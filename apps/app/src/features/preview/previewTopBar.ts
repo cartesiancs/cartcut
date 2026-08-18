@@ -254,10 +254,59 @@ export class PreviewTopBar extends LitElement {
           gap: 0.25rem;
         }
 
+        /*
+         * Segmented control: [zoom out][ 100% v ][zoom in].
+         *
+         * Bootstrap's .btn-group corner reset skips .dropdown-toggle, so the
+         * middle segment would keep its right radius and cut a notch into the
+         * zoom-in button. Round the outer edges only, and let the segments
+         * stretch to a shared height instead of each sizing itself (.btn-xxs
+         * pins height: fit-content, which blocks align-items: stretch).
+         */
+        .preview-zoom-group {
+          display: inline-flex;
+          align-items: stretch;
+        }
+
+        .preview-zoom-group > .btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          height: auto !important;
+          margin: 0 !important;
+          border-radius: 0 !important;
+        }
+
+        /* of-type, not of-child: the .dropdown-menu <ul> is a sibling here, so
+           child position depends on where the menu sits in the markup. */
+        .preview-zoom-group > .btn:first-of-type {
+          border-top-left-radius: 10px !important;
+          border-bottom-left-radius: 10px !important;
+        }
+
+        .preview-zoom-group > .btn:last-of-type {
+          border-top-right-radius: 10px !important;
+          border-bottom-right-radius: 10px !important;
+        }
+
+        /* Hairline dividers so the three segments read as one control. */
+        .preview-zoom-group > .btn + .btn,
+        .preview-zoom-group > .dropdown-menu + .btn {
+          box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.08);
+        }
+
         .preview-zoom-value {
           font-size: 11px;
           font-variant-numeric: tabular-nums;
           min-width: 3.75rem;
+        }
+
+        /* Bootstrap's caret is inline-block and drags the baseline around;
+           size it down and let flex do the centring. */
+        .preview-zoom-value::after {
+          margin-left: 0.3rem;
+          opacity: 0.6;
+          vertical-align: middle;
         }
       </style>
 
