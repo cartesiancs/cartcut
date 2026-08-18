@@ -138,25 +138,7 @@ export class ControlRender extends LitElement {
     });
   }
 
-  handleClickActionButton() {
-    //this.renderControll.requestRender();
-  }
-
-  async handleClickRenderV2Button() {
-    const optionsWithoutDestination: Omit<ExportOptions, "videoDestination"> = {
-      ...renderOptionStore.getState().options,
-      videoDuration: renderOptionStore.getState().options.duration,
-      videoBitrate: Number(document.querySelector("#videoBitrate").value),
-    };
-
-    const elementRenderers = {
-      image: renderImage,
-      video: renderVideoWithWait,
-      gif: renderGif,
-      text: renderText,
-      shape: renderShape,
-    };
-
+  handleClickRenderV2Button() {
     const env = getLocationEnv();
     if (env == "electron") {
       const projectFolder = document.querySelector("#projectFolder").value;
@@ -202,11 +184,8 @@ export class ControlRender extends LitElement {
           if (this.renderTime.length > 2) {
             this.renderTime.shift();
             const rm = (this.renderTime[1] - this.renderTime[0]) / 100;
-            document.querySelector(
-              "#remainingTime",
-            ).innerHTML = `${formatSeconds(
-              Math.round(rm * (100 - progressTo100)),
-            )} left`;
+            document.querySelector("#remainingTime").innerHTML =
+              `${formatSeconds(Math.round(rm * (100 - progressTo100)))} left`;
           }
         },
       );

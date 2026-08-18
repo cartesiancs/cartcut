@@ -241,7 +241,7 @@ export class ElementTimelineLeftOption extends LitElement {
     this.requestUpdate();
   }
 
-  setDeactiveAnimation(elementId, animationType: AnimationType) {
+  setDeactivateAnimation(elementId, animationType: AnimationType) {
     console.log(this.timeline[elementId], animationType);
 
     this.timeline[elementId].animation[animationType].isActivate = false;
@@ -397,7 +397,7 @@ export class ElementTimelineLeftOption extends LitElement {
                   class="btn btn-xxs ${this.getAnimationActive(key, "position")
                     ? ""
                     : "d-none"} text-light mr-2"
-                  @click=${() => this.setDeactiveAnimation(key, "position")}
+                  @click=${() => this.setDeactivateAnimation(key, "position")}
                 >
                   <span class="material-symbols-outlined icon-xs text-light">
                     lock_open
@@ -445,7 +445,7 @@ export class ElementTimelineLeftOption extends LitElement {
                   class="btn btn-xxs ${this.getAnimationActive(key, "opacity")
                     ? ""
                     : "d-none"} text-light mr-2"
-                  @click=${() => this.setDeactiveAnimation(key, "opacity")}
+                  @click=${() => this.setDeactivateAnimation(key, "opacity")}
                 >
                   <span class="material-symbols-outlined icon-xs text-light">
                     lock_open
@@ -493,7 +493,7 @@ export class ElementTimelineLeftOption extends LitElement {
                   class="btn btn-xxs ${this.getAnimationActive(key, "scale")
                     ? ""
                     : "d-none"} text-light mr-2"
-                  @click=${() => this.setDeactiveAnimation(key, "scale")}
+                  @click=${() => this.setDeactivateAnimation(key, "scale")}
                 >
                   <span class="material-symbols-outlined icon-xs text-light">
                     lock_open
@@ -539,7 +539,7 @@ export class ElementTimelineLeftOption extends LitElement {
                   class="btn btn-xxs ${this.getAnimationActive(key, "rotation")
                     ? ""
                     : "d-none"} text-light mr-2"
-                  @click=${() => this.setDeactiveAnimation(key, "rotation")}
+                  @click=${() => this.setDeactivateAnimation(key, "rotation")}
                 >
                   <span class="material-symbols-outlined icon-xs text-light">
                     lock_open

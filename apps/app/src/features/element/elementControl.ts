@@ -809,21 +809,6 @@ export class ElementControl extends LitElement {
     this.timelineState.checkPointTimeline();
   }
 
-  findNearestY(pairs, a) {
-    let closestY = null;
-    let closestDiff = Infinity;
-
-    for (const [x, y] of pairs) {
-      const diff = Math.abs(x - a);
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        closestY = y;
-      }
-    }
-
-    return closestY;
-  }
-
   // showAnimation(elementId, animationType) {
   //   let index = Math.round(this.progressTime / 16);
   //   let indexToMs = index * 20;

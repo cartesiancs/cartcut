@@ -64,12 +64,51 @@ export class elementTimelineCanvas extends LitElement {
     this.canvasVerticalScroll = 0;
     this.copyedTimelineData = {};
 
-    window.addEventListener("resize", this.drawCanvas);
+    window.addEventListener("resize", this.handleWindowResize);
     window.addEventListener("keydown", this._handleKeydown.bind(this));
     document.addEventListener(
       "mousedown",
       this._handleDocumentClick.bind(this),
     );
+  }
+
+  /** Bound so `this` survives the listener call — an unbound method here left
+   * the canvas throwing on every window resize. */
+  private handleWindowResize = () => {
+    this.drawCanvas();
+  };
+
+  private timelineResizeObserver?: ResizeObserver;
+
+  /**
+   * Paint as soon as the canvas exists.
+   *
+   * Every other call site is an event — a store change, a resize, a click — so
+   * with nothing here the timeline stayed blank from launch until the user
+   * happened to click, and only then did the clips, the cursor and the red
+   * end-of-project line appear.
+   *
+   * The first paint alone is not enough: `element-timeline` is inside a
+   * resizable split pane and can still measure 0 high at this point, which would
+   * produce a zero-height canvas. Observing it covers both — the first real
+   * layout and every later resize.
+   */
+  protected firstUpdated(): void {
+    const timeline = document.querySelector("element-timeline");
+    if (timeline) {
+      this.timelineResizeObserver = new ResizeObserver(() => this.drawCanvas());
+      this.timelineResizeObserver.observe(timeline);
+    }
+
+    this.setTimelineColor();
+    this.drawCanvas();
+  }
+
+  disconnectedCallback(): void {
+    this.timelineResizeObserver?.disconnect();
+    this.timelineResizeObserver = undefined;
+    window.removeEventListener("resize", this.handleWindowResize);
+    super.disconnectedCallback();
   }
 
   @query("#elementTimelineCanvasRef") canvas!: HTMLCanvasElement;
@@ -147,6 +186,9 @@ export class elementTimelineCanvas extends LitElement {
 
     renderOptionStore.subscribe((state) => {
       this.renderOption = state.options;
+      // The red end-of-project line is drawn from renderOption.duration, so it
+      // has to be repainted when the duration changes.
+      this.drawCanvas();
     });
 
     return this;
@@ -357,14 +399,18 @@ export class elementTimelineCanvas extends LitElement {
   drawCanvas() {
     let index = 1;
 
+    // Reachable before the first render and from listeners that outlive the
+    // element, so neither the canvas nor the timeline container is guaranteed.
+    const timeline = document.querySelector("element-timeline");
+    if (!this.canvas || !timeline) return;
+
     const ctx = this.canvas.getContext("2d");
     if (ctx) {
       const dpr = window.devicePixelRatio;
       this.canvas.style.width = `${window.innerWidth}px`;
 
       this.canvas.width = window.innerWidth * dpr;
-      this.canvas.height =
-        document.querySelector("element-timeline").offsetHeight * dpr;
+      this.canvas.height = timeline.offsetHeight * dpr;
 
       ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
       ctx.scale(dpr, dpr);

@@ -8,17 +8,24 @@ import {
 } from "../../states/renderOptionStore";
 import { KeyframeController } from "../../controllers/keyframe";
 import { v4 as uuidv4 } from "uuid";
-import { renderText } from "../renderer/text";
-import { renderImage } from "../renderer/image";
-import { renderShape } from "../renderer/shape";
-import { renderGif } from "../renderer/gif";
-import { renderVideoWithoutWait } from "../renderer/video";
-import { loadedAssetStore } from "../asset/loadedAssetStore";
+import { millisecondsToPx } from "../../utils/time";
 import {
-  renderTimelineAtTime,
-  type TimelineRenderers,
-} from "../renderer/timeline";
-import { isVisualTimelineElement } from "../../@types/timeline";
+  renderFrame,
+  resolveElementBox,
+  pickGifFrameIndex,
+  samplePosition,
+} from "@nugget/preview-engine";
+import type {
+  AssetResolver,
+  ImageSource,
+  VideoHandle,
+} from "@nugget/preview-engine";
+import { getLocationEnv } from "../../functions/getLocationEnv";
+
+type ImageTempType = {
+  elementId: string;
+  object: any;
+};
 
 @customElement("preview-canvas")
 export class PreviewCanvas extends LitElement {
@@ -49,16 +56,19 @@ export class PreviewCanvas extends LitElement {
     | "crosshair";
   isStretch: boolean;
   isEditText: boolean;
+  gifFrames: { key: string; frames: ParsedFrame[] }[];
   nowShapeId: string;
   isRotation: boolean;
 
-  renderers: TimelineRenderers = {
-    image: renderImage,
-    video: renderVideoWithoutWait,
-    gif: renderGif,
-    text: renderText,
-    shape: renderShape,
-  };
+  /** One scratch canvas per GIF, so two GIFs of different sizes cannot
+   * overwrite each other's frame the way a single shared canvas did. */
+  private gifScratch = new Map<
+    string,
+    { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }
+  >();
+  /** Assets whose load is already in flight, so a redraw does not start it
+   * again — the old drawers kicked off a fresh request on every frame. */
+  private pendingLoads = new Set<string>();
 
   constructor() {
     super();
@@ -75,6 +85,10 @@ export class PreviewCanvas extends LitElement {
     this.activeElementId = "";
     this.mouseOrigin = { x: 0, y: 0 };
     this.elementOrigin = { x: 0, y: 0, w: 0, h: 0 };
+
+    this.gifFrames = [];
+
+    this.loadedVideos = [];
 
     this.nowShapeId = "";
   }
@@ -166,70 +180,335 @@ export class PreviewCanvas extends LitElement {
     this.canvas.style.cursor = this.cursorType;
   }
 
-  findNearestY(pairs: number[][], a: number): number | null {
-    let closestY: number | null = null;
-    let closestDiff = Infinity;
+  /**
+   * Supplies pixels to the engine, loading lazily.
+   *
+   * The editor has to stay responsive while assets are still arriving, so a
+   * miss returns `null` — the engine skips that element for this frame — and
+   * kicks off the load, which redraws when it lands. The export paths take the
+   * opposite approach and preload everything before the first frame.
+   */
+  private assetResolver: AssetResolver = {
+    getImage: (elementId, element): ImageSource | null => {
+      const loaded = this.loadedObjects.find(
+        (item: ImageTempType) => item.elementId == elementId,
+      );
+      if (loaded) return loaded.object;
 
-    for (const [x, y] of pairs) {
-      const diff = Math.abs(x - a);
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        closestY = y;
+      this.loadOnce(elementId, () => {
+        const img = new Image();
+        img.onload = () => {
+          this.loadedObjects.push({ elementId, object: img });
+          this.pendingLoads.delete(elementId);
+          this.drawCanvas(this.canvas);
+        };
+        img.onerror = () => this.pendingLoads.delete(elementId);
+        img.src = this.getPath(element.localpath);
+      });
+      return null;
+    },
+
+    getVideo: (elementId, element): VideoHandle | null => {
+      // The entry itself is the handle: glFilter caches its WebGL objects on it
+      // between frames, so it has to be the same object every time.
+      const loaded = this.loadedVideos.find(
+        (item) => item.elementId == elementId,
+      );
+      // The entry is pushed as soon as the <video> exists so playback controls
+      // can reach it, but it is not drawable until the first frame decodes.
+      if (loaded) return loaded.isReady ? loaded : null;
+
+      this.loadOnce(elementId, () => {
+        const video = document.createElement("video");
+        video.playbackRate = element.speed as number;
+
+        const entry = {
+          elementId,
+          path: this.getPath(element.localpath),
+          canvas: document.createElement("canvas"),
+          object: video,
+          isPlay: false,
+          isReady: false,
+        };
+        this.loadedVideos.push(entry);
+
+        video.addEventListener("loadeddata", () => {
+          video.currentTime = 0;
+          entry.isReady = true;
+          this.pendingLoads.delete(elementId);
+          this.drawCanvas(this.canvas);
+        });
+        video.src = entry.path;
+      });
+      return null;
+    },
+
+    getGifFrame: (elementId, element, timeMs): ImageSource | null => {
+      const entry = this.gifFrames.find((item) => item.key == elementId);
+      if (!entry) {
+        this.loadOnce(elementId, () => {
+          fetch(this.getPath(element.localpath))
+            .then((resp) => resp.arrayBuffer())
+            .then((buff) => {
+              this.gifFrames.push({
+                key: elementId,
+                frames: decompressFrames(parseGIF(buff), true),
+              });
+              this.pendingLoads.delete(elementId);
+              this.drawCanvas(this.canvas);
+            })
+            .catch(() => this.pendingLoads.delete(elementId));
+        });
+        return null;
       }
-    }
 
-    return closestY;
+      const { frames } = entry;
+      if (frames.length === 0) return null;
+
+      const index = pickGifFrameIndex(frames.length, frames[0]?.delay, timeMs);
+      const frame = frames[index];
+      if (!frame?.dims) return null;
+
+      const { width, height } = frame.dims;
+      let scratch = this.gifScratch.get(elementId);
+      if (!scratch) {
+        const canvas = document.createElement("canvas");
+        scratch = {
+          canvas,
+          ctx: canvas.getContext("2d") as CanvasRenderingContext2D,
+        };
+        this.gifScratch.set(elementId, scratch);
+      }
+      if (scratch.canvas.width !== width || scratch.canvas.height !== height) {
+        scratch.canvas.width = width;
+        scratch.canvas.height = height;
+      }
+
+      const imageData = scratch.ctx.createImageData(width, height);
+      imageData.data.set(frame.patch);
+      scratch.ctx.putImageData(imageData, 0, 0);
+      return scratch.canvas;
+    },
+  };
+
+  private loadOnce(elementId: string, start: () => void) {
+    if (this.pendingLoads.has(elementId)) return;
+    this.pendingLoads.add(elementId);
+    start();
   }
 
-  drawCanvas(canvas: HTMLCanvasElement) {
+  /**
+   * Paint the frame, then the editor chrome on top of it.
+   *
+   * The picture itself comes from the same `renderFrame` both export paths use,
+   * so what is on screen here is what gets exported. Everything the engine does
+   * not know about — the selection outline, resize and rotation handles, the
+   * align guides, shape vertex handles — is drawn afterwards, over the finished
+   * frame, and never reaches an exported video.
+   */
+  drawCanvas(canvas) {
     const ctx = canvas.getContext("2d");
-
-    if (ctx == null) {
-      return;
-    }
+    if (!ctx) return;
 
     canvas.width = this.renderOption.previewSize.w;
     canvas.height = this.renderOption.previewSize.h;
 
-    loadedAssetStore
-      .getState()
-      .loadAssetsNeededAtTime(this.timelineCursor, this.timeline);
-    renderTimelineAtTime(
+    const { drawn } = renderFrame(
       ctx,
       this.timeline,
+      {
+        width: this.renderOption.previewSize.w,
+        height: this.renderOption.previewSize.h,
+        backgroundColor: this.renderOption.backgroundColor,
+      },
       this.timelineCursor,
-      this.renderers,
-      this.renderOption.backgroundColor,
-      canvas.width,
-      canvas.height,
-      { controlOutlineEnabled: true, activeElementId: this.activeElementId },
-      (elementId, element) => {
-        if (this.activeElementId !== elementId) {
-          return;
-        }
-        if (!this.isMove) {
-          return;
-        }
+      {
+        assets: this.assetResolver,
+        isChangeFilter: this.isChangeFilter,
+        ignorePositionIds: this.draggedIds(),
+      },
+      { skipIds: this.hiddenIds() },
+    );
 
+    this.syncVideoAudio(drawn);
+    this.drawEditorChrome(ctx, drawn);
+  }
+
+  /** While a text element is being edited inline, no text is composited. */
+  private hiddenIds(): Set<string> | undefined {
+    if (!this.isEditText) return undefined;
+    const ids = new Set<string>();
+    for (const id in this.timeline) {
+      if (this.timeline[id]?.filetype === "text") ids.add(id);
+    }
+    return ids;
+  }
+
+  /** A dragged element follows the cursor rather than its position keyframes. */
+  private draggedIds(): Set<string> | undefined {
+    if (!this.isMove || !this.activeElementId) return undefined;
+    return new Set([this.activeElementId]);
+  }
+
+  /**
+   * Only clips that are on screen right now should be audible. This is playback,
+   * not rendering, which is why the engine has no say in it.
+   */
+  private syncVideoAudio(visibleIds: string[]) {
+    const visible = new Set(visibleIds);
+    for (const item of this.loadedVideos) {
+      if (item?.object) item.object.muted = !visible.has(item.elementId);
+    }
+  }
+
+  private drawEditorChrome(ctx, drawnIds: string[]) {
+    for (const elementId of drawnIds) {
+      const element = this.timeline[elementId];
+      const isActive = this.activeElementId === elementId;
+      const isEditedShape = this.nowShapeId === elementId;
+      if (!isActive && !isEditedShape) continue;
+
+      const box = resolveElementBox(element, this.timelineCursor, {
+        ignorePosition: this.isMove && isActive,
+      });
+      if (!box) continue;
+
+      const centerX = box.x + box.w / 2;
+      const centerY = box.y + box.h / 2;
+
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate(box.rotation);
+
+      if (isEditedShape) {
+        this.drawShapeHandles(ctx, element, centerX, centerY);
+      }
+      if (isActive) {
+        this.drawOutline(
+          ctx,
+          elementId,
+          -box.w / 2,
+          -box.h / 2,
+          box.w,
+          box.h,
+          box.rotation,
+        );
+      }
+
+      ctx.restore();
+
+      if (isActive && this.isMove) {
         const checkAlign = this.isAlign({
-          x: element.location.x,
-          y: element.location.y,
-          w: element.width,
-          h: element.height,
+          x: box.x,
+          y: box.y,
+          w: box.w,
+          h: box.h,
         });
         if (checkAlign) {
           this.drawAlign(ctx, checkAlign.direction);
         }
-      },
-    );
+
+  /**
+   * Vertex grips for the shape being edited. The old code appended these arcs to
+   * the polygon's own path, so they were filled along with it and dragged the
+   * outline out of shape; drawn here they are ordinary chrome, in the same white
+   * as the selection handles.
+   */
+  private drawShapeHandles(ctx, element, centerX: number, centerY: number) {
+    const points = element?.shape;
+    if (!points || points.length === 0) return;
+
+    const width = Number(element.width) || 0;
+    const ratio = (Number(element.oWidth) || width) / (width || 1);
+    const originX = element.location?.x ?? 0;
+    const originY = element.location?.y ?? 0;
+
+    ctx.fillStyle = "#ffffff";
+    for (const point of points) {
+      const px = point[0] / ratio + originX;
+      const py = point[1] / ratio + originY;
+      ctx.beginPath();
+      ctx.arc(px - centerX, py - centerY, 8, 0, 2 * Math.PI);
+      ctx.fill();
+    }
   }
 
-  drawKeyframePath(ctx: CanvasRenderingContext2D, elementId: string) {
-    const imageElement = this.timeline[elementId];
-    if (imageElement.filetype != "image") {
-      return false;
+  drawOutline(ctx, elementId, x, y, w, h, a) {
+    if (this.activeElementId == elementId) {
+      const padding = 10;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "#ffffff";
+      ctx.strokeRect(x, y, w, h);
+      ctx.fillStyle = "#ffffff";
+
+      ctx.beginPath();
+      ctx.rect(x - padding, y - padding, padding * 2, padding * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.rect(x + w - padding, y - padding, padding * 2, padding * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.rect(x + w - padding, y + h - padding, padding * 2, padding * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.rect(x - padding, y + h - padding, padding * 2, padding * 2);
+      ctx.fill();
+
+      //draw control rotation
+
+      ctx.beginPath();
+      ctx.arc(x + w / 2, y - 50, 15, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  }
+
+  public preloadImage(elementId) {
+    let img = new Image();
+
+    img.onload = () => {
+      if (
+        this.loadedObjects.findIndex((item: ImageTempType) => {
+          return item.elementId == elementId;
+        }) != -1
+      ) {
+        const index = this.loadedObjects.findIndex((item: ImageTempType) => {
+          return item.elementId == elementId;
+        });
+
+        this.loadedObjects[index].object = img;
+      } else {
+        this.loadedObjects.push({
+          elementId: elementId,
+          object: img,
+        });
+      }
+
+      this.drawCanvas(this.canvas);
+    };
+
+    img.src = this.getPath(this.timeline[elementId].localpath);
+  }
+
+  getPath(path) {
+    const nowEnv = getLocationEnv();
+    let filepath = path;
+    if (nowEnv == "electron") {
+      filepath = path;
+    } else if (nowEnv == "web") {
+      filepath = `/api/file?path=${path}`;
+    } else {
+      filepath = path;
     }
 
+    return filepath;
+  }
+
+  drawKeyframePath(ctx, elementId) {
+    const imageElement = this.timeline[elementId] as any;
+    const fileType = this.timeline[elementId].filetype;
     const animationType = "position";
     if (imageElement.animation[animationType].isActivate != true) return false;
 
@@ -304,6 +583,11 @@ export class PreviewCanvas extends LitElement {
       );
       ctx.stroke();
     }
+  }
+
+  setChangeFilter() {
+    this.isChangeFilter = true;
+    this.drawCanvas(this.canvas);
   }
 
   isAlign({ x, y, w, h }) {
@@ -908,31 +1192,19 @@ export class PreviewCanvas extends LitElement {
             fileType == "image" &&
             element.animation[animationType].isActivate == true
           ) {
-            let index = Math.round(this.timelineCursor / 16);
-            let indexToMs = index * 20;
-            let startTime = Number(element.startTime);
-            let indexPoint = Math.round((indexToMs - startTime) / 20);
-
-            if (indexPoint < 0) {
+            // Hit-test against where the element was actually composited, using
+            // the same sampler the engine drew it with.
+            const sampled = samplePosition(
+              this.timeline[elementId],
+              this.timelineCursor,
+            );
+            if (sampled === false) {
               return false;
             }
-
-            const possibleX = this.findNearestY(
-              element.animation[animationType].ax,
-              this.timelineCursor - element.startTime,
-            );
-
-            const possibleY = this.findNearestY(
-              element.animation[animationType].ay,
-              this.timelineCursor - element.startTime,
-            );
-
-            if (possibleX == null || possibleY == null) {
-              return false;
+            if (sampled) {
+              x = sampled.ax as any;
+              y = sampled.ay as any;
             }
-
-            x = possibleX;
-            y = possibleY;
           }
 
           if (

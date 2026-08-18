@@ -69,7 +69,9 @@ export class ElementTimelineRuler extends LitElement {
     this.style.left = `${this.resize.timelineVertical.leftOption}px`;
 
     this.style.position = "absolute";
-    this.width = document.querySelector("element-timeline").clientWidth;
+    // The ruler is rendered ahead of <element-timeline> in the parent template,
+    // so on the very first pass there may be nothing to measure yet.
+    this.width = document.querySelector("element-timeline")?.clientWidth ?? 0;
     this.height = 30;
 
     return html`<canvas
@@ -82,6 +84,31 @@ export class ElementTimelineRuler extends LitElement {
 
   updated() {
     this.drawRuler();
+  }
+
+  private timelineResizeObserver?: ResizeObserver;
+
+  /**
+   * Redraw whenever the timeline is actually sized.
+   *
+   * `updated()` runs before the split pane has necessarily laid out, so the
+   * first ruler could be measured at zero width and stay blank — taking the
+   * playhead head drawn on it along too — until some later event repainted it.
+   */
+  protected firstUpdated(): void {
+    const timeline = document.querySelector("element-timeline");
+    if (timeline) {
+      this.timelineResizeObserver = new ResizeObserver(() => this.drawRuler());
+      this.timelineResizeObserver.observe(timeline);
+    }
+
+    this.drawRuler();
+  }
+
+  disconnectedCallback(): void {
+    this.timelineResizeObserver?.disconnect();
+    this.timelineResizeObserver = undefined;
+    super.disconnectedCallback();
   }
 
   private millisecondsToPx(ms) {
@@ -151,7 +178,10 @@ export class ElementTimelineRuler extends LitElement {
   }
 
   drawRuler() {
-    this.width = document.querySelector("element-timeline").clientWidth;
+    const timeline = document.querySelector("element-timeline");
+    if (!this.canvas || !timeline) return;
+
+    this.width = timeline.clientWidth;
 
     const ctx: any = this.canvas.getContext("2d");
 
