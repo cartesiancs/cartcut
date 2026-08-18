@@ -4,22 +4,31 @@ import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 
+/**
+ * Playhead position holder.
+ *
+ * This element is deliberately never shown. The playhead the user sees is
+ * painted on canvas — the vertical line by `element-timeline-canvas.drawCursor`
+ * and the triangular head by `element-timeline-ruler.drawCursorHead` — and this
+ * element survives only because `element-control` still reads its `style.left`
+ * as the current playhead position. Un-hiding it would draw a second playhead.
+ */
 @customElement("element-timeline-cursor")
 export class ElementTimelineCursor extends LitElement {
-  elementTimelineRuler: any;
   constructor() {
     super();
 
-    this.elementTimelineRuler;
-
-    window.addEventListener("DOMContentLoaded", () => {
-      this.elementTimelineRuler = document.querySelector(
-        "element-timeline-ruler"
-      );
-    });
-
     this.addEventListener("mousedown", this.handleMousedown);
     document.addEventListener("mouseup", this.handleMouseup.bind(this));
+  }
+
+  /**
+   * Resolved on demand rather than on DOMContentLoaded: this element is upgraded
+   * by Lit well after that event has fired, so the old listener never ran and
+   * left this permanently undefined.
+   */
+  private get elementTimelineRuler(): any {
+    return document.querySelector("element-timeline-ruler");
   }
 
   @property()
@@ -44,8 +53,10 @@ export class ElementTimelineCursor extends LitElement {
     this.style.display = "none";
     this.classList.add("timeline-bar");
     this.setAttribute("id", "timeline_bar");
-    const left = parseInt(this.style.left.split("px")[0]);
-    this.style.left = `${left}px`;
+    // Keep whatever position is already set, but start from a real number —
+    // parsing an unset `left` yielded NaN and wrote back an invalid "NaNpx".
+    const left = parseInt(this.style.left.split("px")[0], 10);
+    this.style.left = `${Number.isNaN(left) ? 0 : left}px`;
     this.style.top = `0px`;
   }
 
@@ -54,19 +65,20 @@ export class ElementTimelineCursor extends LitElement {
   }
 
   handleMousedown(e) {
-    this.elementTimelineRuler.moveTime(e);
-    this.elementTimelineRuler.mousemoveEventHandler =
-      this.elementTimelineRuler.handleMousemove.bind(this.elementTimelineRuler);
-    document.addEventListener(
-      "mousemove",
-      this.elementTimelineRuler.mousemoveEventHandler
-    );
+    const ruler = this.elementTimelineRuler;
+    if (!ruler) return;
+
+    ruler.moveTime(e);
+    ruler.mousemoveEventHandler = ruler.handleMousemove.bind(ruler);
+    document.addEventListener("mousemove", ruler.mousemoveEventHandler);
   }
 
   handleMouseup(e) {
-    document.removeEventListener(
-      "mousemove",
-      this.elementTimelineRuler.mousemoveEventHandler
-    );
+    // Runs for every mouseup in the document, so it has to tolerate the ruler
+    // not being there and a drag never having started.
+    const ruler = this.elementTimelineRuler;
+    if (!ruler?.mousemoveEventHandler) return;
+
+    document.removeEventListener("mousemove", ruler.mousemoveEventHandler);
   }
 }
