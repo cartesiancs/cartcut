@@ -14,6 +14,14 @@ function createShader(gl: WebGLRenderingContext, type: number, source: string) {
   return shader;
 }
 
+function mustCreateBuffer(gl: WebGLRenderingContext): WebGLBuffer {
+  const buffer = gl.createBuffer();
+  if (buffer == null) {
+    throw new Error("WebGL: failed to create buffer");
+  }
+  return buffer;
+}
+
 export abstract class BaseFilter<TParam> {
   protected program!: WebGLProgram;
 
@@ -34,7 +42,15 @@ export abstract class BaseFilter<TParam> {
       return;
     }
 
-    this.program = gl.createProgram();
+    const program = gl.createProgram();
+    // Only null on context loss / OOM. `program` is declared with a definite
+    // assignment, so a silent undefined here would surface as a confusing
+    // failure inside the first draw call instead.
+    if (program == null) {
+      throw new Error("WebGL: failed to create program");
+    }
+
+    this.program = program;
     gl.attachShader(this.program, vertexShader);
     gl.attachShader(this.program, fragmentShader);
     gl.linkProgram(this.program);
@@ -66,14 +82,14 @@ export class BaseQuadFilter<TParam> extends BaseFilter<TParam> {
     protected texCoordAttribName: string = "a_texCoord",
   ) {
     super(gl, vertexShaderSource, fragmentShaderSource);
-    this.positionBuffer = gl.createBuffer();
+    this.positionBuffer = mustCreateBuffer(gl);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, this.positions, gl.STATIC_DRAW);
 
     this.a_position = gl.getAttribLocation(this.program, positionAttribName);
     this.a_texCoord = gl.getAttribLocation(this.program, texCoordAttribName);
 
-    this.texCoordBuffer = gl.createBuffer();
+    this.texCoordBuffer = mustCreateBuffer(gl);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.texCoordBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, this.texCoords, gl.STATIC_DRAW);
 

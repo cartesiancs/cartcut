@@ -54,7 +54,10 @@ export const renderText: ElementRenderFunction<TextElementType> = (
 
   ctx.fillStyle = textElement.textcolor;
   ctx.lineWidth = 0;
-  ctx.letterSpacing = `${textElement.letterSpacing}px`;
+  // `letterSpacing` is missing from the DOM types this repo's TypeScript ships
+  // with, though every browser the app runs in supports it.
+  (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing =
+    `${textElement.letterSpacing}px`;
 
   ctx.font = `${textElement.options.isItalic ? "italic" : ""} ${
     textElement.options.isBold ? "bold" : ""

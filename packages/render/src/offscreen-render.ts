@@ -1,121 +1,62 @@
 import { LitElement, html } from "lit";
 import { customElement } from "lit/decorators.js";
 import { ReactiveController, ReactiveControllerHost } from "lit";
-import { decompressFrames, parseGIF } from "gifuct-js";
-import {
-  runFrameLoop,
-  createPreloadedResolver,
-  createVideoSeeker,
-  createCanvasEncoder,
-} from "@nugget/preview-engine";
-import type {
-  FrameSink,
-  LoadedMedia,
-  RenderTimeline,
-} from "@nugget/preview-engine";
+import type { Timeline } from "@app/@types/timeline";
+import { loadedAssetStore } from "@app/features/asset/loadedAssetStore";
+import { renderTimeline } from "@app/features/export/renderTimeline";
+import type { ExportOptions } from "@app/features/export/types";
+import { renderImage } from "@app/features/renderer/image";
+import { renderVideoWithWait } from "@app/features/renderer/video";
+import { renderGif } from "@app/features/renderer/gif";
+import { renderText } from "@app/features/renderer/text";
+import { renderShape } from "@app/features/renderer/shape";
+import type { TimelineRenderers } from "@app/features/renderer/timeline";
 
 /**
  * Offscreen export.
  *
- * Runs in a hidden window driven by the HTTP API. Compositing is the shared
- * @nugget/preview-engine frame loop — identical to the in-app export in
- * apps/app/src/controllers/render.ts; only the IPC channel the frames go down
- * differs. These two files used to be near-identical 1,600-line copies of the
- * whole renderer.
+ * Runs in a hidden window driven by the HTTP API. This used to be a 1,600-line
+ * copy of the whole renderer; it now shares `renderTimeline` with the in-app
+ * export (features/export/ipc.ts) and differs only in which IPC channel the
+ * frames go down — `render:offscreen` instead of `render:v2`, and it reports
+ * progress alongside each frame rather than through the progress modal.
  */
 
-const RENDER_FPS = 60;
-
-/** How long to let the preloads run before the first frame is composited. */
-const PRELOAD_GRACE_MS = 2000;
+const elementRenderers: TimelineRenderers = {
+  image: renderImage,
+  video: renderVideoWithWait,
+  gif: renderGif,
+  text: renderText,
+  shape: renderShape,
+};
 
 export class RenderController implements ReactiveController {
   private host: ReactiveControllerHost | undefined;
-  timeline: RenderTimeline = {};
+  timeline: Timeline = {};
 
-  private loaded: LoadedMedia = {};
-  private canvas = document.createElement("canvas");
-
-  public requestRenderV2(timeline: RenderTimeline, options) {
+  public requestRenderV2(timeline: Timeline, options: ExportOptions) {
     this.timeline = timeline;
-    this.loadMedia(timeline);
-    window.electronAPI.req.render.offscreen.start(options, this.timeline);
+    window.electronAPI.req.render.offscreen.start(options, timeline);
 
-    setTimeout(() => {
-      void this.runExport(options);
-    }, PRELOAD_GRACE_MS);
+    void this.runExport(options);
   }
 
-  private async runExport(options) {
-    this.canvas.width = options.previewSize.w;
-    this.canvas.height = options.previewSize.h;
-    const ctx = this.canvas.getContext("2d");
-    if (!ctx) return;
+  private async runExport(options: ExportOptions) {
+    const assetStore = loadedAssetStore.getState();
 
-    const sink: FrameSink = {
-      sendFrame: (frame, percent) =>
-        window.electronAPI.req.render.offscreen.sendFrame(frame, percent),
-      finish: () => window.electronAPI.req.render.offscreen.finishStream(),
-    };
-
-    await runFrameLoop(
-      ctx,
+    await renderTimeline(
+      assetStore,
       this.timeline,
-      {
-        width: options.previewSize.w,
-        height: options.previewSize.h,
-        backgroundColor: options.backgroundColor,
-      },
-      { fps: RENDER_FPS, durationSec: options.videoDuration },
-      {
-        assets: createPreloadedResolver(this.loaded),
-        prepareFrame: createVideoSeeker(this.loaded, this.timeline),
-        encodeCanvas: createCanvasEncoder(this.canvas),
-      },
-      sink,
-      {
-        onFrameError: (error, frame) =>
-          console.error(`offscreen render: frame ${frame} skipped`, error),
+      elementRenderers,
+      options,
+      (frameBuffer, currentFrame, totalFrames) => {
+        const percent = (currentFrame / totalFrames) * 100;
+        window.electronAPI.req.render.offscreen.sendFrame(frameBuffer, percent);
+        if (currentFrame === totalFrames - 1) {
+          window.electronAPI.req.render.offscreen.finishStream();
+        }
       },
     );
-  }
-
-  loadMedia(timeline: RenderTimeline) {
-    this.timeline = timeline;
-    this.loaded = {};
-
-    for (const key in timeline) {
-      if (!Object.prototype.hasOwnProperty.call(timeline, key)) continue;
-
-      const element = timeline[key];
-
-      if (element.filetype == "image") {
-        const img = new Image();
-        img.onload = () => {
-          this.loaded[key] = img;
-        };
-        img.src = element.localpath as string;
-      }
-
-      if (element.filetype == "video") {
-        const video = document.createElement("video");
-        video.playbackRate = element.speed as number;
-        video.src = element.localpath as string;
-
-        video.addEventListener("loadeddata", () => {
-          video.currentTime = 0;
-          this.loaded[key] = video;
-        });
-      }
-
-      if (element.filetype == "gif") {
-        fetch(element.localpath as string)
-          .then((resp) => resp.arrayBuffer())
-          .then((buff) => {
-            this.loaded[key] = decompressFrames(parseGIF(buff), true);
-          });
-      }
-    }
   }
 
   hostConnected() {}

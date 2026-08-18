@@ -1,8 +1,26 @@
 import type { VideoElementType } from "../../@types/timeline";
+import { isTimeInRange } from "../../utils/time";
 import { loadedAssetStore } from "../asset/loadedAssetStore";
-import { isVideoElementVisibleAtTime } from "../element/time";
 import { VideoFilterPipeline } from "./filter/videoPipeline";
 import type { ElementRenderFunction } from "./type";
+
+/**
+ * Whether a video clip covers `timeInMs` on the timeline.
+ *
+ * This is `isElementVisibleAtTime` specialised to video: only text needs the
+ * timeline (to resolve `parentKey`), so a clip can answer for itself. It
+ * deliberately ignores `trim`, which addresses the *source file* for FFmpeg
+ * seeking and says nothing about where the clip sits on the timeline — the same
+ * correction that removed the old `isVideoElementVisibleAtTime`.
+ */
+function isVideoVisibleAtTime(
+  timeInMs: number,
+  videoElement: VideoElementType,
+): boolean {
+  const startTime = videoElement.startTime;
+  const endTime = startTime + videoElement.duration / videoElement.speed;
+  return isTimeInRange(timeInMs, startTime, endTime);
+}
 
 export const renderVideoWithoutWait: ElementRenderFunction<VideoElementType> = (
   ctx,
@@ -42,7 +60,9 @@ const _renderVideo = (
     );
   }
 
-  if (!isVideoElementVisibleAtTime(timelineCursor, videoElement)) {
+  // renderTimelineAtTime already filters by visibility, but this also decides
+  // whether the clip is audible, so it has to hold for any direct caller too.
+  if (!isVideoVisibleAtTime(timelineCursor, videoElement)) {
     loadedVideo.object.muted = true;
     return;
   }

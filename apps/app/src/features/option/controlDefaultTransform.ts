@@ -4,9 +4,6 @@ import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { LocaleController } from "../../controllers/locale";
 import { KeyframeController } from "../../controllers/keyframe";
-// Same keyframe sampler the renderer uses, so the values shown in these inputs
-// match what is actually drawn on the canvas.
-import { findNearestY } from "@nugget/preview-engine";
 import "../filter/backgroundRemove";
 
 @customElement("default-transform")
@@ -187,6 +184,20 @@ export class OptionImage extends LitElement {
     height.value = this.timeline[this.elementId].height;
   }
 
+  findNearestY(pairs, a): number | null {
+    let closestY = null;
+    let closestDiff = Infinity;
+
+    for (const [x, y] of pairs) {
+      const diff = Math.abs(x - a);
+      if (diff < closestDiff) {
+        closestDiff = diff;
+        closestY = y;
+      }
+    }
+
+    return closestY;
+  }
 
   getOpacity() {
     let animationType = "opacity";
@@ -248,12 +259,12 @@ export class OptionImage extends LitElement {
       let indexPoint = Math.round((indexToMs - startTime) / 20);
 
       try {
-        const ax = findNearestY(
+        const ax = this.findNearestY(
           this.timeline[elementId].animation["position"].ax,
           this.timelineCursor - this.timeline[elementId].startTime,
         ) as any;
 
-        const ay = findNearestY(
+        const ay = this.findNearestY(
           this.timeline[elementId].animation["position"].ay,
           this.timelineCursor - this.timeline[elementId].startTime,
         ) as any;
@@ -279,7 +290,7 @@ export class OptionImage extends LitElement {
       let indexPoint = Math.round((indexToMs - startTime) / 20);
 
       try {
-        const ax = findNearestY(
+        const ax = this.findNearestY(
           this.timeline[elementId].animation["opacity"].ax,
           this.timelineCursor - this.timeline[elementId].startTime,
         ) as any;
@@ -303,7 +314,7 @@ export class OptionImage extends LitElement {
       let indexPoint = Math.round((indexToMs - startTime) / 20);
 
       try {
-        const ax = findNearestY(
+        const ax = this.findNearestY(
           this.timeline[elementId].animation["rotation"].ax,
           this.timelineCursor - this.timeline[elementId].startTime,
         ) as any;

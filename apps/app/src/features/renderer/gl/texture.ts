@@ -1,5 +1,10 @@
-export function createTextureNPOT(gl: WebGLRenderingContext) {
+export function createTextureNPOT(gl: WebGLRenderingContext): WebGLTexture {
   const texture = gl.createTexture();
+  // Only null when the context is lost or out of memory; there is nothing
+  // useful to render after that, so fail loudly instead of further down.
+  if (texture == null) {
+    throw new Error("WebGL: failed to create texture");
+  }
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);

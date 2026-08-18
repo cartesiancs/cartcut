@@ -5,11 +5,9 @@ export default defineConfig({
   base: "",
   resolve: {
     alias: {
-      // Unified rendering engine (shared with apps/app). Consumed as TS source;
-      // Vite/esbuild transpiles it.
-      "@nugget/preview-engine": fileURLToPath(
-        new URL("../preview-engine/src", import.meta.url),
-      ),
+      // The offscreen render window composites with the same renderer as the
+      // editor and the in-app export, so it reads that source directly.
+      "@app": fileURLToPath(new URL("../../apps/app/src", import.meta.url)),
     },
   },
 });

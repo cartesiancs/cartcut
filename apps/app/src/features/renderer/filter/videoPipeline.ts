@@ -27,7 +27,11 @@ export class VideoFilterPipeline {
 
     this.srcTexture = createTextureNPOT(gl);
     this.framebufferTexture = createTextureNPOT(gl);
-    this.framebuffer = gl.createFramebuffer();
+    const framebuffer = gl.createFramebuffer();
+    if (framebuffer == null) {
+      throw new Error("WebGL: failed to create framebuffer");
+    }
+    this.framebuffer = framebuffer;
   }
 
   render(

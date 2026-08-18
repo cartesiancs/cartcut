@@ -19,7 +19,14 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": false,
-    "noUncheckedSideEffectImports": false
+    "noUncheckedSideEffectImports": false,
+
+    /* The offscreen window composites with the editor's renderer, read from
+       source. Mirrors the `@app` alias in vite.config.js. Without `baseUrl`,
+       these are resolved relative to this file. */
+    "paths": {
+      "@app/*": ["../../apps/app/src/*"]
+    }
   },
   "include": ["src"]
 }

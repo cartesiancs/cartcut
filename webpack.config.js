@@ -20,13 +20,6 @@ module.exports = {
   },
   resolve: {
     extensions: [".ts", ".js"],
-    alias: {
-      // Unified rendering engine — consumed as TS source (ts-loader transpiles it).
-      "@nugget/preview-engine": path.resolve(
-        __dirname,
-        "packages/preview-engine/src",
-      ),
-    },
   },
   output: {
     filename: "index.js",
