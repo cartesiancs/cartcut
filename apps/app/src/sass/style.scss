@@ -381,8 +381,16 @@ element-timeline-scroll {
 }
 
 .preview {
-  background-color: #000000;
+  // Matches CANVAS_BG in previewCanvas.ts so there is no flash of a different
+  // grey before the first paint. The frame's own background comes from the
+  // project's render options.
+  background-color: #101112;
   display: block;
+}
+
+preview-canvas {
+  position: absolute;
+  inset: 0;
 }
 
 .control {
@@ -403,7 +411,8 @@ element-timeline-scroll {
 
 .video {
   position: relative;
-  display: flex;
+  width: 100%;
+  height: 100%;
   overflow: clip;
 }
 

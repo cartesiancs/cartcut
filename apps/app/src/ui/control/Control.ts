@@ -274,19 +274,12 @@ export class Control extends LitElement {
 
         <div
           style="height: calc(100% - 2rem);"
-          class="position-relative d-flex align-items-center justify-content-center ${this
-            .nowActivePanel == ""
-            ? ""
-            : "d-none"}"
+          class="position-relative ${this.nowActivePanel == "" ? "" : "d-none"}"
         >
-          <div id="videobox">
-            <div class="d-flex justify-content-center">
-              <div id="video" class="video">
-                <preview-canvas></preview-canvas>
-                <element-control></element-control>
-                <drag-alignment-guide></drag-alignment-guide>
-              </div>
-            </div>
+          <div id="video" class="video">
+            <preview-canvas></preview-canvas>
+            <element-control></element-control>
+            <drag-alignment-guide></drag-alignment-guide>
           </div>
         </div>
 

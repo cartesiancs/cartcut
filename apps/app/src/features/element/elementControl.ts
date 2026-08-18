@@ -259,9 +259,13 @@ export class ElementControl extends LitElement {
   }
 
   fitElementSizeOnPreview(width, height) {
+    // The preview canvas is a viewport now — its backing store is the visible
+    // area in device pixels, not the project resolution. Read the resolution
+    // from the store instead.
+    const previewSize = renderOptionStore.getState().options.previewSize;
     let preview = {
-      w: Number(document.querySelector("#elementPreviewCanvasRef").width),
-      h: Number(document.querySelector("#elementPreviewCanvasRef").height),
+      w: Number(previewSize.w),
+      h: Number(previewSize.h),
     };
 
     let originRatio = width / height;

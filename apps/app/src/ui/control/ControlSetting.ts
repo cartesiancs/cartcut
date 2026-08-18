@@ -38,12 +38,12 @@ export class ControlSetting extends LitElement {
   }
 
   _handleUpdatePreviewSizeW(e) {
-    this.renderOption.previewSize.w = e.target.value;
+    this.renderOption.previewSize.w = Number(e.target.value);
     this.renderOptionStore.updateOptions(this.renderOption);
   }
 
   _handleUpdatePreviewSizeH(e) {
-    this.renderOption.previewSize.h = e.target.value;
+    this.renderOption.previewSize.h = Number(e.target.value);
     this.renderOptionStore.updateOptions(this.renderOption);
   }
 

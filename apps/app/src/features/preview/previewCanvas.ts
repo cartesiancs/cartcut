@@ -19,6 +19,30 @@ import {
   type TimelineRenderers,
 } from "../renderer/timeline";
 import { isVisualTimelineElement } from "../../@types/timeline";
+import { applyElementTransform } from "../renderer/element";
+import { isElementVisibleAtTime } from "../element/time";
+import { renderControlOutline } from "../renderer/controlOutline";
+import {
+  IPreviewViewportStore,
+  previewViewportStore,
+} from "../../states/previewViewportStore";
+import {
+  computeGeometry,
+  fitViewport,
+  screenToWorld,
+  worldToScreen,
+  zoomAround,
+  clampZoom,
+  ZOOM_STEP,
+  type Viewport,
+  type ViewportGeometry,
+} from "./viewport";
+
+/** The infinite plane the frame floats on. */
+const CANVAS_BG = "#101112";
+/** How much of an out-of-frame pixel survives. */
+const OUTSIDE_ALPHA = 0.28;
+const FRAME_GUIDE_COLOR = "rgba(255, 255, 255, 0.35)";
 
 @customElement("preview-canvas")
 export class PreviewCanvas extends LitElement {
@@ -41,6 +65,7 @@ export class PreviewCanvas extends LitElement {
     | "stretchSE";
   cursorType:
     | "default"
+    | "grab"
     | "grabbing"
     | "ew-resize"
     | "ns-resize"
@@ -51,6 +76,34 @@ export class PreviewCanvas extends LitElement {
   isEditText: boolean;
   nowShapeId: string;
   isRotation: boolean;
+
+  /** Viewport panning (middle-drag, alt-drag, or a drag off empty space). */
+  isPanning = false;
+  /** View-space (CSS px) position where the current pan started. */
+  panOrigin = { x: 0, y: 0 };
+  /** Viewport as it was when the pan started. */
+  panViewportOrigin: Viewport = fitViewport(1920, 1080);
+
+  /** Alignment guides to draw this frame, computed while dragging. */
+  alignDirection: string[] = [];
+
+  /** World -> view mapping for the current frame. Kept in sync by updateGeometry(). */
+  geometry: ViewportGeometry = { scale: 1, offsetX: 0, offsetY: 0 };
+  /** Canvas size in CSS px. */
+  viewW = 0;
+  viewH = 0;
+
+  /**
+   * The scene is rendered once here, then composited onto the visible canvas
+   * twice — dimmed everywhere, then at full opacity clipped to the frame.
+   */
+  private offscreen: HTMLCanvasElement | null = null;
+  private drawRequest = 0;
+  private resizeObserver: ResizeObserver | null = null;
+  private boundMouseMove = (e: MouseEvent) => this._handleWindowMouseMove(e);
+  private boundMouseUp = (e: MouseEvent) => this._handleMouseUp(e);
+  private boundKeydown = (e: KeyboardEvent) => this._handleKeydown(e);
+  private boundWheel = (e: WheelEvent) => this._handleWheel(e);
 
   renderers: TimelineRenderers = {
     image: renderImage,
@@ -106,9 +159,6 @@ export class PreviewCanvas extends LitElement {
   timelineControl = this.timelineState.control;
 
   @property()
-  canvasMaxHeight = "100%";
-
-  @property()
   uiState: IUIStore = uiStore.getInitialState();
 
   @property()
@@ -120,6 +170,12 @@ export class PreviewCanvas extends LitElement {
   @property()
   renderOption = this.renderOptionStore.options;
 
+  @property()
+  viewportStore: IPreviewViewportStore = previewViewportStore.getInitialState();
+
+  @property()
+  viewport = this.viewportStore.viewport;
+
   createRenderRoot() {
     useTimelineStore.subscribe((state) => {
       this.timeline = state.timeline;
@@ -129,37 +185,169 @@ export class PreviewCanvas extends LitElement {
       this.timelineControl = state.control;
 
       // this.setTimelineColor();
-      this.setPreviewRatio();
       this.drawCanvas(this.canvas);
     });
 
     uiStore.subscribe((state) => {
       this.resize = state.resize;
-      this.canvasMaxHeight =
-        document.querySelector("#split_col_2").clientHeight;
-
-      this.setPreviewRatio();
       this.drawCanvas(this.canvas);
     });
 
     renderOptionStore.subscribe((state) => {
       this.renderOption = state.options;
-      this.canvasMaxHeight =
-        document.querySelector("#split_col_2").clientHeight;
-      this.setPreviewRatio();
       this.drawCanvas(this.canvas);
+    });
+
+    previewViewportStore.subscribe((state) => {
+      this.viewport = state.viewport;
+      this.scheduleDraw();
+      this.requestUpdate();
     });
 
     return this;
   }
 
-  setPreviewRatio() {
-    const width = this.canvas.offsetWidth;
+  connectedCallback() {
+    super.connectedCallback();
 
-    this.previewRatio = this.renderOption.previewSize.w / width;
+    // Drag and pan listeners live on `window`, not on the canvas: the whole
+    // point of the infinite canvas is dragging an element past the edge of the
+    // preview, and a canvas-bound listener drops the drag the moment the
+    // pointer leaves. One permanent window listener also avoids the double
+    // dispatch two listeners would cause while the pointer is over the canvas.
+    window.addEventListener("mousemove", this.boundMouseMove);
+    window.addEventListener("mouseup", this.boundMouseUp);
+    window.addEventListener("keydown", this.boundKeydown);
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener("mousemove", this.boundMouseMove);
+    window.removeEventListener("mouseup", this.boundMouseUp);
+    window.removeEventListener("keydown", this.boundKeydown);
+    this.canvas?.removeEventListener("wheel", this.boundWheel);
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    if (this.drawRequest) {
+      cancelAnimationFrame(this.drawRequest);
+      this.drawRequest = 0;
+    }
+
+    super.disconnectedCallback();
+  }
+
+  protected firstUpdated() {
+    // `passive: false` so pinch-zoom can preventDefault the page zoom.
+    this.canvas.addEventListener("wheel", this.boundWheel, { passive: false });
+
+    this.resizeObserver = new ResizeObserver(() => {
+      this.scheduleDraw();
+    });
+    this.resizeObserver.observe(this.canvas);
+
+    this.viewport = previewViewportStore.getState().viewport;
+    this.drawCanvas(this.canvas);
+  }
+
+  /** Project resolution, coerced — the settings inputs can hand us strings. */
+  private get frameSize() {
+    const w = Number(this.renderOption.previewSize.w);
+    const h = Number(this.renderOption.previewSize.h);
+    return {
+      w: w > 0 ? w : 1,
+      h: h > 0 ? h : 1,
+    };
+  }
+
+  /** Re-derive the world -> view mapping from the live canvas size. */
+  private updateGeometry(): ViewportGeometry {
+    this.viewW = this.canvas?.clientWidth ?? 0;
+    this.viewH = this.canvas?.clientHeight ?? 0;
+
+    const { w, h } = this.frameSize;
+    this.geometry = computeGeometry(
+      this.viewport,
+      this.viewW,
+      this.viewH,
+      w,
+      h,
+    );
+    this.setPreviewRatio();
+
+    return this.geometry;
+  }
+
+  /**
+   * Kept for the legacy DOM overlay in `element-control`, which still sizes its
+   * assets in CSS px. Same meaning as before: world (project) px per CSS px.
+   */
+  setPreviewRatio() {
+    this.previewRatio = 1 / this.geometry.scale;
 
     const controlDom = document.querySelector("element-control");
-    controlDom.previewRatio = this.previewRatio;
+    if (controlDom) {
+      controlDom.previewRatio = this.previewRatio;
+    }
+  }
+
+  /** Coalesce a burst of wheel/pan/resize events into one repaint per frame. */
+  private scheduleDraw() {
+    if (this.drawRequest) {
+      return;
+    }
+    this.drawRequest = requestAnimationFrame(() => {
+      this.drawRequest = 0;
+      this.drawCanvas(this.canvas);
+    });
+  }
+
+  /** Match the backing store to the laid-out size at the current DPR. */
+  private syncCanvasSize(canvas: HTMLCanvasElement) {
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.max(1, Math.round(canvas.clientWidth * dpr));
+    const height = Math.max(1, Math.round(canvas.clientHeight * dpr));
+
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+
+    return dpr;
+  }
+
+  private getOffscreen(width: number, height: number) {
+    if (this.offscreen == null) {
+      this.offscreen = document.createElement("canvas");
+    }
+    if (this.offscreen.width !== width) this.offscreen.width = width;
+    if (this.offscreen.height !== height) this.offscreen.height = height;
+
+    return this.offscreen;
+  }
+
+  /** View (CSS px, canvas-local) coordinates of a mouse event. */
+  private toView(e: MouseEvent) {
+    const rect = this.canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  /**
+   * World (project px) coordinates of a mouse event.
+   *
+   * Uses `clientX` + `getBoundingClientRect` rather than `offsetX`, which is
+   * relative to whatever element the pointer happens to be over — meaningless
+   * once the listener lives on `window`.
+   */
+  private toWorld(e: MouseEvent) {
+    const view = this.toView(e);
+    return screenToWorld(this.geometry, view.x, view.y);
+  }
+
+  private isInsideCanvas(e: MouseEvent) {
+    const rect = this.canvas.getBoundingClientRect();
+    return (
+      e.clientX >= rect.left &&
+      e.clientX <= rect.right &&
+      e.clientY >= rect.top &&
+      e.clientY <= rect.bottom
+    );
   }
 
   updateCursor() {
@@ -182,46 +370,150 @@ export class PreviewCanvas extends LitElement {
   }
 
   drawCanvas(canvas: HTMLCanvasElement) {
-    const ctx = canvas.getContext("2d");
+    if (canvas == null) {
+      return;
+    }
 
+    const ctx = canvas.getContext("2d");
     if (ctx == null) {
       return;
     }
 
-    canvas.width = this.renderOption.previewSize.w;
-    canvas.height = this.renderOption.previewSize.h;
+    const dpr = this.syncCanvasSize(canvas);
+    const g = this.updateGeometry();
+    const frame = this.frameSize;
+
+    // world -> device
+    const toDevice: [number, number, number, number, number, number] = [
+      g.scale * dpr,
+      0,
+      0,
+      g.scale * dpr,
+      g.offsetX * dpr,
+      g.offsetY * dpr,
+    ];
+
+    // 1. The infinite plane the frame floats on.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = CANVAS_BG;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 2. Render the scene exactly once, off screen. The control outline is
+    //    deliberately left out — it is drawn later, unclipped and undimmed, so
+    //    handles stay grabbable on elements parked outside the frame.
+    const offscreen = this.getOffscreen(canvas.width, canvas.height);
+    const octx = offscreen.getContext("2d");
+    if (octx == null) {
+      return;
+    }
+    octx.setTransform(1, 0, 0, 1, 0, 0);
+    octx.clearRect(0, 0, offscreen.width, offscreen.height);
+    octx.setTransform(...toDevice);
 
     loadedAssetStore
       .getState()
       .loadAssetsNeededAtTime(this.timelineCursor, this.timeline);
     renderTimelineAtTime(
-      ctx,
+      octx,
       this.timeline,
       this.timelineCursor,
       this.renderers,
       this.renderOption.backgroundColor,
-      canvas.width,
-      canvas.height,
-      { controlOutlineEnabled: true, activeElementId: this.activeElementId },
-      (elementId, element) => {
-        if (this.activeElementId !== elementId) {
-          return;
-        }
-        if (!this.isMove) {
-          return;
-        }
-
-        const checkAlign = this.isAlign({
-          x: element.location.x,
-          y: element.location.y,
-          w: element.width,
-          h: element.height,
-        });
-        if (checkAlign) {
-          this.drawAlign(ctx, checkAlign.direction);
-        }
-      },
+      frame.w,
+      frame.h,
+      { controlOutlineEnabled: false, activeElementId: "" },
     );
+
+    // 3. Everything, dimmed — this is what an overflowing element looks like.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = OUTSIDE_ALPHA;
+    ctx.drawImage(offscreen, 0, 0);
+    ctx.globalAlpha = 1;
+
+    // 4. The same pixels again at full opacity, clipped to the frame, giving a
+    //    hard cut exactly where the rendered video ends.
+    ctx.save();
+    ctx.setTransform(...toDevice);
+    ctx.beginPath();
+    ctx.rect(0, 0, frame.w, frame.h);
+    ctx.clip();
+    // clip() bakes the region into device space, so resetting the transform
+    // here keeps the clip but lets us blit the offscreen 1:1.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(offscreen, 0, 0);
+    ctx.restore();
+
+    this.drawFrameGuide(ctx, dpr, frame);
+
+    // 5. Selection chrome and snap guides: always full opacity, never clipped.
+    ctx.save();
+    ctx.setTransform(...toDevice);
+    this.drawActiveOutline(ctx);
+    if (this.alignDirection.length > 0) {
+      this.drawAlign(ctx, this.alignDirection);
+    }
+    ctx.restore();
+  }
+
+  /** The rendered resolution, marked out on the infinite plane. */
+  private drawFrameGuide(
+    ctx: CanvasRenderingContext2D,
+    dpr: number,
+    frame: { w: number; h: number },
+  ) {
+    const topLeft = worldToScreen(this.geometry, 0, 0);
+    const bottomRight = worldToScreen(this.geometry, frame.w, frame.h);
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = dpr;
+    ctx.strokeStyle = FRAME_GUIDE_COLOR;
+    ctx.strokeRect(
+      topLeft.x * dpr,
+      topLeft.y * dpr,
+      (bottomRight.x - topLeft.x) * dpr,
+      (bottomRight.y - topLeft.y) * dpr,
+    );
+    ctx.restore();
+  }
+
+  /** Assumes `ctx` is already in world space. */
+  private drawActiveOutline(ctx: CanvasRenderingContext2D) {
+    const element = this.timeline[this.activeElementId];
+    if (element == undefined || !isVisualTimelineElement(element)) {
+      return;
+    }
+    if (!isElementVisibleAtTime(this.timelineCursor, this.timeline, element)) {
+      return;
+    }
+
+    ctx.save();
+    applyElementTransform(ctx, element, this.timelineCursor);
+    renderControlOutline(ctx, 0, 0, element.width, element.height);
+    ctx.restore();
+  }
+
+  /** Snap guides for the element being dragged, refreshed every mouse move. */
+  private updateAlignDirection() {
+    const element = this.timeline[this.activeElementId];
+    if (!this.isMove || element == undefined) {
+      this.alignDirection = [];
+      return;
+    }
+    if (!isVisualTimelineElement(element)) {
+      this.alignDirection = [];
+      return;
+    }
+
+    const checkAlign = this.isAlign({
+      x: element.location.x,
+      y: element.location.y,
+      w: element.width,
+      h: element.height,
+    });
+    this.alignDirection = checkAlign ? checkAlign.direction : [];
   }
 
   drawKeyframePath(ctx: CanvasRenderingContext2D, elementId: string) {
@@ -250,58 +542,47 @@ export class PreviewCanvas extends LitElement {
   }
 
   drawAlign(ctx: CanvasRenderingContext2D, direction: string[]) {
+    const frame = this.frameSize;
     ctx.lineWidth = 3;
     ctx.strokeStyle = "#ffffff";
     if (direction.includes("top")) {
       ctx.beginPath();
       ctx.moveTo(0, 0);
-      ctx.lineTo(this.renderOption.previewSize.w, 0);
+      ctx.lineTo(frame.w, 0);
       ctx.stroke();
     }
 
     if (direction.includes("left")) {
       ctx.beginPath();
       ctx.moveTo(0, 0);
-      ctx.lineTo(0, this.renderOption.previewSize.h);
+      ctx.lineTo(0, frame.h);
       ctx.stroke();
     }
 
     if (direction.includes("right")) {
       ctx.beginPath();
-      ctx.moveTo(this.renderOption.previewSize.w, 0);
-      ctx.lineTo(
-        this.renderOption.previewSize.w,
-        this.renderOption.previewSize.h,
-      );
+      ctx.moveTo(frame.w, 0);
+      ctx.lineTo(frame.w, frame.h);
       ctx.stroke();
     }
 
     if (direction.includes("bottom")) {
       ctx.beginPath();
-      ctx.moveTo(0, this.renderOption.previewSize.h);
-      ctx.lineTo(
-        this.renderOption.previewSize.w,
-        this.renderOption.previewSize.h,
-      );
+      ctx.moveTo(0, frame.h);
+      ctx.lineTo(frame.w, frame.h);
       ctx.stroke();
     }
 
     if (direction.includes("horizontal")) {
       ctx.beginPath();
-      ctx.moveTo(0, this.renderOption.previewSize.h / 2);
-      ctx.lineTo(
-        this.renderOption.previewSize.w,
-        this.renderOption.previewSize.h / 2,
-      );
+      ctx.moveTo(0, frame.h / 2);
+      ctx.lineTo(frame.w, frame.h / 2);
       ctx.stroke();
     }
     if (direction.includes("vertical")) {
       ctx.beginPath();
-      ctx.moveTo(this.renderOption.previewSize.w / 2, 0);
-      ctx.lineTo(
-        this.renderOption.previewSize.w / 2,
-        this.renderOption.previewSize.h,
-      );
+      ctx.moveTo(frame.w / 2, 0);
+      ctx.lineTo(frame.w / 2, frame.h);
       ctx.stroke();
     }
   }
@@ -313,8 +594,8 @@ export class PreviewCanvas extends LitElement {
     let nx = x;
     let ny = y;
 
-    const cw = this.renderOption.previewSize.w;
-    const ch = this.renderOption.previewSize.h;
+    const cw = this.frameSize.w;
+    const ch = this.frameSize.h;
 
     // top
     if (y < 0 + padding && y > 0 - padding) {
@@ -632,9 +913,33 @@ export class PreviewCanvas extends LitElement {
     return degrees;
   }
 
+  /** Begin a viewport pan from the current pointer position. */
+  private startPan(e: MouseEvent) {
+    this.isPanning = true;
+    this.panOrigin = this.toView(e);
+    this.panViewportOrigin = this.viewport;
+    this.cursorType = "grabbing";
+    this.updateCursor();
+  }
+
   _handleMouseDown(e) {
-    const mx = e.offsetX * this.previewRatio;
-    const my = e.offsetY * this.previewRatio;
+    this.updateGeometry();
+
+    // Middle-drag and alt-drag always pan, whatever is under the pointer.
+    // (Space is not used here: it is already bound to play/pause globally.)
+    if (e.button === 1 || e.altKey) {
+      e.preventDefault();
+      this.startPan(e);
+      return false;
+    }
+
+    if (e.button !== 0) {
+      return false;
+    }
+
+    const world = this.toWorld(e);
+    const mx = world.x;
+    const my = world.y;
     const padding = 20;
     let isMoveTemp = false;
     let isStretchTemp = false;
@@ -863,15 +1168,51 @@ export class PreviewCanvas extends LitElement {
     }
 
     if (isClicked == false) {
+      // Nothing under the pointer: clear the selection and let the drag pan the
+      // view instead.
       this.activeElementId = "";
+      this.startPan(e);
     }
 
+    this.alignDirection = [];
     this.drawCanvas(this.canvas);
   }
 
+  /**
+   * Single `window`-level move handler. Panning and element drags are applied
+   * wherever the pointer is; hover feedback only runs while it is over the
+   * canvas.
+   */
+  _handleWindowMouseMove(e: MouseEvent) {
+    if (this.isPanning) {
+      const view = this.toView(e);
+      const scale = this.geometry.scale;
+      previewViewportStore.getState().setViewport({
+        zoom: this.panViewportOrigin.zoom,
+        center: {
+          x:
+            this.panViewportOrigin.center.x -
+            (view.x - this.panOrigin.x) / scale,
+          y:
+            this.panViewportOrigin.center.y -
+            (view.y - this.panOrigin.y) / scale,
+        },
+      });
+      return;
+    }
+
+    const isDragging = this.isMove || this.isStretch || this.isRotation;
+    if (!isDragging && !this.isInsideCanvas(e)) {
+      return;
+    }
+
+    this._handleMouseMove(e);
+  }
+
   _handleMouseMove(e) {
-    const mx = e.offsetX * this.previewRatio;
-    const my = e.offsetY * this.previewRatio;
+    const world = this.toWorld(e);
+    const mx = world.x;
+    const my = world.y;
     const padding = 20;
 
     let isCollide = false;
@@ -1031,6 +1372,7 @@ export class PreviewCanvas extends LitElement {
         location.y = alignLocation?.y;
       }
 
+      this.updateAlignDirection();
       this.timelineState.patchTimeline(this.timeline);
     }
 
@@ -1236,22 +1578,109 @@ export class PreviewCanvas extends LitElement {
   }
 
   _handleMouseUp(e) {
+    if (this.isPanning) {
+      this.isPanning = false;
+      this.cursorType = "default";
+      this.updateCursor();
+      return;
+    }
+
+    const wasDragging = this.isMove || this.isStretch || this.isRotation;
+    if (!wasDragging) {
+      // This listener sees every mouseup in the app; without this guard a click
+      // anywhere would record a keyframe for the selected element.
+      return;
+    }
+
     try {
       this.addAnimationPoint(
         this.timeline[this.activeElementId].location.x,
         this.timeline[this.activeElementId].location.y,
       );
-      this.isMove = false;
-      this.isStretch = false;
-      this.isRotation = false;
-
-      this.drawCanvas(this.canvas);
     } catch (error) {}
+
+    this.isMove = false;
+    this.isStretch = false;
+    this.isRotation = false;
+    this.alignDirection = [];
+
+    this.drawCanvas(this.canvas);
+  }
+
+  /**
+   * macOS trackpad: a pinch arrives as a wheel event with `ctrlKey`, a
+   * two-finger swipe as a plain wheel event.
+   */
+  _handleWheel(e: WheelEvent) {
+    e.preventDefault();
+
+    this.updateGeometry();
+    const frame = this.frameSize;
+
+    if (e.ctrlKey) {
+      const view = this.toView(e);
+      const nextZoom = this.viewport.zoom * Math.exp(-e.deltaY * 0.01);
+
+      previewViewportStore
+        .getState()
+        .setViewport(
+          zoomAround(
+            this.viewport,
+            nextZoom,
+            view.x,
+            view.y,
+            this.viewW,
+            this.viewH,
+            frame.w,
+            frame.h,
+          ),
+        );
+      return;
+    }
+
+    previewViewportStore
+      .getState()
+      .panByWorld(
+        e.deltaX / this.geometry.scale,
+        e.deltaY / this.geometry.scale,
+      );
+  }
+
+  private zoomByStep(factor: number) {
+    previewViewportStore
+      .getState()
+      .setZoom(clampZoom(this.viewport.zoom * factor));
+  }
+
+  /** Fit / zoom shortcuts. Ignored while the user is typing. */
+  _handleKeydown(e: KeyboardEvent) {
+    if (!(e.metaKey || e.ctrlKey)) {
+      return;
+    }
+
+    const target = e.target as HTMLElement | null;
+    const tag = target?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) {
+      return;
+    }
+
+    if (e.key === "0") {
+      e.preventDefault();
+      const frame = this.frameSize;
+      previewViewportStore.getState().fit(frame.w, frame.h);
+    } else if (e.key === "=" || e.key === "+") {
+      e.preventDefault();
+      this.zoomByStep(ZOOM_STEP);
+    } else if (e.key === "-" || e.key === "_") {
+      e.preventDefault();
+      this.zoomByStep(1 / ZOOM_STEP);
+    }
   }
 
   _handleDblClick(e) {
-    const mx = e.offsetX * this.previewRatio;
-    const my = e.offsetY * this.previewRatio;
+    const world = this.toWorld(e);
+    const mx = world.x;
+    const my = world.y;
     const padding = 40;
 
     for (const elementId of Object.keys(this.timeline)) {
@@ -1294,18 +1723,14 @@ export class PreviewCanvas extends LitElement {
   }
 
   protected render() {
-    this.style.margin = "10px";
+    // The canvas is a viewport now, not the frame: it always fills its column
+    // and keeps its shape, whatever the project resolution is.
     return html` <canvas
       id="elementPreviewCanvasRef"
       class="preview"
-      style="width: 100%; max-height: calc(${this
-        .canvasMaxHeight}px - 40px); cursor: ${this.cursorType};"
-      width="1920"
-      height="1080"
-      onclick="${this.handleClickCanvas()}"
+      style="width: 100%; height: 100%; display: block; cursor: ${this
+        .cursorType};"
       @mousedown=${this._handleMouseDown}
-      @mousemove=${this._handleMouseMove}
-      @mouseup=${this._handleMouseUp}
     ></canvas>`;
   }
 }

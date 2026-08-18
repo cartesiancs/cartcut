@@ -6,6 +6,18 @@ import {
   controlPanelStore,
 } from "../../states/controlPanelStore";
 import { v4 as uuidv4 } from "uuid";
+import {
+  IPreviewViewportStore,
+  previewViewportStore,
+} from "../../states/previewViewportStore";
+import {
+  IRenderOptionStore,
+  renderOptionStore,
+} from "../../states/renderOptionStore";
+import { ZOOM_STEP } from "./viewport";
+
+/** 100% is the fit scale, so it doubles as the "fit" preset. */
+const ZOOM_PRESETS = [25, 50, 100, 200, 400, 800];
 
 @customElement("preview-top-bar")
 export class PreviewTopBar extends LitElement {
@@ -31,6 +43,18 @@ export class PreviewTopBar extends LitElement {
   @property()
   timeline: any = this.timelineState.timeline;
 
+  @property()
+  viewportStore: IPreviewViewportStore = previewViewportStore.getInitialState();
+
+  @property()
+  viewport = this.viewportStore.viewport;
+
+  @property()
+  renderOptionStore: IRenderOptionStore = renderOptionStore.getInitialState();
+
+  @property()
+  renderOption = this.renderOptionStore.options;
+
   createRenderRoot() {
     useTimelineStore.subscribe((state) => {
       this.control = state.control;
@@ -42,7 +66,33 @@ export class PreviewTopBar extends LitElement {
       this.nowActivePanel = state.nowActive;
     });
 
+    previewViewportStore.subscribe((state) => {
+      this.viewport = state.viewport;
+      this.requestUpdate();
+    });
+
+    renderOptionStore.subscribe((state) => {
+      this.renderOption = state.options;
+    });
+
     return this;
+  }
+
+  _handleClickZoom(factor: number) {
+    previewViewportStore
+      .getState()
+      .setZoom(previewViewportStore.getState().viewport.zoom * factor);
+  }
+
+  _handleClickZoomPreset(zoom: number) {
+    previewViewportStore.getState().setZoom(zoom);
+  }
+
+  _handleClickFit() {
+    const previewSize = this.renderOption.previewSize;
+    previewViewportStore
+      .getState()
+      .fit(Number(previewSize.w), Number(previewSize.h));
   }
 
   createShape(shape) {
@@ -203,6 +253,12 @@ export class PreviewTopBar extends LitElement {
           align-items: center;
           gap: 0.25rem;
         }
+
+        .preview-zoom-value {
+          font-size: 11px;
+          font-variant-numeric: tabular-nums;
+          min-width: 3.75rem;
+        }
       </style>
 
       <div class="timeline-cursor-buttons bg-darker">
@@ -287,6 +343,53 @@ export class PreviewTopBar extends LitElement {
               </li>
             </ul>
           </div>
+
+          <div class="btn-group preview-zoom-group">
+            <button
+              @click=${() => this._handleClickZoom(1 / ZOOM_STEP)}
+              class="btn btn-xxs btn-default text-light m-0"
+              title="Zoom out"
+            >
+              <span class="material-symbols-outlined icon-xs"> zoom_out </span>
+            </button>
+
+            <button
+              class="btn btn-xxs btn-default dropdown-toggle text-light m-0 preview-zoom-value"
+              data-bs-toggle="dropdown"
+              aria-expanded="false"
+            >
+              ${Math.round(this.viewport.zoom)}%
+            </button>
+
+            <ul class="dropdown-menu">
+              <li>
+                ${ZOOM_PRESETS.map(
+                  (zoom) => html`<a
+                    class="dropdown-item dropdown-item-sm"
+                    @click=${() => this._handleClickZoomPreset(zoom)}
+                  >
+                    ${zoom}%${zoom == 100 ? " (Fit)" : ""}
+                  </a>`,
+                )}
+              </li>
+            </ul>
+
+            <button
+              @click=${() => this._handleClickZoom(ZOOM_STEP)}
+              class="btn btn-xxs btn-default text-light m-0"
+              title="Zoom in"
+            >
+              <span class="material-symbols-outlined icon-xs"> zoom_in </span>
+            </button>
+          </div>
+
+          <button
+            @click=${this._handleClickFit}
+            class="btn btn-xxs btn-default text-light m-0"
+            title="Fit to frame"
+          >
+            <span class="material-symbols-outlined icon-xs"> fit_screen </span>
+          </button>
 
           <button
             @click=${() => this._handleClickButton("lockKeyboard")}
