@@ -14,7 +14,15 @@ import {
   animatableProperties,
   type TimelineElement,
 } from "../../@types/timeline";
-import { splitAt, trimEnd, trimStart } from "../timeline/clipEdit";
+import {
+  deleteClips,
+  moveClips,
+  pasteClips,
+  rippleDelete,
+  splitAtPlayhead,
+  trimClipEnd,
+  trimClipStart,
+} from "../timeline/clipOps";
 import { pxToMsSigned, spanLength } from "../timeline/geometry";
 import {
   hitTest,
@@ -23,11 +31,12 @@ import {
   type TimelineLayout,
 } from "../timeline/layout";
 import { drawTimeline } from "../timeline/draw";
-import { collectSnapPoints, snapSpan } from "../timeline/snapping";
 import {
-  normalizeDocument,
-  type TimelineDocument,
-} from "../timeline/tracks";
+  createVideoTileProvider,
+  type VideoTileProvider,
+} from "../timeline/strip/videoTiles";
+import { collectSnapPoints, snapSpan } from "../timeline/snapping";
+import { type TimelineDocument } from "../timeline/tracks";
 
 /** How close, in px, an edge must come before it snaps. */
 const SNAP_TOLERANCE_PX = 10;
@@ -39,8 +48,16 @@ type DragState = {
   originX: number;
   /** Primary target — the clip actually grabbed. */
   elementId: string;
-  /** The elements as they were at mousedown, keyed by id. */
-  snapshot: Record<string, TimelineElement>;
+  /** The selection as it stood when the drag began. */
+  ids: string[];
+  /**
+   * The document at mousedown.
+   *
+   * Every mousemove recomputes from this rather than from the last frame, so a
+   * drag is one transform of a fixed input. Compounding deltas onto a value the
+   * drag is itself rewriting accelerates the clip and accumulates rounding.
+   */
+  baseDoc: TimelineDocument;
 };
 
 /**
@@ -71,6 +88,15 @@ export class elementTimelineCanvas extends LitElement {
   private layout: TimelineLayout = { rows: [], clips: [], totalHeight: 0 };
   private clipboard: Record<string, TimelineElement> = {};
   private canvasVerticalScroll = 0;
+
+  /**
+   * Decodes filmstrip frames in the background.
+   *
+   * Drawing only ever reads from it, so a frame that is not ready yet costs
+   * nothing; when one lands it asks for a repaint.
+   */
+  private tiles: VideoTileProvider = createVideoTileProvider();
+  private disposeTiles: (() => void) | null = null;
 
   constructor() {
     super();
@@ -118,10 +144,14 @@ export class elementTimelineCanvas extends LitElement {
       this.timelineResizeObserver = new ResizeObserver(() => this.drawCanvas());
       this.timelineResizeObserver.observe(timeline);
     }
+    this.disposeTiles = this.tiles.onReady(() => this.drawCanvas());
     this.drawCanvas();
   }
 
   disconnectedCallback(): void {
+    this.disposeTiles?.();
+    this.disposeTiles = null;
+    this.tiles.dispose();
     this.timelineResizeObserver?.disconnect();
     this.timelineResizeObserver = undefined;
     window.removeEventListener("resize", this.handleWindowResize);
@@ -252,6 +282,7 @@ export class elementTimelineCanvas extends LitElement {
       playheadMs: this.timelineCursor,
       projectEndMs: this.renderOption.duration * 1000,
       snapGuideMs: this.snapGuideMs,
+      provider: this.tiles,
     });
   }
 
@@ -275,7 +306,7 @@ export class elementTimelineCanvas extends LitElement {
   }
 
   /**
-   * Cut the selected clip at the playhead.
+   * Cut the selected clips at the playhead.
    *
    * Both halves keep the original's `trackId`, so they land side by side on one
    * row. The old implementation handed the second half a fresh
@@ -284,60 +315,34 @@ export class elementTimelineCanvas extends LitElement {
    */
   private splitSelected() {
     const at = this.timelineCursor;
-    this.commit((doc) => {
-      let next = doc;
-      let changed = false;
-
-      for (const elementId of this.targetId) {
-        const element = next.elements[elementId];
-        if (!element) {
-          continue;
-        }
-        const parts = splitAt(element, at);
-        if (parts == null) {
-          continue;
-        }
-
-        changed = true;
-        next = {
-          ...next,
-          elements: {
-            ...next.elements,
-            [elementId]: parts.left,
-            [uuidv4()]: parts.right,
-          },
-        };
-      }
-
-      return changed ? normalizeDocument(next) : doc;
-    });
+    this.commit((doc) => splitAtPlayhead(doc, this.targetId, at, uuidv4));
   }
 
+  /** Paste at the playhead, keeping the copied group's internal spacing. */
   private pasteClipboard() {
-    const entries = Object.entries(this.clipboard);
-    if (entries.length === 0) {
-      return;
-    }
-
-    this.commit((doc) => {
-      const elements = { ...doc.elements };
-      for (const [, element] of entries) {
-        elements[uuidv4()] = structuredClone(element);
-      }
-      return normalizeDocument({ ...doc, elements });
-    });
+    const at = this.timelineCursor;
+    this.commit((doc) => pasteClips(doc, this.clipboard, at, uuidv4));
   }
 
   private removeElements(ids: string[]) {
-    if (ids.length === 0) {
-      return;
-    }
+    this.commit((doc) => deleteClips(doc, ids));
+  }
+
+  /**
+   * Delete and close the gap, pulling later clips on the same track backwards.
+   *
+   * Plain delete leaves the hole; this is the other half of the pair every
+   * editor offers, and with one clip per row there was nothing for it to act on
+   * before.
+   */
+  public rippleDeleteSelected() {
+    const ids = [...this.targetIdDuringRightClick];
     this.commit((doc) => {
-      const elements = { ...doc.elements };
+      let next = doc;
       for (const id of ids) {
-        delete elements[id];
+        next = rippleDelete(next, id);
       }
-      return normalizeDocument({ ...doc, elements });
+      return next;
     });
   }
 
@@ -348,20 +353,12 @@ export class elementTimelineCanvas extends LitElement {
   // ----------------------------------------------------------------- drag
 
   private beginDrag(hit: Extract<Hit, { kind: "clip" }>, x: number) {
-    const doc = this.currentDoc();
-    const snapshot: Record<string, TimelineElement> = {};
-    for (const elementId of this.targetId) {
-      const element = doc.elements[elementId];
-      if (element) {
-        snapshot[elementId] = element;
-      }
-    }
-
     this.drag = {
       kind: hit.zone === "body" ? "move" : hit.zone,
       originX: x,
       elementId: hit.elementId,
-      snapshot,
+      ids: [...this.targetId],
+      baseDoc: this.currentDoc(),
     };
   }
 
@@ -371,54 +368,51 @@ export class elementTimelineCanvas extends LitElement {
       return;
     }
 
-    const committed = useTimelineStore.getState().getDocument();
+    const base = drag.baseDoc;
     const deltaMs = pxToMsSigned(x - drag.originX, this.timelineRange);
-    const elements = { ...committed.elements };
     this.snapGuideMs = null;
 
+    let next: TimelineDocument;
+
     if (drag.kind === "move") {
-      const primary = drag.snapshot[drag.elementId];
-      let applied = deltaMs;
-
-      if (primary) {
-        // Snap the grabbed clip, then move the whole selection by the amount
-        // that actually got applied, so a multi-clip drag keeps its shape.
-        const desired = Math.max(0, primary.startTime + deltaMs);
-        const snapped = snapSpan(
-          desired,
-          spanLength(primary),
-          collectSnapPoints(committed, {
-            excludeIds: Object.keys(drag.snapshot),
-            playheadMs: this.timelineCursor,
-          }),
-          this.timelineRange,
-          SNAP_TOLERANCE_PX,
-          primary.trackId,
-        );
-
-        applied = snapped.startMs - primary.startTime;
-        this.snapGuideMs = snapped.hit?.ms ?? null;
+      const primary = base.elements[drag.elementId];
+      if (!primary) {
+        return;
       }
 
-      for (const [elementId, element] of Object.entries(drag.snapshot)) {
-        elements[elementId] = {
-          ...element,
-          startTime: Math.max(0, element.startTime + applied),
-        };
-      }
+      // Snap the grabbed clip, then move the whole selection by however much
+      // actually got applied, so a multi-clip drag keeps its shape.
+      const desired = Math.max(0, primary.startTime + deltaMs);
+      const snapped = snapSpan(
+        desired,
+        spanLength(primary),
+        collectSnapPoints(base, {
+          excludeIds: drag.ids,
+          playheadMs: this.timelineCursor,
+        }),
+        this.timelineRange,
+        SNAP_TOLERANCE_PX,
+        primary.trackId,
+      );
+
+      this.snapGuideMs = snapped.hit?.ms ?? null;
+      next = moveClips(base, drag.ids, snapped.startMs - primary.startTime);
     } else {
       // Trimming acts on the grabbed clip alone; dragging one edge of a
-      // multi-selection has no obvious meaning for the rest.
-      const element = drag.snapshot[drag.elementId];
-      if (element) {
-        elements[drag.elementId] =
-          drag.kind === "trimStart"
-            ? trimStart(element, deltaMs)
-            : trimEnd(element, deltaMs);
-      }
+      // multi-selection has no obvious meaning for the rest. `clipOps` clamps
+      // the edge at the neighbouring clip rather than letting it overlap.
+      next =
+        drag.kind === "trimStart"
+          ? trimClipStart(base, drag.elementId, deltaMs)
+          : trimClipEnd(base, drag.elementId, deltaMs);
     }
 
-    this.pendingDoc = normalizeDocument({ ...committed, elements });
+    // A declined op returns its input. Holding the previous frame rather than
+    // snapping back to the start makes a blocked drag come to rest against
+    // whatever is in the way, instead of jumping home.
+    if (next !== base) {
+      this.pendingDoc = next;
+    }
     this.drawCanvas();
   }
 
@@ -580,36 +574,7 @@ export class elementTimelineCanvas extends LitElement {
    * nothing.
    */
   private moveSelectionByTrack(delta: number) {
-    if (this.targetId.length === 0) {
-      return;
-    }
-
-    this.commit((doc) => {
-      const ordered = [...doc.tracks].sort((a, b) => a.index - b.index);
-      const elements = { ...doc.elements };
-      let changed = false;
-
-      for (const elementId of this.targetId) {
-        const element = elements[elementId];
-        if (!element) {
-          continue;
-        }
-        const from = ordered.findIndex((t) => t.id === element.trackId);
-        const to = from + delta;
-        if (from === -1 || to < 0 || to >= ordered.length) {
-          continue;
-        }
-        // Kinds are kept apart: a caption dropping onto an audio row would be
-        // invisible and unexportable.
-        if (ordered[to].kind !== ordered[from].kind) {
-          continue;
-        }
-        elements[elementId] = { ...element, trackId: ordered[to].id };
-        changed = true;
-      }
-
-      return changed ? normalizeDocument({ ...doc, elements }) : doc;
-    });
+    this.commit((doc) => moveClips(doc, this.targetId, 0, delta));
   }
 
   // ------------------------------------------------------------ side panel
@@ -664,6 +629,7 @@ export class elementTimelineCanvas extends LitElement {
         <menu-dropdown-body top="${y}" left="${x}">
           ${this.animationMenuTemplate()}
           <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').removeSeletedElements()" item-name="remove"> </menu-dropdown-item>
+          <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').rippleDeleteSelected()" item-name="remove and close gap"> </menu-dropdown-item>
         </menu-dropdown-body>`;
   }
 

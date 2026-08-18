@@ -384,6 +384,38 @@ describe("drawTimeline filmstrip", () => {
     expect(pixel(canvas, 50, 30)).not.toMatchObject({ r: 255, g: 0, b: 0 });
   });
 
+  it("requests the frames it is missing, keyed by source position", () => {
+    const provider: TileProvider = { get: vi.fn(() => null), request: vi.fn() };
+    paint(filmDoc(), { provider });
+
+    expect(provider.request).toHaveBeenCalled();
+    const first = (provider.request as any).mock.calls[0][0];
+    expect(first.localpath).toBe("/clip.mp4");
+    expect(first.key).toContain("/clip.mp4|");
+    expect(first.tileH).toBe(TRACK_HEIGHT);
+    expect(first.tileW).toBeGreaterThan(0);
+  });
+
+  it("does not re-request a frame it already has", () => {
+    const provider: TileProvider = {
+      get: vi.fn(() => solid(80, TRACK_HEIGHT, "#ff0000") as any),
+      request: vi.fn(),
+    };
+    paint(filmDoc(), { provider });
+    expect(provider.request).not.toHaveBeenCalled();
+  });
+
+  it("asks for distinct frames along the strip, not the same one twice", () => {
+    // A quantum coarser than the tile spacing used to round neighbouring tiles
+    // onto one instant, so the strip repeated a frame instead of advancing.
+    const provider: TileProvider = { get: vi.fn(() => null), request: vi.fn() };
+    paint(filmDoc(), { provider });
+
+    const keys = (provider.request as any).mock.calls.map((c: any[]) => c[0].key);
+    expect(keys.length).toBeGreaterThan(1);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
   it("never asks the provider about audio or text", () => {
     const provider: TileProvider = { get: vi.fn(() => null), request: vi.fn() };
     paint(

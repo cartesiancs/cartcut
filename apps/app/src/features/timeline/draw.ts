@@ -11,11 +11,16 @@
  * life of the file: clips carried no label at all. Both are fixed below.
  */
 
-import type { TimelineElement } from "../../@types/timeline";
-import { isDynamicElement } from "./geometry";
+import type {
+  ImageElementType,
+  TimelineElement,
+  VideoElementType,
+} from "../../@types/timeline";
+import { isDynamicElement, spanStart, speedOf } from "./geometry";
 import { xAtTime, type ClipRect, type TimelineLayout } from "./layout";
 import type { TimelineDocument } from "./tracks";
 import { nullTileProvider, type TileProvider } from "./strip/provider";
+import { planFilmstrip } from "./strip/tiles";
 
 export type ThemeColors = {
   background: string;
@@ -103,8 +108,11 @@ export function clipLabel(element: TimelineElement): string {
   return name || element.filetype;
 }
 
-/** Whether a clip type can show frame thumbnails. */
-export function canShowFilmstrip(element: TimelineElement): boolean {
+/** Clip types with frames to show. A type guard so `drawFilmstrip` can rely on
+ * the visual fields — audio has no width or height at all. */
+export function canShowFilmstrip(
+  element: TimelineElement,
+): element is VideoElementType | ImageElementType {
   return element.filetype === "video" || element.filetype === "image";
 }
 
@@ -116,6 +124,8 @@ export function drawClip(
     selected: boolean;
     provider: TileProvider;
     colors: ThemeColors;
+    range: number;
+    viewportW: number;
   },
 ) {
   const color = element.timelineOptions?.color ?? "#4a4b57";
@@ -133,7 +143,10 @@ export function drawClip(
   ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
 
   if (canShowFilmstrip(element)) {
-    drawFilmstrip(ctx, rect, element, opts.provider);
+    drawFilmstrip(ctx, rect, element, opts.provider, {
+      range: opts.range,
+      viewportW: opts.viewportW,
+    });
   }
 
   if (rect.h >= MIN_LABEL_HEIGHT && rect.w > LABEL_PADDING * 2) {
@@ -169,26 +182,59 @@ export function drawClip(
 /**
  * Lay frame tiles across the clip.
  *
- * Tile planning proper — quantisation, cache keys, viewport culling — arrives
- * with the extractor. Here each tile is simply asked for and drawn if present,
- * so a provider that has nothing yet leaves the flat colour showing.
+ * Every tile is drawn if the provider already has it and requested if not —
+ * `request` is cheap and deduplicating, so calling it each frame is fine. A
+ * miss leaves the flat colour showing until a later repaint, which is the
+ * normal state while a strip fills in.
  */
 function drawFilmstrip(
   ctx: CanvasRenderingContext2D,
   rect: ClipRect,
-  element: TimelineElement,
+  element: VideoElementType | ImageElementType,
   provider: TileProvider,
+  opts: { range: number; viewportW: number },
 ) {
-  const tileW = Math.max(8, Math.round(rect.h * (16 / 9)));
-  const count = Math.ceil(rect.w / tileW);
+  // A video knows its source pixels; an image only has its on-screen box, which
+  // is the same shape unless it has been stretched.
+  const origin = element.filetype === "video" ? element.origin : null;
+  const aspect =
+    origin != null && origin.width > 0 && origin.height > 0
+      ? origin.width / origin.height
+      : element.width > 0 && element.height > 0
+        ? element.width / element.height
+        : 16 / 9;
 
-  for (let i = 0; i < count; i++) {
-    const key = `${element.localpath}|${i}|${rect.h}`;
-    const tile = provider.get(key);
-    if (tile == null) {
+  const plan = planFilmstrip({
+    localpath: element.localpath,
+    clipX: rect.x,
+    clipY: rect.y,
+    clipW: rect.w,
+    clipH: rect.h,
+    spanStartMs: spanStart(element),
+    sourceInMs: isDynamicElement(element) ? element.trim.startTime : 0,
+    speed: speedOf(element),
+    sourceAspect: aspect,
+    range: opts.range,
+    viewportX0: 0,
+    viewportX1: opts.viewportW,
+  });
+
+  for (const tile of plan.tiles) {
+    const bitmap = provider.get(tile.key);
+    if (bitmap == null) {
+      provider.request({
+        key: tile.key,
+        localpath: tile.localpath,
+        sourceMs: tile.sourceMs,
+        tileW: plan.tileW,
+        tileH: rect.h,
+      });
       continue;
     }
-    ctx.drawImage(tile, rect.x + i * tileW, rect.y, tileW, rect.h);
+
+    // Draw the whole tile at its natural width and let the clip's own clip path
+    // cut the overhang; scaling the last tile down instead would squash it.
+    ctx.drawImage(bitmap, tile.dx, tile.dy, plan.tileW, tile.dh);
   }
 }
 
@@ -217,6 +263,8 @@ export function drawTimeline(
       selected: selection.has(rect.elementId),
       provider,
       colors,
+      range: opts.range,
+      viewportW: opts.viewportW,
     });
   }
 
