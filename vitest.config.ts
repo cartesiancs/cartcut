@@ -9,7 +9,12 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["apps/app/src/**/*.{test,spec}.ts"],
+    // `electron/` is compiled by a separate tsc pass that excludes tests, so a
+    // suite can live next to main-process code without entering that build.
+    include: [
+      "apps/app/src/**/*.{test,spec}.ts",
+      "electron/**/*.{test,spec}.ts",
+    ],
     exclude: ["**/node_modules/**", "**/dist/**", "**/main/**"],
   },
 });

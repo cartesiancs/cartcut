@@ -14,6 +14,7 @@ import { renderShape } from "../renderer/shape";
 import { renderGif } from "../renderer/gif";
 import { renderVideoWithoutWait } from "../renderer/video";
 import { loadedAssetStore } from "../asset/loadedAssetStore";
+import { placeNewElement } from "../timeline/placement";
 import {
   renderTimelineAtTime,
   type TimelineRenderers,
@@ -833,6 +834,9 @@ export class PreviewCanvas extends LitElement {
 
     this.timeline[elementId] = {
       key: elementId,
+      // Both are overwritten by `placeNewElement` below, which picks the track
+      // and derives the paint rank from it.
+      trackId: "",
       priority: 1,
       blob: "",
       startTime: 0,
@@ -881,7 +885,13 @@ export class PreviewCanvas extends LitElement {
       },
     };
 
-    this.timelineState.patchTimeline(this.timeline);
+    const element = this.timeline[elementId];
+    delete this.timeline[elementId];
+    this.timelineState.withCheckpoint((doc) =>
+      placeNewElement(doc, elementId, element, this.timelineCursor, uuidv4()),
+    );
+    this.timeline = useTimelineStore.getState().timeline;
+
     return elementId;
   }
 

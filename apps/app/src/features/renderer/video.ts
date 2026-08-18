@@ -1,5 +1,6 @@
 import type { VideoElementType } from "../../@types/timeline";
 import { isTimeInRange } from "../../utils/time";
+import { spanOf } from "../timeline/geometry";
 import { loadedAssetStore } from "../asset/loadedAssetStore";
 import { VideoFilterPipeline } from "./filter/videoPipeline";
 import type { ElementRenderFunction } from "./type";
@@ -10,16 +11,14 @@ import type { ElementRenderFunction } from "./type";
  * This is `isElementVisibleAtTime` specialised to video: only text needs the
  * timeline (to resolve `parentKey`), so a clip can answer for itself. It
  * deliberately ignores `trim`, which addresses the *source file* for FFmpeg
- * seeking and says nothing about where the clip sits on the timeline — the same
- * correction that removed the old `isVideoElementVisibleAtTime`.
+ * seeking and says nothing about where the clip sits on the timeline.
  */
 function isVideoVisibleAtTime(
   timeInMs: number,
   videoElement: VideoElementType,
 ): boolean {
-  const startTime = videoElement.startTime;
-  const endTime = startTime + videoElement.duration / videoElement.speed;
-  return isTimeInRange(timeInMs, startTime, endTime);
+  const { start, end } = spanOf(videoElement);
+  return isTimeInRange(timeInMs, start, end);
 }
 
 export const renderVideoWithoutWait: ElementRenderFunction<VideoElementType> = (

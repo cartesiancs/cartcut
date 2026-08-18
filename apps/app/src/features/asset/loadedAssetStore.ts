@@ -9,6 +9,7 @@ import {
 } from "../../@types/timeline";
 import { VideoFilterPipeline } from "../renderer/filter/videoPipeline";
 import { isElementVisibleAtTime } from "../element/time";
+import { sourceTimeAt } from "../timeline/geometry";
 
 type GifMetadata = {
   imageData: ImageData;
@@ -220,8 +221,9 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
       (meta) =>
         new Promise<void>((resolve, reject) => {
           const video = meta.object;
-          video.currentTime =
-            (-(meta.element.startTime - time) * meta.element.speed) / 1000;
+          // `sourceTimeAt` adds the trim offset this line used to drop, which
+          // is why a trimmed clip previewed the untrimmed frame.
+          video.currentTime = sourceTimeAt(meta.element, time) / 1000;
           video.playbackRate = meta.element.speed;
 
           video.addEventListener(
@@ -241,8 +243,7 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
     const videoMetas = Object.values(get()._loadedElementVideo);
     for (const meta of videoMetas) {
       meta.object.currentTime =
-        (-(meta.element.startTime - timelineCursor) * meta.element.speed) /
-        1000;
+        sourceTimeAt(meta.element, timelineCursor) / 1000;
       meta.object.playbackRate = meta.element.speed;
       meta.object.muted = true;
       meta.isPlay = true;
@@ -256,8 +257,7 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
       meta.isPlay = false;
       meta.object.pause();
       meta.object.currentTime =
-        (-(meta.element.startTime - timelineCursor) * meta.element.speed) /
-        1000;
+        sourceTimeAt(meta.element, timelineCursor) / 1000;
     }
   },
 }));

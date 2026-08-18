@@ -6,6 +6,7 @@ import {
   controlPanelStore,
 } from "../../states/controlPanelStore";
 import { v4 as uuidv4 } from "uuid";
+import { placeNewElement } from "../timeline/placement";
 import {
   IPreviewViewportStore,
   previewViewportStore,
@@ -103,13 +104,15 @@ export class PreviewTopBar extends LitElement {
 
     this.timeline[elementId] = {
       key: elementId,
+      // Both are overwritten by `placeNewElement` below, which picks the track
+      // and derives the paint rank from it.
+      trackId: "",
       priority: 1,
       blob: "",
       startTime: 0,
       duration: 1000,
       opacity: 100,
       location: { x: 0, y: 0 },
-      trim: { startTime: 0, endTime: 1000 },
       rotation: 0,
       width: width,
       height: height,
@@ -151,7 +154,19 @@ export class PreviewTopBar extends LitElement {
       },
     };
 
-    this.timelineState.patchTimeline(this.timeline);
+    const element = this.timeline[elementId];
+    delete this.timeline[elementId];
+    this.timelineState.withCheckpoint((doc) =>
+      placeNewElement(
+        doc,
+        elementId,
+        element,
+        useTimelineStore.getState().cursor,
+        uuidv4(),
+      ),
+    );
+    this.timeline = useTimelineStore.getState().timeline;
+
     return elementId;
   }
 

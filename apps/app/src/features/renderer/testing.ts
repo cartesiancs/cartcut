@@ -79,6 +79,7 @@ export function points(...pairs: Array<[number, number]>): number[][] {
 const placed = {
   key: "el",
   localpath: "/tmp/asset",
+  trackId: "track-1",
   priority: 1,
   blob: "",
   startTime: 0,
@@ -151,6 +152,7 @@ export function videoElement(
     filetype: "video",
     animation: inactiveAnimation(),
     trim: { startTime: 0, endTime: 4000 },
+    sourceDuration: 4000,
     isExistAudio: true,
     codec: { video: "h264", audio: "aac" },
     speed: 1,
@@ -168,7 +170,6 @@ export function textElement(
     ...visual,
     filetype: "text",
     animation: inactiveAnimation(),
-    parentKey: "standalone",
     text: "AB",
     textcolor: "#ffffff",
     fontsize: 40,
@@ -198,6 +199,7 @@ export function audioElement(
     ...placed,
     filetype: "audio",
     trim: { startTime: 0, endTime: 4000 },
+    sourceDuration: 4000,
     speed: 1,
     ...over,
   };

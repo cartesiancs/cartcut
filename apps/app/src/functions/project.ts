@@ -3,6 +3,7 @@ import { useTimelineStore } from "../states/timelineStore";
 import { rendererModal } from "../utils/modal";
 import { uiStore } from "../states/uiStore";
 import { renderOptionStore } from "../states/renderOptionStore";
+import { SCHEMA_VERSION } from "../features/timeline/tracks";
 
 const arrayBufferToBase64 = (buffer) => {
   var binary = "";
@@ -55,17 +56,46 @@ const project = {
       let filepath = path;
 
       window.electronAPI.req.filesystem.readFile(filepath).then((data) => {
-        JSZip.loadAsync(data).then(function (zip: any) {
-          zip
-            .file("timeline.json")
-            .async("string")
-            .then(async (result) => {
-              let timeline = JSON.parse(result);
+        JSZip.loadAsync(data).then(async function (zip: any) {
+          // Projects written before tracks existed have no `project.json` and
+          // no `tracks.json`; their elements carry a hand-assigned `priority`
+          // that doubled as a row index, and `trim` under the old reading. There
+          // is no migration, so say so plainly rather than opening something
+          // that would look subtly wrong and export differently.
+          const versionEntry = zip.file("project.json");
+          const schemaVersion = versionEntry
+            ? JSON.parse(await versionEntry.async("string")).schemaVersion
+            : 1;
 
-              timelineStore.patchTimeline(timeline);
+          if (schemaVersion !== SCHEMA_VERSION) {
+            rendererModal.whenTimelineChanged.show();
+            document.querySelector("#whenTimelineChangedMsg").innerHTML =
+              `This project was made with an older version of Nugget ` +
+              `(format v${schemaVersion}) and cannot be opened by this one ` +
+              `(format v${SCHEMA_VERSION}).`;
+            return;
+          }
 
-              project.changeProjectFileValue({ projectDestination: filepath });
-            });
+          const elements = JSON.parse(
+            await zip.file("timeline.json").async("string"),
+          );
+          const tracksEntry = zip.file("tracks.json");
+          const tracks = tracksEntry
+            ? JSON.parse(await tracksEntry.async("string"))
+            : [];
+
+          timelineStore.patchDocument({
+            schemaVersion: SCHEMA_VERSION,
+            tracks,
+            elements,
+          });
+
+          project.changeProjectFileValue({ projectDestination: filepath });
+
+          // Baseline the change detector against what was just loaded.
+          // Without this the freshly opened project immediately reads as
+          // "modified" and blocks opening another one.
+          elementTimeline.appendCheckpointInHashTable();
         });
 
         JSZip.loadAsync(data).then(function (zip: any) {
@@ -100,7 +130,7 @@ const project = {
     const elementTimeline = document.querySelector("element-timeline");
     const renderOptionState = renderOptionStore.getState().options;
 
-    const timeline = document.querySelector("element-timeline").timeline;
+    const { tracks, elements } = useTimelineStore.getState().getDocument();
     const projectDuration = renderOptionStore.getState().options.duration;
     const projectRatio = document.querySelector("element-control").previewRatio;
     const previewSizeH = renderOptionState.previewSize.h;
@@ -120,7 +150,11 @@ const project = {
       },
     };
 
-    zip.file("timeline.json", JSON.stringify(timeline));
+    // `project.json` is what tells a future version which format this is; a
+    // file without it predates tracks.
+    zip.file("project.json", JSON.stringify({ schemaVersion: SCHEMA_VERSION }));
+    zip.file("timeline.json", JSON.stringify(elements));
+    zip.file("tracks.json", JSON.stringify(tracks));
     zip.file("renderOptions.json", JSON.stringify(options));
 
     zip.generateAsync({ type: "blob" }).then(async function (content) {

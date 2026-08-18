@@ -1,43 +1,26 @@
-import type {
-  AudioElementType,
-  Timeline,
-  VisualTimelineElement,
-  VideoElementType,
-} from "../../@types/timeline";
-import { elementUtils } from "../../utils/element";
+import type { Timeline, VisualTimelineElement } from "../../@types/timeline";
+import { spanOf } from "../timeline/geometry";
 import { isTimeInRange } from "../../utils/time";
 
+/**
+ * Whether an element covers `timeInMs`.
+ *
+ * Visibility depends ONLY on timeline position, never on `trim`, which
+ * addresses the source file — see `features/timeline/geometry.ts` for why three
+ * subsystems used to disagree about that.
+ *
+ * `timeline` is no longer read. It is still in the signature because text used
+ * to carry a `parentKey` and render at `parent.startTime + own.startTime`, so
+ * placing a clip meant consulting its neighbours. Captions now sit on a text
+ * track holding absolute times like everything else, so every clip answers for
+ * itself; the parameter stays so this change does not also churn a dozen call
+ * sites.
+ */
 export function isElementVisibleAtTime(
   timeInMs: number,
-  timeline: Timeline,
+  _timeline: Timeline,
   element: VisualTimelineElement,
 ): boolean {
-  const startTime =
-    element.startTime + getAdditionalStartTime(timeline, element);
-
-  const realDuration =
-    elementUtils.getElementType(element.filetype) === "dynamic"
-      ? element.duration /
-        (element as VideoElementType | AudioElementType).speed
-      : element.duration;
-  const endTime = startTime + realDuration;
-
-  // Visibility depends ONLY on timeline position (startTime + duration)
-  // NOT on trim values (which are source file positions for FFmpeg -ss seeking)
-  return isTimeInRange(timeInMs, startTime, endTime);
-}
-
-function getAdditionalStartTime(
-  timeline: Timeline,
-  element: VisualTimelineElement,
-): number {
-  let additionalStartTime = 0;
-  if (element.filetype == "text") {
-    if (element.parentKey != "standalone") {
-      const parentStartTime = timeline[element.parentKey].startTime;
-      additionalStartTime = parentStartTime;
-    }
-  }
-
-  return additionalStartTime;
+  const { start, end } = spanOf(element);
+  return isTimeInRange(timeInMs, start, end);
 }

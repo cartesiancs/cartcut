@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import { getLocationEnv } from "../../functions/getLocationEnv";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
+import { placeNewElement } from "../timeline/placement";
 
 @customElement("warning-demo")
 export class WarningDemo extends LitElement {
@@ -65,6 +66,7 @@ export class WarningDemo extends LitElement {
           startTime: 0,
           endTime: 60000,
         },
+        sourceDuration: 60000,
         rotation: 0,
         width: 1920,
         height: 1080,
@@ -160,7 +162,6 @@ export class WarningDemo extends LitElement {
           size: 1,
           color: "#000000",
         },
-        parentKey: "standalone",
         priority: 3,
         startTime: 556,
         duration: 1533,
@@ -224,7 +225,25 @@ export class WarningDemo extends LitElement {
       },
     };
 
-    this.timelineState.patchTimeline(this.timeline);
+    // The preset is authored as a bare element map with no tracks, so route it
+    // through the same placement rule the editor uses. Each element keeps its
+    // own start time and lands on a track of the right kind — the video and the
+    // still overlap in time, so they end up stacked rather than sharing a row.
+    this.timelineState.withCheckpoint((doc) => {
+      let next = doc;
+      for (const [elementId, element] of Object.entries(this.timeline)) {
+        next = placeNewElement(
+          next,
+          elementId,
+          element as any,
+          (element as any).startTime,
+          uuidv4(),
+        );
+      }
+      return next;
+    });
+
+    this.timeline = useTimelineStore.getState().timeline;
   }
 
   render() {

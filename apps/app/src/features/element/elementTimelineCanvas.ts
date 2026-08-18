@@ -1,97 +1,116 @@
 import { v4 as uuidv4 } from "uuid";
-import { elementUtils } from "../../utils/element";
 import { LitElement, html } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
-import { consume, provide } from "@lit/context";
-import {
-  TimelineContentObject,
-  timelineContext,
-} from "../../context/timelineContext";
+import { consume } from "@lit/context";
+import { timelineContext } from "../../context/timelineContext";
 import { IUIStore, uiStore } from "../../states/uiStore";
-import { darkenColor } from "../../utils/rgbColor";
-import { TimelineController } from "../../controllers/timeline";
 import { IKeyframeStore, keyframeStore } from "../../states/keyframeStore";
 import {
   IRenderOptionStore,
   renderOptionStore,
 } from "../../states/renderOptionStore";
+import {
+  animatableProperties,
+  type TimelineElement,
+} from "../../@types/timeline";
+import { splitAt, trimEnd, trimStart } from "../timeline/clipEdit";
+import { pxToMsSigned, spanLength } from "../timeline/geometry";
+import {
+  hitTest,
+  layoutTimeline,
+  type Hit,
+  type TimelineLayout,
+} from "../timeline/layout";
+import { drawTimeline } from "../timeline/draw";
+import { collectSnapPoints, snapSpan } from "../timeline/snapping";
+import {
+  normalizeDocument,
+  type TimelineDocument,
+} from "../timeline/tracks";
 
-interface ObjectClassType {
-  [elementId: string]: number;
-}
+/** How close, in px, an edge must come before it snaps. */
+const SNAP_TOLERANCE_PX = 10;
 
-interface ObjectClassTrimType {
-  [elementId: string]: {
-    startTime: number;
-    endTime: number;
-  };
-}
+type DragKind = "move" | "trimStart" | "trimEnd";
 
+type DragState = {
+  kind: DragKind;
+  originX: number;
+  /** Primary target — the clip actually grabbed. */
+  elementId: string;
+  /** The elements as they were at mousedown, keyed by id. */
+  snapshot: Record<string, TimelineElement>;
+};
+
+/**
+ * The timeline canvas.
+ *
+ * This used to be 1,500 lines that measured clips, hit-tested them, drew them,
+ * and edited them — with the row geometry written out four separate times
+ * across two files and, inevitably, disagreeing. All of that now lives in
+ * DOM-free modules under `features/timeline/`, each with its own tests, and
+ * what is left here is the part that genuinely needs a browser: a canvas, some
+ * event listeners, and the store.
+ */
 @customElement("element-timeline-canvas")
 export class elementTimelineCanvas extends LitElement {
-  targetId: string[];
-  isDrag: boolean;
-  firstClickPosition: { x: number; y: number };
-  targetLastPosition: { x: number; y: number } | undefined;
-  targetStartTime: ObjectClassType;
-  targetDuration: ObjectClassType;
-  targetMediaType: "static" | "dynamic" | undefined;
-  cursorType: "none" | "move" | "moveNotGuide" | "stretchStart" | "stretchEnd";
-  cursorNow: number;
-  targetTrim: ObjectClassTrimType;
-  timelineColor: {};
-  canvasVerticalScroll: number;
-  copyedTimelineData: {};
-  isGuide: boolean;
-  targetIdDuringRightClick: any;
+  targetId: string[] = [];
+  targetIdDuringRightClick: string[] = [];
+
+  private drag: DragState | null = null;
+  /**
+   * The document as the drag has it so far.
+   *
+   * A drag draws from this and writes to the store exactly once, on mouseup.
+   * Every mousemove used to call `patchTimeline`, which churned the store at
+   * pointer rate and let a single drag eat the whole undo history.
+   */
+  private pendingDoc: TimelineDocument | null = null;
+  private snapGuideMs: number | null = null;
+  private layout: TimelineLayout = { rows: [], clips: [], totalHeight: 0 };
+  private clipboard: Record<string, TimelineElement> = {};
+  private canvasVerticalScroll = 0;
 
   constructor() {
     super();
-
-    this.targetId = [];
-    this.targetIdDuringRightClick = [];
-    this.targetStartTime = {};
-    this.targetDuration = {};
-    this.targetTrim = {};
-
-    this.isDrag = false;
-    this.isGuide = false;
-    this.firstClickPosition = { x: 0, y: 0 };
-    this.cursorType = "none";
-    this.cursorNow = 0;
-    this.timelineColor = {};
-    this.canvasVerticalScroll = 0;
-    this.copyedTimelineData = {};
-
     window.addEventListener("resize", this.handleWindowResize);
     window.addEventListener("keydown", this._handleKeydown.bind(this));
-    document.addEventListener(
-      "mousedown",
-      this._handleDocumentClick.bind(this),
-    );
+    document.addEventListener("mousedown", this._handleDocumentClick.bind(this));
+
+    // A drag has to keep tracking once the pointer leaves the canvas —
+    // dragging a clip up to another row means moving well outside it — and it
+    // must end even if the button is released somewhere else entirely,
+    // otherwise the drag sticks to the cursor.
+    window.addEventListener("mousemove", this.handleWindowMouseMove);
+    window.addEventListener("mouseup", this.handleWindowMouseUp);
   }
 
-  /** Bound so `this` survives the listener call — an unbound method here left
-   * the canvas throwing on every window resize. */
+  /** Bound so `this` survives the listener call. */
   private handleWindowResize = () => {
     this.drawCanvas();
+  };
+
+  private handleWindowMouseMove = (e: MouseEvent) => {
+    if (!this.drag || !this.canvas) {
+      return;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    this.updateDrag(e.clientX - rect.left);
+  };
+
+  private handleWindowMouseUp = () => {
+    if (this.drag) {
+      this.endDrag();
+    }
   };
 
   private timelineResizeObserver?: ResizeObserver;
 
   /**
-   * Paint as soon as the canvas exists.
-   *
-   * Every other call site is an event — a store change, a resize, a click — so
-   * with nothing here the timeline stayed blank from launch until the user
-   * happened to click, and only then did the clips, the cursor and the red
-   * end-of-project line appear.
-   *
-   * The first paint alone is not enough: `element-timeline` is inside a
-   * resizable split pane and can still measure 0 high at this point, which would
-   * produce a zero-height canvas. Observing it covers both — the first real
-   * layout and every later resize.
+   * `element-timeline` sits in a resizable split pane and can measure 0 high at
+   * first paint, so observing it covers both the first real layout and every
+   * later resize.
    */
   protected firstUpdated(): void {
     const timeline = document.querySelector("element-timeline");
@@ -99,8 +118,6 @@ export class elementTimelineCanvas extends LitElement {
       this.timelineResizeObserver = new ResizeObserver(() => this.drawCanvas());
       this.timelineResizeObserver.observe(timeline);
     }
-
-    this.setTimelineColor();
     this.drawCanvas();
   }
 
@@ -108,6 +125,8 @@ export class elementTimelineCanvas extends LitElement {
     this.timelineResizeObserver?.disconnect();
     this.timelineResizeObserver = undefined;
     window.removeEventListener("resize", this.handleWindowResize);
+    window.removeEventListener("mousemove", this.handleWindowMouseMove);
+    window.removeEventListener("mouseup", this.handleWindowMouseUp);
     super.disconnectedCallback();
   }
 
@@ -118,6 +137,9 @@ export class elementTimelineCanvas extends LitElement {
 
   @property({ attribute: false })
   timeline: any = this.timelineState.timeline;
+
+  @property({ attribute: false })
+  tracks = this.timelineState.tracks;
 
   @property({ attribute: false })
   timelineRange = this.timelineState.range;
@@ -135,13 +157,7 @@ export class elementTimelineCanvas extends LitElement {
   control = this.timelineState.control;
 
   @property({ attribute: false })
-  isOpenAnimationPanelId: string[] = [];
-
-  @property({ attribute: false })
   keyframeState: IKeyframeStore = keyframeStore.getInitialState();
-
-  @property({ attribute: false })
-  target = this.keyframeState.target;
 
   @property({ attribute: false })
   uiState: IUIStore = uiStore.getInitialState();
@@ -157,21 +173,17 @@ export class elementTimelineCanvas extends LitElement {
 
   @consume({ context: timelineContext })
   @property({ attribute: false })
-  public timelineOptions: any = {
-    canvasVerticalScroll: 0,
-    panelOptions: [],
-  };
+  public timelineOptions: any = { canvasVerticalScroll: 0, panelOptions: [] };
 
   createRenderRoot() {
     useTimelineStore.subscribe((state) => {
       this.timeline = state.timeline;
+      this.tracks = state.tracks;
       this.timelineRange = state.range;
       this.timelineCursor = state.cursor;
       this.timelineScroll = state.scroll;
       this.timelineHistory = state.history;
       this.control = state.control;
-
-      this.setTimelineColor();
       this.drawCanvas();
     });
 
@@ -180,19 +192,249 @@ export class elementTimelineCanvas extends LitElement {
       this.drawCanvas();
     });
 
-    keyframeStore.subscribe((state) => {
-      this.target = state.target;
-    });
-
     renderOptionStore.subscribe((state) => {
       this.renderOption = state.options;
-      // The red end-of-project line is drawn from renderOption.duration, so it
-      // has to be repainted when the duration changes.
       this.drawCanvas();
     });
 
     return this;
   }
+
+  /** The document being displayed: mid-drag preview, or the committed one. */
+  private currentDoc(): TimelineDocument {
+    return this.pendingDoc ?? useTimelineStore.getState().getDocument();
+  }
+
+  drawCanvas() {
+    const container = document.querySelector("element-timeline");
+    if (!this.canvas || !container) {
+      return;
+    }
+
+    const ctx = this.canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+
+    const dpr = window.devicePixelRatio || 1;
+    // The canvas is absolutely positioned to the right of the track headers, so
+    // its own width is what is left of the window. Using the full window width
+    // ran it off the right edge by exactly the header width.
+    const width = Math.max(
+      0,
+      window.innerWidth - this.resize.timelineVertical.leftOption,
+    );
+    const height = (container as HTMLElement).offsetHeight;
+
+    this.canvas.style.width = `${width}px`;
+    this.canvas.width = width * dpr;
+    this.canvas.height = height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const doc = this.currentDoc();
+    this.layout = layoutTimeline({
+      doc,
+      range: this.timelineRange,
+      hScroll: this.timelineScroll,
+      vScroll: this.canvasVerticalScroll,
+      viewportW: width,
+      viewportH: height,
+    });
+
+    drawTimeline(ctx, {
+      layout: this.layout,
+      doc,
+      range: this.timelineRange,
+      hScroll: this.timelineScroll,
+      viewportW: width,
+      viewportH: height,
+      selection: this.targetId,
+      playheadMs: this.timelineCursor,
+      projectEndMs: this.renderOption.duration * 1000,
+      snapGuideMs: this.snapGuideMs,
+    });
+  }
+
+  // ---------------------------------------------------------------- editing
+
+  /** Apply a document transform and record one undo step. */
+  private commit(fn: (doc: TimelineDocument) => TimelineDocument) {
+    useTimelineStore.getState().withCheckpoint(fn);
+  }
+
+  private copySelected() {
+    const doc = this.currentDoc();
+    const copied: Record<string, TimelineElement> = {};
+    for (const elementId of this.targetId) {
+      const element = doc.elements[elementId];
+      if (element) {
+        copied[elementId] = structuredClone(element);
+      }
+    }
+    this.clipboard = copied;
+  }
+
+  /**
+   * Cut the selected clip at the playhead.
+   *
+   * Both halves keep the original's `trackId`, so they land side by side on one
+   * row. The old implementation handed the second half a fresh
+   * `priority = max + 1`, and since a row *was* the priority-sorted index, that
+   * put it on a brand-new row every time.
+   */
+  private splitSelected() {
+    const at = this.timelineCursor;
+    this.commit((doc) => {
+      let next = doc;
+      let changed = false;
+
+      for (const elementId of this.targetId) {
+        const element = next.elements[elementId];
+        if (!element) {
+          continue;
+        }
+        const parts = splitAt(element, at);
+        if (parts == null) {
+          continue;
+        }
+
+        changed = true;
+        next = {
+          ...next,
+          elements: {
+            ...next.elements,
+            [elementId]: parts.left,
+            [uuidv4()]: parts.right,
+          },
+        };
+      }
+
+      return changed ? normalizeDocument(next) : doc;
+    });
+  }
+
+  private pasteClipboard() {
+    const entries = Object.entries(this.clipboard);
+    if (entries.length === 0) {
+      return;
+    }
+
+    this.commit((doc) => {
+      const elements = { ...doc.elements };
+      for (const [, element] of entries) {
+        elements[uuidv4()] = structuredClone(element);
+      }
+      return normalizeDocument({ ...doc, elements });
+    });
+  }
+
+  private removeElements(ids: string[]) {
+    if (ids.length === 0) {
+      return;
+    }
+    this.commit((doc) => {
+      const elements = { ...doc.elements };
+      for (const id of ids) {
+        delete elements[id];
+      }
+      return normalizeDocument({ ...doc, elements });
+    });
+  }
+
+  public removeSeletedElements() {
+    this.removeElements(this.targetIdDuringRightClick);
+  }
+
+  // ----------------------------------------------------------------- drag
+
+  private beginDrag(hit: Extract<Hit, { kind: "clip" }>, x: number) {
+    const doc = this.currentDoc();
+    const snapshot: Record<string, TimelineElement> = {};
+    for (const elementId of this.targetId) {
+      const element = doc.elements[elementId];
+      if (element) {
+        snapshot[elementId] = element;
+      }
+    }
+
+    this.drag = {
+      kind: hit.zone === "body" ? "move" : hit.zone,
+      originX: x,
+      elementId: hit.elementId,
+      snapshot,
+    };
+  }
+
+  private updateDrag(x: number) {
+    const drag = this.drag;
+    if (!drag) {
+      return;
+    }
+
+    const committed = useTimelineStore.getState().getDocument();
+    const deltaMs = pxToMsSigned(x - drag.originX, this.timelineRange);
+    const elements = { ...committed.elements };
+    this.snapGuideMs = null;
+
+    if (drag.kind === "move") {
+      const primary = drag.snapshot[drag.elementId];
+      let applied = deltaMs;
+
+      if (primary) {
+        // Snap the grabbed clip, then move the whole selection by the amount
+        // that actually got applied, so a multi-clip drag keeps its shape.
+        const desired = Math.max(0, primary.startTime + deltaMs);
+        const snapped = snapSpan(
+          desired,
+          spanLength(primary),
+          collectSnapPoints(committed, {
+            excludeIds: Object.keys(drag.snapshot),
+            playheadMs: this.timelineCursor,
+          }),
+          this.timelineRange,
+          SNAP_TOLERANCE_PX,
+          primary.trackId,
+        );
+
+        applied = snapped.startMs - primary.startTime;
+        this.snapGuideMs = snapped.hit?.ms ?? null;
+      }
+
+      for (const [elementId, element] of Object.entries(drag.snapshot)) {
+        elements[elementId] = {
+          ...element,
+          startTime: Math.max(0, element.startTime + applied),
+        };
+      }
+    } else {
+      // Trimming acts on the grabbed clip alone; dragging one edge of a
+      // multi-selection has no obvious meaning for the rest.
+      const element = drag.snapshot[drag.elementId];
+      if (element) {
+        elements[drag.elementId] =
+          drag.kind === "trimStart"
+            ? trimStart(element, deltaMs)
+            : trimEnd(element, deltaMs);
+      }
+    }
+
+    this.pendingDoc = normalizeDocument({ ...committed, elements });
+    this.drawCanvas();
+  }
+
+  private endDrag() {
+    const pending = this.pendingDoc;
+    this.drag = null;
+    this.pendingDoc = null;
+    this.snapGuideMs = null;
+
+    if (pending) {
+      this.commit(() => pending);
+    }
+    this.drawCanvas();
+  }
+
+  // --------------------------------------------------------------- events
 
   _handleDocumentClick(e) {
     if (e.target.id != "elementTimelineCanvasRef") {
@@ -201,1288 +443,273 @@ export class elementTimelineCanvas extends LitElement {
     }
   }
 
-  setTimelineColor() {
-    for (const key in this.timeline) {
-      if (Object.prototype.hasOwnProperty.call(this.timeline, key)) {
-        const element = this.timeline[key];
-        if (!this.timelineColor.hasOwnProperty(key)) {
-          // this.timelineColor[key] = this.getRandomColor();
-          this.timelineColor[key] = this.timeline[key].timelineOptions.color;
-        }
+  _handleMouseWheel(e) {
+    if (e.ctrlKey) {
+      e.preventDefault();
+      const dx = parseFloat(e.deltaY) * (this.timelineRange / 75);
+      const next = this.timelineRange - dx;
+      if (e.deltaY < 0 ? next < 5 : next > -8) {
+        this.timelineState.setRange(next);
       }
-    }
-  }
-
-  private getRandomArbitrary(min, max) {
-    return Math.round(Math.random() * (max - min) + min);
-  }
-
-  private getRandomColor() {
-    let rgbMinColor = { r: 45, g: 23, b: 56 };
-    let rgbMaxColor = { r: 167, g: 139, b: 180 };
-
-    let rgb = {
-      r: this.getRandomArbitrary(rgbMinColor.r, rgbMaxColor.r),
-      g: this.getRandomArbitrary(rgbMinColor.g, rgbMaxColor.g),
-      b: this.getRandomArbitrary(rgbMinColor.b, rgbMaxColor.b),
-    };
-
-    let rgbColor = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
-    return rgbColor;
-  }
-
-  private millisecondsToPx(ms) {
-    const timelineRange = this.timelineRange;
-    const timeMagnification = timelineRange / 4;
-    const convertPixel = (ms / 5) * timeMagnification;
-    const result = Number(convertPixel.toFixed(0));
-
-    return result;
-  }
-
-  private pxToMilliseconds(px) {
-    const timelineRange = this.timelineRange;
-    const timeMagnification = timelineRange / 4;
-    const convertMs = (px * 5) / timeMagnification;
-    return Number(convertMs.toFixed(0));
-  }
-
-  private wrapText(ctx, text, x, y, maxWidth) {
-    let ellipsis = "...";
-    let truncatedText = text;
-
-    if (ctx.measureText(text).width > maxWidth) {
-      while (ctx.measureText(truncatedText + ellipsis).width > maxWidth) {
-        truncatedText = truncatedText.slice(0, -1);
-      }
-      truncatedText += ellipsis;
+      return;
     }
 
-    const fontSize = 14;
-    ctx.fillStyle = "#ffffff";
-    ctx.lineWidth = 0;
-    ctx.font = `${fontSize}px "Noto Sans"`;
-    ctx.fillText(truncatedText, x, y);
-  }
-
-  private deepCopy(obj) {
-    if (obj === null || typeof obj !== "object") {
-      return obj;
+    const nextVertical = Math.max(0, this.canvasVerticalScroll + e.deltaY);
+    if (nextVertical !== this.canvasVerticalScroll) {
+      this.canvasVerticalScroll = nextVertical;
+      this.timelineOptions.canvasVerticalScroll = nextVertical;
+      this.drawCanvas();
     }
 
-    if (Array.isArray(obj)) {
-      const copy: any = [];
-      obj.forEach((element, index) => {
-        copy[index] = this.deepCopy(element);
-      });
-      return copy;
+    this.timelineState.setScroll(Math.max(0, this.timelineScroll + e.deltaX));
+  }
+
+  _handleMouseMove(e) {
+    if (this.drag) {
+      this.updateDrag(e.offsetX);
+      return;
+    }
+
+    const hit = hitTest(this.layout, e.offsetX, e.offsetY);
+    if (hit.kind === "clip") {
+      this.style.cursor = hit.zone === "body" ? "pointer" : "ew-resize";
     } else {
-      const copy = {};
-      Object.keys(obj).forEach((key) => {
-        copy[key] = this.deepCopy(obj[key]);
-      });
-      return copy;
+      this.style.cursor = "default";
     }
   }
 
-  private copySeletedElement() {
-    if (this.targetId.length == 1) {
-      let selected = {};
+  _handleMouseDown(e) {
+    this.timelineState.setCursorType("pointer");
 
-      let changedUUID = uuidv4();
+    const hit = hitTest(this.layout, e.offsetX, e.offsetY);
 
-      selected[changedUUID] = this.deepCopy(this.timeline[this.targetId[0]]);
-
-      this.copyedTimelineData = selected;
-    }
-  }
-
-  private splitSeletedElement() {
-    if (this.targetId.length != 1) {
-      return false;
+    if (hit.kind !== "clip") {
+      this.targetId = [];
+      this.drawCanvas();
+      return;
     }
 
-    let selected = {};
-    const timelineRange = this.timelineRange;
-    const timelineCursor = this.timelineCursor;
-    const timeMagnification = timelineRange / 4;
-    const convertMs = (timelineCursor * 5) / timeMagnification;
-    let curserLeft = this.timelineCursor;
-
-    let changedUUID = uuidv4();
-    selected[changedUUID] = this.deepCopy(this.timeline[this.targetId[0]]);
-
-    if (
-      elementUtils.getElementType(this.timeline[this.targetId[0]].filetype) ==
-      "dynamic"
-    ) {
-      let targetElementTrimStartTime =
-        curserLeft -
-        (selected[changedUUID].trim.startTime +
-          selected[changedUUID].startTime);
-      selected[changedUUID].trim.startTime += targetElementTrimStartTime;
-
-      this.timeline[this.targetId[0]].trim.endTime =
-        selected[changedUUID].trim.startTime;
-    } else if (
-      elementUtils.getElementType(this.timeline[this.targetId[0]].filetype) ==
-      "static"
-    ) {
-      let targetElementStartTime = curserLeft - selected[changedUUID].startTime;
-
-      selected[changedUUID].startTime += targetElementStartTime;
-      selected[changedUUID].duration =
-        selected[changedUUID].duration - targetElementStartTime;
-
-      let originElementDuration =
-        this.timeline[this.targetId[0]].duration -
-        selected[changedUUID].duration;
-
-      this.timeline[this.targetId[0]].duration = originElementDuration;
-    }
-
-    this.copyedTimelineData = selected;
-  }
-
-  drawCursor() {
-    const ctx: any = this.canvas.getContext("2d");
-    const height = document.querySelector("element-timeline").offsetHeight;
-
-    const now =
-      this.millisecondsToPx(this.timelineCursor) - this.timelineScroll;
-
-    ctx.fillStyle = "#dbdaf0";
-    ctx.beginPath();
-    ctx.rect(now, 0, 2, height);
-    ctx.fill();
-  }
-
-  drawEndTimeline() {
-    const projectDuration = this.renderOption.duration;
-
-    const timelineRange = this.timelineRange;
-    const timeMagnification = timelineRange / 4;
-
-    const ctx: any = this.canvas.getContext("2d");
-    const height = document.querySelector("element-timeline").offsetHeight;
-
-    const end =
-      ((projectDuration * 1000) / 5) * timeMagnification - this.timelineScroll;
-
-    ctx.fillStyle = "#ff173e";
-    ctx.beginPath();
-    ctx.rect(end, 0, 2, height);
-    ctx.fill();
-  }
-
-  drawActive(ctx, elementId, left, top, width, height) {
-    const activeHeight = 2;
-
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.rect(left, top + height - activeHeight, width, activeHeight);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.rect(left, top, width, activeHeight);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.rect(left, top, activeHeight, height);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.rect(left + width - activeHeight, top, activeHeight, height);
-    ctx.fill();
-    ctx.fillStyle = this.timelineColor[elementId];
-    ctx.strokeStyle = this.timelineColor[elementId];
-    ctx.lineWidth = 0;
-  }
-
-  drawCanvas() {
-    let index = 1;
-
-    // Reachable before the first render and from listeners that outlive the
-    // element, so neither the canvas nor the timeline container is guaranteed.
-    const timeline = document.querySelector("element-timeline");
-    if (!this.canvas || !timeline) return;
-
-    const ctx = this.canvas.getContext("2d");
-    if (ctx) {
-      const dpr = window.devicePixelRatio;
-      this.canvas.style.width = `${window.innerWidth}px`;
-
-      this.canvas.width = window.innerWidth * dpr;
-      this.canvas.height = timeline.offsetHeight * dpr;
-
-      ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-      ctx.scale(dpr, dpr);
-
-      const sortedTimeline = Object.fromEntries(
-        Object.entries(this.timeline).sort(
-          ([, valueA]: any, [, valueB]: any) =>
-            valueA.priority - valueB.priority,
-        ),
-      );
-
-      for (const elementId in sortedTimeline) {
-        if (Object.prototype.hasOwnProperty.call(sortedTimeline, elementId)) {
-          const height = 30;
-          const top = index * height * 1.2 - this.canvasVerticalScroll;
-          const left =
-            this.millisecondsToPx(this.timeline[elementId].startTime) -
-            this.timelineScroll;
-
-          const filetype = this.timeline[elementId].filetype;
-
-          let elementType = elementUtils.getElementType(filetype);
-
-          ctx.lineWidth = 0;
-
-          if (elementType == "static") {
-            const width = this.millisecondsToPx(
-              this.timeline[elementId].duration,
-            );
-
-            let additionalLeft = 0;
-
-            if (filetype == "text") {
-              if (this.timeline[elementId].parentKey != "standalone") {
-                const parentStartTime =
-                  this.timeline[this.timeline[elementId].parentKey].startTime;
-                additionalLeft = this.millisecondsToPx(parentStartTime);
-              }
-            }
-
-            const finalLeft = left + additionalLeft;
-
-            ctx.fillStyle = this.timelineColor[elementId];
-            ctx.strokeStyle = this.timelineColor[elementId];
-            ctx.lineWidth = 0;
-
-            ctx.beginPath();
-            ctx.rect(finalLeft, top, width, height);
-            ctx.fill();
-            ctx.stroke();
-
-            if (this.targetId.includes(elementId)) {
-              this.drawActive(ctx, elementId, finalLeft, top, width, height);
-            }
-          } else if (elementType == "dynamic") {
-            const width = this.millisecondsToPx(
-              this.timeline[elementId].duration /
-                this.timeline[elementId].speed,
-            );
-
-            const startTime = this.millisecondsToPx(
-              this.timeline[elementId].trim.startTime,
-            );
-            const endTime = this.millisecondsToPx(
-              this.timeline[elementId].trim.endTime,
-            );
-            const duration = this.millisecondsToPx(
-              this.timeline[elementId].duration /
-                this.timeline[elementId].speed,
-            );
-
-            ctx.fillStyle = this.timelineColor[elementId];
-            ctx.strokeStyle = this.timelineColor[elementId];
-            ctx.lineWidth = 0;
-
-            ctx.beginPath();
-            ctx.rect(left, top, width, height);
-            ctx.fill();
-
-            if (this.targetId.includes(elementId)) {
-              this.drawActive(ctx, elementId, left, top, width, height);
-            }
-
-            const darkenRate = 0.8;
-
-            ctx.lineWidth = 0;
-            ctx.fillStyle = darkenColor(
-              this.timelineColor[elementId],
-              darkenRate,
-            );
-            ctx.beginPath();
-            ctx.rect(left, top, startTime, height);
-            ctx.fill();
-
-            ctx.fillStyle = darkenColor(
-              this.timelineColor[elementId],
-              darkenRate,
-            );
-            ctx.beginPath();
-            ctx.rect(left + endTime, top, duration - endTime, height);
-            ctx.fill();
-          }
-
-          const isActive = this.isActiveAnimationPanel(elementId);
-
-          if (isActive) {
-            index += 1;
-
-            const panelTop =
-              index * height * 1.2 - this.timelineOptions.canvasVerticalScroll;
-            ctx.fillStyle = "#24252b";
-
-            ctx.beginPath();
-            ctx.rect(0, panelTop, this.canvas.width, height);
-            ctx.fill();
-
-            for (
-              let indexX = 0;
-              indexX < this.timeline[elementId].animation.position.x.length;
-              indexX++
-            ) {
-              const element =
-                this.timeline[elementId].animation.position.x[indexX];
-
-              const p =
-                this.millisecondsToPx(
-                  this.timeline[elementId].startTime + element.p[0],
-                ) - this.timelineScroll;
-
-              ctx.fillStyle = "#ffffff";
-              ctx.beginPath();
-              ctx.arc(p, panelTop + height / 2, 4, 0, 2 * Math.PI);
-              ctx.fill();
-            }
-
-            for (
-              let indexY = 0;
-              indexY < this.timeline[elementId].animation.position.y.length;
-              indexY++
-            ) {
-              const element =
-                this.timeline[elementId].animation.position.y[indexY];
-
-              const p =
-                this.millisecondsToPx(
-                  this.timeline[elementId].startTime + element.p[0],
-                ) - this.timelineScroll;
-
-              ctx.fillStyle = "#ffffff";
-              ctx.beginPath();
-              ctx.arc(p, panelTop + height / 2, 4, 0, 2 * Math.PI);
-              ctx.fill();
-            }
-
-            index += 1;
-
-            const panelOpacityTop =
-              index * height * 1.2 - this.timelineOptions.canvasVerticalScroll;
-            ctx.fillStyle = "#24252b";
-
-            ctx.beginPath();
-            ctx.rect(0, panelOpacityTop, this.canvas.width, height);
-            ctx.fill();
-
-            for (
-              let indexX = 0;
-              indexX < this.timeline[elementId].animation.opacity.x.length;
-              indexX++
-            ) {
-              const element =
-                this.timeline[elementId].animation.opacity.x[indexX];
-
-              const p =
-                this.millisecondsToPx(
-                  this.timeline[elementId].startTime + element.p[0],
-                ) - this.timelineScroll;
-
-              ctx.fillStyle = "#ffffff";
-              ctx.beginPath();
-              ctx.arc(p, panelOpacityTop + height / 2, 4, 0, 2 * Math.PI);
-              ctx.fill();
-            }
-
-            index += 1;
-
-            const panelScaleTop =
-              index * height * 1.2 - this.timelineOptions.canvasVerticalScroll;
-            ctx.fillStyle = "#24252b";
-
-            ctx.beginPath();
-            ctx.rect(0, panelScaleTop, this.canvas.width, height);
-            ctx.fill();
-
-            for (
-              let indexX = 0;
-              indexX < this.timeline[elementId].animation.scale.x.length;
-              indexX++
-            ) {
-              const element =
-                this.timeline[elementId].animation.scale.x[indexX];
-
-              const p =
-                this.millisecondsToPx(
-                  this.timeline[elementId].startTime + element.p[0],
-                ) - this.timelineScroll;
-
-              ctx.fillStyle = "#ffffff";
-              ctx.beginPath();
-              ctx.arc(p, panelScaleTop + height / 2, 4, 0, 2 * Math.PI);
-              ctx.fill();
-            }
-
-            index += 1;
-
-            const panelRotationTop =
-              index * height * 1.2 - this.timelineOptions.canvasVerticalScroll;
-            ctx.fillStyle = "#24252b";
-
-            ctx.beginPath();
-            ctx.rect(0, panelRotationTop, this.canvas.width, height);
-            ctx.fill();
-
-            for (
-              let indexX = 0;
-              indexX < this.timeline[elementId].animation.rotation.x.length;
-              indexX++
-            ) {
-              const element =
-                this.timeline[elementId].animation.rotation.x[indexX];
-
-              const p =
-                this.millisecondsToPx(
-                  this.timeline[elementId].startTime + element.p[0],
-                ) - this.timelineScroll;
-
-              ctx.fillStyle = "#ffffff";
-              ctx.beginPath();
-              ctx.arc(p, panelRotationTop + height / 2, 4, 0, 2 * Math.PI);
-              ctx.fill();
-            }
-          }
-
-          index += 1;
-        }
+    if (e.shiftKey) {
+      if (!this.targetId.includes(hit.elementId)) {
+        this.targetId = [...this.targetId, hit.elementId];
       }
+    } else if (!this.targetId.includes(hit.elementId)) {
+      this.targetId = [hit.elementId];
+    }
 
-      this.drawEndTimeline();
-      this.drawCursor();
+    this.showSideOption(hit.elementId);
+    this.beginDrag(hit, e.offsetX);
+    this.drawCanvas();
+  }
+
+  _handleMouseUp() {
+    if (this.drag) {
+      this.endDrag();
     }
   }
 
-  deactivateAnimationPanel(elementId) {
-    const panelOptions = this.timelineOptions.panelOptions.filter((item) => {
-      return item.elementId != elementId;
-    });
-
-    this.timelineOptions.panelOptions = panelOptions;
+  _handleContextmenu(e) {
+    this.targetIdDuringRightClick = [...this.targetId];
+    if (e.which == 3 || e.button == 2) {
+      this.showMenuDropdown({ x: e.clientX, y: e.clientY });
+    }
   }
 
-  activateAnimationPanel(elementId) {
-    this.timelineOptions.panelOptions.push({
-      elementId: elementId,
-      activeAnimation: true,
-    });
+  _handleKeydown(event) {
+    const mod = event.metaKey || event.ctrlKey;
+
+    // `event.code` and `metaKey`: the old handler used `keyCode` with a
+    // hard-coded `ctrlKey`, so none of these worked on macOS at all.
+    switch (event.code) {
+      case "ArrowUp":
+        this.moveSelectionByTrack(-1);
+        return;
+      case "ArrowDown":
+        this.moveSelectionByTrack(1);
+        return;
+      case "ArrowRight":
+        if (this.control.cursorType === "pointer") {
+          this.timelineState.increaseCursor(1000 / 60);
+        }
+        return;
+      case "ArrowLeft":
+        if (this.control.cursorType === "pointer") {
+          this.timelineState.decreaseCursor(1000 / 60);
+        }
+        return;
+      case "Backspace":
+      case "Delete":
+        this.removeElements(this.targetId);
+        this.targetId = [];
+        return;
+    }
+
+    if (!mod) {
+      return;
+    }
+
+    switch (event.code) {
+      case "KeyZ":
+        this.timelineState.rollbackTimelineFromCheckPoint(
+          event.shiftKey ? 1 : -1,
+        );
+        return;
+      case "KeyC":
+        this.copySelected();
+        return;
+      case "KeyV":
+        this.pasteClipboard();
+        return;
+      case "KeyX":
+        this.copySelected();
+        this.removeElements(this.targetId);
+        this.targetId = [];
+        return;
+      case "KeyD":
+        this.splitSelected();
+        return;
+    }
   }
 
-  isActiveAnimationPanel(elementId) {
-    return (
-      this.timelineOptions.panelOptions.findIndex((item) => {
-        return item.elementId == elementId;
-      }) != -1
-    );
-  }
-
-  private guide({
-    element,
-    filetype,
-    elementBarPosition,
-    targetId,
-    targetElementType,
-  }) {
-    let startX =
-      filetype == "static"
-        ? this.millisecondsToPx(element.startTime)
-        : this.millisecondsToPx(element.startTime + element.trim.startTime);
-    let endX =
-      filetype == "static"
-        ? this.millisecondsToPx(element.startTime + element.duration)
-        : this.millisecondsToPx(element.startTime + element.trim.endTime);
-    let checkRange = 10;
-
-    let isGuide = false;
-
-    if (
-      elementBarPosition.startX > startX - checkRange &&
-      elementBarPosition.startX < startX + checkRange
-    ) {
-      let px =
-        targetElementType == "static"
-          ? startX
-          : startX -
-            this.millisecondsToPx(this.timeline[targetId].trim.startTime);
-      this.timeline[targetId].startTime = this.pxToMilliseconds(px);
-      isGuide = true;
+  /**
+   * Move the selection one row up or down.
+   *
+   * Replaces `exchangePriority`, which swapped two elements' priorities to
+   * reorder rows — and which was called with the selection *array* where a
+   * single id was expected, so it never matched anything and silently did
+   * nothing.
+   */
+  private moveSelectionByTrack(delta: number) {
+    if (this.targetId.length === 0) {
+      return;
     }
 
-    if (
-      elementBarPosition.startX > endX - checkRange &&
-      elementBarPosition.startX < endX + checkRange
-    ) {
-      let px =
-        targetElementType == "static"
-          ? endX
-          : endX -
-            this.millisecondsToPx(this.timeline[targetId].trim.startTime);
-      this.timeline[targetId].startTime = this.pxToMilliseconds(px);
+    this.commit((doc) => {
+      const ordered = [...doc.tracks].sort((a, b) => a.index - b.index);
+      const elements = { ...doc.elements };
+      let changed = false;
 
-      isGuide = true;
-    }
-
-    if (
-      elementBarPosition.endX > startX - checkRange &&
-      elementBarPosition.endX < startX + checkRange
-    ) {
-      let px =
-        targetElementType == "static"
-          ? startX - this.millisecondsToPx(this.timeline[targetId].duration)
-          : startX -
-            this.millisecondsToPx(this.timeline[targetId].trim.endTime);
-      this.timeline[targetId].startTime = this.pxToMilliseconds(px);
-      isGuide = true;
-    }
-
-    if (
-      elementBarPosition.endX > endX - checkRange &&
-      elementBarPosition.endX < endX + checkRange
-    ) {
-      let px =
-        targetElementType == "static"
-          ? endX - this.millisecondsToPx(this.timeline[targetId].duration)
-          : endX - this.millisecondsToPx(this.timeline[targetId].trim.endTime);
-      this.timeline[targetId].startTime = this.pxToMilliseconds(px);
-      isGuide = true;
-    }
-
-    this.isGuide = isGuide;
-  }
-
-  private magnet({ targetId, px }: { targetId: string; px: number }) {
-    let targetElementType = elementUtils.getElementType(
-      this.timeline[targetId].filetype,
-    );
-
-    let startX =
-      targetElementType == "static"
-        ? this.millisecondsToPx(this.timeline[targetId].startTime)
-        : this.millisecondsToPx(
-            this.timeline[targetId].startTime +
-              this.timeline[targetId].trim.startTime,
-          );
-    let endX =
-      targetElementType == "static"
-        ? this.millisecondsToPx(
-            this.timeline[targetId].startTime +
-              this.timeline[targetId].duration,
-          )
-        : this.millisecondsToPx(
-            this.timeline[targetId].startTime +
-              this.timeline[targetId].trim.endTime,
-          );
-
-    let elementBarPosition = {
-      startX: startX,
-      endX: endX,
-    };
-
-    for (const timelineKey in this.timeline) {
-      if (Object.prototype.hasOwnProperty.call(this.timeline, timelineKey)) {
-        if (timelineKey == targetId) {
+      for (const elementId of this.targetId) {
+        const element = elements[elementId];
+        if (!element) {
           continue;
         }
-
-        const element = this.timeline[timelineKey];
-        const elementType = elementUtils.getElementType(element.filetype);
-        this.guide({
-          element: element,
-          filetype: elementType,
-          elementBarPosition: elementBarPosition,
-          targetElementType: targetElementType,
-          targetId: targetId,
-        });
-      }
-    }
-  }
-
-  updateTargetPosition({ targetId, dx }: { targetId: string; dx: number }) {
-    this.timeline[targetId].startTime =
-      this.targetStartTime[targetId] + this.pxToMilliseconds(dx);
-  }
-
-  updateTargetStartStretch({ targetId, dx }: { targetId: string; dx: number }) {
-    let elementType = elementUtils.getElementType(
-      this.timeline[targetId].filetype,
-    );
-
-    const minDuration = 10;
-
-    if (elementType == "static") {
-      if (
-        this.targetDuration[targetId] - this.pxToMilliseconds(dx) <=
-        minDuration
-      ) {
-        return false;
-      }
-
-      this.timeline[targetId].startTime =
-        this.targetStartTime[targetId] + this.pxToMilliseconds(dx);
-      this.timeline[targetId].duration =
-        this.targetDuration[targetId] - this.pxToMilliseconds(dx);
-    }
-
-    if (elementType == "dynamic") {
-      if (this.targetTrim[targetId].startTime + this.pxToMilliseconds(dx) > 0) {
-        this.timeline[targetId].startTime = this.targetStartTime[targetId];
-        this.timeline[targetId].trim.startTime =
-          this.targetTrim[targetId].startTime + this.pxToMilliseconds(dx);
-      }
-    }
-  }
-
-  updateTargetEndStretch({ targetId, dx }: { targetId: string; dx: number }) {
-    let elementType = elementUtils.getElementType(
-      this.timeline[targetId].filetype,
-    );
-
-    const minDuration = 10;
-
-    if (elementType == "static") {
-      if (
-        this.targetDuration[targetId] + this.pxToMilliseconds(dx) <=
-        minDuration
-      ) {
-        return false;
-      }
-
-      this.timeline[targetId].startTime = this.targetStartTime[targetId];
-      this.timeline[targetId].duration =
-        this.targetDuration[targetId] + this.pxToMilliseconds(dx);
-    }
-
-    if (elementType == "dynamic") {
-      if (
-        this.targetTrim[targetId].endTime + this.pxToMilliseconds(dx) <
-        this.targetDuration[targetId] / this.timeline[targetId].speed
-      ) {
-        this.timeline[targetId].startTime = this.targetStartTime[targetId];
-        this.timeline[targetId].trim.endTime =
-          this.targetTrim[targetId].endTime + this.pxToMilliseconds(dx);
-      }
-    }
-  }
-
-  findTarget({ x, y }: { x: number; y: number }): {
-    targetId: string;
-    cursorType: "none" | "move" | "stretchStart" | "stretchEnd";
-  } {
-    let index = 1;
-    let targetId = "";
-    let cursorType = "none";
-
-    const sortedTimeline = Object.fromEntries(
-      Object.entries(this.timeline).sort(
-        ([, valueA]: any, [, valueB]: any) => valueA.priority - valueB.priority,
-      ),
-    );
-
-    for (const elementId in sortedTimeline) {
-      if (Object.prototype.hasOwnProperty.call(sortedTimeline, elementId)) {
-        const defaultWidth = this.millisecondsToPx(
-          this.timeline[elementId].duration,
-        );
-
-        let additionalLeft = 0;
-
-        if (this.timeline[elementId].filetype == "text") {
-          if (this.timeline[elementId].parentKey != "standalone") {
-            const parentStartTime =
-              this.timeline[this.timeline[elementId].parentKey].startTime;
-            additionalLeft = this.millisecondsToPx(parentStartTime);
-          }
+        const from = ordered.findIndex((t) => t.id === element.trackId);
+        const to = from + delta;
+        if (from === -1 || to < 0 || to >= ordered.length) {
+          continue;
         }
-
-        const defaultHeight = 30;
-        const startY = index * defaultHeight * 1.2 - this.canvasVerticalScroll;
-        const startX =
-          this.millisecondsToPx(this.timeline[elementId].startTime) -
-          this.timelineScroll +
-          additionalLeft;
-
-        const endX = startX + defaultWidth;
-        const endY = startY + defaultHeight;
-        const stretchArea = 10;
-
-        if (
-          x > startX - stretchArea &&
-          x < endX + stretchArea &&
-          y > startY &&
-          y < endY
-        ) {
-          targetId = elementId;
-          let elementType = elementUtils.getElementType(
-            this.timeline[elementId].filetype,
-          );
-
-          if (elementType == "static") {
-            if (x > startX - stretchArea && x < startX + stretchArea) {
-              return { targetId: targetId, cursorType: "stretchStart" };
-            } else if (x > endX - stretchArea && x < endX + stretchArea) {
-              return { targetId: targetId, cursorType: "stretchEnd" };
-            } else {
-              return { targetId: targetId, cursorType: "move" };
-            }
-          } else if (elementType == "dynamic") {
-            const trimStartTime = this.millisecondsToPx(
-              this.timeline[elementId].trim.startTime,
-            );
-            const trimEndTime = this.millisecondsToPx(
-              this.timeline[elementId].trim.endTime,
-            );
-            if (
-              x > startX + trimStartTime - stretchArea &&
-              x < startX + trimStartTime + stretchArea
-            ) {
-              return { targetId: targetId, cursorType: "stretchStart" };
-            } else if (
-              x > trimEndTime + startX - stretchArea &&
-              x < trimEndTime + startX + stretchArea
-            ) {
-              return { targetId: targetId, cursorType: "stretchEnd" };
-            } else {
-              return { targetId: targetId, cursorType: "move" };
-            }
-          }
+        // Kinds are kept apart: a caption dropping onto an audio row would be
+        // invisible and unexportable.
+        if (ordered[to].kind !== ordered[from].kind) {
+          continue;
         }
-
-        const isActive = this.isActiveAnimationPanel(elementId);
-
-        if (isActive) {
-          index += 4;
-        }
-
-        index += 1;
+        elements[elementId] = { ...element, trackId: ordered[to].id };
+        changed = true;
       }
-    }
 
-    return { targetId: "", cursorType: "none" };
-  }
-
-  public openAnimationPanel(targetId: string, animationType) {
-    this.isOpenAnimationPanelId.push(targetId);
-
-    let timelineOptionOffcanvas = new bootstrap.Offcanvas(
-      document.getElementById("option_bottom"),
-    );
-    let targetElementId = document.querySelector(
-      "#timelineOptionTargetElement",
-    );
-
-    this.keyframeState.update({
-      elementId: targetId,
-      animationType: animationType,
-      isShow: true,
+      return changed ? normalizeDocument({ ...doc, elements }) : doc;
     });
-
-    targetElementId.value = targetId;
-    timelineOptionOffcanvas.show();
   }
 
-  public closeAnimationPanel(targetId: string) {
-    this.isOpenAnimationPanelId = this.isOpenAnimationPanelId.filter(
-      (item) => !item.includes(targetId),
+  // ------------------------------------------------------------ side panel
+
+  showSideOption(elementId: string) {
+    const optionGroup: any = document.querySelector("option-group");
+    const element = this.currentDoc().elements[elementId];
+    if (!optionGroup || !element) {
+      return;
+    }
+
+    const allText = this.targetId.every(
+      (id) => this.currentDoc().elements[id]?.filetype === "text",
     );
+
+    if (element.filetype === "text" && allText) {
+      optionGroup.showOptions({ filetype: "text", elementIds: this.targetId });
+      return;
+    }
+
+    optionGroup.showOption({ filetype: element.filetype, elementId });
   }
 
-  animationPanelDropdownTemplate() {
-    if (this.targetId.length != 1) {
+  /**
+   * Menu items for keyframe editing, when the selection can be animated.
+   *
+   * The left column used to carry these buttons, one set per element row. With
+   * many clips per row there is no per-element row to hang them on, so they
+   * moved to the clip's own context menu.
+   */
+  private animationMenuTemplate(): string {
+    if (this.targetIdDuringRightClick.length !== 1) {
       return "";
     }
 
-    if (
-      elementUtils.getElementType(this.timeline[this.targetId[0]].filetype) ==
-        "dynamic" ||
-      this.timeline[this.targetId[0]].filetype == "text"
-    ) {
+    const elementId = this.targetIdDuringRightClick[0];
+    const element = this.currentDoc().elements[elementId];
+    if (!element) {
       return "";
     }
 
-    let isShowPanel = this.isShowAnimationPanel();
-    let itemName = isShowPanel == true ? "close animation" : "open animation";
-    let itemOnclickEvent =
-      isShowPanel == true
-        ? `document.querySelector('element-timeline-canvas').closeAnimationPanel('${this.targetId}')`
-        : `document.querySelector('element-timeline-canvas').openAnimationPanel('${this.targetId}')`;
-
-    let template = `<menu-dropdown-item onclick=${itemOnclickEvent} item-name="${itemName}"></menu-dropdown-item>`;
-    return template;
-  }
-
-  isShowAnimationPanel() {
-    const index = this.isOpenAnimationPanelId.findIndex((item) => {
-      return this.targetId.includes(item);
-    });
-
-    return index != -1;
+    return animatableProperties(element)
+      .map(
+        (type) =>
+          `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').openAnimationPanel('${elementId}', '${type}')" item-name="animate ${type}"></menu-dropdown-item>`,
+      )
+      .join("");
   }
 
   showMenuDropdown({ x, y }) {
     document.querySelector("#menuRightClick").innerHTML = `
         <menu-dropdown-body top="${y}" left="${x}">
-        ${this.animationPanelDropdownTemplate()}
+          ${this.animationMenuTemplate()}
           <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').removeSeletedElements()" item-name="remove"> </menu-dropdown-item>
         </menu-dropdown-body>`;
   }
 
-  showSideOption(elementId: string) {
-    const optionGroup = document.querySelector("option-group");
-    const fileType = this.timeline[elementId].filetype;
-    let isAllText = true;
+  /**
+   * Keyframe editing moved out of the timeline.
+   *
+   * An open animation panel used to consume four extra rows *inside* the
+   * timeline — one each for position, opacity, scale and rotation. That only
+   * worked while a row belonged to a single element; with many clips per track
+   * there is no row to borrow. The bottom keyframe editor already does this
+   * job, so these two just drive it.
+   */
+  public openAnimationPanel(targetId: string, animationType) {
+    const offcanvas = new bootstrap.Offcanvas(
+      document.getElementById("option_bottom"),
+    );
+    const target: any = document.querySelector("#timelineOptionTargetElement");
 
-    for (let index = 0; index < this.targetId.length; index++) {
-      const element = this.targetId[index];
-      const itrFileType = this.timeline[elementId].filetype;
-      if (itrFileType != "text") {
-        isAllText = false;
-      }
+    this.keyframeState.update({
+      elementId: targetId,
+      animationType,
+      isShow: true,
+    });
+
+    if (target) {
+      target.value = targetId;
     }
+    offcanvas.show();
+  }
 
-    console.log(fileType == "text", isAllText);
-
-    if (fileType == "text" && isAllText) {
-      optionGroup.showOptions({
-        filetype: fileType,
-        elementIds: this.targetId,
-      });
-
-      return false;
-    }
-
-    optionGroup.showOption({
-      filetype: fileType,
-      elementId: elementId,
+  public closeAnimationPanel(targetId: string) {
+    this.keyframeState.update({
+      elementId: targetId,
+      animationType: "position",
+      isShow: false,
     });
   }
 
-  whenRightClick(e) {
-    const isRightClick = e.which == 3 || e.button == 2;
+  // ---------------------------------------------------------------- render
 
-    this.targetIdDuringRightClick = [...this.targetId];
-
-    if (!isRightClick) {
-      return 0;
+  protected render(): unknown {
+    const canvasRef = document.querySelector("#elementTimelineCanvasRef");
+    if (canvasRef) {
+      this.timelineState.setCanvasWidth(canvasRef.clientWidth);
     }
 
-    this.showMenuDropdown({
-      x: e.clientX,
-      y: e.clientY,
-    });
-  }
-
-  exchangePriority(targetId, next) {
-    // next는 -1이거나, 1이거나
-    const sortedTimeline = Object.fromEntries(
-      Object.entries(this.timeline).sort(
-        ([, valueA]: any, [, valueB]: any) => valueA.priority - valueB.priority,
-      ),
-    );
-
-    const priorityArray = Object.entries(sortedTimeline).map(
-      ([key, value]: any) => ({
-        key: key,
-        priority: value.priority,
-      }),
-    );
-
-    let targetArrayIndex = -1;
-    let index = 0;
-
-    for (const key in sortedTimeline) {
-      if (Object.prototype.hasOwnProperty.call(sortedTimeline, key)) {
-        if (key == targetId) {
-          targetArrayIndex = index;
-        }
-        index += 1;
-      }
-    }
-
-    if (targetArrayIndex != -1) {
-      this.timeline[targetId].priority =
-        priorityArray[targetArrayIndex + next].priority;
-      this.timeline[priorityArray[targetArrayIndex + next].key].priority =
-        priorityArray[targetArrayIndex].priority;
-    }
-
-    this.timelineState.patchTimeline(this.timeline);
-  }
-
-  getNowPriority() {
-    if (Object.keys(this.timeline).length == 0) {
-      return 1;
-    }
-
-    let lastPriority: any = 1;
-
-    for (const key in this.timeline) {
-      if (Object.hasOwnProperty.call(this.timeline, key)) {
-        const element = this.timeline[key];
-        lastPriority =
-          lastPriority < (element.priority as number)
-            ? element.priority
-            : lastPriority;
-      }
-    }
-
-    return lastPriority + 1;
-  }
-
-  searchChildrenKey(searchKey) {
-    let hasChild = false;
-
-    for (const key in this.timeline) {
-      if (Object.prototype.hasOwnProperty.call(this.timeline, key)) {
-        const element = this.timeline[key];
-        if (element.filetype == "text") {
-          if (element.parentKey == searchKey) {
-            hasChild = true;
-          }
-        }
-      }
-    }
-
-    return hasChild;
-  }
-
-  public removeSeletedElements() {
-    let isAbleRemove = true;
-
-    for (const key in this.targetIdDuringRightClick) {
-      if (
-        Object.prototype.hasOwnProperty.call(this.targetIdDuringRightClick, key)
-      ) {
-        const element = this.targetIdDuringRightClick[key];
-        const hasChild = this.searchChildrenKey(element);
-        if (!hasChild) {
-          this.timelineState.removeTimeline(element);
-        }
-      }
-    }
-  }
-
-  _handleMouseWheel(e) {
-    const newScroll = this.timelineScroll + e.deltaX;
-
-    if (e.ctrlKey) {
-      e.preventDefault();
-      const dx = parseFloat(e.deltaY) * (this.timelineRange / 75);
-      const x = this.timelineRange - dx;
-
-      if (e.deltaY < 0) {
-        if (x < 5) {
-          this.timelineState.setRange(x);
-        }
-      } else {
-        if (x > -8) {
-          this.timelineState.setRange(x);
-        }
-      }
-    } else {
-      if (this.canvasVerticalScroll + e.deltaY > 0) {
-        this.canvasVerticalScroll += e.deltaY;
-        this.timelineOptions.canvasVerticalScroll += e.deltaY;
-        this.drawCanvas();
-      }
-
-      if (newScroll >= 0) {
-        this.timelineState.setScroll(newScroll);
-      } else {
-        this.timelineState.setScroll(0);
-      }
-    }
-  }
-
-  _handleMouseMove(e) {
-    const x = e.offsetX;
-    const y = e.offsetY;
-
-    const target = this.findTarget({ x: x, y: y });
-    const cursorType = target.cursorType;
-
-    if (cursorType == "move") {
-      this.style.cursor = "pointer";
-    } else if (cursorType == "stretchEnd" || cursorType == "stretchStart") {
-      this.style.cursor = "ew-resize";
-    } else {
-      this.style.cursor = "default";
-    }
-
-    if (this.isDrag) {
-      const dx = x - this.firstClickPosition.x;
-
-      for (const key in this.targetId) {
-        if (Object.prototype.hasOwnProperty.call(this.targetId, key)) {
-          const target = this.targetId[key];
-          if (this.cursorType == "move") {
-            this.updateTargetPosition({ targetId: target, dx: dx });
-            this.magnet({ targetId: target, px: dx });
-          } else if (this.cursorType == "moveNotGuide") {
-            this.updateTargetPosition({ targetId: target, dx: dx });
-          } else if (this.cursorType == "stretchStart") {
-            this.updateTargetStartStretch({ targetId: target, dx: dx });
-          } else if (this.cursorType == "stretchEnd") {
-            this.updateTargetEndStretch({ targetId: target, dx: dx });
-          }
-
-          this.timelineState.patchTimeline(this.timeline);
-        }
-      }
-    }
-  }
-
-  _handleMouseDown(e) {
-    try {
-      this.timelineState.setCursorType("pointer");
-
-      const x = e.offsetX;
-      const y = e.offsetY;
-
-      const target = this.findTarget({ x: x, y: y });
-
-      if (e.shiftKey && target.targetId != "") {
-        this.targetId.push(target.targetId);
-        this.cursorType = target.cursorType;
-        if (target.cursorType == "move" && this.targetId.length > 1) {
-          this.cursorType = "moveNotGuide";
-        }
-      } else if (this.targetId.includes(target.targetId)) {
-        // 타겟 ID가 포함된 엘리먼트를 클릭했을때, 시프트 키 없이도 움직이도록.
-        this.cursorType = target.cursorType;
-        if (target.cursorType == "move" && this.targetId.length > 1) {
-          this.cursorType = "moveNotGuide";
-        }
-      } else {
-        if (target.targetId == "") {
-          this.targetId = [];
-          this.cursorType = target.cursorType;
-        } else {
-          this.targetId = [target.targetId];
-          this.cursorType = target.cursorType;
-        }
-      }
-
-      this.showSideOption(this.targetId[0]);
-
-      this.targetId = [...new Set(this.targetId)];
-
-      this.firstClickPosition.x = e.offsetX;
-      this.firstClickPosition.y = e.offsetY;
-
-      for (let index = 0; index < this.targetId.length; index++) {
-        const elementId = this.targetId[index];
-        this.targetStartTime[elementId] = this.timeline[elementId].startTime;
-        this.targetDuration[elementId] = this.timeline[elementId].duration;
-
-        let elementType = elementUtils.getElementType(
-          this.timeline[elementId].filetype,
-        );
-
-        if (elementType == "dynamic") {
-          this.targetTrim[elementId] = {
-            startTime: this.timeline[elementId].trim.startTime,
-            endTime: this.timeline[elementId].trim.endTime,
-          };
-          // this.targetTrim.startTime =
-          //   this.timeline[this.targetId[0]].trim.startTime;
-          // this.targetTrim.endTime = this.timeline[this.targetId[0]].trim.endTime;
-        }
-      }
-
-      this.drawCanvas();
-
-      this.isDrag = true;
-    } catch (error) {
-      this.drawCanvas();
-
-      this.isDrag = true;
-    }
-  }
-
-  _handleMouseUp(e) {
-    this.isDrag = false;
-  }
-
-  _handleKeydown(event) {
-    console.log(event.keyCode);
-
-    // arrowUp
-
-    if (event.keyCode == 38) {
-      console.log(this.targetId);
-      console.log(this.timeline);
-      this.exchangePriority(this.targetId, -1);
-    }
-
-    // arrowDown
-
-    if (event.keyCode == 40) {
-      console.log(this.targetId);
-      this.exchangePriority(this.targetId, 1);
-    }
-
-    if (event.keyCode == 39) {
-      if (this.control.cursorType != "pointer") {
-        return false;
-      }
-
-      const elementControl = document.querySelector("element-control");
-
-      elementControl.progress = this.timelineScroll + 1000 / 60;
-
-      elementControl.stop();
-      elementControl.appearAllElementInTime();
-      this.timelineState.increaseCursor(1000 / 60);
-    }
-
-    // arrowBack
-    if (event.keyCode == 37) {
-      if (this.control.cursorType != "pointer") {
-        return false;
-      }
-      const elementControl = document.querySelector("element-control");
-
-      elementControl.progress = this.timelineScroll - 1000 / 60;
-
-      elementControl.stop();
-      elementControl.appearAllElementInTime();
-
-      this.timelineState.decreaseCursor(1000 / 60);
-    }
-
-    if (event.keyCode == 49) {
-      // 1
-      console.log(this.timelineHistory, this.timeline);
-
-      const sortd = Object.fromEntries(
-        Object.entries(useTimelineStore.getState().timeline).sort(
-          ([, valueA]: any, [, valueB]: any) =>
-            valueA.priority - valueB.priority,
-        ),
-      );
-
-      for (const key in sortd) {
-        if (Object.prototype.hasOwnProperty.call(sortd, key)) {
-          const element = sortd[key];
-          console.log(key);
-        }
-      }
-    }
-
-    if (event.keyCode == 8) {
-      // backspace
-      // event.preventDefault();
-      for (const key in this.targetId) {
-        if (Object.prototype.hasOwnProperty.call(this.targetId, key)) {
-          const element = this.targetId[key];
-          const hasChild = this.searchChildrenKey(element);
-          if (!hasChild) {
-            this.timelineState.removeTimeline(element);
-          }
-        }
-      }
-
-      this.timelineState.checkPointTimeline();
-    }
-
-    if (!event.shiftKey && event.ctrlKey && event.keyCode == 90) {
-      //CTL z
-      console.log(this.timelineHistory.timelineHistory, "EE");
-      if (
-        this.timelineHistory.historyNow - 1 == -1 ||
-        this.timelineHistory.timelineHistory.length <
-          this.timelineHistory.historyNow
-      ) {
-        return;
-      }
-      this.timelineState.rollbackTimelineFromCheckPoint(-1);
-    }
-
-    if (event.shiftKey && event.ctrlKey && event.keyCode == 90) {
-      //CTL z
-      console.log(
-        this.timelineHistory.timelineHistory.length,
-        this.timelineHistory.historyNow,
-      );
-      if (
-        this.timelineHistory.timelineHistory.length <=
-        this.timelineHistory.historyNow + 1
-      ) {
-        return;
-      }
-      this.timelineState.rollbackTimelineFromCheckPoint(1);
-    }
-
-    if (event.ctrlKey && event.keyCode == 86) {
-      //CTL v
-      for (const elementId in this.copyedTimelineData) {
-        if (Object.hasOwnProperty.call(this.copyedTimelineData, elementId)) {
-          let tempCopyObject = this.copyedTimelineData[elementId];
-          tempCopyObject.priority = this.getNowPriority();
-
-          this.timeline[elementId] = { ...tempCopyObject };
-          this.timelineState.patchTimeline(this.timeline);
-        }
-      }
-    }
-
-    if (event.ctrlKey && event.keyCode == 67) {
-      //CTL c
-      console.log("SS");
-      this.copySeletedElement();
-    }
-
-    if (event.ctrlKey && event.keyCode == 88) {
-      //CTL x
-
-      this.copySeletedElement();
-
-      for (const key in this.targetId) {
-        if (Object.prototype.hasOwnProperty.call(this.targetId, key)) {
-          const element = this.targetId[key];
-          const hasChild = this.searchChildrenKey(element);
-          if (!hasChild) {
-            this.timelineState.removeTimeline(element);
-          }
-        }
-      }
-    }
-
-    if (event.ctrlKey && event.keyCode == 68) {
-      //CTL d
-      this.splitSeletedElement();
-
-      for (const elementId in this.copyedTimelineData) {
-        if (Object.hasOwnProperty.call(this.copyedTimelineData, elementId)) {
-          let tempCopyObject = this.copyedTimelineData[elementId];
-          tempCopyObject.priority = this.getNowPriority();
-
-          this.timeline[elementId] = { ...tempCopyObject };
-          this.timelineState.patchTimeline(this.timeline);
-        }
-      }
-    }
-  }
-
-  _handleContextmenu(e) {
-    this.whenRightClick(e);
-  }
-
-  renderAnimationPanel() {
-    //this.isOpenAnimationPanelId
-    return html``;
-  }
-
-  renderCanvas() {
     return html`
       <canvas
         id="elementTimelineCanvasRef"
@@ -1495,15 +722,5 @@ export class elementTimelineCanvas extends LitElement {
         @contextmenu=${this._handleContextmenu}
       ></canvas>
     `;
-  }
-
-  protected render(): unknown {
-    if (document.querySelector("#elementTimelineCanvasRef")) {
-      this.timelineState.setCanvasWidth(
-        document.querySelector("#elementTimelineCanvasRef").clientWidth,
-      );
-    }
-
-    return html` ${this.renderCanvas()}`;
   }
 }

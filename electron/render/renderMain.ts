@@ -286,44 +286,29 @@ export const renderFilter = {
     }
 
     if (checkDynamicCondition) {
-      //NOTE: 끝 부분 자르기 버그 있음
-      //NOTE: 버그 지뢰임 나중에 해결해야
+      // `trim` is a window into the source file measured in source ms, so `-ss`
+      // takes it unscaled and `-t` takes `duration`, which is that window's
+      // length. `-itsoffset` is purely the clip's timeline position. The
+      // previous code scaled `-ss` by speed and folded the trim into the
+      // offset, which seeked to the wrong frame and pushed the clip late; only
+      // the silent branch passed `-t` at all, which is the "끝 부분 자르기
+      // 버그" the old note here referred to.
+      const speed = object.element.speed > 0 ? object.element.speed : 1;
 
-      if (isExistAudio == true) {
-        object.command
-          .input(object.element.localpath)
-          .inputOptions(
-            `-ss ${
-              (object.element.trim.startTime / 1000) * object.element.speed
-            }`,
-          )
-          .inputOptions(
-            `-itsoffset ${
-              options.startTime + object.element.trim.startTime / 1000
-            }`,
-          );
-      } else {
-        object.command
-          .input(object.element.localpath)
-          .inputOptions(
-            `-ss ${
-              (object.element.trim.startTime / 1000) * object.element.speed
-            }`,
-          )
-          .inputOptions(`-itsoffset ${options.startTime}`)
-          .inputOptions(`-t ${object.element.trim.endTime / 1000}`);
+      object.command
+        .input(object.element.localpath)
+        .inputOptions(`-ss ${object.element.trim.startTime / 1000}`)
+        .inputOptions(`-itsoffset ${object.element.startTime / 1000}`)
+        .inputOptions(`-t ${object.element.duration / 1000}`);
 
-        if (object.element.codec.video != "default") {
-          object.command.inputOptions(`-vcodec ${object.element.codec.video}`);
-        }
+      if (isExistAudio != true && object.element.codec.video != "default") {
+        object.command.inputOptions(`-vcodec ${object.element.codec.video}`);
       }
 
-      log.info("[render] Log aaa");
-
-      options.startTime =
-        options.startTime + object.element.trim.startTime / 1000;
+      options.startTime = object.element.startTime / 1000;
       options.endTime =
-        object.element.startTime / 1000 + object.element.trim.endTime / 1000;
+        object.element.startTime / 1000 +
+        object.element.duration / speed / 1000;
     }
 
     object.filter.push({

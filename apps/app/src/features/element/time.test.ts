@@ -43,38 +43,36 @@ describe("isElementVisibleAtTime", () => {
     expect(isElementVisibleAtTime(81_000, empty, el)).toBe(false);
   });
 
-  it("offsets a parented text element by its parent's start time", () => {
+  it("reads a caption's own start time, with no parent to resolve", () => {
+    // Text used to carry a `parentKey` and be shifted by that clip's start
+    // time, so the same numbers meant different things depending on a
+    // neighbour. Captions are ordinary clips on a text track now and hold
+    // absolute times, which is what lets many of them share one track.
     const timeline: Timeline = {
       clip: videoElement({ startTime: 2000, duration: 5000 }),
-      caption: textElement({
-        startTime: 500,
-        duration: 1000,
-        parentKey: "clip",
-      }),
+      caption: textElement({ startTime: 500, duration: 1000 }),
     };
     const caption = timeline.caption;
-    // window is [2500, 3500), not [500, 1500)
-    expect(isElementVisibleAtTime(500, timeline, caption)).toBe(false);
-    expect(isElementVisibleAtTime(2500, timeline, caption)).toBe(true);
-    expect(isElementVisibleAtTime(3499, timeline, caption)).toBe(true);
-    expect(isElementVisibleAtTime(3500, timeline, caption)).toBe(false);
+    expect(isElementVisibleAtTime(499, timeline, caption)).toBe(false);
+    expect(isElementVisibleAtTime(500, timeline, caption)).toBe(true);
+    expect(isElementVisibleAtTime(1499, timeline, caption)).toBe(true);
+    expect(isElementVisibleAtTime(1500, timeline, caption)).toBe(false);
   });
 
-  it("leaves a standalone text element at its own start time", () => {
-    const el = textElement({
-      startTime: 500,
-      duration: 1000,
-      parentKey: "standalone",
-    });
-    expect(isElementVisibleAtTime(500, empty, el)).toBe(true);
-    expect(isElementVisibleAtTime(1500, empty, el)).toBe(false);
-  });
-
-  it("only parents text — an image is unaffected by a parent clip", () => {
+  it("gives every element type the same one coordinate system", () => {
     const timeline: Timeline = {
       clip: videoElement({ startTime: 2000, duration: 5000 }),
       pic: imageElement({ startTime: 500, duration: 1000 }),
+      caption: textElement({ startTime: 500, duration: 1000 }),
     };
     expect(isElementVisibleAtTime(500, timeline, timeline.pic)).toBe(true);
+    expect(isElementVisibleAtTime(500, timeline, timeline.caption)).toBe(true);
+  });
+
+  it("does not consult the rest of the timeline", () => {
+    // A clip answering for itself is what makes hit-testing and layout local.
+    const el = textElement({ startTime: 500, duration: 1000 });
+    expect(isElementVisibleAtTime(500, empty, el)).toBe(true);
+    expect(isElementVisibleAtTime(1500, empty, el)).toBe(false);
   });
 });

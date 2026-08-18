@@ -346,7 +346,10 @@ export class AutomaticCaption extends LitElement {
         (element[element.length - 1].end - element[0].start) * 1000 || 1000;
 
       resultArray.push({
-        parentKey: this.selectedKey,
+        // The clip that was transcribed. `startTime`/`duration` below are in
+        // that file's own time, since that is what a transcript timestamps;
+        // the app converts them to timeline time before placing the captions.
+        sourceKey: this.selectedKey,
         text: text,
         textcolor: "#ffffff",
         fontsize: 52,

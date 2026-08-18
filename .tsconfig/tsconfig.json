@@ -1,5 +1,23 @@
 {
   "extends": "../tsconfig.json",
   "include": ["../electron"],
-  "exclude": ["../node_modules"]
+  "compilerOptions": {
+    // Pinned so the output layout cannot drift. `rootDir` is otherwise inferred
+    // from the common ancestor of every file in the program, so one stray
+    // import reaching outside `electron/` silently relocates the whole build
+    // from `main/` to `main/electron/` — and `package.json` points `main` at
+    // `main/main.js`.
+    "rootDir": "../electron"
+  },
+  // `exclude` replaces rather than merges with the base config, so the root's
+  // test exclusion has to be repeated here. Without it the co-located suites
+  // are compiled into the shipped app, and their imports drag the renderer
+  // tree in with them.
+  // Patterns resolve relative to this file's directory, so they need the `../`
+  // to reach the sources named in `include`.
+  "exclude": [
+    "../node_modules",
+    "../electron/**/*.test.ts",
+    "../electron/**/*.spec.ts"
+  ]
 }

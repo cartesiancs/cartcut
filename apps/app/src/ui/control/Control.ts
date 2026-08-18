@@ -20,6 +20,10 @@ import {
   controlPanelStore,
 } from "../../states/controlPanelStore";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
+import {
+  isDynamicElement,
+  timelineTimeAt,
+} from "../../features/timeline/geometry";
 
 @customElement("control-ui")
 export class Control extends LitElement {
@@ -103,13 +107,42 @@ export class Control extends LitElement {
     this.isAbleResize = true;
   }
 
+  /**
+   * Place transcribed captions on the timeline.
+   *
+   * The transcript timestamps the *source file*, so each caption's start has to
+   * be mapped through the clip it came from — trim offset and speed included —
+   * before it can be placed. Captions used to carry a `parentKey` and be
+   * rendered at `parent.startTime + own.startTime`, which was the same
+   * conversion done implicitly, at draw time, forever, and only for a 1x
+   * untrimmed clip. Doing it once here leaves every caption an ordinary clip
+   * holding an absolute time, so many of them share one text track.
+   */
   _handleComplateAutoCaption(e) {
     const result = e.detail.result;
     const control = document.querySelector("element-control");
+    const timeline = useTimelineStore.getState().timeline;
 
     for (let index = 0; index < result.length; index++) {
-      const element = result[index];
-      control.addText(element);
+      const { sourceKey, ...caption } = result[index];
+      const source = sourceKey ? timeline[sourceKey] : undefined;
+
+      if (source == null || !isDynamicElement(source)) {
+        control.addText(caption);
+        continue;
+      }
+
+      const start = timelineTimeAt(source, caption.startTime);
+      const end = timelineTimeAt(
+        source,
+        caption.startTime + caption.duration,
+      );
+
+      control.addText({
+        ...caption,
+        startTime: Math.max(0, Math.round(start)),
+        duration: Math.max(1, Math.round(end - start)),
+      });
     }
   }
 

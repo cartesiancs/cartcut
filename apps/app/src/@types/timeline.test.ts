@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { isVisualTimelineElement } from "./timeline";
+import {
+  animatableProperties,
+  canAnimate,
+  isVisualTimelineElement,
+} from "./timeline";
 import {
   imageElement,
   videoElement,
@@ -37,5 +41,39 @@ describe("isVisualTimelineElement", () => {
     } else {
       throw new Error("image should be visual");
     }
+  });
+});
+
+describe("canAnimate / animatableProperties", () => {
+  it("includes the element types that carry an animation block", () => {
+    expect(canAnimate(imageElement({}))).toBe(true);
+    expect(canAnimate(videoElement({}))).toBe(true);
+    expect(canAnimate(textElement({}))).toBe(true);
+    expect(canAnimate(shapeElement({}))).toBe(true);
+  });
+
+  it("excludes GIF and audio, which have no animation field", () => {
+    // The old gate was "static and not text", which let GIF in — it has no
+    // `animation` at all — and kept video out, which does.
+    expect(canAnimate(gifElement({}))).toBe(false);
+    expect(canAnimate(audioElement({}))).toBe(false);
+  });
+
+  it("offers all four properties where the type supports them", () => {
+    expect(animatableProperties(imageElement({}))).toEqual([
+      "position",
+      "opacity",
+      "scale",
+      "rotation",
+    ]);
+  });
+
+  it("offers only opacity for a shape, which is all its type has", () => {
+    expect(animatableProperties(shapeElement({}))).toEqual(["opacity"]);
+  });
+
+  it("offers nothing for an element that cannot animate", () => {
+    expect(animatableProperties(gifElement({}))).toEqual([]);
+    expect(animatableProperties(audioElement({}))).toEqual([]);
   });
 });

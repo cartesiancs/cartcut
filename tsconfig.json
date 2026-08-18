@@ -6,6 +6,14 @@
     "outDir": "./main",
     "esModuleInterop": true,
     "resolveJsonModule": true,
+    // Dependencies ship .d.ts files written against their own lib/module
+    // settings, not ours: @napi-rs/canvas wants Float16Array, @vitest/utils
+    // wants WeakKey (both post-ES2015 lib), vite re-exports "rollup/parseAst"
+    // which only resolves under bundler resolution, and @types/glob expects an
+    // older minimatch. None of that is fixable from here, and type-checking
+    // other people's declarations tells us nothing about this codebase — which
+    // is why `tsc --init` turns this on by default.
+    "skipLibCheck": true,
     "sourceMap": true,
     "allowJs": true,
     "strict": true,

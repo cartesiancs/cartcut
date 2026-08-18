@@ -218,15 +218,13 @@ describe("renderTimelineAtTime", () => {
     expect(calls).toEqual(["image", "video", "gif", "text", "shape"]);
   });
 
-  it("resolves a parented caption against its parent clip", () => {
+  it("places a caption at its own start time, independent of any clip", () => {
+    // Captions used to be offset by a `parentKey` clip's start time. They are
+    // ordinary clips on a text track now, so this one is on screen at 2500
+    // because it says so, not because the video underneath begins there.
     const timeline: Timeline = {
       clip: videoElement({ priority: 1, startTime: 2000, duration: 5000 }),
-      caption: textElement({
-        priority: 2,
-        startTime: 0,
-        duration: 1000,
-        parentKey: "clip",
-      }),
+      caption: textElement({ priority: 2, startTime: 2500, duration: 1000 }),
     };
 
     const early: string[] = [];
@@ -238,5 +236,12 @@ describe("renderTimelineAtTime", () => {
       during.push(id),
     );
     expect(during).toEqual(["clip", "caption"]);
+
+    // ...and it leaves when its own window closes, while the clip plays on.
+    const after: string[] = [];
+    render(timeline, 3500, paintRenderers(), undefined, (id) =>
+      after.push(id),
+    );
+    expect(after).toEqual(["clip"]);
   });
 });

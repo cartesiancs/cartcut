@@ -9,6 +9,7 @@ import {
 } from "../../states/renderOptionStore";
 import { decompressFrames, parseGIF } from "gifuct-js";
 import { getLocationEnv } from "../../functions/getLocationEnv";
+import { placeNewElement } from "../timeline/placement";
 
 @customElement("element-control")
 export class ElementControl extends LitElement {
@@ -278,24 +279,45 @@ export class ElementControl extends LitElement {
     };
   }
 
+  /**
+   * Kept only so the element factories below can keep filling the field while
+   * they are being built. `priority` is derived from track order the moment the
+   * element is committed, so whatever this returns is immediately overwritten.
+   */
   getNowPriority() {
-    if (Object.keys(this.timeline).length == 0) {
-      return 1;
+    return 1;
+  }
+
+  /**
+   * Hand a freshly built element to the timeline.
+   *
+   * Every factory used to finish with `patchTimeline` + `checkPointTimeline`,
+   * having already written the element to `this.timeline` at `startTime: 0`
+   * with `priority = max + 1`. That combination is precisely what produced a
+   * new row per element. Now the element is routed through `placeNewElement`,
+   * which reuses a track of the right kind and only adds one when the moment is
+   * genuinely occupied.
+   *
+   * `preferredStart` defaults to the playhead, so adding an asset drops it
+   * where the user is looking rather than back at zero. Callers that already
+   * know the moment — captions carrying their own timing — pass it explicitly.
+   */
+  private commitNewElement(elementId: string, preferredStart?: number) {
+    const element = this.timeline[elementId];
+    if (element == null) {
+      return;
     }
 
-    let lastPriority: any = 1;
+    delete this.timeline[elementId];
 
-    for (const key in this.timeline) {
-      if (Object.hasOwnProperty.call(this.timeline, key)) {
-        const element = this.timeline[key];
-        lastPriority =
-          lastPriority < (element.priority as number)
-            ? element.priority
-            : lastPriority;
-      }
-    }
+    const start =
+      preferredStart ?? useTimelineStore.getState().cursor ?? 0;
 
-    return lastPriority + 1;
+    this.timelineState.withCheckpoint((doc) =>
+      placeNewElement(doc, elementId, element, start, this.generateUUID()),
+    );
+
+    this.timeline = useTimelineStore.getState().timeline;
   }
 
   addImage(blob, path) {
@@ -353,8 +375,7 @@ export class ElementControl extends LitElement {
         },
       };
 
-      this.timelineState.patchTimeline(this.timeline);
-      this.timelineState.checkPointTimeline();
+      this.commitNewElement(elementId);
     };
   }
 
@@ -388,8 +409,7 @@ export class ElementControl extends LitElement {
           },
         };
 
-        this.timelineState.patchTimeline(this.timeline);
-        this.timelineState.checkPointTimeline();
+        this.commitNewElement(elementId);
       });
   }
 
@@ -437,6 +457,7 @@ export class ElementControl extends LitElement {
           opacity: 100,
           location: { x: 0, y: 0 },
           trim: { startTime: 0, endTime: duration },
+          sourceDuration: duration,
           rotation: 0,
           width: width,
           height: height,
@@ -483,8 +504,7 @@ export class ElementControl extends LitElement {
           },
         };
 
-        this.timelineState.patchTimeline(this.timeline);
-        this.timelineState.checkPointTimeline();
+        this.commitNewElement(elementId);
 
         // this.showVideo(elementId);
       });
@@ -538,6 +558,7 @@ export class ElementControl extends LitElement {
           opacity: 100,
           location: { x: 0, y: 0 },
           trim: { startTime: 0, endTime: duration },
+          sourceDuration: duration,
           rotation: 0,
           width: width,
           height: height,
@@ -584,8 +605,7 @@ export class ElementControl extends LitElement {
           },
         };
 
-        this.timelineState.patchTimeline(this.timeline);
-        this.timelineState.checkPointTimeline();
+        this.commitNewElement(elementId);
 
         // this.showVideo(elementId);
       });
@@ -593,7 +613,6 @@ export class ElementControl extends LitElement {
   }
 
   addText({
-    parentKey = "standalone",
     text = "TITLE",
     textcolor = "#ffffff",
     fontsize = 52,
@@ -609,7 +628,6 @@ export class ElementControl extends LitElement {
     const elementId = this.generateUUID();
 
     this.timeline[elementId] = {
-      parentKey: parentKey,
       priority: this.getNowPriority(),
       startTime: startTime,
       duration: duration,
@@ -672,8 +690,9 @@ export class ElementControl extends LitElement {
       },
     };
 
-    this.timelineState.patchTimeline(this.timeline);
-    this.timelineState.checkPointTimeline();
+    // Captions arrive with their own timing, already converted to timeline
+    // time by the caller, so they must not be nudged to the playhead.
+    this.commitNewElement(elementId, startTime);
 
     // this.showText(elementId);
     // this.elementTimeline.addElementBar(elementId);
@@ -685,7 +704,6 @@ export class ElementControl extends LitElement {
     const fontSize = 52;
 
     this.timeline[elementId] = {
-      parentKey: "standalone",
       priority: this.getNowPriority(),
       startTime: 0,
       duration: 1000,
@@ -748,8 +766,7 @@ export class ElementControl extends LitElement {
       },
     };
 
-    this.timelineState.patchTimeline(this.timeline);
-    this.timelineState.checkPointTimeline();
+    this.commitNewElement(elementId);
 
     // this.showText(elementId);
     // this.elementTimeline.addElementBar(elementId);
@@ -774,6 +791,7 @@ export class ElementControl extends LitElement {
         duration: duration,
         location: { x: 0, y: 0 }, // NOT USING
         trim: { startTime: 0, endTime: duration },
+        sourceDuration: duration,
         localpath: path,
         filetype: "audio",
         speed: 1,
@@ -782,8 +800,7 @@ export class ElementControl extends LitElement {
         },
       };
 
-      this.timelineState.patchTimeline(this.timeline);
-      this.timelineState.checkPointTimeline();
+      this.commitNewElement(elementId);
 
       // this.showAudio(elementId);
       // this.elementTimeline.addElementBar(elementId);
@@ -801,6 +818,7 @@ export class ElementControl extends LitElement {
       duration: duration,
       location: { x: 0, y: 0 }, // NOT USING
       trim: { startTime: 0, endTime: duration },
+      sourceDuration: duration,
       localpath: path,
       filetype: "audio",
       speed: 1,
@@ -809,8 +827,7 @@ export class ElementControl extends LitElement {
       },
     };
 
-    this.timelineState.patchTimeline(this.timeline);
-    this.timelineState.checkPointTimeline();
+    this.commitNewElement(elementId);
   }
 
   // showAnimation(elementId, animationType) {
