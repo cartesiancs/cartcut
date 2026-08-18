@@ -1,4 +1,12 @@
-# Nugget
+![banner](./.github/banner.png)
+
+<h1 align='center'>
+cartcut
+</h1>
+
+<p align='center'>
+Opensource alternative to capcut
+</p>
 
 ![plot](./.github/screenshotv1.png)
 
@@ -35,11 +43,7 @@ It also supports layer-based editing, which differs from traditional track-based
 
 ## About The Project
 
-
-
 https://github.com/user-attachments/assets/922a8a7d-ec58-4141-bb4a-5b016da268a8
-
-
 
 _This video is made of Nugget._
 
