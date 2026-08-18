@@ -26,7 +26,14 @@ const fragmentShaderSource = `
   }
 `;
 
-function parseRGBString(str: string) {
+/**
+ * Parse a chromakey parameter string such as `"r=0:g=255:b=0:f=0.4"`.
+ *
+ * `f` is the match threshold and defaults to 1, which keys out everything; the
+ * channels are 0..255. Exported so the parsing can be tested without a WebGL
+ * context — the shader around it cannot run in Node.
+ */
+export function parseRGBString(str: string) {
   const parts = str.split(":");
 
   let r = 0,

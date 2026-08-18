@@ -1,0 +1,11 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`golden frames > composites a stable frame at each sampled timecode 1`] = `
+{
+  "0": "ca97b8f5",
+  "1000": "ca97b8f5",
+  "2000": "f5e63009",
+  "3000": "9203f8f8",
+  "3999": "bd2b9e44",
+}
+`;
