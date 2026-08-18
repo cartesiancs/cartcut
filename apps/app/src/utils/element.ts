@@ -1,24 +1,11 @@
+// Element classification now lives in the unified rendering engine so preview
+// and export share one implementation. This module keeps the historical
+// `elementUtils` shape for existing call-sites and re-exports the engine's
+// `getElementType`.
+import { getElementType } from "@nugget/preview-engine";
+
 const elementUtils = {
-  getElementType(filetype): "undefined" | "static" | "dynamic" {
-    let elementType: any = "undefined";
-    const elementFileExtensionType = {
-      static: ["image", "text", "png", "jpg", "jpeg", "gif", "shape"],
-      dynamic: ["video", "audio", "mp4", "mp3", "mov"],
-    };
-
-    for (const type in elementFileExtensionType) {
-      if (Object.hasOwnProperty.call(elementFileExtensionType, type)) {
-        const extensionList = elementFileExtensionType[type];
-
-        if (extensionList.indexOf(filetype) >= 0) {
-          elementType = type;
-          break;
-        }
-      }
-    }
-
-    return elementType;
-  },
+  getElementType,
 };
 
-export { elementUtils };
+export { elementUtils, getElementType };

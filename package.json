@@ -10,6 +10,9 @@
     "compile": "tsc -w -p ./.tsconfig",
     "bundle": "npm run bundle:src",
     "bundle:src": "webpack --mode=development --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:cov": "vitest run --coverage",
     "bundle:prod:src": "webpack --mode=production",
     "build:osx": "npm run bundle:prod:src && cross-env GH_TOKEN=<TOKEN> electron-builder build --mac -p always",
     "build:win": "npm run bundle:prod:src && cross-env GH_TOKEN=<TOKEN> electron-builder build --win --x64 -p always",
@@ -132,6 +135,7 @@
   "devDependencies": {
     "@babel/core": "^7.22.1",
     "@babel/preset-env": "^7.22.4",
+    "@napi-rs/canvas": "^1.0.2",
     "babel-loader": "^9.1.2",
     "cross-env": "^7.0.3",
     "css-loader": "^6.7.1",
@@ -142,6 +146,7 @@
     "sass": "^1.55.0",
     "sass-loader": "^13.0.2",
     "style-loader": "^3.3.1",
+    "vitest": "^2.1.9",
     "webpack": "^5.74.0",
     "webpack-cli": "^4.10.0"
   }

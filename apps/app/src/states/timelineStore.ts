@@ -1,5 +1,6 @@
 import { createStore } from "zustand/vanilla";
 import { Timeline } from "../@types/timeline";
+import { setIn } from "../utils/immutable";
 
 type TimelineCursorType = "pointer" | "text" | "shape" | "lockKeyboard";
 
@@ -101,21 +102,15 @@ export const useTimelineStore = createStore<ITimelineStore>((set) => ({
     }),
 
   updateTimeline: (targetId: any, targetArray: string[], value: any) =>
-    set((state) => {
-      let timeline: any = { ...state.timeline };
-      let current = timeline[targetId];
-      for (let i = 0; i < targetArray.length - 1; i++) {
-        const key = targetArray[i];
-        current = current[key];
-      }
-      current[targetArray[targetArray.length - 1]] = value;
-      return {
-        timeline: {
-          ...state.timeline,
-          [targetId]: { ...current, ...state.timeline[targetId] },
-        },
-      };
-    }),
+    set((state) => ({
+      // Immutable path update: clone only root -> changed leaf, share the rest.
+      // Replaces the old in-place mutation that leaked nested references across
+      // the store snapshot, component aliases, and every undo-history entry.
+      timeline: {
+        ...state.timeline,
+        [targetId]: setIn(state.timeline[targetId], targetArray, value),
+      },
+    })),
 
   setRange: (range: number) =>
     set((state) => ({

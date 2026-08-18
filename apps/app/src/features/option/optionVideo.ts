@@ -227,21 +227,6 @@ export class OptionVideo extends LitElement {
     this.requestUpdate();
   }
 
-  findNearestY(pairs, a): number | null {
-    let closestY = null;
-    let closestDiff = Infinity;
-
-    for (const [x, y] of pairs) {
-      const diff = Math.abs(x - a);
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        closestY = y;
-      }
-    }
-
-    return closestY;
-  }
-
   updateSpeed() {
     const speed = this.querySelector("input[aria-event='speed'") as any;
 

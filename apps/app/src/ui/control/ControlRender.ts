@@ -130,14 +130,6 @@ export class ControlRender extends LitElement {
     });
   }
 
-  handleClickActionButton() {
-    //this.renderControll.requestRender();
-  }
-
-  handleClickRenderButton() {
-    this.renderControl.requestRender();
-  }
-
   handleClickRenderV2Button() {
     const env = getLocationEnv();
     if (env == "electron") {
@@ -190,11 +182,6 @@ export class ControlRender extends LitElement {
           <label class="form-check-label">높음</label>
         </div>
       </div> -->
-
-      <!-- <button class="btn btn-blue-fill" @click=${this
-        .handleClickRenderButton}>
-        ${this.lc.t("setting.export")}
-      </button> -->
 
       <button
         class="btn btn-blue-fill ${getLocationEnv() == "demo" ? "d-none" : ""}"
