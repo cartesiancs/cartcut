@@ -25,12 +25,22 @@ import {
 } from "../timeline/clipOps";
 import { pxToMsSigned, spanLength } from "../timeline/geometry";
 import {
+  TRACK_PITCH,
   hitTest,
   layoutTimeline,
-  type Hit,
+  timeAtX,
+  trackAtY,
   type TimelineLayout,
 } from "../timeline/layout";
-import { drawTimeline } from "../timeline/draw";
+import {
+  DRAG,
+  idleDrag,
+  reduceDrag,
+  trackDeltaFor,
+  type DragState,
+  type PointerEv,
+} from "../timeline/dragMachine";
+import { drawDropTarget, drawTimeline } from "../timeline/draw";
 import {
   createVideoTileProvider,
   type VideoTileProvider,
@@ -41,28 +51,10 @@ import {
 } from "../timeline/strip/audioPeaks";
 import { collectSnapPoints, snapSpan } from "../timeline/snapping";
 import { type TimelineDocument } from "../timeline/tracks";
+import { AssetController } from "../../controllers/asset";
 
 /** How close, in px, an edge must come before it snaps. */
 const SNAP_TOLERANCE_PX = 10;
-
-type DragKind = "move" | "trimStart" | "trimEnd";
-
-type DragState = {
-  kind: DragKind;
-  originX: number;
-  /** Primary target — the clip actually grabbed. */
-  elementId: string;
-  /** The selection as it stood when the drag began. */
-  ids: string[];
-  /**
-   * The document at mousedown.
-   *
-   * Every mousemove recomputes from this rather than from the last frame, so a
-   * drag is one transform of a fixed input. Compounding deltas onto a value the
-   * drag is itself rewriting accelerates the clip and accumulates rounding.
-   */
-  baseDoc: TimelineDocument;
-};
 
 /**
  * The timeline canvas.
@@ -79,7 +71,14 @@ export class elementTimelineCanvas extends LitElement {
   targetId: string[] = [];
   targetIdDuringRightClick: string[] = [];
 
-  private drag: DragState | null = null;
+  private dragState: DragState = idleDrag;
+  /** The document as it stood when the drag began. */
+  private dragBase: TimelineDocument | null = null;
+  /** The selection the drag is carrying. */
+  private dragIds: string[] = [];
+  private longPressTimer = 0;
+  /** Row a freed clip is currently hovering over, for the drop highlight. */
+  private dropTrackId: string | null = null;
   /**
    * The document as the drag has it so far.
    *
@@ -115,6 +114,7 @@ export class elementTimelineCanvas extends LitElement {
     // otherwise the drag sticks to the cursor.
     window.addEventListener("mousemove", this.handleWindowMouseMove);
     window.addEventListener("mouseup", this.handleWindowMouseUp);
+    window.addEventListener("blur", this.handleCancelGesture);
   }
 
   /** Bound so `this` survives the listener call. */
@@ -123,16 +123,28 @@ export class elementTimelineCanvas extends LitElement {
   };
 
   private handleWindowMouseMove = (e: MouseEvent) => {
-    if (!this.drag || !this.canvas) {
+    if (this.dragState.phase === "idle" || !this.canvas) {
       return;
     }
     const rect = this.canvas.getBoundingClientRect();
-    this.updateDrag(e.clientX - rect.left);
+    this.dispatchPointer({
+      type: "move",
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+      t: e.timeStamp,
+    });
   };
 
-  private handleWindowMouseUp = () => {
-    if (this.drag) {
-      this.endDrag();
+  private handleWindowMouseUp = (e: MouseEvent) => {
+    if (this.dragState.phase !== "idle") {
+      this.dispatchPointer({ type: "up", t: e.timeStamp });
+    }
+  };
+
+  /** Escape abandons a drag; so does the window losing focus mid-gesture. */
+  private handleCancelGesture = () => {
+    if (this.dragState.phase !== "idle") {
+      this.dispatchPointer({ type: "cancel" });
     }
   };
 
@@ -168,6 +180,8 @@ export class elementTimelineCanvas extends LitElement {
     window.removeEventListener("resize", this.handleWindowResize);
     window.removeEventListener("mousemove", this.handleWindowMouseMove);
     window.removeEventListener("mouseup", this.handleWindowMouseUp);
+    window.removeEventListener("blur", this.handleCancelGesture);
+    window.clearTimeout(this.longPressTimer);
     super.disconnectedCallback();
   }
 
@@ -296,6 +310,10 @@ export class elementTimelineCanvas extends LitElement {
       provider: this.tiles,
       peaks: this.peaks,
     });
+
+    if (this.dropTrackId != null) {
+      drawDropTarget(ctx, this.layout, this.dropTrackId, width);
+    }
   }
 
   // ---------------------------------------------------------------- editing
@@ -364,30 +382,37 @@ export class elementTimelineCanvas extends LitElement {
 
   // ----------------------------------------------------------------- drag
 
-  private beginDrag(hit: Extract<Hit, { kind: "clip" }>, x: number) {
-    this.drag = {
-      kind: hit.zone === "body" ? "move" : hit.zone,
-      originX: x,
-      elementId: hit.elementId,
-      ids: [...this.targetId],
-      baseDoc: this.currentDoc(),
-    };
-  }
-
-  private updateDrag(x: number) {
-    const drag = this.drag;
-    if (!drag) {
+  /**
+   * Apply the drag machine's verdict to the document.
+   *
+   * The machine decides *what kind* of gesture is happening; this turns the
+   * current offsets into a candidate document. Recomputed from `dragBase` every
+   * frame rather than compounded, so the clip tracks the pointer exactly.
+   */
+  private applyDrag() {
+    const base = this.dragBase;
+    const drag = this.dragState;
+    if (base == null || drag.hit.kind !== "clip") {
       return;
     }
 
-    const base = drag.baseDoc;
-    const deltaMs = pxToMsSigned(x - drag.originX, this.timelineRange);
+    const deltaMs = pxToMsSigned(drag.dxPx, this.timelineRange);
     this.snapGuideMs = null;
+    this.dropTrackId = null;
 
     let next: TimelineDocument;
 
-    if (drag.kind === "move") {
-      const primary = base.elements[drag.elementId];
+    if (drag.phase === "trimStart" || drag.phase === "trimEnd") {
+      // Trimming acts on the grabbed clip alone; dragging one edge of a
+      // multi-selection has no obvious meaning for the rest. `clipOps` clamps
+      // the edge at the neighbouring clip rather than letting it overlap.
+      const trimMs = Math.round(deltaMs);
+      next =
+        drag.phase === "trimStart"
+          ? trimClipStart(base, drag.hit.elementId, trimMs)
+          : trimClipEnd(base, drag.hit.elementId, trimMs);
+    } else {
+      const primary = base.elements[drag.hit.elementId];
       if (!primary) {
         return;
       }
@@ -399,7 +424,7 @@ export class elementTimelineCanvas extends LitElement {
         desired,
         spanLength(primary),
         collectSnapPoints(base, {
-          excludeIds: drag.ids,
+          excludeIds: this.dragIds,
           playheadMs: this.timelineCursor,
         }),
         this.timelineRange,
@@ -407,16 +432,22 @@ export class elementTimelineCanvas extends LitElement {
         primary.trackId,
       );
 
+      const trackDelta = drag.free
+        ? trackDeltaFor(drag.dyPx, TRACK_PITCH)
+        : 0;
+
       this.snapGuideMs = snapped.hit?.ms ?? null;
-      next = moveClips(base, drag.ids, snapped.startMs - primary.startTime);
-    } else {
-      // Trimming acts on the grabbed clip alone; dragging one edge of a
-      // multi-selection has no obvious meaning for the rest. `clipOps` clamps
-      // the edge at the neighbouring clip rather than letting it overlap.
-      next =
-        drag.kind === "trimStart"
-          ? trimClipStart(base, drag.elementId, deltaMs)
-          : trimClipEnd(base, drag.elementId, deltaMs);
+
+      // Round once, here, where pixels finally become a time. A fractional
+      // delta leaves clips at 1988.888ms and, worse, a drag meant to be purely
+      // vertical still nudges the clip along its track by a sub-pixel amount
+      // — enough to break the exact adjacency a split just produced.
+      const appliedMs = Math.round(snapped.startMs - primary.startTime);
+      next = moveClips(base, this.dragIds, appliedMs, trackDelta);
+
+      if (trackDelta !== 0 && next !== base) {
+        this.dropTrackId = next.elements[drag.hit.elementId]?.trackId ?? null;
+      }
     }
 
     // A declined op returns its input. Holding the previous frame rather than
@@ -428,16 +459,67 @@ export class elementTimelineCanvas extends LitElement {
     this.drawCanvas();
   }
 
-  private endDrag() {
-    const pending = this.pendingDoc;
-    this.drag = null;
-    this.pendingDoc = null;
-    this.snapGuideMs = null;
+  /** Feed one pointer event to the machine and carry out what it asks for. */
+  private dispatchPointer(ev: PointerEv) {
+    const { state, effects } = reduceDrag(this.dragState, ev);
+    const wasIdle = this.dragState.phase === "idle";
+    this.dragState = state;
 
-    if (pending) {
-      this.commit(() => pending);
+    if (ev.type === "down" && state.phase !== "idle") {
+      this.dragBase = this.currentDoc();
+      this.dragIds = [...this.targetId];
+      // A hold has to be able to complete without the pointer moving.
+      window.clearTimeout(this.longPressTimer);
+      this.longPressTimer = window.setTimeout(
+        () => this.dispatchPointer({ type: "tick", t: ev.t + DRAG.LONG_PRESS_MS }),
+        DRAG.LONG_PRESS_MS,
+      );
     }
-    this.drawCanvas();
+
+    for (const effect of effects) {
+      switch (effect.type) {
+        case "cursor":
+          this.style.cursor = effect.value;
+          break;
+        case "clearSelection":
+          this.targetId = [];
+          this.drawCanvas();
+          break;
+        case "commit": {
+          const pending = this.pendingDoc;
+          this.pendingDoc = null;
+          if (pending) {
+            this.commit(() => pending);
+          }
+          break;
+        }
+        case "revert":
+          this.pendingDoc = null;
+          break;
+        case "armed":
+          // The clip is off its track now; showing that immediately is what
+          // makes the gesture discoverable without a tooltip.
+          this.drawCanvas();
+          break;
+        default:
+          break;
+      }
+    }
+
+    if (state.phase === "idle") {
+      window.clearTimeout(this.longPressTimer);
+      this.longPressTimer = 0;
+      this.dragBase = null;
+      this.dragIds = [];
+      this.snapGuideMs = null;
+      this.dropTrackId = null;
+      this.drawCanvas();
+      return;
+    }
+
+    if (!wasIdle || ev.type !== "down") {
+      this.applyDrag();
+    }
   }
 
   // --------------------------------------------------------------- events
@@ -471,8 +553,9 @@ export class elementTimelineCanvas extends LitElement {
   }
 
   _handleMouseMove(e) {
-    if (this.drag) {
-      this.updateDrag(e.offsetX);
+    // While a gesture is live the window listener owns tracking, so this only
+    // has to keep the cursor honest about what is under the pointer.
+    if (this.dragState.phase !== "idle") {
       return;
     }
 
@@ -489,29 +572,90 @@ export class elementTimelineCanvas extends LitElement {
 
     const hit = hitTest(this.layout, e.offsetX, e.offsetY);
 
-    if (hit.kind !== "clip") {
-      this.targetId = [];
-      this.drawCanvas();
-      return;
-    }
-
-    if (e.shiftKey) {
-      if (!this.targetId.includes(hit.elementId)) {
-        this.targetId = [...this.targetId, hit.elementId];
+    // Selection is settled here, before the machine sees the press, because
+    // what the drag carries depends on it.
+    if (hit.kind === "clip") {
+      if (e.shiftKey) {
+        if (!this.targetId.includes(hit.elementId)) {
+          this.targetId = [...this.targetId, hit.elementId];
+        }
+      } else if (!this.targetId.includes(hit.elementId)) {
+        this.targetId = [hit.elementId];
       }
-    } else if (!this.targetId.includes(hit.elementId)) {
-      this.targetId = [hit.elementId];
+      this.showSideOption(hit.elementId);
     }
 
-    this.showSideOption(hit.elementId);
-    this.beginDrag(hit, e.offsetX);
+    this.dispatchPointer({
+      type: "down",
+      x: e.offsetX,
+      y: e.offsetY,
+      t: e.timeStamp,
+      hit,
+      shift: e.shiftKey,
+      alt: e.altKey,
+    });
+
     this.drawCanvas();
   }
 
-  _handleMouseUp() {
-    if (this.drag) {
-      this.endDrag();
+  _handleMouseUp(e) {
+    if (this.dragState.phase !== "idle") {
+      this.dispatchPointer({ type: "up", t: e.timeStamp });
     }
+  }
+
+  /**
+   * Accept an asset dragged from the browser.
+   *
+   * Assets could only ever be clicked before, which added them at time zero on
+   * a brand-new row. Dropping says where and on which track, which is the whole
+   * point of having tracks.
+   */
+  _handleDragOver(e: DragEvent) {
+    if (!e.dataTransfer?.types.includes("application/x-nugget-asset")) {
+      return;
+    }
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+
+    this.dropTrackId = trackAtY(this.layout, (e as any).offsetY);
+    this.drawCanvas();
+  }
+
+  _handleDragLeave() {
+    if (this.dropTrackId != null) {
+      this.dropTrackId = null;
+      this.drawCanvas();
+    }
+  }
+
+  _handleDrop(e: DragEvent) {
+    const originPath = e.dataTransfer?.getData("application/x-nugget-asset");
+    this.dropTrackId = null;
+    if (!originPath) {
+      return;
+    }
+    e.preventDefault();
+
+    const atMs = Math.max(
+      0,
+      Math.round(
+        timeAtX((e as any).offsetX, this.timelineRange, this.timelineScroll),
+      ),
+    );
+
+    // Adding is asynchronous, so the position travels on the control rather
+    // than as an argument; `commitNewElement` consumes it once.
+    const control: any = document.querySelector("element-control");
+    if (control) {
+      control.dropHint = {
+        startMs: atMs,
+        trackId: trackAtY(this.layout, (e as any).offsetY),
+      };
+    }
+
+    new AssetController().add(originPath);
+    this.drawCanvas();
   }
 
   _handleContextmenu(e) {
@@ -522,6 +666,11 @@ export class elementTimelineCanvas extends LitElement {
   }
 
   _handleKeydown(event) {
+    if (event.code === "Escape") {
+      this.handleCancelGesture();
+      return;
+    }
+
     const mod = event.metaKey || event.ctrlKey;
 
     // `event.code` and `metaKey`: the old handler used `keyCode` with a
@@ -693,6 +842,9 @@ export class elementTimelineCanvas extends LitElement {
         id="elementTimelineCanvasRef"
         style="width: 1122px;left: ${this.resize.timelineVertical
           .leftOption}px;position: absolute;"
+        @dragover=${this._handleDragOver}
+        @dragleave=${this._handleDragLeave}
+        @drop=${this._handleDrop}
         @mousewheel=${this._handleMouseWheel}
         @mousemove=${this._handleMouseMove}
         @mousedown=${this._handleMouseDown}

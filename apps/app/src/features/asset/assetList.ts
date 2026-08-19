@@ -122,6 +122,11 @@ export class AssetFile extends LitElement {
 
     this.addEventListener("click", this.handleClick.bind(this));
 
+    // Dragging an asset onto the timeline lets the user choose the track and
+    // the moment. Clicking still works and drops it at the playhead.
+    this.setAttribute("draggable", "true");
+    this.addEventListener("dragstart", this.handleDragStart.bind(this));
+
     this.videoBlob = "";
 
     this.directory = document.querySelector("asset-list").nowDirectory;
@@ -231,6 +236,19 @@ export class AssetFile extends LitElement {
       <b class="align-self-center text-ellipsis-scroll text-light text-center"
         >${this.assetName}</b
       >`;
+  }
+
+  handleDragStart(e: DragEvent) {
+    if (!e.dataTransfer) {
+      return;
+    }
+    // A custom type so the timeline can tell an asset from an OS file drop,
+    // which `asset-upload-drop` already handles differently.
+    e.dataTransfer.setData(
+      "application/x-nugget-asset",
+      `${this.directory}/${this.assetName}`,
+    );
+    e.dataTransfer.effectAllowed = "copy";
   }
 
   handleClick() {

@@ -34,9 +34,24 @@ export function chooseTrackFor(
   element: TimelineElement,
   startMs: number,
   newTrackId: string,
+  preferredTrackId?: string,
 ): { doc: TimelineDocument; trackId: string } {
   const kind = defaultTrackKindFor(element.filetype);
   const span = { start: startMs, end: startMs + spanLength(element) };
+
+  // A drop names the row the user aimed at. Honour it when the kind matches
+  // and the moment is free; otherwise fall through to the usual search rather
+  // than refusing the drop outright.
+  if (preferredTrackId != null) {
+    const preferred = doc.tracks.find((t) => t.id === preferredTrackId);
+    if (
+      preferred != null &&
+      preferred.kind === kind &&
+      findCollisions(doc, preferred.id, span).length === 0
+    ) {
+      return { doc, trackId: preferred.id };
+    }
+  }
 
   // Descending index == bottom row first.
   const candidates = [...tracksOfKind(doc, kind)].sort(
@@ -68,6 +83,7 @@ export function placeNewElement(
   element: TimelineElement,
   startMs: number,
   newTrackId: string,
+  preferredTrackId?: string,
 ): TimelineDocument {
   const start = Math.max(0, startMs);
   const placed = { ...element, startTime: start };
@@ -76,6 +92,7 @@ export function placeNewElement(
     placed,
     start,
     newTrackId,
+    preferredTrackId,
   );
 
   return normalizeDocument({

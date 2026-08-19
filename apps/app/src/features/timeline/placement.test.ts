@@ -105,7 +105,70 @@ describe("chooseTrackFor", () => {
   });
 });
 
+describe("chooseTrackFor with a preferred track", () => {
+  it("uses the row the drop aimed at, even if a lower one is free", () => {
+    // Without this a drop onto V2 would silently land on V1, since V1 is
+    // where the automatic search starts.
+    const doc = docWith([
+      ["v2", "video"],
+      ["v1", "video"],
+    ]);
+    expect(
+      chooseTrackFor(doc, videoElement({}), 0, "new", "v2").trackId,
+    ).toBe("v2");
+  });
+
+  it("falls back rather than refusing when the aimed row is occupied", () => {
+    const doc = docWith(
+      [
+        ["v2", "video"],
+        ["v1", "video"],
+      ],
+      { blocker: imageElement({ trackId: "v2", startTime: 0, duration: 4000 }) },
+    );
+    expect(
+      chooseTrackFor(doc, imageElement({ duration: 1000 }), 1000, "new", "v2")
+        .trackId,
+    ).toBe("v1");
+  });
+
+  it("ignores a preferred row of the wrong kind", () => {
+    // Dropping audio onto a video row should not put it there.
+    const doc = docWith([
+      ["v1", "video"],
+      ["a1", "audio"],
+    ]);
+    expect(chooseTrackFor(doc, audioElement({}), 0, "new", "v1").trackId).toBe(
+      "a1",
+    );
+  });
+
+  it("ignores a preferred row that no longer exists", () => {
+    const doc = docWith([["v1", "video"]]);
+    expect(
+      chooseTrackFor(doc, videoElement({}), 0, "new", "gone").trackId,
+    ).toBe("v1");
+  });
+});
+
 describe("placeNewElement", () => {
+  it("places a dropped clip on the row it was aimed at", () => {
+    const base = docWith([
+      ["v2", "video"],
+      ["v1", "video"],
+    ]);
+    const doc = placeNewElement(
+      base,
+      "dropped",
+      imageElement({ duration: 1000 }),
+      3000,
+      "new",
+      "v2",
+    );
+    expect(doc.elements.dropped.trackId).toBe("v2");
+    expect(doc.elements.dropped.startTime).toBe(3000);
+  });
+
   it("places at the requested moment, not at zero", () => {
     // Everything used to be dropped at startTime 0 regardless.
     const doc = placeNewElement(
