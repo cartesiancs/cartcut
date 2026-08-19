@@ -25,6 +25,38 @@ import type { TileProvider, TileRequest } from "./provider";
 const MAX_TILES = 400;
 /** Beyond this, the oldest pending requests are dropped unrendered. */
 const MAX_PENDING = 24;
+/**
+ * Deadlines for the two waits that can never resolve.
+ *
+ * `loadedmetadata` never fires for an unreadable file, and `seeked` never
+ * fires for a position the element already holds. The queue is serial, so
+ * either one used to stall the whole filmstrip permanently — with an empty
+ * catch swallowing the evidence.
+ */
+const READY_TIMEOUT_MS = 5000;
+const SEEK_TIMEOUT_MS = 3000;
+/** Give up on a source after this many failures rather than retry forever. */
+const MAX_FAILURES_PER_PATH = 3;
+
+/** Reject `work` if it has not settled in `ms`. */
+function withDeadline<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms}ms`)),
+      ms,
+    );
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 
 type CachedTile = CanvasImageSource & Disposable;
 
@@ -35,6 +67,8 @@ function resolvePath(localpath: string): string {
     : `/api/file?path=${localpath}`;
 }
 
+export type TileFailure = { localpath: string; reason: string };
+
 export type VideoTileProvider = TileProvider & {
   /** Called after new tiles land, so the host can repaint. */
   onReady(callback: () => void): () => void;
@@ -44,6 +78,10 @@ export type VideoTileProvider = TileProvider & {
   readonly cachedTiles: number;
   /** How many requests are still waiting to be decoded. */
   readonly pendingTiles: number;
+  /** Sources that were given up on. Empty is the healthy state. */
+  readonly failedPaths: readonly string[];
+  /** Notified once per source that fails, never once per repaint. */
+  onError(callback: (failure: TileFailure) => void): () => void;
 };
 
 export function createVideoTileProvider(): VideoTileProvider {
@@ -52,6 +90,9 @@ export function createVideoTileProvider(): VideoTileProvider {
   const pending: TileRequest[] = [];
   const queued = new Set<string>();
   const listeners = new Set<() => void>();
+  const errorListeners = new Set<(failure: TileFailure) => void>();
+  const failureCounts = new Map<string, number>();
+  const failed = new Set<string>();
 
   let working = false;
   let readyHandle = 0;
@@ -123,7 +164,7 @@ export function createVideoTileProvider(): VideoTileProvider {
 
   async function capture(request: TileRequest): Promise<void> {
     const video = videoFor(request.localpath);
-    await ready(video);
+    await withDeadline(ready(video), READY_TIMEOUT_MS, "video load");
 
     // Seeking past the end never fires `seeked`, so clamp into the file.
     const duration = Number.isFinite(video.duration) ? video.duration : 0;
@@ -131,7 +172,11 @@ export function createVideoTileProvider(): VideoTileProvider {
       Math.max(0, request.sourceMs / 1000),
       Math.max(0, duration - 0.05),
     );
-    await seek(video, timeSec);
+    // Seeking to the position it already holds fires no `seeked`, so waiting
+    // for one would hang this request — and with it the whole serial queue.
+    if (Math.abs(video.currentTime - timeSec) > 1e-3) {
+      await withDeadline(seek(video, timeSec), SEEK_TIMEOUT_MS, "seek");
+    }
 
     let tile: CachedTile;
     if (typeof createImageBitmap === "function") {
@@ -154,6 +199,39 @@ export function createVideoTileProvider(): VideoTileProvider {
     cache.set(request.key, tile);
   }
 
+  /**
+   * Count a failure, and give up on the source once it looks hopeless.
+   *
+   * Reported exactly once per source — at the moment it is abandoned — so a
+   * broken file produces one line, not one per repaint. Silence here is what
+   * made this class of bug so hard to see.
+   */
+  function noteFailure(request: TileRequest, error: unknown): void {
+    const count = (failureCounts.get(request.localpath) ?? 0) + 1;
+    failureCounts.set(request.localpath, count);
+
+    if (count < MAX_FAILURES_PER_PATH || failed.has(request.localpath)) {
+      return;
+    }
+
+    failed.add(request.localpath);
+    videos.get(request.localpath)?.removeAttribute("src");
+    videos.delete(request.localpath);
+
+    for (let i = pending.length - 1; i >= 0; i--) {
+      if (pending[i].localpath === request.localpath) {
+        queued.delete(pending[i].key);
+        pending.splice(i, 1);
+      }
+    }
+
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`[filmstrip] giving up on ${request.localpath}: ${reason}`);
+    for (const listener of errorListeners) {
+      listener({ localpath: request.localpath, reason });
+    }
+  }
+
   async function pump(): Promise<void> {
     if (working) {
       return;
@@ -171,10 +249,10 @@ export function createVideoTileProvider(): VideoTileProvider {
 
         try {
           await capture(request);
+          failureCounts.delete(request.localpath);
           notifyReady();
-        } catch {
-          // A missing or undecodable file just leaves the flat colour showing;
-          // failing loudly here would spam on every repaint.
+        } catch (error) {
+          noteFailure(request, error);
         }
       }
     } finally {
@@ -188,7 +266,13 @@ export function createVideoTileProvider(): VideoTileProvider {
     },
 
     request(request) {
-      if (cache.has(request.key) || queued.has(request.key)) {
+      if (
+        cache.has(request.key) ||
+        queued.has(request.key) ||
+        // A source that has failed repeatedly is not asked again; without this
+        // a bad file is retried on every single repaint.
+        failed.has(request.localpath)
+      ) {
         return;
       }
 
@@ -210,7 +294,14 @@ export function createVideoTileProvider(): VideoTileProvider {
       return () => listeners.delete(callback);
     },
 
+    onError(callback) {
+      errorListeners.add(callback);
+      return () => errorListeners.delete(callback);
+    },
+
     invalidate(localpath) {
+      failureCounts.delete(localpath);
+      failed.delete(localpath);
       cache.invalidatePath(localpath);
       videos.get(localpath)?.removeAttribute("src");
       videos.delete(localpath);
@@ -224,6 +315,10 @@ export function createVideoTileProvider(): VideoTileProvider {
       return pending.length;
     },
 
+    get failedPaths() {
+      return [...failed];
+    },
+
     dispose() {
       cache.clear();
       for (const video of videos.values()) {
@@ -231,6 +326,9 @@ export function createVideoTileProvider(): VideoTileProvider {
       }
       videos.clear();
       listeners.clear();
+      errorListeners.clear();
+      failureCounts.clear();
+      failed.clear();
       pending.length = 0;
       queued.clear();
       if (readyHandle !== 0) {

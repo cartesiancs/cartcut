@@ -935,50 +935,6 @@ export class ElementControl extends LitElement {
   //   }
   // }
 
-  showAudio(elementId) {
-    const element: any = document.getElementById(`element-${elementId}`);
-
-    if (element == null) {
-      this.insertAdjacentHTML(
-        "beforeend",
-        `<element-control-asset element-id="${elementId}" element-filetype="audio"></element-control-asset>`,
-      );
-
-      let audio = element.querySelector("audio");
-      let secondsOfRelativeTime =
-        ((this.timeline[elementId].startTime as number) - this.progressTime) /
-        1000;
-
-      audio.currentTime = secondsOfRelativeTime;
-    } else {
-      let audio = element.querySelector("audio");
-      let secondsOfRelativeTime =
-        -((this.timeline[elementId].startTime as number) - this.progressTime) /
-        1000;
-
-      if (
-        !!(
-          audio.currentTime > 0 &&
-          !audio.paused &&
-          !audio.ended &&
-          audio.readyState > 2
-        )
-      ) {
-      } else {
-        audio.currentTime = secondsOfRelativeTime;
-
-        if (this.isPaused) {
-          audio.pause();
-        } else {
-          audio.play();
-        }
-      }
-
-      document
-        .querySelector(`#element-${elementId}`)
-        .classList.remove("d-none");
-    }
-  }
 
   // showText(elementId) {
   //   if (document.getElementById(`element-${elementId}`) == null) {
@@ -1144,42 +1100,6 @@ export class ElementControl extends LitElement {
     return uuid;
   }
 
-  hideElement(elementId) {
-    if (this.timeline[elementId].filetype == "video") {
-      this.pauseVideo(elementId);
-    } else if (this.timeline[elementId].filetype == "audio") {
-      this.pauseAudio(elementId);
-    }
-    // document.querySelector(`#element-${elementId}`).classList.add("d-none");
-  }
-
-  appearAllElementInTime() {
-    for (let elementId in this.timeline) {
-      let filetype = this.timeline[elementId].filetype;
-      // Visibility depends ONLY on timeline position (startTime + duration)
-      // NOT on trim values (which are source file positions for FFmpeg -ss seeking)
-      let checkFiletype =
-        (this.timeline[elementId].startTime as number) > this.progressTime ||
-        (this.timeline[elementId].startTime as number) +
-          (this.timeline[elementId].duration as number) <
-          this.progressTime;
-
-      if (checkFiletype) {
-        this.hideElement(elementId);
-      } else {
-        if (filetype == "image") {
-          //this.showImage(elementId);
-        } else if (filetype == "video") {
-          // this.showVideo(elementId);
-        } else if (filetype == "text") {
-          // this.showText(elementId);
-        } else if (filetype == "audio") {
-          this.showAudio(elementId);
-        }
-      }
-    }
-  }
-
   step() {
     const elapsed = Date.now() - this.startTime;
 
@@ -1197,8 +1117,9 @@ export class ElementControl extends LitElement {
       this.stop();
     }
 
-    this.appearAllElementInTime();
-
+    // Media used to be scheduled here by a second, divergent loop. It is all
+    // driven from the preview's draw path now, which this cursor update
+    // already triggers.
     this.scroller = window.requestAnimationFrame(this.step.bind(this));
   }
 
@@ -1224,7 +1145,6 @@ export class ElementControl extends LitElement {
       }
     }
 
-    this.pauseAllDynamicElements();
   }
 
   reset() {
@@ -1235,40 +1155,7 @@ export class ElementControl extends LitElement {
     this.progressTime = 0;
     this.stop();
 
-    this.appearAllElementInTime();
-
     this.timelineState.setCursor(0);
-  }
-
-  pauseVideo(elementId) {
-    // const target: any = document.getElementById(`element-${elementId}`);
-    // let secondsOfRelativeTime =
-    //   -((this.timeline[elementId].startTime as number) - this.progressTime) /
-    //   1000;
-    // let video = target.querySelector("video");
-    // video.currentTime = secondsOfRelativeTime;
-    // video.pause();
-  }
-
-  pauseAudio(elementId) {
-    const target: any = document.getElementById(`element-${elementId}`);
-
-    let audio = target.querySelector("audio");
-    audio.pause();
-  }
-
-  pauseAllDynamicElements() {
-    let key;
-
-    for (key in this.timeline) {
-      let filetype = this.timeline[key].filetype;
-
-      if (filetype == "video") {
-        this.pauseVideo(key);
-      } else if (filetype == "audio") {
-        this.pauseAudio(key);
-      }
-    }
   }
 
   deactivateAllOutline() {

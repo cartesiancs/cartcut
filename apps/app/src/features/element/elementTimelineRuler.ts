@@ -324,7 +324,6 @@ export class ElementTimelineRuler extends LitElement {
     elementControl.progress = e.pageX + this.timelineScroll;
 
     elementControl.stop();
-    elementControl.appearAllElementInTime();
     this.timelineState.setPlay(false);
 
     cursorDom.style.left = `${e.pageX}px`;

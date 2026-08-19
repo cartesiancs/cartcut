@@ -63,6 +63,11 @@ export type DrawOptions = {
 
 const LABEL_FONT = '12px "Noto Sans", sans-serif';
 const LABEL_PADDING = 6;
+/** Dark outline that keeps the label readable without hiding the frame. */
+const LABEL_HALO = "rgba(0, 0, 0, 0.85)";
+const LABEL_HALO_WIDTH = 3;
+/** How much of a video clip the waveform is allowed to take. */
+const WAVEFORM_BAND_PX = 10;
 const SELECTION_WIDTH = 2;
 /** Below this height a label would collide with the filmstrip; skip it. */
 const MIN_LABEL_HEIGHT = 20;
@@ -172,17 +177,23 @@ export function drawClip(
     ctx.font = LABEL_FONT;
     ctx.textBaseline = "top";
 
-    // A scrim so the label survives whatever the thumbnail underneath is doing.
-    const scrimHeight = 16;
-    ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
-    ctx.fillRect(rect.x, rect.y, rect.w, scrimHeight);
-
-    ctx.fillStyle = opts.colors.label;
     const label = truncateText(
       ctx,
       clipLabel(element),
       rect.w - LABEL_PADDING * 2,
     );
+
+    // Outlined rather than sat on an opaque strip. The strip was 16px of a
+    // 40px row, and with the waveform below it left about 8px of actual
+    // frames — which is why the filmstrip looked absent on any clip with
+    // sound. An outline costs nothing and hides nothing.
+    ctx.lineJoin = "round";
+    ctx.miterLimit = 2;
+    ctx.lineWidth = LABEL_HALO_WIDTH;
+    ctx.strokeStyle = LABEL_HALO;
+    ctx.strokeText(label, rect.x + LABEL_PADDING, rect.y + 2);
+
+    ctx.fillStyle = opts.colors.label;
     ctx.fillText(label, rect.x + LABEL_PADDING, rect.y + 2);
   }
 
@@ -278,7 +289,9 @@ function drawWaveform(
   }
 
   const isVideo = element.filetype === "video";
-  const band = isVideo ? rect.h * 0.4 : rect.h;
+  // A thin trace on a video, so the frames keep the height; a bare audio clip
+  // has nothing to compete with and uses the whole row.
+  const band = isVideo ? Math.min(WAVEFORM_BAND_PX, rect.h) : rect.h;
   const top = rect.y + rect.h - band;
   const mid = top + band / 2;
   const half = band / 2;
@@ -295,13 +308,9 @@ function drawWaveform(
     viewportX1: opts.viewportW,
   });
 
-  if (isVideo) {
-    // Darken behind the trace so it stays readable over the frames.
-    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
-    ctx.fillRect(rect.x, top, rect.w, band);
-  }
-
-  ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
+  // No backing plate: at full opacity the trace reads against bright frames on
+  // its own, and a plate would cost another tenth of the clip's height.
+  ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
   for (const column of columns) {
     const y0 = mid - column.max * half;
     const y1 = mid - column.min * half;

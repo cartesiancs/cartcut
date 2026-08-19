@@ -543,6 +543,120 @@ describe("drawTimeline waveform", () => {
   });
 });
 
+describe("how much of a clip the frames actually get", () => {
+  /** Peaks at a constant level, covering 10s of source. */
+  function loudPeaks(level = 0.9): PeakData {
+    const buckets = 500;
+    const peaks = new Float32Array(buckets * 2);
+    for (let i = 0; i < buckets; i++) {
+      peaks[i * 2] = -level;
+      peaks[i * 2 + 1] = level;
+    }
+    return { peaks, bucketMs: 20, durationMs: buckets * 20 };
+  }
+
+  /** Rows at `x` showing the filmstrip's colour rather than a decoration. */
+  function frameRows(canvas: any, x: number) {
+    let rows = 0;
+    for (let y = 0; y < TRACK_HEIGHT; y++) {
+      const p = pixel(canvas, x, y);
+      if (p.r > 200 && p.g < 80 && p.b < 80) {
+        rows++;
+      }
+    }
+    return rows;
+  }
+
+  const withSound = () =>
+    doc({
+      v: videoElement({
+        trackId: "v1",
+        startTime: 0,
+        duration: 4000,
+        localpath: "/clip.mp4",
+        isExistAudio: true,
+        timelineOptions: { color: "#0000ff" },
+      }),
+    });
+
+  it("leaves the top of the clip showing frames, not a black bar", () => {
+    // The label used to sit on a 16px opaque strip — 40% of the row.
+    const { canvas } = paint(withSound(), {
+      provider: solidProvider("#ff0000"),
+      peaks: { get: () => loudPeaks(), request: vi.fn() },
+    });
+    // Clear of the glyphs, still inside the label band.
+    expect(pixel(canvas, 170, 3).r).toBeGreaterThan(200);
+  });
+
+  it("keeps a video's waveform to a thin trace", () => {
+    // This is the assertion whose absence let an earlier check pass: it was
+    // run on a silent clip, so no waveform band was drawn and the strip looked
+    // fine. With sound, the label strip plus a 40%-height waveform left about
+    // 8 of 40 rows showing frames.
+    const { canvas } = paint(withSound(), {
+      provider: solidProvider("#ff0000"),
+      peaks: { get: () => loudPeaks(), request: vi.fn() },
+    });
+    expect(frameRows(canvas, 100)).toBeGreaterThanOrEqual(26);
+  });
+
+  it("gives a silent video essentially the whole clip", () => {
+    const { canvas } = paint(
+      doc({
+        v: videoElement({
+          trackId: "v1",
+          startTime: 0,
+          duration: 4000,
+          localpath: "/clip.mp4",
+          isExistAudio: false,
+          timelineOptions: { color: "#0000ff" },
+        }),
+      }),
+      { provider: solidProvider("#ff0000") },
+    );
+    expect(frameRows(canvas, 100)).toBeGreaterThanOrEqual(36);
+  });
+
+  it("still draws the label legibly over a bright frame", () => {
+    // The outline has to be doing its job now that there is no strip.
+    const { canvas } = paint(withSound(), {
+      provider: solidProvider("#ffffff"),
+      peaks: { get: () => loudPeaks(), request: vi.fn() },
+    });
+
+    let dark = 0;
+    for (let x = 6; x < 70; x++) {
+      for (let y = 0; y < 16; y++) {
+        if (pixel(canvas, x, y).r < 80) {
+          dark++;
+        }
+      }
+    }
+    expect(dark).toBeGreaterThan(0);
+  });
+
+  it("gives a bare audio clip the full height", () => {
+    const { canvas } = paint(
+      doc({
+        a: audioElement({
+          trackId: "v1",
+          startTime: 0,
+          duration: 4000,
+          localpath: "/song.mp3",
+          timelineOptions: { color: "#000080" },
+        }),
+      }),
+      { peaks: { get: () => loudPeaks(1), request: vi.fn() } },
+    );
+    // A full-scale signal reaches close to both edges of the row. Sampled
+    // clear of the label, whose dark outline would otherwise be read as the
+    // absence of a trace.
+    expect(pixel(canvas, 150, 2).r).toBeGreaterThan(100);
+    expect(pixel(canvas, 150, TRACK_HEIGHT - 3).r).toBeGreaterThan(100);
+  });
+});
+
 describe("drawDropTarget", () => {
   it("highlights the row being dropped onto", () => {
     const d = doc({});

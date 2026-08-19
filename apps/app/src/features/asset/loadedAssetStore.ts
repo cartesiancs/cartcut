@@ -3,26 +3,41 @@ import { getLocationEnv } from "../../functions/getLocationEnv";
 import { decompressFrames, parseGIF, type ParsedFrame } from "gifuct-js";
 import {
   isVisualTimelineElement,
+  type AudioElementType,
   type Timeline,
   type VideoElementType,
   type VisualTimelineElement,
 } from "../../@types/timeline";
 import { VideoFilterPipeline } from "../renderer/filter/videoPipeline";
 import { isElementVisibleAtTime } from "../element/time";
-import { sourceTimeAt } from "../timeline/geometry";
+import { sourceTimeAt, speedOf } from "../timeline/geometry";
+import {
+  syncPlayback as syncPlaybackHandles,
+  type MediaHandle,
+} from "../timeline/playback";
+import { SCHEMA_VERSION, type TimelineTrack } from "../timeline/tracks";
 
 type GifMetadata = {
   imageData: ImageData;
   parsedFrame: ParsedFrame;
 };
 
+/**
+ * A decoded video, addressed by the element that asked for it.
+ *
+ * It deliberately holds **no copy of the element**. It used to, and because
+ * every edit returns a new object while this entry was never refreshed, the
+ * copy froze at load time — so a moved clip played footage offset by exactly
+ * the drag distance. The live element is now passed in at every call site
+ * instead, which makes that class of bug unrepresentable.
+ */
 export type VideoMetadataPerElement = {
   elementId: string;
-  element: VideoElementType;
+  /** The source this was decoded from, so a changed path can be detected. */
+  localpath: string;
   path: string;
   canvas: HTMLCanvasElement;
   object: HTMLVideoElement;
-  isPlay: boolean;
 };
 
 export interface ILoadedAssetStore {
@@ -34,6 +49,31 @@ export interface ILoadedAssetStore {
 
   // elementId, video
   _loadedElementVideo: Record<string, VideoMetadataPerElement>;
+
+  /**
+   * Element ids whose decode is in flight.
+   *
+   * The cache only fills on `loadeddata`, and the preview calls
+   * `loadAssetsNeededAtTime` un-awaited on every repaint — so without this a
+   * scrub onto an unloaded clip spawned a fresh `<video>` at frame rate until
+   * the first one resolved, and every loser leaked.
+   */
+  _loadingElementVideo: Set<string>;
+
+  /**
+   * elementId → `<audio>`.
+   *
+   * Audio clips used to be driven by a second scheduler in `elementControl`
+   * that ignored `trim` and `speed` outright — a split clip replayed the part
+   * that had been cut. They go through the same sync as video now.
+   */
+  _loadedElementAudio: Record<string, HTMLAudioElement>;
+  _loadingElementAudio: Set<string>;
+
+  loadElementAudio: (
+    elementId: string,
+    element: AudioElementType,
+  ) => Promise<void>;
 
   gifCanvasCtx: CanvasRenderingContext2D;
   videoFilterCanvasCtx: WebGLRenderingContext;
@@ -52,21 +92,39 @@ export interface ILoadedAssetStore {
   getElementVideo: (elementId: string) => VideoMetadataPerElement | null;
 
   loadEntireTimeline: (timeline: Timeline) => Promise<void>;
-  loadAssetsNeededAtTime: (t: number, timeline: Timeline) => Promise<void>;
+  /** Resolves true when something new finished decoding. */
+  loadAssetsNeededAtTime: (t: number, timeline: Timeline) => Promise<boolean>;
   _loadAssetsWithFilter: (
     timeline: Timeline,
     filter: ((element: VisualTimelineElement) => boolean) | null,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
 
   seek: (timeline: Timeline, time: number) => Promise<void>;
-  startPlay: (timelineCursor: number) => void;
-  stopPlay: (timelineCursor: number) => void;
+
+  /**
+   * Bring every decoded video in line with the timeline.
+   *
+   * Called from the preview's draw path, which runs on every store change —
+   * including every cursor tick — so this is what keeps playback positions
+   * honest and, crucially, silences a clip the moment the playhead leaves it.
+   */
+  syncPlayback: (
+    timeline: Timeline,
+    cursorMs: number,
+    isPlaying: boolean,
+  ) => void;
+
+  /** Drop videos whose element is gone or whose source path changed. */
+  releaseUnusedVideos: (timeline: Timeline) => void;
 }
 
 export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
   _loadedImage: {},
   _loadedGif: {},
   _loadedElementVideo: {},
+  _loadingElementVideo: new Set<string>(),
+  _loadedElementAudio: {},
+  _loadingElementAudio: new Set<string>(),
 
   gifCanvasCtx: document
     .createElement("canvas")
@@ -146,11 +204,10 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
           video.currentTime = 0;
           this._loadedElementVideo[elementId] = {
             elementId,
-            element: videoElement,
+            localpath: videoElement.localpath,
             path: getPath(videoElement.localpath),
             canvas: canvas,
             object: video,
-            isPlay: false,
           };
           resolve();
         },
@@ -170,15 +227,39 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
     return get()._loadedElementVideo[elementId] ?? null;
   },
 
+  loadElementAudio(elementId, element) {
+    return new Promise<void>((resolve, reject) => {
+      // Detached: an `Audio` plays perfectly well without being in the DOM,
+      // and the old path's reliance on finding a rendered `<audio>` by id is
+      // exactly what threw a TypeError and froze the playback loop.
+      const audio = new Audio(getPath(element.localpath));
+      audio.preload = "auto";
+
+      audio.addEventListener(
+        "loadeddata",
+        () => {
+          this._loadedElementAudio[elementId] = audio;
+          resolve();
+        },
+        { once: true },
+      );
+      audio.addEventListener("error", (e) => reject(e), { once: true });
+    });
+  },
+
   async loadEntireTimeline(timeline: Timeline) {
     await this._loadAssetsWithFilter(timeline, null);
   },
   async loadAssetsNeededAtTime(t: number, timeline: Timeline) {
-    await this._loadAssetsWithFilter(timeline, (element) => {
+    return this._loadAssetsWithFilter(timeline, (element) => {
       return isElementVisibleAtTime(t, timeline, element);
     });
   },
   async _loadAssetsWithFilter(timeline, filter) {
+    // Drop handles for clips that are gone or now point at another file, so
+    // the cache cannot outlive the timeline it was built from.
+    get().releaseUnusedVideos(timeline);
+
     const idElementPairs = Object.entries(timeline);
     const visibleElements = idElementPairs.filter(
       (x): x is [string, VisualTimelineElement] => {
@@ -200,67 +281,155 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
           }
           break;
         case "video":
-          if (store._loadedElementVideo[elementId] == null) {
-            return store.loadElementVideo(elementId, element);
+          if (
+            store._loadedElementVideo[elementId] == null &&
+            !store._loadingElementVideo.has(elementId)
+          ) {
+            store._loadingElementVideo.add(elementId);
+            return store
+              .loadElementVideo(elementId, element)
+              .catch(() => {})
+              .finally(() => store._loadingElementVideo.delete(elementId));
           }
           break;
       }
 
       return null;
     });
-    await Promise.all(loadPromises.filter((x) => x != null));
-  },
-
-  async seek(timeline, time) {
-    const videoMetas = Object.values(get()._loadedElementVideo);
-    const visibleVideoMetas = videoMetas.filter((meta) => {
-      const element = meta.element;
-      return isElementVisibleAtTime(time, timeline, element);
-    });
-    const seekPromises = visibleVideoMetas.map(
-      (meta) =>
-        new Promise<void>((resolve, reject) => {
-          const video = meta.object;
-          // `sourceTimeAt` adds the trim offset this line used to drop, which
-          // is why a trimmed clip previewed the untrimmed frame.
-          video.currentTime = sourceTimeAt(meta.element, time) / 1000;
-          video.playbackRate = meta.element.speed;
-
-          video.addEventListener(
-            "seeked",
-            () => {
-              resolve();
-            },
-            { once: true },
-          );
-        }),
-    );
-
-    await Promise.all(seekPromises);
-  },
-
-  startPlay(timelineCursor: number) {
-    const videoMetas = Object.values(get()._loadedElementVideo);
-    for (const meta of videoMetas) {
-      meta.object.currentTime =
-        sourceTimeAt(meta.element, timelineCursor) / 1000;
-      meta.object.playbackRate = meta.element.speed;
-      meta.object.muted = true;
-      meta.isPlay = true;
-      meta.object.play();
+    // Audio is not a visual element, so it never reaches the switch above.
+    for (const [elementId, element] of idElementPairs) {
+      if (
+        element.filetype !== "audio" ||
+        store._loadedElementAudio[elementId] != null ||
+        store._loadingElementAudio.has(elementId)
+      ) {
+        continue;
+      }
+      store._loadingElementAudio.add(elementId);
+      loadPromises.push(
+        store
+          .loadElementAudio(elementId, element)
+          .catch(() => {})
+          .finally(() => store._loadingElementAudio.delete(elementId)),
+      );
     }
+
+    const started = loadPromises.filter((x) => x != null);
+    await Promise.all(started);
+
+    // Whether anything new arrived. A handle that finishes decoding after the
+    // last repaint would otherwise sit unsynchronised — at position zero,
+    // silent or not, until some unrelated change happened to redraw.
+    return started.length > 0;
   },
 
-  stopPlay(timelineCursor: number) {
-    const videoMetas = Object.values(get()._loadedElementVideo);
-    for (const meta of videoMetas) {
-      meta.isPlay = false;
+  /**
+   * Seek every visible video to `time` and wait for it to land.
+   *
+   * The export path needs frame-exact positioning, so unlike the preview it
+   * waits. `timeline` was already a parameter here and was then ignored in
+   * favour of a stale copy; it is now actually used.
+   */
+  async seek(timeline, time) {
+    const metas = Object.values(get()._loadedElementVideo).filter((meta) => {
+      const element = timeline[meta.elementId];
+      return (
+        element != null &&
+        isVisualTimelineElement(element) &&
+        isElementVisibleAtTime(time, timeline, element)
+      );
+    });
+
+    await Promise.all(
+      metas.map(
+        (meta) =>
+          new Promise<void>((resolve) => {
+            const element = timeline[meta.elementId] as VideoElementType;
+            const video = meta.object;
+            const want = sourceTimeAt(element, time) / 1000;
+
+            video.playbackRate = speedOf(element);
+
+            // Assigning the position it already holds fires no `seeked`, so
+            // waiting for one would stall the export's frame loop forever.
+            if (Math.abs(video.currentTime - want) < 1e-3) {
+              resolve();
+              return;
+            }
+
+            video.addEventListener("seeked", () => resolve(), { once: true });
+            video.currentTime = want;
+          }),
+      ),
+    );
+  },
+
+  syncPlayback(timeline, cursorMs, isPlaying) {
+    const state = get();
+    const handles: Record<string, MediaHandle> = {};
+    for (const meta of Object.values(state._loadedElementVideo)) {
+      handles[meta.elementId] = meta.object;
+    }
+    for (const [elementId, audio] of Object.entries(state._loadedElementAudio)) {
+      handles[elementId] = audio;
+    }
+
+    syncPlaybackHandles(asDocument(timeline), cursorMs, isPlaying, handles);
+  },
+
+  releaseUnusedVideos(timeline) {
+    const loadedAudio = get()._loadedElementAudio;
+    for (const [elementId, audio] of Object.entries(loadedAudio)) {
+      const element = timeline[elementId];
+      if (element != null && element.filetype === "audio") {
+        continue;
+      }
+      audio.pause();
+      audio.muted = true;
+      audio.removeAttribute("src");
+      delete loadedAudio[elementId];
+      get()._loadingElementAudio.delete(elementId);
+    }
+
+    const loaded = get()._loadedElementVideo;
+
+    for (const [elementId, meta] of Object.entries(loaded)) {
+      const element = timeline[elementId];
+      const stillValid =
+        element != null &&
+        element.filetype === "video" &&
+        element.localpath === meta.localpath;
+
+      if (stillValid) {
+        continue;
+      }
+
+      // Nothing else will ever visit this handle again, so silence it before
+      // letting go — otherwise a deleted clip keeps playing.
       meta.object.pause();
-      meta.object.currentTime =
-        sourceTimeAt(meta.element, timelineCursor) / 1000;
+      meta.object.muted = true;
+      meta.object.removeAttribute("src");
+      meta.object.load();
+      delete loaded[elementId];
+      get()._loadingElementVideo.delete(elementId);
     }
   },
 }));
+
+/**
+ * Wrap a bare element map so the pure playback module can consume it.
+ *
+ * Playback only reads `elements`, so the tracks are irrelevant here — but the
+ * module's input type is the whole document, which keeps it honest for every
+ * other caller.
+ */
+function asDocument(timeline: Timeline) {
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    tracks: [] as TimelineTrack[],
+    elements: timeline,
+  };
+}
 
 function getPath(path: string) {
   const nowEnv = getLocationEnv();

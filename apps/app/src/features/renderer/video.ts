@@ -59,13 +59,15 @@ const _renderVideo = (
     );
   }
 
-  // renderTimelineAtTime already filters by visibility, but this also decides
-  // whether the clip is audible, so it has to hold for any direct caller too.
+  // Draw nothing outside the clip's window. Audibility is deliberately NOT
+  // decided here: `renderTimelineAtTime` skips clips outside their window
+  // before this ever runs, so a "mute me now" branch in this file could never
+  // fire for the clip that needs it — which is why audio kept playing over a
+  // cut. `features/timeline/playback.ts` owns that, driven from the preview's
+  // draw path where every handle is visited whether it is on screen or not.
   if (!isVideoVisibleAtTime(timelineCursor, videoElement)) {
-    loadedVideo.object.muted = true;
     return;
   }
-  loadedVideo.object.muted = false;
 
   if (videoElement.filter.enable) {
     store.videoFilterPipeline.render(

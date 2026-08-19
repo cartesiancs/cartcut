@@ -412,9 +412,30 @@ export class PreviewCanvas extends LitElement {
     octx.clearRect(0, 0, offscreen.width, offscreen.height);
     octx.setTransform(...toDevice);
 
+    // A newly decoded handle has missed this frame's sync, so ask for another
+    // one as soon as it lands. Without this a clip stays parked at zero until
+    // something unrelated triggers a repaint.
+    void loadedAssetStore
+      .getState()
+      .loadAssetsNeededAtTime(this.timelineCursor, this.timeline)
+      .then((loadedSomething) => {
+        if (loadedSomething) {
+          this.scheduleDraw();
+        }
+      });
+
+    // Every media handle is reconciled here, on every repaint — which includes
+    // every cursor tick during playback. This is what mutes a clip the moment
+    // the playhead leaves it; the compositor below skips clips outside their
+    // window, so it can never do that job.
     loadedAssetStore
       .getState()
-      .loadAssetsNeededAtTime(this.timelineCursor, this.timeline);
+      .syncPlayback(
+        this.timeline,
+        this.timelineCursor,
+        this.timelineControl.isPlay,
+      );
+
     renderTimelineAtTime(
       octx,
       this.timeline,
@@ -817,13 +838,25 @@ export class PreviewCanvas extends LitElement {
     }
   }
 
+  /**
+   * Play and stop no longer seed the videos themselves.
+   *
+   * `syncPlayback` runs from the draw path on every store change, so it starts
+   * and stops each handle as the playhead enters and leaves its clip. Seeding
+   * once at play time is exactly what left a clip wrong for the whole session
+   * when its window began after the cursor.
+   */
   public stopPlay() {
-    loadedAssetStore.getState().stopPlay(this.timelineCursor);
+    loadedAssetStore
+      .getState()
+      .syncPlayback(this.timeline, this.timelineCursor, false);
     this.drawCanvas(this.canvas);
   }
 
   public startPlay() {
-    loadedAssetStore.getState().startPlay(this.timelineCursor);
+    loadedAssetStore
+      .getState()
+      .syncPlayback(this.timeline, this.timelineCursor, true);
   }
 
   createShape(x: number, y: number) {

@@ -128,7 +128,6 @@ export class ElementTimeline extends LitElement {
     } else if (element.filetype == "audio") {
       let blobUrl = await this.getBlobUrl(`file://${element.localpath}`);
       this.timeline[elementId].blob = String(blobUrl);
-      this.elementControl.showAudio(elementId);
     }
   }
 

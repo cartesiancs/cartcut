@@ -64,33 +64,8 @@ describe("renderVideo", () => {
     expect(pixel(canvas, 50, 50)).toMatchObject({ r: 0, g: 0, b: 0 });
   });
 
-  it("unmutes a clip while it is on screen", () => {
-    const video = loadedVideo();
-    store.getElementVideo.mockReturnValue(video);
-
-    const { ctx } = scene(100, 100);
-    renderVideoWithWait(ctx, "v", videoElement({ startTime: 0, duration: 2000 }), 1000);
-
-    expect(video.object.muted).toBe(false);
-  });
-
-  it("mutes a clip once the cursor leaves it", () => {
-    const video = loadedVideo();
-    store.getElementVideo.mockReturnValue(video);
-    video.object.muted = false;
-
-    const { canvas, ctx } = scene(100, 100, "#000000");
-    renderVideoWithWait(
-      ctx,
-      "v",
-      videoElement({ startTime: 0, duration: 2000 }),
-      5000,
-    );
-
-    expect(video.object.muted).toBe(true);
-    expect(pixel(canvas, 50, 50)).toMatchObject({ r: 0, g: 0, b: 0 });
-  });
-
+  
+  
   it("treats trim as a source-file offset, not a timeline one", () => {
     // A clip placed at 43s whose trim starts at 71.3s into the source file is on
     // screen from 43s. Adding trim to the timeline position used to push it out
@@ -111,22 +86,23 @@ describe("renderVideo", () => {
     renderVideoWithWait(ctx, "v", el, 43_000);
 
     expect(pixel(canvas, 25, 25)).toMatchObject({ r: 255, g: 0, b: 0 });
-    expect(video.object.muted).toBe(false);
   });
 
-  it("shortens a sped-up clip's window", () => {
+  it("leaves audibility entirely to the playback sync", () => {
+    // The compositor skips clips outside their window, so a mute decision made
+    // here could never fire for the clip that needs it. That is why audio kept
+    // playing over a cut, and why `features/timeline/playback.ts` owns it now.
     const video = loadedVideo();
     store.getElementVideo.mockReturnValue(video);
-    const el = videoElement({ startTime: 0, duration: 2000, speed: 2 });
+    video.object.muted = true;
 
     const { ctx } = scene(100, 100);
-    renderVideoWithWait(ctx, "v", el, 999);
-    expect(video.object.muted).toBe(false);
+    renderVideoWithWait(ctx, "v", videoElement({ startTime: 0, duration: 2000 }), 1000);
 
-    renderVideoWithWait(ctx, "v", el, 1000);
     expect(video.object.muted).toBe(true);
   });
 
+  
   it("routes the frame through the filters when they are enabled", () => {
     store.getElementVideo.mockReturnValue(loadedVideo());
     const el = videoElement({

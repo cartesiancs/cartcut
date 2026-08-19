@@ -2,6 +2,7 @@ import directory from "./functions/directory";
 import mime from "./functions/mime";
 import project from "./functions/project";
 import fonts from "./functions/fonts";
+import { loadedAssetStore } from "./features/asset/loadedAssetStore";
 import { enableIpcWrapper } from "./functions/ipcWrapper";
 
 enableIpcWrapper();
@@ -64,4 +65,14 @@ customElements.define("tutorial-popover", TutorialPopover);
 customElements.define("toast-item", Toast);
 customElements.define("toast-box", ToastBox);
 
-export { directory, mime, project, fonts };
+/**
+ * `loadedAssetStore` is exported for diagnostics.
+ *
+ * The media layer — which `<video>` is where, muted, playing — is the one part
+ * of the editor that node tests cannot observe, and it is where the playback
+ * bugs lived. Being able to ask the running app "is anything audible outside
+ * its own clip?" is what turns those into a checkable question rather than a
+ * listening exercise. The filmstrip's `cachedTiles`/`failedPaths` counters
+ * earned their keep the same way.
+ */
+export { directory, mime, project, fonts, loadedAssetStore };
