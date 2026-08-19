@@ -4,8 +4,7 @@ import { customElement, property } from "lit/decorators.js";
 import { AssetController } from "../../controllers/asset";
 import { LocaleController } from "../../controllers/locale";
 import { getLocationEnv } from "../../functions/getLocationEnv";
-import { assetContext } from "./context/assetContext";
-import { consume } from "@lit/context";
+import { IAssetStore, assetStore } from "../../states/assetStore";
 
 @customElement("asset-list")
 export class AssetList extends LitElement {
@@ -20,8 +19,6 @@ export class AssetList extends LitElement {
     this.map = [];
   }
 
-  @property()
-  showType;
   isShowOption = true;
 
   private lc = new LocaleController(this);
@@ -70,10 +67,7 @@ export class AssetList extends LitElement {
     let listBody: HTMLDivElement | null = this.querySelector("div");
     if (listBody == null) return false;
     this.map.push(
-      html`<asset-file
-        showType="${this.showType}"
-        assetName="${filename}"
-      ></asset-file>`,
+      html`<asset-file assetName="${filename}"></asset-file>`,
     );
     console.log("AAA", filename);
   }
@@ -89,10 +83,7 @@ export class AssetList extends LitElement {
     let listBody = this.querySelector("div");
     if (listBody == null) return false;
     this.map.push(
-      html`<asset-folder
-        showType="${this.showType}"
-        assetName="${foldername}"
-      ></asset-folder>`,
+      html`<asset-folder assetName="${foldername}"></asset-folder>`,
     );
   }
 
@@ -135,19 +126,22 @@ export class AssetFile extends LitElement {
   @property()
   assetName;
 
-  @consume({ context: assetContext, subscribe: true })
-  @property({ attribute: false })
-  public assetOptions = {
-    showType: "grid",
-  };
+  @property()
+  assetState: IAssetStore = assetStore.getState();
+
+  @property()
+  showType = this.assetState.showType;
 
   createRenderRoot() {
+    assetStore.subscribe((state) => {
+      this.showType = state.showType;
+    });
+
     return this;
   }
 
   protected updated(_changedProperties: PropertyValues): void {
-    console.log("this.", this.assetOptions.showType);
-    if (this.assetOptions.showType == "grid") {
+    if (this.showType == "grid") {
       this.classList.remove("col-12", "flex-row");
       this.classList.add("col-4", "flex-column");
     } else {
@@ -354,8 +348,28 @@ export class AssetFolder extends LitElement {
   @property()
   assetName;
 
+  @property()
+  assetState: IAssetStore = assetStore.getState();
+
+  @property()
+  showType = this.assetState.showType;
+
   createRenderRoot() {
+    assetStore.subscribe((state) => {
+      this.showType = state.showType;
+    });
+
     return this;
+  }
+
+  protected updated(_changedProperties: PropertyValues): void {
+    if (this.showType == "grid") {
+      this.classList.remove("col-12", "flex-row");
+      this.classList.add("col-4", "flex-column");
+    } else {
+      this.classList.remove("col-4", "flex-column");
+      this.classList.add("col-12", "flex-row");
+    }
   }
 
   private assetControl = new AssetController();

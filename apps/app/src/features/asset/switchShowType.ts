@@ -1,30 +1,27 @@
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { AssetController } from "../../controllers/asset";
-import { getLocationEnv } from "../../functions/getLocationEnv";
-import { consume, provide } from "@lit/context";
-import { assetContext } from "./context/assetContext";
+import { IAssetStore, assetStore } from "../../states/assetStore";
 
 @customElement("switch-showtype")
 export class SwitchShowType extends LitElement {
-  constructor() {
-    super();
-  }
+  @property()
+  assetState: IAssetStore = assetStore.getState();
 
-  @consume({ context: assetContext })
-  @property({ attribute: false })
-  public assetOptions = {
-    showType: "grid",
-  };
+  @property()
+  showType = this.assetState.showType;
 
   createRenderRoot() {
+    assetStore.subscribe((state) => {
+      this.showType = state.showType;
+    });
+
     return this;
   }
 
   render() {
     return html` <button
         ref="arrowup"
-        class="btn btn-transparent btn-sm ${this.assetOptions.showType == "list"
+        class="btn btn-transparent btn-sm ${this.showType == "list"
           ? ""
           : "d-none"}"
         @click=${this._handleClickSwitchShowType}
@@ -33,7 +30,7 @@ export class SwitchShowType extends LitElement {
       </button>
       <button
         ref="arrowup"
-        class="btn btn-transparent btn-sm ${this.assetOptions.showType == "grid"
+        class="btn btn-transparent btn-sm ${this.showType == "grid"
           ? ""
           : "d-none"}"
         @click=${this._handleClickSwitchShowType}
@@ -43,12 +40,6 @@ export class SwitchShowType extends LitElement {
   }
 
   _handleClickSwitchShowType() {
-    if (this.assetOptions.showType == "grid") {
-      this.assetOptions.showType = "list";
-    } else if (this.assetOptions.showType == "list") {
-      this.assetOptions.showType = "grid";
-    }
-
-    this.requestUpdate();
+    this.assetState.toggleShowType();
   }
 }

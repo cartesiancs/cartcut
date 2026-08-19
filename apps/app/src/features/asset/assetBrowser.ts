@@ -1,9 +1,7 @@
 import { LitElement, html } from "lit";
-import { customElement, property } from "lit/decorators.js";
+import { customElement } from "lit/decorators.js";
 import { AssetController } from "../../controllers/asset";
 import { getLocationEnv } from "../../functions/getLocationEnv";
-import { provide } from "@lit/context";
-import { assetContext } from "./context/assetContext";
 import "./switchShowType";
 
 @customElement("asset-browser")
@@ -14,12 +12,6 @@ export class AssetBrowser extends LitElement {
 
     this.directory = "";
   }
-
-  @provide({ context: assetContext })
-  @property()
-  public assetOptions = {
-    showType: "grid",
-  };
 
   createRenderRoot() {
     return this;
@@ -48,7 +40,7 @@ export class AssetBrowser extends LitElement {
         <switch-showtype></switch-showtype>
       </div>
 
-      <asset-list showType="${this.assetOptions.showType}"></asset-list> `;
+      <asset-list></asset-list> `;
   }
 
   updateDirectoryInput(path) {
