@@ -5,6 +5,7 @@ import {
   renderOptionStore,
 } from "../../states/renderOptionStore";
 import { LocaleController } from "../../controllers/locale";
+import { selectProjectFolder } from "../../features/asset/assetBrowser";
 import "../../components/input/input";
 
 @customElement("control-ui-setting")
@@ -98,7 +99,7 @@ export class ControlSetting extends LitElement {
         />
         <button
           class="btn btn-sm btn-default text-light"
-          onclick="CARTCUT.directory.select()"
+          @click=${() => selectProjectFolder()}
         >
           ${this.lc.t("setting.select_project_folder")}
         </button>

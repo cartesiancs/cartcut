@@ -6,6 +6,8 @@ import { chatLLMStore, IChatLLMPanelStore } from "../../states/chatLLM";
 import { ToastController } from "../../controllers/toast";
 import { actionParsor, parseCommands } from "./resultParser";
 import { getLocationEnv } from "../../functions/getLocationEnv";
+import { assetStore } from "../../states/assetStore";
+import { joinPath, readDirectory } from "../asset/directoryEntries";
 
 @customElement("ai-input")
 export class AiInput extends LitElement {
@@ -59,34 +61,16 @@ export class AiInput extends LitElement {
 
     console.log(`${lists.join(" ")} \n ${value}`);
 
-    const directory = document.querySelector("asset-list").nowDirectory;
+    const directory = assetStore.getState().nowDirectory;
     if (directory == "") {
       this.toast.show("Please specify a directory", 2000);
       return 0;
     }
 
-    window.electronAPI.req.filesystem.getDirectory(directory).then((result) => {
-      let fileLists = {};
-      let resultList: any = [];
-      console.log(directory, result);
-
-      for (const key in result) {
-        if (Object.hasOwnProperty.call(result, key)) {
-          const element = result[key];
-          if (!element.isDirectory) {
-            fileLists[key] = element;
-          }
-        }
-      }
-
-      for (const file in fileLists) {
-        if (Object.hasOwnProperty.call(fileLists, file)) {
-          const element = fileLists[file];
-          const path = directory + "/" + element.title;
-          console.log(path);
-          resultList.push(`EXIST "${path}"`);
-        }
-      }
+    readDirectory(directory).then((entries) => {
+      const resultList = entries
+        .filter((entry) => !entry.isDirectory)
+        .map((entry) => `EXIST "${joinPath(directory, entry.name)}"`);
 
       window.electronAPI.req.ai
         .text(

@@ -1,21 +1,10 @@
-import { ReactiveController, ReactiveControllerHost } from "lit";
 import { path } from "../functions/path";
 import mime from "../functions/mime";
 import { getLocationEnv } from "../functions/getLocationEnv";
 
-export class AssetController implements ReactiveController {
-  private host: ReactiveControllerHost | undefined;
-
-  public loadPrevDirectory(nowDirectory) {
-    let splitNowDirectory = nowDirectory.split("/");
-    let splitPrevDirectory = splitNowDirectory.slice(
-      -splitNowDirectory.length,
-      -1,
-    );
-
-    this.requestAllDir(splitPrevDirectory.join("/"));
-  }
-
+/** Inserts an asset into the timeline. Directory browsing lives in
+ * `features/asset/assetBrowser.ts`. */
+export class AssetController {
   public add(originPath) {
     const nowEnv = getLocationEnv();
     const filepath =
@@ -79,41 +68,4 @@ export class AssetController implements ReactiveController {
       });
   }
 
-  public requestAllDir(dir) {
-    window.electronAPI.req.filesystem.getDirectory(dir).then((result) => {
-      let fileLists = {};
-      const assetList = document.querySelector("asset-list");
-      const assetBrowser = document.querySelector("asset-browser");
-
-      assetList.nowDirectory = dir;
-      assetList.clearList();
-      assetBrowser.updateDirectoryInput(dir);
-
-      for (const key in result) {
-        if (Object.hasOwnProperty.call(result, key)) {
-          const element = result[key];
-          if (!element.isDirectory) {
-            fileLists[key] = element;
-          } else {
-            assetList.getFolder(element.title);
-          }
-        }
-      }
-
-      for (const file in fileLists) {
-        if (Object.hasOwnProperty.call(fileLists, file)) {
-          const element = fileLists[file];
-          assetList.getFile(element.title);
-        }
-      }
-    });
-  }
-
-  hostConnected() {
-    // projectStore.subscribe((state) => {
-    //   this.nowDirectory = state.nowDirectory;
-    // });
-  }
-
-  hostDisconnected() {}
 }

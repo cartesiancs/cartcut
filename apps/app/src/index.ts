@@ -1,4 +1,3 @@
-import directory from "./functions/directory";
 import mime from "./functions/mime";
 import project from "./functions/project";
 import fonts from "./functions/fonts";
@@ -74,4 +73,4 @@ customElements.define("toast-box", ToastBox);
  * listening exercise. The filmstrip's `cachedTiles`/`failedPaths` counters
  * earned their keep the same way.
  */
-export { directory, mime, project, fonts, loadedAssetStore };
+export { mime, project, fonts, loadedAssetStore };

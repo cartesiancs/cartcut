@@ -1,6 +1,5 @@
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { IProjectStore, projectStore } from "../../states/projectStore";
 import { useTimelineStore } from "../../states/timelineStore";
 import { LocaleController } from "../../controllers/locale";
 import { getLocationEnv } from "../../functions/getLocationEnv";
@@ -25,12 +24,6 @@ export class ControlRender extends LitElement {
   private lc = new LocaleController(this);
 
   @property()
-  projectState: IProjectStore = projectStore.getInitialState();
-
-  @property()
-  nowDirectory = this.projectState.nowDirectory;
-
-  @property()
   videoSrc = "";
   httpRenderDoneModal: any;
   hasUpdatedOnce: boolean;
@@ -43,10 +36,6 @@ export class ControlRender extends LitElement {
   }
 
   createRenderRoot() {
-    projectStore.subscribe((state) => {
-      this.nowDirectory = state.nowDirectory;
-    });
-
     if (getLocationEnv() == "web") {
       socket = io();
 

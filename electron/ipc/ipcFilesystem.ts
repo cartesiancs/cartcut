@@ -6,20 +6,32 @@ export const ipcFilesystem = {
   getDirectory: async (event, dir) => {
     const result = new Promise((resolve, reject) => {
       fs.readdir(dir, async (err, files) => {
-        let lists = {};
+        // Without this, `files` is undefined and `files.map` throws inside the
+        // callback, escaping the promise — it then never settles and the
+        // renderer's `.then` and `.catch` both go uncalled.
+        if (err) {
+          reject(err);
+          return;
+        }
 
-        const promises = files.map(async (file) => {
-          const stat = await fsp.lstat(`${dir}/${file}`);
-          const isDirectory = stat.isDirectory();
+        try {
+          let lists = {};
 
-          lists[String(file)] = {
-            isDirectory: isDirectory,
-            title: file,
-          };
-        });
+          const promises = files.map(async (file) => {
+            const stat = await fsp.lstat(`${dir}/${file}`);
+            const isDirectory = stat.isDirectory();
 
-        await Promise.all(promises);
-        resolve(lists);
+            lists[String(file)] = {
+              isDirectory: isDirectory,
+              title: file,
+            };
+          });
+
+          await Promise.all(promises);
+          resolve(lists);
+        } catch (error) {
+          reject(error);
+        }
       });
     });
 

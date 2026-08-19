@@ -1,27 +1,27 @@
 import { path } from "../../functions/path";
+import mime from "../../functions/mime";
 import { LitElement, PropertyValues, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { AssetController } from "../../controllers/asset";
-import { LocaleController } from "../../controllers/locale";
+import { repeat } from "lit/directives/repeat.js";
 import { getLocationEnv } from "../../functions/getLocationEnv";
-import { IAssetStore, assetStore } from "../../states/assetStore";
+import { AssetShowType } from "../../states/assetStore";
+import { AssetEntry, joinPath } from "./directoryEntries";
+import { thumbnailCache } from "./thumbnailCache";
 
+/**
+ * The grid. Presentation only — `<asset-browser>` owns the directory and hands
+ * the entries down, so nothing here fetches, sorts, or reaches into the DOM.
+ */
 @customElement("asset-list")
 export class AssetList extends LitElement {
-  blobThumbnail: {};
-  nowDirectory: string;
-  map: any;
-  constructor() {
-    super();
-    this.blobThumbnail = {};
-    this.nowDirectory = "";
+  @property({ attribute: false })
+  entries: AssetEntry[] = [];
 
-    this.map = [];
-  }
+  @property()
+  directory = "";
 
-  isShowOption = true;
-
-  private lc = new LocaleController(this);
+  @property()
+  showType: AssetShowType = "grid";
 
   createRenderRoot() {
     return this;
@@ -29,75 +29,44 @@ export class AssetList extends LitElement {
 
   render() {
     return html`<div class="row px-2">
-      <p
-        class="text-light mt-2 text-center ${!this.isShowOption
-          ? "d-none"
-          : ""} ${getLocationEnv() == "demo" ? "d-none" : ""}"
-      >
-        ${this.lc.t("setting.need_select_project_folder")}
-      </p>
-      <p
-        class="text-light mt-2 text-center ${!this.isShowOption
-          ? "d-none"
-          : ""} ${getLocationEnv() != "demo" ? "d-none" : ""}"
-      >
-        The folder cannot be viewed in the demo version.
-      </p>
-      <button
-        class="btn btn-sm btn-default text-light ${!this.isShowOption
-          ? "d-none"
-          : ""}"
-        onclick="CARTCUT.directory.select()"
-      >
-        ${this.lc.t("setting.select_project_folder")}
-      </button>
-
-      ${this.map}
+      ${repeat(
+        this.entries,
+        (entry) => entry.name,
+        (entry) =>
+          entry.isDirectory
+            ? html`<asset-folder
+                .name=${entry.name}
+                .directory=${this.directory}
+                .showType=${this.showType}
+              ></asset-folder>`
+            : html`<asset-file
+                .name=${entry.name}
+                .directory=${this.directory}
+                .showType=${this.showType}
+              ></asset-file>`,
+      )}
     </div> `;
   }
+}
 
-  getFile(filename) {
-    let splitedFilename = filename.split(".");
-    let splitedFilenameLength = splitedFilename.length;
-    let fileType =
-      splitedFilenameLength <= 2
-        ? ""
-        : splitedFilename[splitedFilenameLength - 1];
-
-    let listBody: HTMLDivElement | null = this.querySelector("div");
-    if (listBody == null) return false;
-    this.map.push(
-      html`<asset-file assetName="${filename}"></asset-file>`,
-    );
-    console.log("AAA", filename);
-  }
-
-  getFolder(foldername) {
-    let splitedFoldername = foldername.split(".");
-    let splitedFoldernameLength = splitedFoldername.length;
-    let fileType =
-      splitedFoldernameLength <= 2
-        ? ""
-        : splitedFoldername[splitedFoldernameLength - 1];
-
-    let listBody = this.querySelector("div");
-    if (listBody == null) return false;
-    this.map.push(
-      html`<asset-folder assetName="${foldername}"></asset-folder>`,
-    );
-  }
-
-  clearList() {
-    this.map = [];
-    this.isShowOption = false;
-    this.requestUpdate();
+/**
+ * Layout for one item. Both `asset-file` and `asset-folder` swap between a
+ * three-across grid cell and a full-width row.
+ */
+function applyShowType(element: HTMLElement, showType: AssetShowType) {
+  if (showType == "grid") {
+    element.classList.remove("col-12", "flex-row");
+    element.classList.add("col-4", "flex-column");
+  } else {
+    element.classList.remove("col-4", "flex-column");
+    element.classList.add("col-12", "flex-row");
   }
 }
 
 @customElement("asset-file")
 export class AssetFile extends LitElement {
-  directory: any;
   videoBlob: string;
+
   constructor() {
     super();
 
@@ -119,71 +88,57 @@ export class AssetFile extends LitElement {
     this.addEventListener("dragstart", this.handleDragStart.bind(this));
 
     this.videoBlob = "";
-
-    this.directory = document.querySelector("asset-list").nowDirectory;
   }
 
   @property()
-  assetName;
+  name = "";
 
   @property()
-  assetState: IAssetStore = assetStore.getState();
+  directory = "";
 
   @property()
-  showType = this.assetState.showType;
+  showType: AssetShowType = "grid";
 
   createRenderRoot() {
-    assetStore.subscribe((state) => {
-      this.showType = state.showType;
-    });
-
     return this;
   }
 
   protected updated(_changedProperties: PropertyValues): void {
-    if (this.showType == "grid") {
-      this.classList.remove("col-12", "flex-row");
-      this.classList.add("col-4", "flex-column");
-    } else {
-      this.classList.remove("col-4", "flex-column");
-      this.classList.add("col-12", "flex-row");
-    }
+    applyShowType(this, this.showType);
   }
 
-  private assetControl = new AssetController();
+  private get fullPath(): string {
+    return joinPath(this.directory, this.name);
+  }
+
+  private get fileUrl(): string {
+    const filepath =
+      getLocationEnv() == "electron"
+        ? `file://${this.fullPath}`
+        : `/api/file?path=${this.fullPath}`;
+
+    return path.encode(filepath);
+  }
 
   render() {
-    this.directory = document.querySelector("asset-list").nowDirectory;
+    const fileType = mime.lookup(this.name).type;
+    const fileUrl = this.fileUrl;
 
-    const fileType = CARTCUT.mime.lookup(this.assetName).type;
-
-    const nowEnv = getLocationEnv();
-    const filepath =
-      nowEnv == "electron"
-        ? `file://${this.directory}/${this.assetName}`
-        : `/api/file?path=${this.directory}/${this.assetName}`;
-    const fileUrl = path.encode(filepath);
-    const assetList = document.querySelector("asset-list");
-
-    let template;
-    if (fileType == "image") {
-      template = this.templateImage(fileUrl);
-    } else if (fileType == "gif") {
-      template = this.templateImage(fileUrl);
-    } else if (fileType == "video") {
-      if (assetList.blobThumbnail.hasOwnProperty(fileUrl)) {
-        let savedThumbnailUrl = assetList.blobThumbnail[fileUrl];
-        this.videoBlob = savedThumbnailUrl;
-        template = this.templateVideoThumbnail();
-      } else {
-        let thumbnailUrl = this.captureVideoThumbnail(fileUrl);
-        template = this.templateVideoThumbnail();
-      }
-    } else {
-      template = this.template(fileType);
+    if (fileType == "image" || fileType == "gif") {
+      return this.templateImage(fileUrl);
     }
 
-    return template;
+    if (fileType == "video") {
+      const cached = thumbnailCache.get(fileUrl);
+      if (cached != undefined) {
+        this.videoBlob = cached;
+      } else {
+        this.captureVideoThumbnail(fileUrl);
+      }
+      return this.templateVideoThumbnail();
+    }
+
+    return this.template(fileType);
   }
 
   template(filetype = "unknown") {
@@ -195,23 +150,21 @@ export class AssetFile extends LitElement {
     return html`<span
         class="material-symbols-outlined icon-lg align-self-center"
       >
-        ${fileIcon[filetype]}
+        ${fileIcon[filetype] ?? fileIcon.unknown}
       </span>
       <b class="align-self-center text-ellipsis-scroll text-light text-center"
-        >${this.assetName}</b
+        >${this.name}</b
       >`;
   }
 
   templateImage(url) {
-    this.directory = document.querySelector("asset-list").nowDirectory;
-
     return html`<img
         src="${url}"
         alt=""
         class="align-self-center asset-preview"
       />
       <b class="align-self-center text-ellipsis-scroll text-light text-center"
-        >${this.assetName}</b
+        >${this.name}</b
       >`;
   }
 
@@ -228,7 +181,7 @@ export class AssetFile extends LitElement {
       </div>
 
       <b class="align-self-center text-ellipsis-scroll text-light text-center"
-        >${this.assetName}</b
+        >${this.name}</b
       >`;
   }
 
@@ -238,28 +191,22 @@ export class AssetFile extends LitElement {
     }
     // A custom type so the timeline can tell an asset from an OS file drop,
     // which `asset-upload-drop` already handles differently.
-    e.dataTransfer.setData(
-      "application/x-cartcut-asset",
-      `${this.directory}/${this.assetName}`,
-    );
+    e.dataTransfer.setData("application/x-cartcut-asset", this.fullPath);
     e.dataTransfer.effectAllowed = "copy";
   }
 
   handleClick() {
-    this.directory = document.querySelector("asset-list").nowDirectory;
-
-    this.assetControl.add(`${this.directory}/${this.assetName}`);
-    //this.patchToControl(`${this.directory}/${this.filename}`, `${this.directory}`)
+    this.dispatchEvent(
+      new CustomEvent("asset-open", {
+        detail: { path: this.fullPath },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   async captureVideoThumbnail(url) {
-    const assetList = document.querySelector("asset-list");
-    const nowEnv = getLocationEnv();
-    const filepath =
-      nowEnv == "electron"
-        ? `file://${this.directory}/${this.assetName}`
-        : `/api/file?path=${this.directory}/${this.assetName}`;
-    const fileUrl = path.encode(filepath);
+    const fileUrl = this.fileUrl;
 
     try {
       const thumbnailUrl = await new Promise((resolve, reject) => {
@@ -304,16 +251,13 @@ export class AssetFile extends LitElement {
 
                     this.videoBlob = url;
                     this.requestUpdate();
-                    assetList.blobThumbnail[fileUrl] = url;
+                    thumbnailCache.set(fileUrl, url);
                     resolve(url);
                   } catch (error) {}
                 });
               });
 
               videoElement.currentTime = 1;
-
-              // let image = thumbnailCanvas.toDataURL('image/jpeg');
-              // resolve(image)
             };
           });
       });
@@ -325,8 +269,6 @@ export class AssetFile extends LitElement {
 
 @customElement("asset-folder")
 export class AssetFolder extends LitElement {
-  directory: any;
-
   constructor() {
     super();
 
@@ -341,56 +283,43 @@ export class AssetFolder extends LitElement {
     );
 
     this.addEventListener("click", this.handleClick.bind(this));
-
-    this.directory = document.querySelector("asset-list").nowDirectory;
   }
 
   @property()
-  assetName;
+  name = "";
 
   @property()
-  assetState: IAssetStore = assetStore.getState();
+  directory = "";
 
   @property()
-  showType = this.assetState.showType;
+  showType: AssetShowType = "grid";
 
   createRenderRoot() {
-    assetStore.subscribe((state) => {
-      this.showType = state.showType;
-    });
-
     return this;
   }
 
   protected updated(_changedProperties: PropertyValues): void {
-    if (this.showType == "grid") {
-      this.classList.remove("col-12", "flex-row");
-      this.classList.add("col-4", "flex-column");
-    } else {
-      this.classList.remove("col-4", "flex-column");
-      this.classList.add("col-12", "flex-row");
-    }
+    applyShowType(this, this.showType);
   }
-
-  private assetControl = new AssetController();
 
   render() {
-    const template = this.template();
-    return template;
-  }
-
-  template() {
     return html`<span
         class="material-symbols-outlined icon-lg align-self-center"
       >
         folder
       </span>
       <b class="align-self-center text-ellipsis text-light text-center"
-        >${this.assetName}</b
+        >${this.name}</b
       >`;
   }
 
   handleClick() {
-    this.assetControl.requestAllDir(`${this.directory}/${this.assetName}`);
+    this.dispatchEvent(
+      new CustomEvent("asset-navigate", {
+        detail: { name: this.name },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 }
