@@ -26,7 +26,7 @@ export class ControlSetting extends LitElement {
     });
 
     window.electronAPI.req.app.getAppInfo().then((result) => {
-      this.appVersion = `Nugget v${result.data.version}`;
+      this.appVersion = `Cartcut v${result.data.version}`;
     });
 
     return this;
@@ -98,7 +98,7 @@ export class ControlSetting extends LitElement {
         />
         <button
           class="btn btn-sm btn-default text-light"
-          onclick="NUGGET.directory.select()"
+          onclick="CARTCUT.directory.select()"
         >
           ${this.lc.t("setting.select_project_folder")}
         </button>
@@ -216,13 +216,13 @@ export class ControlSetting extends LitElement {
 
       <button
         class="btn btn-sm btn-default text-light mt-1"
-        onclick="NUGGET.project.save()"
+        onclick="CARTCUT.project.save()"
       >
         ${this.lc.t("setting.save_project")}
       </button>
       <button
         class="btn btn-sm btn-default text-light mt-1"
-        onclick="NUGGET.project.load()"
+        onclick="CARTCUT.project.load()"
       >
         ${this.lc.t("setting.load_project")}
       </button>

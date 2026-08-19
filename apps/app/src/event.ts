@@ -42,11 +42,11 @@ window.electronAPI.res.app.forceClose((evt) => {
 });
 
 window.electronAPI.res.shortcut.controlS((evt) => {
-  NUGGET.project.save();
+  CARTCUT.project.save();
 });
 
 window.electronAPI.res.shortcut.controlO((evt) => {
-  NUGGET.project.load();
+  CARTCUT.project.load();
 });
 
 window.electronAPI.res.timeline.get((event) => {
@@ -86,9 +86,9 @@ window.onresize = async function (event) {
 };
 
 // HTMLCanvasElement.prototype.render = function () {
-//     nugget.canvas.preview.render(this);
+//     cartcut.canvas.preview.render(this);
 //   };
 
 //   HTMLCanvasElement.prototype.clear = function () {
-//     nugget.canvas.preview.clear(this);
+//     cartcut.canvas.preview.clear(this);
 //   };

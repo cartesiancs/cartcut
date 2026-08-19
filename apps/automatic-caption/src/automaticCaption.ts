@@ -153,7 +153,7 @@ export class AutomaticCaption extends LitElement {
     this.applyCursorEvent("lockKeyboard");
 
     if (this.sttMethod == "local") {
-      const serverUrl = document.querySelector("#NuggetAutoServer").value;
+      const serverUrl = document.querySelector("#CartcutAutoServer").value;
       const response = await fetch(audioPath);
 
       if (!response.ok) {
@@ -230,7 +230,7 @@ export class AutomaticCaption extends LitElement {
 
   async translateText() {
     try {
-      const serverUrl = document.querySelector("#NuggetAutoServer").value;
+      const serverUrl = document.querySelector("#CartcutAutoServer").value;
       const formData = new FormData();
       formData.append("contents", JSON.stringify(this.analyzedEditCaption));
       formData.append("target_lang", this.targetTranslateLang);
@@ -891,10 +891,10 @@ export class AutomaticCaption extends LitElement {
 
         <div class="input-group ${this.sttMethod == "local" ? "" : "d-none"}">
           <span class="input-group-text bg-dark text-light" id="basic-addon2"
-            >NuggetAutoServer</span
+            >CartcutAutoServer</span
           >
           <input
-            id="NuggetAutoServer"
+            id="CartcutAutoServer"
             type="text"
             class="form-control bg-default bg-dark text-light ${this.isLoadVideo
               ? "d-none"

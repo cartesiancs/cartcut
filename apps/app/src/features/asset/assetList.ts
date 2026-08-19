@@ -50,7 +50,7 @@ export class AssetList extends LitElement {
         class="btn btn-sm btn-default text-light ${!this.isShowOption
           ? "d-none"
           : ""}"
-        onclick="NUGGET.directory.select()"
+        onclick="CARTCUT.directory.select()"
       >
         ${this.lc.t("setting.select_project_folder")}
       </button>
@@ -161,7 +161,7 @@ export class AssetFile extends LitElement {
   render() {
     this.directory = document.querySelector("asset-list").nowDirectory;
 
-    const fileType = NUGGET.mime.lookup(this.assetName).type;
+    const fileType = CARTCUT.mime.lookup(this.assetName).type;
 
     const nowEnv = getLocationEnv();
     const filepath =
@@ -245,7 +245,7 @@ export class AssetFile extends LitElement {
     // A custom type so the timeline can tell an asset from an OS file drop,
     // which `asset-upload-drop` already handles differently.
     e.dataTransfer.setData(
-      "application/x-nugget-asset",
+      "application/x-cartcut-asset",
       `${this.directory}/${this.assetName}`,
     );
     e.dataTransfer.effectAllowed = "copy";

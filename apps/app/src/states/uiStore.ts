@@ -41,7 +41,7 @@ export const uiStore = createStore<IUIStore>((set) => ({
       leftOption: 170,
     },
   },
-  topBarTitle: "Nugget",
+  topBarTitle: "Cartcut",
 
   setChatSidebar: (width) =>
     set((state) => ({

@@ -24,6 +24,6 @@ module.exports = {
   output: {
     filename: "index.js",
     path: path.resolve(__dirname, "apps/app/dist"),
-    library: "NUGGET",
+    library: "CARTCUT",
   },
 };

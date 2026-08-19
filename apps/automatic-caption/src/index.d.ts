@@ -4,7 +4,7 @@ interface Window {
 
 declare var bootstrap: any;
 declare var _: any;
-declare var NUGGET: any;
+declare var CARTCUT: any;
 
 interface Document {
   querySelector(selectors: string): any;

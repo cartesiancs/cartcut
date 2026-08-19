@@ -1,4 +1,4 @@
-# nugget-app
+# cartcut
 
 ![plot](../assets/images/screenshot.png)
 

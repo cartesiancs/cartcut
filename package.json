@@ -1,5 +1,5 @@
 {
-  "name": "nugget-app",
+  "name": "cartcut-app",
   "version": "0.4.3",
   "description": "Video Editor",
   "main": "main/main.js",
@@ -23,8 +23,8 @@
     "url": "https://github.com/cartesiancs/nugget-app"
   },
   "build": {
-    "productName": "Nugget",
-    "appId": "com.cartesiancs.nugget",
+    "productName": "Cartcut",
+    "appId": "com.cartesiancs.cartcut",
     "asar": true,
     "extraResources": [
       {
@@ -43,9 +43,9 @@
       }
     ],
     "protocols": {
-      "name": "nuggetapp",
+      "name": "cartcutapp",
       "schemes": [
-        "nuggetapp"
+        "cartcutapp"
       ]
     },
     "mac": {

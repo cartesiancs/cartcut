@@ -42,7 +42,7 @@ export class TemplateList extends LitElement {
     const searchText = this.querySelector(
       "#searchGifInput",
     ) as HTMLInputElement | null;
-    const value = searchText?.value?.trim() || "_defnugget";
+    const value = searchText?.value?.trim() || "_defcartcut";
 
     const request = await axios.get(`http://127.0.0.1:8000/api/gif?q=${value}`);
     const result = request.data.result.data;

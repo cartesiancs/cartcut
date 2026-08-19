@@ -613,7 +613,7 @@ export class elementTimelineCanvas extends LitElement {
    * point of having tracks.
    */
   _handleDragOver(e: DragEvent) {
-    if (!e.dataTransfer?.types.includes("application/x-nugget-asset")) {
+    if (!e.dataTransfer?.types.includes("application/x-cartcut-asset")) {
       return;
     }
     e.preventDefault();
@@ -631,7 +631,7 @@ export class elementTimelineCanvas extends LitElement {
   }
 
   _handleDrop(e: DragEvent) {
-    const originPath = e.dataTransfer?.getData("application/x-nugget-asset");
+    const originPath = e.dataTransfer?.getData("application/x-cartcut-asset");
     this.dropTrackId = null;
     if (!originPath) {
       return;

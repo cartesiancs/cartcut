@@ -1,4 +1,4 @@
-const NUGGET_WEBSITE = "https://nugget.studio";
+const CARTCUT_WEBSITE = "https://nugget.studio";
 let APP_;
 
 let toastElList = [].slice.call(document.querySelectorAll(".toast"));

@@ -70,7 +70,7 @@ const project = {
           if (schemaVersion !== SCHEMA_VERSION) {
             rendererModal.whenTimelineChanged.show();
             document.querySelector("#whenTimelineChangedMsg").innerHTML =
-              `This project was made with an older version of Nugget ` +
+              `This project was made with an older version of Cartcut ` +
               `(format v${schemaVersion}) and cannot be opened by this one ` +
               `(format v${SCHEMA_VERSION}).`;
             return;
@@ -180,7 +180,7 @@ const project = {
 
   changeProjectFileValue: function ({ projectDestination }) {
     document.querySelector("#projectFile").value = projectDestination;
-    uiState.setTopBarTitle(`Nugget - ${projectDestination}`);
+    uiState.setTopBarTitle(`Cartcut - ${projectDestination}`);
   },
 };
 

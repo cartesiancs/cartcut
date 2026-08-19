@@ -80,7 +80,7 @@ const template: any = [
     label: "About",
     submenu: [
       // {
-      //   label: "About Nugget",
+      //   label: "About Cartcut",
       //   click: async () => {
       //     let mainWindow = window.createWindow({
       //       width: 600,
