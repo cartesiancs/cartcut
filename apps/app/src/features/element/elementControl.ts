@@ -280,15 +280,6 @@ export class ElementControl extends LitElement {
   }
 
   /**
-   * Kept only so the element factories below can keep filling the field while
-   * they are being built. `priority` is derived from track order the moment the
-   * element is committed, so whatever this returns is immediately overwritten.
-   */
-  getNowPriority() {
-    return 1;
-  }
-
-  /**
    * Hand a freshly built element to the timeline.
    *
    * Every factory used to finish with `patchTimeline` + `checkPointTimeline`,
@@ -353,7 +344,6 @@ export class ElementControl extends LitElement {
       const filepath = nowEnv == "electron" ? path : `/api/file?path=${path}`;
 
       this.timeline[elementId] = {
-        priority: this.getNowPriority(),
         blob: blob,
         startTime: 0,
         duration: 1000,
@@ -411,7 +401,6 @@ export class ElementControl extends LitElement {
         let gif = parseGIF(buff);
         let frames = decompressFrames(gif, true);
         this.timeline[elementId] = {
-          priority: this.getNowPriority(),
           blob: blob,
           startTime: 0,
           duration: 1000,
@@ -469,7 +458,6 @@ export class ElementControl extends LitElement {
         const filepath = nowEnv == "electron" ? path : `/api/file?path=${path}`;
 
         this.timeline[elementId] = {
-          priority: this.getNowPriority(),
           blob: blob,
           startTime: 0,
           duration: duration,
@@ -570,7 +558,6 @@ export class ElementControl extends LitElement {
         });
 
         this.timeline[elementId] = {
-          priority: this.getNowPriority(),
           blob: blob,
           startTime: 0,
           duration: duration,
@@ -647,7 +634,6 @@ export class ElementControl extends LitElement {
     const elementId = this.generateUUID();
 
     this.timeline[elementId] = {
-      priority: this.getNowPriority(),
       startTime: startTime,
       duration: duration,
       text: text,
@@ -723,7 +709,6 @@ export class ElementControl extends LitElement {
     const fontSize = 52;
 
     this.timeline[elementId] = {
-      priority: this.getNowPriority(),
       startTime: 0,
       duration: 1000,
       text: "TITLE",
@@ -804,7 +789,6 @@ export class ElementControl extends LitElement {
       let duration = audio.duration * 1000;
 
       this.timeline[elementId] = {
-        priority: this.getNowPriority(),
         blob: blob,
         startTime: 0,
         duration: duration,
@@ -831,7 +815,6 @@ export class ElementControl extends LitElement {
     const audio = document.createElement("audio");
 
     this.timeline[elementId] = {
-      priority: this.getNowPriority(),
       blob: blob,
       startTime: 0,
       duration: duration,

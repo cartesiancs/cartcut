@@ -104,10 +104,10 @@ export class PreviewTopBar extends LitElement {
 
     this.timeline[elementId] = {
       key: elementId,
-      // Both are overwritten by `placeNewElement` below, which picks the track
-      // and derives the paint rank from it.
+      // Both are supplied by `placeNewElement` below, which picks the track and
+      // derives the paint rank from it.
       trackId: "",
-      priority: 1,
+      priority: 0,
       blob: "",
       startTime: 0,
       duration: 1000,

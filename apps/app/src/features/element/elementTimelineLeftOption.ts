@@ -49,7 +49,6 @@ export class ElementTimelineLeftOption extends LitElement {
   @property({ attribute: false })
   public timelineOptions: any = {
     canvasVerticalScroll: 0,
-    panelOptions: [],
   };
 
   createRenderRoot() {

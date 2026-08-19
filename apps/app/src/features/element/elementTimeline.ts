@@ -172,7 +172,6 @@ export class ElementTimeline extends LitElement {
   @property()
   public timelineOptions = {
     canvasVerticalScroll: 0,
-    panelOptions: [],
   };
 
   render() {

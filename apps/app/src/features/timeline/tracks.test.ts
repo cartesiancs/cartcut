@@ -184,6 +184,42 @@ describe("derivePriorities", () => {
     expect(Object.keys(derivePriorities(doc)).sort()).toEqual(["a", "b", "c"]);
   });
 
+  it("sorts back into exactly paintOrder, so the two cannot drift", () => {
+    // `priority` survives as a derived field because the compositor and both
+    // FFmpeg export paths receive a bare element map across IPC and have no
+    // tracks to sort by. That denormalisation is only safe while sorting on it
+    // reproduces `paintOrder` exactly — which is what this pins.
+    const doc = withClips(
+      docWithTracks("video", "text", "audio", "video"),
+      {
+        a: imageElement({ trackId: "t3", startTime: 5000 }),
+        b: imageElement({ trackId: "t0", startTime: 0 }),
+        c: textElement({ trackId: "t1", startTime: 2000 }),
+        d: audioElement({ trackId: "t2", startTime: 1000 }),
+        e: imageElement({ trackId: "t3", startTime: 0 }),
+      },
+    );
+
+    const elements = derivePriorities(doc);
+    const bySortedPriority = Object.entries(elements)
+      .sort(([, x], [, y]) => x.priority - y.priority)
+      .map(([id]) => id);
+
+    expect(bySortedPriority).toEqual(paintOrder(doc));
+  });
+
+  it("assigns a rank to every element with no gaps or repeats", () => {
+    const doc = withClips(docWithTracks("video", "video"), {
+      a: imageElement({ trackId: "t0" }),
+      b: imageElement({ trackId: "t1" }),
+      c: imageElement({ trackId: "t1", startTime: 9000 }),
+    });
+    const ranks = Object.values(derivePriorities(doc))
+      .map((el) => el.priority)
+      .sort((x, y) => x - y);
+    expect(ranks).toEqual([1, 2, 3]);
+  });
+
   it("does not mutate the elements it is given", () => {
     const doc = withClips(docWithTracks("video"), {
       a: imageElement({ trackId: "t0", priority: 99 }),

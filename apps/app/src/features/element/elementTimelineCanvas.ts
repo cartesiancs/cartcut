@@ -228,7 +228,7 @@ export class elementTimelineCanvas extends LitElement {
 
   @consume({ context: timelineContext })
   @property({ attribute: false })
-  public timelineOptions: any = { canvasVerticalScroll: 0, panelOptions: [] };
+  public timelineOptions: any = { canvasVerticalScroll: 0 };
 
   createRenderRoot() {
     useTimelineStore.subscribe((state) => {

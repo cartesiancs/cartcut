@@ -53,7 +53,8 @@ export class WarningDemo extends LitElement {
   insertPresetTimeline() {
     this.timeline = {
       "af9bb3d9-f9cc-4ec0-a768-cb818fbbe033": {
-        priority: 1,
+        // `priority` is omitted throughout: placement derives it from the
+        // track each element lands on.
         blob: "blob:file:///668d3bda-547a-4bb6-ab7a-53cc1c8000ef",
         startTime: 0,
         duration: 60000,
@@ -113,7 +114,6 @@ export class WarningDemo extends LitElement {
         },
       },
       "f395b92c-c195-42d7-bc90-f62b62f3000d": {
-        priority: 2,
         blob: "blob:file:///ac05f4bc-7c0b-456f-ae60-87b251f6f38d",
         startTime: 2956,
         duration: 3467,
@@ -162,7 +162,6 @@ export class WarningDemo extends LitElement {
           size: 1,
           color: "#000000",
         },
-        priority: 3,
         startTime: 556,
         duration: 1533,
         text: "TEST TITLE",

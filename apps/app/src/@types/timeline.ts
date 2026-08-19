@@ -27,12 +27,20 @@ type TimelinePlaced = {
   /** Which track (row) this clip sits on. Many clips may share one. */
   trackId: string;
   /**
-   * Paint rank, back to front.
+   * Paint rank, back to front — 1 is furthest away.
    *
-   * DERIVED — never authored. `features/timeline/tracks.ts#derivePriorities`
-   * recomputes it from track order on every mutation; it survives only so the
-   * compositor and both FFmpeg paths keep working while the UI migrates to
-   * tracks.
+   * DERIVED, never authored: `features/timeline/tracks.ts#derivePriorities`
+   * recomputes it from track order on every mutation, and
+   * `tracks.test.ts` pins that sorting on it reproduces `paintOrder` exactly.
+   *
+   * It survives rather than being replaced by a track lookup because the
+   * compositor, the WebCodecs export and the FFmpeg export all receive a bare
+   * element map across an IPC boundary, with no tracks to sort by. This is the
+   * serialised form of that ordering.
+   *
+   * What made the old field dangerous was not its existence but that it was
+   * authored by hand and meant two things at once — z-order *and*, through the
+   * enumeration index, which row a clip occupied. It now means one thing.
    */
   priority: number;
   blob: string;
