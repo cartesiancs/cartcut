@@ -674,3 +674,272 @@ describe("drawDropTarget", () => {
     expect(() => drawDropTarget(ctx, layout, "nope", W)).not.toThrow();
   });
 });
+
+// ===================================================== keyframe diamonds
+
+import { drawKeyframeLane } from "./draw";
+import {
+  KEYFRAME_LANE_PX,
+  KEYFRAME_SIZE_PX,
+  keyframeLane,
+} from "./keyframeMarkers";
+import { bakeTrack } from "../animation/keyframes";
+import { audioElement, keys } from "../renderer/testing";
+
+describe("keyframe diamonds", () => {
+  /** An image clip with opacity keyed at the given element-relative times. */
+  function keyed(times: number[], over: Record<string, any> = {}) {
+    const authored = keys(...times.map((t) => [t, 50] as [number, number]));
+    const base = imageElement();
+    return imageElement({
+      trackId: "v1",
+      startTime: 0,
+      duration: 4000,
+      timelineOptions: { color: "#0000ff" },
+      animation: {
+        ...(base.animation as any),
+        opacity: { isActivate: true, x: authored, ax: bakeTrack(authored) },
+      } as any,
+      ...over,
+    });
+  }
+
+  /** The lane's vertical centre for a clip on the first row at topOffset 0. */
+  const laneCenterY = TRACK_HEIGHT - KEYFRAME_LANE_PX / 2;
+
+  /**
+   * Paint with the playhead parked off-canvas.
+   *
+   * The playhead is `#dbdaf0` and the diamonds `#d7dce3` — near enough that a
+   * "is this pixel light" test cannot tell them apart, and it defaults to x=0
+   * where a keyframe at t=0 also lands. Moving it aside keeps these assertions
+   * about diamonds.
+   */
+  const paintKf = (
+    d: TimelineDocument,
+    over: Partial<Parameters<typeof drawTimeline>[1]> = {},
+  ) => paint(d, { playheadMs: -999_999, ...over });
+
+  /** Whether a pixel is the diamond colour rather than the clip or the plate. */
+  function isDiamond(canvas: any, x: number, y: number) {
+    const p = pixel(canvas, x, y);
+    return p.r > 180 && p.g > 180 && p.b > 180;
+  }
+
+  it("marks each keyframe at its own time", () => {
+    // 45px per second at range 0.9, so 0ms / 1000ms / 2000ms land at 0 / 45 / 90.
+    const { canvas } = paintKf(doc({ a: keyed([0, 1000, 2000]) }));
+    expect(isDiamond(canvas, 0, laneCenterY)).toBe(true);
+    expect(isDiamond(canvas, 45, laneCenterY)).toBe(true);
+    expect(isDiamond(canvas, 90, laneCenterY)).toBe(true);
+    // And nothing between them.
+    expect(isDiamond(canvas, 22, laneCenterY)).toBe(false);
+    expect(isDiamond(canvas, 67, laneCenterY)).toBe(false);
+  });
+
+  it("draws nothing for a clip with no keyframes", () => {
+    // A dark clip colour, so "is this pixel the diamond" is not confused by the
+    // default white element fill.
+    const { canvas } = paintKf(
+      doc({
+        a: imageElement({
+          trackId: "v1",
+          startTime: 0,
+          duration: 4000,
+          timelineOptions: { color: "#0000ff" },
+        }),
+      }),
+    );
+    for (let x = 0; x < 180; x += 5) {
+      expect(isDiamond(canvas, x, laneCenterY)).toBe(false);
+    }
+  });
+
+  it("draws nothing when the track is switched off", () => {
+    const off = keyed([0, 1000]);
+    (off as any).animation.opacity.isActivate = false;
+    const { canvas } = paintKf(doc({ a: off }));
+    expect(isDiamond(canvas, 45, laneCenterY)).toBe(false);
+  });
+
+  /**
+   * A diamond, not a square: its widest row is the middle one.
+   */
+  it("is diamond-shaped", () => {
+    const { canvas } = paintKf(doc({ a: keyed([1000]) }));
+
+    const runAt = (y: number) => {
+      let lit = 0;
+      for (let x = 30; x < 62; x++) {
+        if (isDiamond(canvas, x, y)) lit++;
+      }
+      return lit;
+    };
+
+    const middle = runAt(laneCenterY);
+    const above = runAt(laneCenterY - 2);
+    const below = runAt(laneCenterY + 2);
+
+    expect(middle).toBeGreaterThan(0);
+    expect(middle).toBeGreaterThan(above);
+    expect(middle).toBeGreaterThan(below);
+    expect(above).toBeGreaterThan(0);
+    expect(below).toBeGreaterThan(0);
+  });
+
+  it("is about the size it says it is", () => {
+    const { canvas } = paintKf(doc({ a: keyed([1000]) }));
+    let minX = Infinity;
+    let maxX = -Infinity;
+    for (let x = 20; x < 70; x++) {
+      if (isDiamond(canvas, x, laneCenterY)) {
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+      }
+    }
+    expect(maxX - minX + 1).toBeLessThanOrEqual(KEYFRAME_SIZE_PX + 1);
+    expect(maxX - minX + 1).toBeGreaterThanOrEqual(KEYFRAME_SIZE_PX - 2);
+  });
+
+  it("sits in the lane, not over the label", () => {
+    const { canvas } = paintKf(doc({ a: keyed([1000]) }));
+    // The label band at the top of the clip is untouched.
+    for (let y = 0; y < TRACK_HEIGHT - KEYFRAME_LANE_PX - 1; y++) {
+      expect(isDiamond(canvas, 45, y)).toBe(false);
+    }
+  });
+
+  it("is cut at the clip's edge rather than spilling onto the neighbour", () => {
+    // A keyframe on the very last frame of a clip. Half the diamond is outside
+    // the clip box, and the clip path has to remove it.
+    const d = doc({
+      a: keyed([4000]),
+      b: imageElement({
+        trackId: "v1",
+        startTime: 4000,
+        duration: 4000,
+        timelineOptions: { color: "#0000ff" },
+      }),
+    });
+    const { canvas, layout } = paintKf(d);
+    const edge = layout.clips.find((c) => c.elementId === "a")!;
+    const boundary = Math.round(edge.x + edge.w);
+    for (let x = boundary + 1; x < boundary + 5; x++) {
+      expect(isDiamond(canvas, x, laneCenterY)).toBe(false);
+    }
+  });
+
+  it("leaves the selection border unbroken over a marker", () => {
+    // Selection is the stronger signal; its 2px frame wins.
+    const { canvas } = paintKf(doc({ a: keyed([0, 1000, 2000]) }), {
+      selection: ["a"],
+    });
+    const p = pixel(canvas, 45, TRACK_HEIGHT - 1);
+    expect(p).toMatchObject({ r: 255, g: 255, b: 255 });
+  });
+
+  it("merges keyframes too close together into one marker", () => {
+    const { canvas } = paintKf(doc({ a: keyed([1000, 1001, 1002]) }));
+    let lit = 0;
+    for (let x = 30; x < 62; x++) {
+      if (isDiamond(canvas, x, laneCenterY)) lit++;
+    }
+    // One diamond's worth of pixels, not three overlapping smears.
+    expect(lit).toBeLessThanOrEqual(KEYFRAME_SIZE_PX + 1);
+  });
+
+  /** A full-scale waveform, as the block above builds one. */
+  function loudTrack(level = 1) {
+    const buckets = 200;
+    const peaks = new Float32Array(buckets * 2);
+    for (let i = 0; i < buckets; i++) {
+      peaks[i * 2] = -level;
+      peaks[i * 2 + 1] = level;
+    }
+    return { peaks, bucketMs: 20, durationMs: buckets * 20 };
+  }
+
+  /** Rows at `x` showing the filmstrip's colour rather than a decoration. */
+  function framePixelRows(canvas: any, x: number) {
+    let rows = 0;
+    for (let y = 0; y < TRACK_HEIGHT; y++) {
+      const p = pixel(canvas, x, y);
+      if (p.r > 200 && p.g < 80 && p.b < 80) rows++;
+    }
+    return rows;
+  }
+
+  it("gives an animated video's waveform room without taking the frames", () => {
+    // With no keyframes this clip keeps its existing budget (>= 26 frame rows,
+    // pinned above). The lane costs it 8 more, and no more than that.
+    const authored = keys([0, 0], [2000, 100]);
+    const base = videoElement();
+    const d = doc({
+      v: videoElement({
+        trackId: "v1",
+        startTime: 0,
+        duration: 4000,
+        localpath: "/clip.mp4",
+        isExistAudio: true,
+        timelineOptions: { color: "#0000ff" },
+        animation: {
+          ...(base.animation as any),
+          opacity: { isActivate: true, x: authored, ax: bakeTrack(authored) },
+        } as any,
+      }),
+    });
+
+    const { canvas } = paintKf(d, {
+      provider: solidProvider("#ff0000"),
+      peaks: { get: () => loudTrack(), request: vi.fn() },
+    });
+    expect(framePixelRows(canvas, 100)).toBeGreaterThanOrEqual(18);
+  });
+
+  it("keeps a bare audio clip's full-height waveform", () => {
+    // Audio carries no animation block, so it never gets a lane and never
+    // loses any of its row.
+    const d = doc({
+      a: audioElement({
+        trackId: "v1",
+        startTime: 0,
+        duration: 4000,
+        localpath: "/clip.mp3",
+      }),
+    });
+    expect(
+      keyframeLane(
+        { elementId: "a", trackId: "v1", x: 0, y: 0, w: 180, h: TRACK_HEIGHT },
+        d.elements.a,
+      ),
+    ).toBeNull();
+  });
+
+  it("paints 200 clips of 300 keyframes each without stalling", () => {
+    // Two fills per clip regardless of keyframe count is what makes this cheap.
+    const elements: Record<string, any> = {};
+    const times = Array.from({ length: 300 }, (_, i) => i * 13);
+    for (let i = 0; i < 200; i++) {
+      elements[`e${i}`] = keyed(times, {
+        startTime: i * 4000,
+        trackId: i % 2 === 0 ? "v1" : "v2",
+      });
+    }
+
+    const start = Date.now();
+    paintKf(doc(elements));
+    expect(Date.now() - start).toBeLessThan(3000);
+  });
+
+  it("draws nothing when asked directly for a clip with no lane", () => {
+    const { ctx } = scene(W, H);
+    expect(() =>
+      drawKeyframeLane(
+        ctx,
+        { elementId: "a", trackId: "v1", x: 0, y: 0, w: 180, h: 8 },
+        imageElement(),
+        { colors: defaultColors, range: RANGE },
+      ),
+    ).not.toThrow();
+  });
+});

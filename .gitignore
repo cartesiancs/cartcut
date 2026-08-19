@@ -9,3 +9,4 @@
 /temp
 /apps/app/dist
 .DS_Store
+/even-terminal-*.log

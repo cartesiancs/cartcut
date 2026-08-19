@@ -4,6 +4,9 @@ import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { LocaleController } from "../../controllers/locale";
 import { VideoElementType } from "../../@types/timeline";
 import { KeyframeController } from "../../controllers/keyframe";
+import { addKeyframe, setTrackActive } from "../animation/keyframeOps";
+import { setIn } from "../../utils/immutable";
+import { GestureCommit } from "./gestureCommit";
 
 @customElement("option-video")
 export class OptionVideo extends LitElement {
@@ -21,6 +24,8 @@ export class OptionVideo extends LitElement {
 
   private lc = new LocaleController(this);
   private keyframeControl = new KeyframeController(this);
+  /** Coalesces a spinner scrub into a single undo step. */
+  private gesture = new GestureCommit();
 
   @property()
   timelineState: any = useTimelineStore.getInitialState();
@@ -322,30 +327,22 @@ export class OptionVideo extends LitElement {
     this.requestUpdate();
   }
 
+  /**
+   * Apply an animation preset — a fade in, a scale up — as one undo step.
+   *
+   * Three writes used to make this up: an in-place `isActivate = true` on the
+   * store snapshot, two `addPoint` calls, and a `patchTimeline` that recorded no
+   * history. Undoing a preset was impossible, and the in-place write reached
+   * back into every history entry that shared the element.
+   */
   handleClickAddAnimatePreset(ax, ay, bx, by, type) {
-    const state = useTimelineStore.getState();
-    let element = state.timeline[this.elementId] as any;
-
-    element.animation[type].isActivate = true;
-
-    this.keyframeControl.addPoint({
-      x: ax,
-      y: ay,
-      line: 0,
-      elementId: this.elementId,
-      animationType: type,
+    const elementId = this.elementId;
+    useTimelineStore.getState().withCheckpoint((doc) => {
+      let next = setTrackActive(doc, elementId, type, true);
+      next = addKeyframe(next, elementId, type, "x", ax, ay);
+      next = addKeyframe(next, elementId, type, "x", bx, by);
+      return next;
     });
-
-    this.keyframeControl.addPoint({
-      x: bx,
-      y: by,
-      line: 0,
-      elementId: this.elementId,
-      animationType: type,
-    });
-
-    this.timeline[this.elementId] = element;
-    this.timelineState.patchTimeline(this.timeline);
 
     this.requestUpdate();
   }
@@ -369,32 +366,6 @@ export class OptionVideo extends LitElement {
     this.requestUpdate();
   }
 
-  addAnimationPoint(x, line: number) {
-    const fileType = this.timeline[this.elementId].filetype as any;
-    const startTime = this.timeline[this.elementId].startTime as any;
-
-    const animationType = "position";
-    if (!["image", "video", "text"].includes(fileType)) return false;
-
-    if (
-      this.timeline[this.elementId].animation["position"].isActivate != true
-    ) {
-      return false;
-    }
-
-    try {
-      this.keyframeControl.addPoint({
-        x: this.timelineCursor - startTime,
-        y: x,
-        line: line,
-        elementId: this.elementId,
-        animationType: "position",
-      });
-    } catch (error) {
-      console.log(error, "AAARR");
-    }
-  }
-
   handleLocation() {
     const xDom: any = this.querySelector(
       "number-input[aria-event='location-x'",
@@ -403,17 +374,42 @@ export class OptionVideo extends LitElement {
       "number-input[aria-event='location-y'",
     );
 
-    let x = parseFloat(parseFloat(xDom.value).toFixed(2));
-    let y = parseFloat(parseFloat(yDom.value).toFixed(2));
+    const x = parseFloat(parseFloat(xDom.value).toFixed(2));
+    const y = parseFloat(parseFloat(yDom.value).toFixed(2));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return;
+    }
 
-    this.addAnimationPoint(x, 0);
-    this.addAnimationPoint(y, 1);
+    // The static location and, when position is animated, the keyframe at the
+    // playhead, as a single undo step. `addAnimationPoint` used to record the
+    // keyframes through one path and the location through another — an
+    // in-place write plus `patchTimeline`, which keeps no history at all.
+    const elementId = this.elementId;
+    const startTime = this.timeline[elementId].startTime;
+    const atMs = this.timelineCursor - startTime;
 
-    this.timeline[this.elementId].location = {
-      x: x,
-      y: y,
-    };
+    // One step per scrub, not per mousemove: `number-input` dispatches
+    // `onChange` on every pointer move, and a checkpoint each would evict the
+    // whole undo stack on a single drag.
+    this.gesture.apply((doc) => {
+      let next = doc;
+      if ((next.elements[elementId] as any)?.animation?.position?.isActivate) {
+        next = addKeyframe(next, elementId, "position", "x", atMs, x);
+        next = addKeyframe(next, elementId, "position", "y", atMs, y);
+      }
+      const element = next.elements[elementId];
+      if (element == null) {
+        return next;
+      }
+      return {
+        ...next,
+        elements: {
+          ...next.elements,
+          [elementId]: setIn(element, ["location"], { x, y }),
+        },
+      };
+    });
 
-    this.timelineState.patchTimeline(this.timeline);
+    this.requestUpdate();
   }
 }

@@ -1,3 +1,5 @@
+import { emptyAnimation, sampleTrackXY } from "../animation/keyframes";
+import { addKeyframe } from "../animation/keyframeOps";
 import { html, LitElement } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
@@ -6,7 +8,6 @@ import {
   IRenderOptionStore,
   renderOptionStore,
 } from "../../states/renderOptionStore";
-import { KeyframeController } from "../../controllers/keyframe";
 import { v4 as uuidv4 } from "uuid";
 import { renderText } from "../renderer/text";
 import { renderImage } from "../renderer/image";
@@ -139,7 +140,6 @@ export class PreviewCanvas extends LitElement {
     //document.querySelector("element-control").handleClickPreview();
   }
 
-  private keyframeControl = new KeyframeController(this);
 
   @property()
   timelineState: ITimelineStore = useTimelineStore.getInitialState();
@@ -355,21 +355,6 @@ export class PreviewCanvas extends LitElement {
     this.canvas.style.cursor = this.cursorType;
   }
 
-  findNearestY(pairs: number[][], a: number): number | null {
-    let closestY: number | null = null;
-    let closestDiff = Infinity;
-
-    for (const [x, y] of pairs) {
-      const diff = Math.abs(x - a);
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        closestY = y;
-      }
-    }
-
-    return closestY;
-  }
-
   drawCanvas(canvas: HTMLCanvasElement) {
     if (canvas == null) {
       return;
@@ -536,31 +521,6 @@ export class PreviewCanvas extends LitElement {
       h: element.height,
     });
     this.alignDirection = checkAlign ? checkAlign.direction : [];
-  }
-
-  drawKeyframePath(ctx: CanvasRenderingContext2D, elementId: string) {
-    const imageElement = this.timeline[elementId];
-    if (imageElement.filetype != "image") {
-      return false;
-    }
-
-    const animationType = "position";
-    if (imageElement.animation[animationType].isActivate != true) return false;
-
-    try {
-      const xa = imageElement.animation[animationType].x;
-      const ya = imageElement.animation[animationType].y;
-      // ctx.strokeStyle = "#403af0";
-      // ctx.beginPath();
-
-      // ctx.stroke();
-
-      // for (let index = 0; index < xa.length; index++) {
-      //   const element = xa[index];
-      //   ctx.lineTo(x, );
-
-      // }
-    } catch (error) {}
   }
 
   drawAlign(ctx: CanvasRenderingContext2D, direction: string[]) {
@@ -817,25 +777,16 @@ export class PreviewCanvas extends LitElement {
       return false;
     }
 
-    try {
-      this.keyframeControl.addPoint({
-        x: this.timelineCursor - startTime,
-        y: x,
-        line: 0,
-        elementId: this.activeElementId,
-        animationType: "position",
-      });
+    // Both lanes in one checkpoint. As two, a single undo left an x keyframe
+    // with no y to match it — the element jumping to a position it was never
+    // dragged to.
+    const elementId = this.activeElementId;
+    const atMs = this.timelineCursor - startTime;
 
-      this.keyframeControl.addPoint({
-        x: this.timelineCursor - startTime,
-        y: y,
-        line: 1,
-        elementId: this.activeElementId,
-        animationType: "position",
-      });
-    } catch (error) {
-      console.log(error, "AAARR");
-    }
+    useTimelineStore.getState().withCheckpoint((doc) => {
+      const withX = addKeyframe(doc, elementId, "position", "x", atMs, x);
+      return addKeyframe(withX, elementId, "position", "y", atMs, y);
+    });
   }
 
   /**
@@ -889,30 +840,7 @@ export class PreviewCanvas extends LitElement {
       option: {
         fillColor: "#ffffff",
       },
-      animation: {
-        // position: {
-        //   isActivate: false,
-        //   x: [],
-        //   y: [],
-        //   ax: [[], []],
-        //   ay: [[], []],
-        // },
-        opacity: {
-          isActivate: false,
-          x: [],
-          ax: [[], []],
-        },
-        // scale: {
-        //   isActivate: false,
-        //   x: [],
-        //   ax: [[], []],
-        // },
-        // rotation: {
-        //   isActivate: false,
-        //   x: [],
-        //   ax: [[], []],
-        // },
-      },
+      animation: emptyAnimation("shape"),
       timelineOptions: {
         color: "rgb(59, 143, 179)",
       },
@@ -1286,37 +1214,28 @@ export class PreviewCanvas extends LitElement {
           const duration = element.duration;
           const rotation = element.rotation;
 
-          const animationType = "position";
-
-          if (
-            fileType == "image" &&
-            element.animation[animationType].isActivate == true
-          ) {
-            let index = Math.round(this.timelineCursor / 16);
-            let indexToMs = index * 20;
-            let startTime = Number(element.startTime);
-            let indexPoint = Math.round((indexToMs - startTime) / 20);
-
-            if (indexPoint < 0) {
-              return false;
-            }
-
-            const possibleX = this.findNearestY(
-              element.animation[animationType].ax,
-              this.timelineCursor - element.startTime,
+          // Where the selection box and its drag handles sit, which has to be
+          // wherever the element is actually being drawn.
+          //
+          // Three bugs lived in the block this replaces. It ran only for
+          // `filetype == "image"`, so a video's or a caption's handles stayed
+          // at the static location while the element animated away from them.
+          // It carried a copy of the renderer's dead 16ms-to-20ms guard. And
+          // both of its bail-outs were `return false` inside a `for` loop —
+          // which exits the whole method, so one element whose animation had
+          // not started yet stopped every later element from being drawn at
+          // all.
+          const positionTrack = (element as any).animation?.position;
+          if (positionTrack?.isActivate === true) {
+            const animated = sampleTrackXY(
+              positionTrack,
+              element.startTime,
+              this.timelineCursor,
+              x,
+              y,
             );
-
-            const possibleY = this.findNearestY(
-              element.animation[animationType].ay,
-              this.timelineCursor - element.startTime,
-            );
-
-            if (possibleX == null || possibleY == null) {
-              return false;
-            }
-
-            x = possibleX;
-            y = possibleY;
+            x = animated.x;
+            y = animated.y;
           }
 
           if (

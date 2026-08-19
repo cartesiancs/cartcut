@@ -4,12 +4,22 @@ import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { LocaleController } from "../../controllers/locale";
 import { KeyframeController } from "../../controllers/keyframe";
+import {
+  sampleTrack,
+  sampleTrackXY,
+} from "../animation/keyframes";
+import { addKeyframe } from "../animation/keyframeOps";
+import { setIn } from "../../utils/immutable";
+import { GestureCommit } from "./gestureCommit";
+import type { AnimatableProperty } from "../../@types/timeline";
 import "../filter/backgroundRemove";
 
 @customElement("default-transform")
 export class OptionImage extends LitElement {
   private lc = new LocaleController(this);
   private keyframeControl = new KeyframeController(this);
+  /** Coalesces a spinner scrub into a single undo step. */
+  private gesture = new GestureCommit();
 
   @property()
   elementId;
@@ -184,263 +194,153 @@ export class OptionImage extends LitElement {
     height.value = this.timeline[this.elementId].height;
   }
 
-  findNearestY(pairs, a): number | null {
-    let closestY = null;
-    let closestDiff = Infinity;
+  /**
+   * The value a property shows right now, animated or not.
+   *
+   * These six methods used to carry their own copy of the nearest-neighbour
+   * scan, plus a dead `index`/`indexToMs`/`indexPoint` triple copied from the
+   * renderer's sampler, plus a `try`/`catch` swallowing whatever went wrong.
+   * The copy also read `ax || location.x`, so an animated value of exactly 0 —
+   * the left edge, fully transparent, no rotation — was falsy and silently
+   * showed the static value instead. `sampleTrack` uses `??`.
+   */
+  private track(animationType: string) {
+    return this.timeline?.[this.elementId]?.animation?.[animationType];
+  }
 
-    for (const [x, y] of pairs) {
-      const diff = Math.abs(x - a);
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        closestY = y;
-      }
-    }
-
-    return closestY;
+  private isAnimated(animationType: string): boolean {
+    return this.track(animationType)?.isActivate === true;
   }
 
   getOpacity() {
-    let animationType = "opacity";
-
-    if (
-      this.timeline[this.elementId].animation[animationType].isActivate == true
-    ) {
-      const result = this.getAnimateOpacity(this.elementId) as any;
-      if (result != false) {
-        return result;
-      }
-    } else {
-      return {
-        x: this.timeline[this.elementId].opacity,
-      };
+    const fallback = this.timeline[this.elementId].opacity;
+    if (!this.isAnimated("opacity")) {
+      return { x: fallback };
     }
+    return {
+      x: sampleTrack(
+        this.track("opacity"),
+        this.timeline[this.elementId].startTime,
+        this.timelineCursor,
+        fallback,
+      ),
+    };
   }
 
   getRotation() {
-    let animationType = "rotation";
-
-    if (
-      this.timeline[this.elementId].animation[animationType].isActivate == true
-    ) {
-      const result = this.getAnimateRotation(this.elementId) as any;
-      if (result != false) {
-        return result;
-      }
-    } else {
-      return {
-        x: this.timeline[this.elementId].rotation,
-      };
+    const fallback = this.timeline[this.elementId].rotation;
+    if (!this.isAnimated("rotation")) {
+      return { x: fallback };
     }
+    return {
+      x: sampleTrack(
+        this.track("rotation"),
+        this.timeline[this.elementId].startTime,
+        this.timelineCursor,
+        fallback,
+      ),
+    };
   }
 
   getPosition() {
-    let animationType = "position";
-
-    if (
-      this.timeline[this.elementId].animation[animationType].isActivate == true
-    ) {
-      const result = this.getAnimatePosition(this.elementId) as any;
-      if (result != false) {
-        return result;
-      }
-    } else {
-      return {
-        x: this.timeline[this.elementId].location?.x,
-        y: this.timeline[this.elementId].location?.y,
-      };
+    const location = this.timeline[this.elementId].location ?? { x: 0, y: 0 };
+    if (!this.isAnimated("position")) {
+      return { x: location.x, y: location.y };
     }
+    return sampleTrackXY(
+      this.track("position"),
+      this.timeline[this.elementId].startTime,
+      this.timelineCursor,
+      location.x,
+      location.y,
+    );
   }
 
-  getAnimatePosition(elementId) {
-    if (this.timeline[elementId].animation["position"].isActivate == true) {
-      let index = Math.round(this.timelineCursor / 16);
-      let indexToMs = index * 20;
-      let startTime = Number(this.timeline[elementId].startTime);
-      let indexPoint = Math.round((indexToMs - startTime) / 20);
-
-      try {
-        const ax = this.findNearestY(
-          this.timeline[elementId].animation["position"].ax,
-          this.timelineCursor - this.timeline[elementId].startTime,
-        ) as any;
-
-        const ay = this.findNearestY(
-          this.timeline[elementId].animation["position"].ay,
-          this.timelineCursor - this.timeline[elementId].startTime,
-        ) as any;
-
-        return {
-          x: ax || this.timeline[this.elementId].location?.x,
-          y: ay || this.timeline[this.elementId].location?.y,
-        };
-      } catch (error) {
-        return {
-          x: this.timeline[this.elementId].location?.x,
-          y: this.timeline[this.elementId].location?.y,
-        };
-      }
-    }
+  getAnimationEnable(animationType): boolean {
+    return this.track(animationType)?.isActivate === true;
   }
 
-  getAnimateOpacity(elementId) {
-    if (this.timeline[elementId].animation["opacity"].isActivate == true) {
-      let index = Math.round(this.timelineCursor / 16);
-      let indexToMs = index * 20;
-      let startTime = Number(this.timeline[elementId].startTime);
-      let indexPoint = Math.round((indexToMs - startTime) / 20);
-
-      try {
-        const ax = this.findNearestY(
-          this.timeline[elementId].animation["opacity"].ax,
-          this.timelineCursor - this.timeline[elementId].startTime,
-        ) as any;
-
-        return {
-          x: ax || this.timeline[this.elementId].opacity,
-        };
-      } catch (error) {
-        return {
-          x: 0,
-        };
-      }
-    }
-  }
-
-  getAnimateRotation(elementId) {
-    if (this.timeline[elementId].animation["rotation"].isActivate == true) {
-      let index = Math.round(this.timelineCursor / 16);
-      let indexToMs = index * 20;
-      let startTime = Number(this.timeline[elementId].startTime);
-      let indexPoint = Math.round((indexToMs - startTime) / 20);
-
-      try {
-        const ax = this.findNearestY(
-          this.timeline[elementId].animation["rotation"].ax,
-          this.timelineCursor - this.timeline[elementId].startTime,
-        ) as any;
-
-        return {
-          x: ax || this.timeline[this.elementId].rotation,
-        };
-      } catch (error) {
-        return {
-          x: 0,
-        };
-      }
-    }
-  }
-
-  addAnimationPoint(x, line: number) {
-    const fileType = this.timeline[this.elementId].filetype as any;
-    const startTime = this.timeline[this.elementId].startTime as any;
-
-    const animationType = "position";
-    if (!["image", "video", "text"].includes(fileType)) return false;
-
-    if (
-      this.timeline[this.elementId].animation["position"].isActivate != true
-    ) {
-      return false;
-    }
-
-    try {
-      this.keyframeControl.addPoint({
-        x: this.timelineCursor - startTime,
-        y: x,
-        line: line,
-        elementId: this.elementId,
-        animationType: "position",
-      });
-    } catch (error) {
-      console.log(error, "AAARR");
-    }
-  }
-
-  addAnimationDot(x, line: number, animationType) {
-    const fileType = this.timeline[this.elementId].filetype as any;
-    const startTime = this.timeline[this.elementId].startTime as any;
-
-    if (
-      this.timeline[this.elementId].animation[animationType].isActivate != true
-    ) {
-      return false;
-    }
-
-    try {
-      this.keyframeControl.addPoint({
-        x: this.timelineCursor - startTime,
-        y: x,
-        line: line,
-        elementId: this.elementId,
-        animationType: animationType,
-      });
-    } catch (error) {
-      console.log(error, "AAARR");
-    }
-  }
-
-  getAnimationEnable(animationType) {
-    try {
-      return this.timeline[this.elementId].animation[animationType].isActivate;
-    } catch (error) {
-      return false;
-    }
-  }
-
+  /**
+   * Toggle a property's animation.
+   *
+   * Turning it on seeds one keyframe at the playhead from the element's current
+   * static value, so the element does not jump the moment animation is enabled.
+   * `appendFirstAnimation`, which used to do that by mutating the store
+   * snapshot, now lives in `keyframeOps.setTrackActive` where it is pure and
+   * covered.
+   */
   setAnimationEnable(animationType) {
-    if (
-      this.timeline[this.elementId].animation[animationType].isActivate == false
-    ) {
-      // 현재 위치 혹은 x를 반영
-      this.appendFirstAnimation(animationType);
-      this.timeline[this.elementId].animation[animationType].isActivate = true;
-    } else {
-      this.timeline[this.elementId].animation[animationType].isActivate = false;
+    const element = this.timeline?.[this.elementId];
+    if (element == null) {
+      return;
     }
-    this.timelineState.patchTimeline(this.timeline);
+    this.keyframeControl.setActive({
+      elementId: this.elementId,
+      animationType,
+      active: !this.getAnimationEnable(animationType),
+      atMs: this.timelineCursor - element.startTime,
+    });
+    this.requestUpdate();
   }
 
-  appendFirstAnimation(animationType) {
-    // length 확인 필요
-    const startTime = this.timeline[this.elementId].startTime;
-    const padd = 100;
-
-    if (this.timeline[this.elementId].animation[animationType].x.length != 0) {
-      return false;
+  /**
+   * Commit a value change from a number input as one undo step.
+   *
+   * The static field and, when the property is animated, the keyframe at the
+   * playhead move together, and the whole scrub of the spinner is one step.
+   * `number-input` fires `onChange` on every mousemove, so committing per event
+   * would evict the entire undo stack on a single drag; `GestureCommit`
+   * previews until the gesture settles and then records once.
+   *
+   * The four handlers below used to do neither — they assigned straight into
+   * the store snapshot and called `patchTimeline`, which records no history at
+   * all and, because history entries share their nested objects, rewrote the
+   * past as well.
+   */
+  private commitValue(
+    statics: Array<{ path: string[]; value: any }>,
+    keyframes: Array<{ animationType: AnimatableProperty; lane: 0 | 1; value: number }> = [],
+  ) {
+    const elementId = this.elementId;
+    const element = this.timeline?.[elementId];
+    if (element == null) {
+      return;
     }
+    const atMs = this.timelineCursor - element.startTime;
 
-    if (animationType == "position") {
-      const x = this.timeline[this.elementId].location.x;
-      const y = this.timeline[this.elementId].location.y;
-      const t = this.timelineCursor - startTime;
+    this.gesture.apply((doc) => {
+      let next = doc;
 
-      this.timeline[this.elementId].animation[animationType].x.push({
-        type: "cubic",
-        p: [t, x],
-        cs: [t - padd, x],
-        ce: [t + padd, x],
-      });
+      for (const { animationType, lane, value } of keyframes) {
+        if (next.elements[elementId]?.["animation"]?.[animationType]?.isActivate !== true) {
+          continue;
+        }
+        next = addKeyframe(
+          next,
+          elementId,
+          animationType,
+          lane === 1 ? "y" : "x",
+          atMs,
+          value,
+        );
+      }
 
-      this.timeline[this.elementId].animation[animationType].y.push({
-        type: "cubic",
-        p: [t, y],
-        cs: [t - padd, y],
-        ce: [t + padd, y],
-      });
+      for (const { path, value } of statics) {
+        const current = next.elements[elementId];
+        if (current == null) {
+          continue;
+        }
+        next = {
+          ...next,
+          elements: {
+            ...next.elements,
+            [elementId]: setIn(current, path, value),
+          },
+        };
+      }
 
-      this.timeline[this.elementId].animation[animationType].ax = [[t, x]];
-      this.timeline[this.elementId].animation[animationType].ay = [[t, y]];
-    } else {
-      const x = this.timeline[this.elementId][animationType];
-      const t = this.timelineCursor - startTime;
-      this.timeline[this.elementId].animation[animationType].x.push({
-        type: "cubic",
-        p: [t, x],
-        cs: [t - padd, x],
-        ce: [t + padd, x],
-      });
-      this.timeline[this.elementId].animation[animationType].ax = [[t, x]];
-    }
+      return next;
+    });
   }
 
   handleLocation() {
@@ -451,51 +351,61 @@ export class OptionImage extends LitElement {
       "number-input[aria-event='location-y'",
     );
 
-    let x = parseFloat(parseFloat(xDom.value).toFixed(2));
-    let y = parseFloat(parseFloat(yDom.value).toFixed(2));
+    const x = parseFloat(parseFloat(xDom.value).toFixed(2));
+    const y = parseFloat(parseFloat(yDom.value).toFixed(2));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return;
+    }
 
-    this.addAnimationPoint(x, 0);
-    this.addAnimationPoint(y, 1);
-
-    this.timeline[this.elementId].location = {
-      x: x,
-      y: y,
-    };
-
-    this.timelineState.patchTimeline(this.timeline);
+    this.commitValue(
+      [{ path: ["location"], value: { x, y } }],
+      [
+        { animationType: "position", lane: 0, value: x },
+        { animationType: "position", lane: 1, value: y },
+      ],
+    );
   }
 
   handleOpacity() {
-    const opacity: any = this.querySelector(
-      "number-input[aria-event='opacity'",
+    const dom: any = this.querySelector("number-input[aria-event='opacity'");
+    const opacity = parseInt(dom.value);
+    if (!Number.isFinite(opacity)) {
+      return;
+    }
+    this.commitValue(
+      [{ path: ["opacity"], value: opacity }],
+      [{ animationType: "opacity", lane: 0, value: opacity }],
     );
-
-    this.addAnimationDot(parseInt(opacity.value), 0, "opacity");
-
-    this.timeline[this.elementId].opacity = parseInt(opacity.value);
-
-    this.timelineState.patchTimeline(this.timeline);
   }
 
   handleRotation() {
-    const rotation = this.querySelector(
+    const dom = this.querySelector(
       "number-input[aria-event='rotation'",
     ) as any;
-
-    this.addAnimationDot(parseInt(rotation.value), 0, "rotation");
-
-    this.timeline[this.elementId].rotation = parseInt(rotation.value);
-
-    this.timelineState.patchTimeline(this.timeline);
+    const rotation = parseInt(dom.value);
+    if (!Number.isFinite(rotation)) {
+      return;
+    }
+    this.commitValue(
+      [{ path: ["rotation"], value: rotation }],
+      [{ animationType: "rotation", lane: 0, value: rotation }],
+    );
   }
 
   handleSize() {
     const width: any = this.querySelector("number-input[aria-event='width'");
     const height: any = this.querySelector("number-input[aria-event='height'");
 
-    this.timeline[this.elementId].width = parseFloat(width.value);
-    this.timeline[this.elementId].height = parseFloat(height.value);
+    const w = parseFloat(width.value);
+    const h = parseFloat(height.value);
+    if (!Number.isFinite(w) || !Number.isFinite(h)) {
+      return;
+    }
 
-    this.timelineState.patchTimeline(this.timeline);
+    // Size carries no animation track, so this is a plain value change.
+    this.commitValue([
+      { path: ["width"], value: w },
+      { path: ["height"], value: h },
+    ]);
   }
 }

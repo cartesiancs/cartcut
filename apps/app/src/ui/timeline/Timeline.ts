@@ -6,7 +6,7 @@ import { IKeyframeStore, keyframeStore } from "../../states/keyframeStore";
 import "../../features/element/elementTimelineScroll";
 import "../../features/element/elementTimelineBottom";
 import "../../features/gpt/aiInput";
-import { isTypingTarget } from "../../utils/typingTarget";
+import { isTypingEvent } from "../../utils/typingTarget";
 
 @customElement("timeline-ui")
 export class Timeline extends LitElement {
@@ -101,7 +101,7 @@ export class Timeline extends LitElement {
 
   _handleKeydown(event) {
     // Typing a space in a text field must not toggle playback.
-    if (isTypingTarget(event.target)) {
+    if (isTypingEvent(event)) {
       return;
     }
 

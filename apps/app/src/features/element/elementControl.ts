@@ -1,3 +1,4 @@
+import { emptyAnimation } from "../animation/keyframes";
 import { LitElement, html } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import { v4 as uuidv4 } from "uuid";
@@ -355,30 +356,7 @@ export class ElementControl extends LitElement {
         localpath: path,
         filetype: "image",
         ratio: img.width / img.height,
-        animation: {
-          position: {
-            isActivate: false,
-            x: [],
-            y: [],
-            ax: [[], []],
-            ay: [[], []],
-          },
-          opacity: {
-            isActivate: false,
-            x: [],
-            ax: [[], []],
-          },
-          scale: {
-            isActivate: false,
-            x: [],
-            ax: [[], []],
-          },
-          rotation: {
-            isActivate: false,
-            x: [],
-            ax: [[], []],
-          },
-        },
+        animation: emptyAnimation("image"),
         timelineOptions: {
           color: "rgb(134, 41, 143)",
         },
@@ -482,30 +460,7 @@ export class ElementControl extends LitElement {
             width: width,
             height: height,
           },
-          animation: {
-            position: {
-              isActivate: false,
-              x: [],
-              y: [],
-              ax: [[], []],
-              ay: [[], []],
-            },
-            opacity: {
-              isActivate: false,
-              x: [],
-              ax: [[], []],
-            },
-            scale: {
-              isActivate: false,
-              x: [],
-              ax: [[], []],
-            },
-            rotation: {
-              isActivate: false,
-              x: [],
-              ax: [[], []],
-            },
-          },
+          animation: emptyAnimation("video"),
           timelineOptions: {
             color: "rgb(71, 59, 179)",
           },
@@ -582,30 +537,7 @@ export class ElementControl extends LitElement {
             width: width,
             height: height,
           },
-          animation: {
-            position: {
-              isActivate: false,
-              x: [],
-              y: [],
-              ax: [[], []],
-              ay: [[], []],
-            },
-            opacity: {
-              isActivate: false,
-              x: [],
-              ax: [[], []],
-            },
-            scale: {
-              isActivate: false,
-              x: [],
-              ax: [[], []],
-            },
-            rotation: {
-              isActivate: false,
-              x: [],
-              ax: [[], []],
-            },
-          },
+          animation: emptyAnimation("video"),
           timelineOptions: {
             color: "rgb(71, 59, 179)",
           },
@@ -666,30 +598,7 @@ export class ElementControl extends LitElement {
       width: width,
       widthInner: 200,
       opacity: 100,
-      animation: {
-        position: {
-          isActivate: false,
-          x: [],
-          y: [],
-          ax: [[], []],
-          ay: [[], []],
-        },
-        opacity: {
-          isActivate: false,
-          x: [],
-          ax: [[], []],
-        },
-        scale: {
-          isActivate: false,
-          x: [],
-          ax: [[], []],
-        },
-        rotation: {
-          isActivate: false,
-          x: [],
-          ax: [[], []],
-        },
-      },
+      animation: emptyAnimation("text"),
       timelineOptions: {
         color: "rgb(59, 143, 179)",
       },
@@ -741,30 +650,7 @@ export class ElementControl extends LitElement {
       height: fontSize + 16,
       width: 500,
       widthInner: 200,
-      animation: {
-        position: {
-          isActivate: false,
-          x: [],
-          y: [],
-          ax: [[], []],
-          ay: [[], []],
-        },
-        opacity: {
-          isActivate: false,
-          x: [],
-          ax: [[], []],
-        },
-        scale: {
-          isActivate: false,
-          x: [],
-          ax: [[], []],
-        },
-        rotation: {
-          isActivate: false,
-          x: [],
-          ax: [[], []],
-        },
-      },
+      animation: emptyAnimation("text"),
       timelineOptions: {
         color: "rgb(59, 143, 179)",
       },

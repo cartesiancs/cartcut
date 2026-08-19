@@ -1,3 +1,4 @@
+import { emptyAnimation } from "../animation/keyframes";
 import { LitElement, html } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import { v4 as uuidv4 } from "uuid";
@@ -88,30 +89,7 @@ export class WarningDemo extends LitElement {
           width: 1920,
           height: 1080,
         },
-        animation: {
-          position: {
-            isActivate: false,
-            x: [],
-            y: [],
-            ax: [[], []],
-            ay: [[], []],
-          },
-          opacity: {
-            isActivate: false,
-            x: [],
-            ax: [[], []],
-          },
-          scale: {
-            isActivate: false,
-            x: [],
-            ax: [[], []],
-          },
-          rotation: {
-            isActivate: false,
-            x: [],
-            ax: [[], []],
-          },
-        },
+        animation: emptyAnimation("video"),
       },
       "f395b92c-c195-42d7-bc90-f62b62f3000d": {
         blob: "blob:file:///ac05f4bc-7c0b-456f-ae60-87b251f6f38d",
@@ -128,30 +106,7 @@ export class WarningDemo extends LitElement {
         localpath: "/sample/developer-8764521_1280.jpg",
         filetype: "image",
         ratio: 0.56015625,
-        animation: {
-          position: {
-            isActivate: false,
-            x: [],
-            y: [],
-            ax: [[], []],
-            ay: [[], []],
-          },
-          opacity: {
-            isActivate: false,
-            x: [],
-            ax: [[], []],
-          },
-          scale: {
-            isActivate: false,
-            x: [],
-            ax: [[], []],
-          },
-          rotation: {
-            isActivate: false,
-            x: [],
-            ax: [[], []],
-          },
-        },
+        animation: emptyAnimation("image"),
       },
       "b33c8a40-1e3b-456c-b84f-bbb01cb75a6c": {
         isBold: false,
@@ -197,30 +152,7 @@ export class WarningDemo extends LitElement {
         width: 500,
         widthInner: 200,
         opacity: 100,
-        animation: {
-          position: {
-            isActivate: false,
-            x: [],
-            y: [],
-            ax: [[], []],
-            ay: [[], []],
-          },
-          opacity: {
-            isActivate: false,
-            x: [],
-            ax: [[], []],
-          },
-          scale: {
-            isActivate: false,
-            x: [],
-            ax: [[], []],
-          },
-          rotation: {
-            isActivate: false,
-            x: [],
-            ax: [[], []],
-          },
-        },
+        animation: emptyAnimation("text"),
       },
     };
 

@@ -28,7 +28,6 @@ import "./features/element/elementTimelineRange";
 import "./features/keyframe/keyframeEditor";
 import "./features/menu/menuDropdown";
 
-import "./features/animation/animationPanel";
 
 import "./features/option/optionGroup";
 import "./features/option/optionText";

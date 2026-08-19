@@ -2,7 +2,6 @@ import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { LocaleController } from "../../controllers/locale";
-import { KeyframeController } from "../../controllers/keyframe";
 import "../filter/backgroundRemove";
 import "./controlDefaultTransform";
 
@@ -10,7 +9,6 @@ import "./controlDefaultTransform";
 export class OptionImage extends LitElement {
   elementId: string;
   private lc = new LocaleController(this);
-  private keyframeControl = new KeyframeController(this);
 
   @property()
   timelineState: any = useTimelineStore.getInitialState();

@@ -19,6 +19,14 @@ export interface KeyEventTargetLike {
   readOnly?: boolean;
   disabled?: boolean;
   type?: string;
+  /** Present when the target is a custom element that renders into shadow DOM. */
+  shadowRoot?: { activeElement?: unknown } | null;
+}
+
+/** The part of a `KeyboardEvent` this module reads. */
+export interface KeyEventLike {
+  target?: unknown;
+  composedPath?: () => unknown[];
 }
 
 /** Input types that hold no text and so never swallow a shortcut. */
@@ -60,4 +68,38 @@ export function isTypingTarget(target: unknown): boolean {
   }
 
   return true;
+}
+
+/**
+ * The same question, asked of an event rather than a bare target.
+ *
+ * Use this for any listener bound to `window` or `document`. Shadow DOM
+ * retargets `event.target` to the *host* element as the event crosses the
+ * boundary, so a keystroke typed into `number-input`'s inner `<input>` arrives
+ * at a window listener as `<number-input>` — which is not a text field by any
+ * test, so `isTypingTarget` alone waves it through. That is the exact bug this
+ * module exists to prevent, reintroduced by a component boundary: Backspace
+ * while correcting a digit in the opacity spinner deleted the selected clip.
+ *
+ * `composedPath()[0]` is the element the user is actually typing in, whatever
+ * shadow roots lie between it and the listener.
+ */
+export function isTypingEvent(event: KeyEventLike | null | undefined): boolean {
+  if (event == null) {
+    return false;
+  }
+
+  const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+  if (path.length > 0 && isTypingTarget(path[0])) {
+    return true;
+  }
+
+  if (isTypingTarget(event.target)) {
+    return true;
+  }
+
+  // Last resort for engines without `composedPath`: ask the host's shadow root
+  // what has focus inside it.
+  const host = event.target as KeyEventTargetLike | null;
+  return isTypingTarget(host?.shadowRoot?.activeElement);
 }

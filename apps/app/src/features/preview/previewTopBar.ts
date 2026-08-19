@@ -1,3 +1,4 @@
+import { emptyAnimation } from "../animation/keyframes";
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
@@ -125,30 +126,7 @@ export class PreviewTopBar extends LitElement {
       option: {
         fillColor: "#ffffff",
       },
-      animation: {
-        position: {
-          isActivate: false,
-          x: [],
-          y: [],
-          ax: [[], []],
-          ay: [[], []],
-        },
-        opacity: {
-          isActivate: false,
-          x: [],
-          ax: [[], []],
-        },
-        scale: {
-          isActivate: false,
-          x: [],
-          ax: [[], []],
-        },
-        rotation: {
-          isActivate: false,
-          x: [],
-          ax: [[], []],
-        },
-      },
+      animation: emptyAnimation("shape"),
       timelineOptions: {
         color: "rgb(59, 143, 179)",
       },

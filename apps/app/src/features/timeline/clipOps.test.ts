@@ -413,3 +413,189 @@ describe("pasteClips", () => {
     expect(Object.values(next.elements)[0].startTime).toBe(0);
   });
 });
+
+// =========================================================== keyframes
+//
+// Keyframe times are relative to `element.startTime`, which makes a move free
+// and a split or a paste dangerous: the ops build their results with `{...clip}`
+// spreads, so without help the pieces share one `animation` object.
+
+import { bakeTrack, sampleTrack } from "../animation/keyframes";
+import { keys } from "../renderer/testing";
+
+function animated(over = {}) {
+  const authored = keys([0, 0], [2000, 100]);
+  return imageElement({
+    trackId: "v1",
+    startTime: 1000,
+    duration: 2000,
+    animation: {
+      position: { isActivate: false, x: [], y: [], ax: [], ay: [] },
+      opacity: { isActivate: true, x: authored, ax: bakeTrack(authored) },
+      scale: { isActivate: false, x: [], ax: [] },
+      rotation: { isActivate: false, x: [], ax: [] },
+    },
+    ...over,
+  });
+}
+
+const opacityAt = (element: any, cursorMs: number) =>
+  sampleTrack(element.animation.opacity, element.startTime, cursorMs, -1);
+
+/**
+ * How far two samples of the same curve may legitimately differ.
+ *
+ * A split is exact — `sliceKeyframes` subdivides the segment rather than
+ * planting a default-handled keyframe — so the only slack is that the two
+ * sides bake onto grids offset from each other, and sampling snaps to the
+ * nearest point rather than blending. That is half a 60Hz sample of the ramp:
+ * `animated()` covers 0 -> 100 across 2000ms, so ~0.42.
+ */
+const SAMPLE_SLACK = (100 * (1000 / 60)) / 2000;
+
+function expectSameCurve(actual: number, expected: number) {
+  expect(Math.abs(actual - expected)).toBeLessThanOrEqual(SAMPLE_SLACK);
+}
+
+describe("moveClips and keyframes", () => {
+  it("carries the animation with the clip", () => {
+    // This works for free because the times are relative — but "for free"
+    // is exactly the kind of thing that stops being true silently.
+    const before = doc([["v1", "video"]], { a: animated() });
+    const after = moveClips(before, ["a"], 3000);
+
+    expect((after.elements.a as any).startTime).toBe(4000);
+    for (let offset = 0; offset <= 2000; offset += 100) {
+      expect(opacityAt(after.elements.a, 4000 + offset)).toBe(
+        opacityAt(before.elements.a, 1000 + offset),
+      );
+    }
+  });
+
+  it("leaves the keyframe times themselves untouched", () => {
+    const before = doc([["v1", "video"]], { a: animated() });
+    const after = moveClips(before, ["a"], 3000);
+    expect((after.elements.a as any).animation.opacity.x.map((k) => k.p[0])).toEqual(
+      [0, 2000],
+    );
+  });
+
+  it("does not let a later keyframe edit reach the previous document", () => {
+    // A move spreads the element shallowly, so the moved clip shares its
+    // animation with the version before the move. That is safe only while
+    // every keyframe write is immutable — which is what this pins.
+    const before = doc([["v1", "video"]], { a: animated() });
+    const snapshot = JSON.parse(JSON.stringify(before.elements.a));
+    const after = moveClips(before, ["a"], 3000);
+
+    (after.elements.a as any).animation = {
+      ...(after.elements.a as any).animation,
+      opacity: { isActivate: true, x: [], ax: [] },
+    };
+
+    expect(JSON.parse(JSON.stringify(before.elements.a))).toEqual(snapshot);
+  });
+});
+
+describe("pasteClips and keyframes", () => {
+  it("gives every paste its own animation object", () => {
+    // Pasting twice from one clipboard used to produce two elements editing a
+    // single animation, because `copySelected`'s `structuredClone` runs once at
+    // copy time and the paste itself only spread the clip.
+    const base = doc([["v1", "video"]], {});
+    const clipboard = { a: animated() };
+
+    let ids = 0;
+    const idGen = () => `p${ids++}`;
+
+    let after = pasteClips(base, clipboard, 5000, idGen);
+    after = pasteClips(after, clipboard, 20_000, idGen);
+
+    const pasted = Object.values(after.elements) as any[];
+    expect(pasted).toHaveLength(2);
+    expect(pasted[0].animation).not.toBe(pasted[1].animation);
+    expect(pasted[0].animation).not.toBe(clipboard.a.animation);
+    expect(pasted[0].animation.opacity.x[0]).not.toBe(
+      pasted[1].animation.opacity.x[0],
+    );
+    expect(pasted[0].animation).toEqual(pasted[1].animation);
+  });
+
+  it("keeps the pasted clip showing what the original showed", () => {
+    const base = doc([["v1", "video"]], {});
+    const after = pasteClips(base, { a: animated() }, 5000, () => "p0");
+    const pasted: any = after.elements.p0;
+
+    for (let offset = 0; offset <= 2000; offset += 100) {
+      expect(opacityAt(pasted, pasted.startTime + offset)).toBe(
+        opacityAt(animated(), 1000 + offset),
+      );
+    }
+  });
+});
+
+describe("splitClip and keyframes", () => {
+  it("gives the halves independent animations at the document level", () => {
+    const before = doc([["v1", "video"]], { a: animated() });
+    const after = splitClip(before, "a", 2000, "b");
+
+    const left: any = after.elements.a;
+    const right: any = after.elements.b;
+    expect(left.animation).not.toBe(right.animation);
+    expect(left.animation.opacity.x[0]).not.toBe(right.animation.opacity.x[0]);
+  });
+
+  it("shows the same value across the seam as before the cut", () => {
+    const before = doc([["v1", "video"]], { a: animated() });
+    const after = splitClip(before, "a", 2000, "b");
+
+    for (let cursor = 1000; cursor < 3000; cursor += 50) {
+      const half = cursor < 2000 ? after.elements.a : after.elements.b;
+      expectSameCurve(opacityAt(half, cursor), opacityAt(before.elements.a, cursor));
+    }
+  });
+
+  it("survives being split repeatedly", () => {
+    // The "used hard" case: cut, cut a piece again, and again.
+    let d = doc([["v1", "video"]], { a: animated({ duration: 4000 }) });
+    const original = d.elements.a;
+
+    d = splitClip(d, "a", 2000, "b");
+    d = splitClip(d, "b", 3000, "c");
+    d = splitClip(d, "c", 4000, "e");
+
+    const pieces = Object.values(d.elements) as any[];
+    expect(pieces).toHaveLength(4);
+
+    const seen = new Set<object>();
+    for (const piece of pieces) {
+      expect(seen.has(piece.animation)).toBe(false);
+      seen.add(piece.animation);
+      expect(piece.animation.opacity.ax).toEqual(
+        bakeTrack(piece.animation.opacity.x),
+      );
+    }
+
+    for (let cursor = 1000; cursor < 5000; cursor += 50) {
+      const piece = pieces.find(
+        (p) => cursor >= p.startTime && cursor < p.startTime + p.duration,
+      );
+      if (piece == null) continue;
+      expectSameCurve(opacityAt(piece, cursor), opacityAt(original, cursor));
+    }
+  });
+});
+
+describe("rippleDelete and keyframes", () => {
+  it("shifts a following clip without disturbing its keyframes", () => {
+    const before = doc([["v1", "video"]], {
+      a: animated({ startTime: 0, duration: 1000 }),
+      b: animated({ startTime: 1000, duration: 2000 }),
+    });
+    const after = rippleDelete(before, "a");
+
+    const moved: any = after.elements.b;
+    expect(moved.startTime).toBe(0);
+    expect(moved.animation.opacity.x.map((k: any) => k.p[0])).toEqual([0, 2000]);
+  });
+});

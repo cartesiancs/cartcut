@@ -12,6 +12,7 @@ import {
   type TimelineTrack,
   type TrackKind,
 } from "../features/timeline/tracks";
+import { normalizeAnimations } from "../features/animation/keyframeOps";
 
 type TimelineCursorType = "pointer" | "text" | "shape" | "lockKeyboard";
 
@@ -72,6 +73,15 @@ export interface ITimelineStore {
   getDocument: () => TimelineDocument;
   /** Replace both, re-deriving indices, names and priorities. */
   patchDocument: (doc: TimelineDocument) => void;
+  /**
+   * Show a document without normalising it or recording an undo step.
+   *
+   * For the preview frames of a drag, which arrive at pointer rate. The
+   * document must already be well-formed — in practice it came from a pure op
+   * applied to one that was — because none of the repair work runs. `patchDocument`
+   * would re-walk every keyframe array in the project on every mousemove.
+   */
+  previewDocument: (doc: TimelineDocument) => void;
   /**
    * Apply a pure document transform and record one undo step — but only if the
    * transform actually changed something. The pure ops return their input
@@ -205,9 +215,18 @@ export const useTimelineStore = createStore<ITimelineStore>((set, get) => ({
 
   patchDocument: (doc: TimelineDocument) =>
     set(() => {
-      const normalized = normalizeDocument(doc);
+      // Ingress, and the only place animation blocks are validated: this is
+      // what a loaded `.ngt` comes through, and projects written by older
+      // builds carry `ax: [[], []]` where a list of `[t, value]` pairs belongs.
+      // `normalizeDocument` would be the wrong home — it runs on every
+      // checkpoint and every clip op, and re-walking keyframe arrays at pointer
+      // rate to re-check data that was checked on the way in is pure cost.
+      const normalized = normalizeDocument(normalizeAnimations(doc));
       return { timeline: normalized.elements, tracks: normalized.tracks };
     }),
+
+  previewDocument: (doc: TimelineDocument) =>
+    set(() => ({ timeline: doc.elements, tracks: doc.tracks })),
 
   withCheckpoint: (fn) =>
     set((state) => {

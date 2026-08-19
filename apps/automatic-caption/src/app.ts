@@ -29,16 +29,21 @@ export class SimpleApp extends LitElement {
       speed: 1,
       filter: { enable: false, list: [] },
       origin: { width: 1920, height: 1080 },
+      // `ax`/`ay` are lists of `[timeMs, value]` pairs. This fixture, like every
+      // element factory in the main app, used to write `[[], []]` — two *empty*
+      // pairs. Inlined rather than importing `emptyAnimation`, because this is a
+      // separate Vite build with its own module graph.
       animation: {
         position: {
           isActivate: false,
           x: [],
           y: [],
-          ax: [[], []],
-          ay: [[], []],
+          ax: [],
+          ay: [],
         },
-        opacity: { isActivate: false, x: [], ax: [[], []] },
-        scale: { isActivate: false, x: [], ax: [[], []] },
+        opacity: { isActivate: false, x: [], ax: [] },
+        scale: { isActivate: false, x: [], ax: [] },
+        rotation: { isActivate: false, x: [], ax: [] },
       },
     },
   };

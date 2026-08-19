@@ -123,13 +123,12 @@ describe("renderElement", () => {
     expect(pixel(canvas, 255, 255)).toMatchObject({ r: 0, g: 0, b: 0 });
   });
 
-  it("still follows an INACTIVE position track — rotation, scale and opacity do not", () => {
-    // Characterisation, not endorsement: `renderElement` guards rotation, scale
-    // and opacity with `isActivate` but reads position whenever the track
-    // exists. Turning the position animation off therefore does not stop the
-    // element moving, as long as keyframes remain baked into `ax`/`ay`.
-    // If that is fixed, this test should fail and be rewritten to expect the
-    // element to stay at its static location.
+  it("ignores an inactive position track, as rotation, scale and opacity do", () => {
+    // Position used to be the one property that animated whenever a track
+    // merely existed, so switching it off left the element moving anyway. It is
+    // now gated on `isActivate` like the other three — which the timeline's
+    // keyframe lane depends on, since it draws diamonds only for live tracks
+    // and would otherwise show a clip moving with nothing to explain it.
     const el = imageElement({
       location: { x: 0, y: 0 },
       width: 50,
@@ -147,8 +146,9 @@ describe("renderElement", () => {
     });
 
     const { canvas } = draw(el, 0);
-    expect(pixel(canvas, 225, 125)).toMatchObject({ r: 255, g: 0, b: 0 });
-    expect(pixel(canvas, 25, 25)).toMatchObject({ r: 0, g: 0, b: 0 });
+    // At its static location, not at the baked (200, 100).
+    expect(pixel(canvas, 25, 25)).toMatchObject({ r: 255, g: 0, b: 0 });
+    expect(pixel(canvas, 225, 125)).toMatchObject({ r: 0, g: 0, b: 0 });
   });
 
   it("leaves an inactive scale track at 1x even with keyframes baked in", () => {

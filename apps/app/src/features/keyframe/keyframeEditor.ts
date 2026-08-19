@@ -5,6 +5,11 @@ import { millisecondsToPx, pxToMilliseconds } from "../../utils/time";
 import { IUIStore, uiStore } from "../../states/uiStore";
 import { ImageElementType } from "../../@types/timeline";
 import { KeyframeController } from "../../controllers/keyframe";
+import { applySurface, surfaceSpec } from "../timeline/canvasSurface";
+import { moveKeyframe, setHandles } from "../animation/keyframeOps";
+import { sameKeyframes } from "../animation/keyframes";
+import type { TimelineDocument } from "../timeline/tracks";
+import { isTypingEvent } from "../../utils/typingTarget";
 
 @customElement("keyframe-editor")
 export class KeyframeEditor extends LitElement {
@@ -27,6 +32,13 @@ export class KeyframeEditor extends LitElement {
   cursor: string;
   verticalRange: number;
   activePointIndex: number;
+
+  /** The document as it stood when the current drag began. */
+  private dragOriginDoc: TimelineDocument | null = null;
+  /** Index of the grabbed keyframe in `dragOriginDoc`, which never re-sorts. */
+  private dragOriginIndex = -1;
+  /** The drag's preview document; committed once, on mouseup. */
+  private pendingDoc: TimelineDocument | null = null;
 
   constructor() {
     super();
@@ -62,7 +74,12 @@ export class KeyframeEditor extends LitElement {
     this.activePointIndex = -1;
 
     this.addEventListener("scroll", this.handleScroll.bind(this));
-    window.addEventListener("keydown", this._handleKeydown.bind(this));
+    // Bound once and kept, so `disconnectedCallback` can actually remove it.
+    // The old `.bind(this)` inline created a function nobody held a
+    // reference to, leaking one window listener per editor instance.
+    window.addEventListener("keydown", this.boundKeydown);
+    window.addEventListener("mouseup", this._handleMouseUp);
+    window.addEventListener("blur", this.handleCancelDrag);
 
     // try {
     //   // position이면 2개 나머지는 1개
@@ -80,8 +97,21 @@ export class KeyframeEditor extends LitElement {
 
   private keyframeControl = new KeyframeController(this);
 
-  @property()
-  isShow;
+  /**
+   * Whether the editor is open.
+   *
+   * An explicit converter because the host binds this as an attribute —
+   * `isShow="${this.target.isShow}"` — and Lit's default converter is String,
+   * so the closed state arrived as the string `"false"`, which is truthy. Every
+   * `if (this.isShow)` in this file was therefore always taken: the editor
+   * redrew on every store change while closed, and Backspace deleted a keyframe
+   * from a panel the user could not see.
+   *
+   * Lit's own `Boolean` converter is presence-based and would be wrong here for
+   * the same reason — the attribute is always present.
+   */
+  @property({ converter: { fromAttribute: (value) => value === "true" } })
+  isShow = false;
 
   @property()
   elementId;
@@ -132,105 +162,78 @@ export class KeyframeEditor extends LitElement {
   }
 
   render() {
-    try {
-      if (this.isShow) {
-        if (this.animationType == "position") {
-          this.lineCount = 2;
-        }
-        if (["opacity", "scale", "rotation"].includes(this.animationType)) {
-          this.lineCount = 1;
-        }
+    if (!this.isShow) {
+      return;
+    }
 
-        // if (this.prevElementId != this.elementId) {
-        //   if (
-        //     this.timeline[this.elementId].animation[this.animationType]
-        //       .isActivate
-        //   ) {
-        //     this.points = [
-        //       ...this.timeline[this.elementId].animation[this.animationType]
-        //         .points,
-        //     ];
-        //   } else {
-        //     this.points = [[[0, 0]], [[0, 0]]];
-        //   }
-        //   this.prevElementId = this.elementId;
-        // }
-      }
+    // Position is the only two-lane property; everything else edits one curve.
+    this.lineCount = this.animationType == "position" ? 2 : 1;
+    if (this.selectLine >= this.lineCount) {
+      // A stale `selectLine` of 1 left the editor silently inert on a
+      // single-lane property: every read and every edit addressed a `y` lane
+      // that does not exist, so clicking added nothing and dragging grabbed
+      // nothing, with no visible reason and no way back except the x button.
+      this.selectLine = 0;
+      this.activePointIndex = -1;
+    }
 
-      if (this.isShow) {
-        this.showKeyframeEditorButtonGroup();
+    this.showKeyframeEditorButtonGroup();
+    this.classList.add("h-100", "w-100", "position-absolute", "overflow-hidden");
 
-        this.classList.add(
-          "h-100",
-          "w-100",
-          "position-absolute",
-          "overflow-hidden",
-        );
-
-        return html` <div style="display: flex;">
-          <div
-            class="d-flex row gap-2 p-2 ps-3"
-            style="width: ${this.resize.timelineVertical.leftOption}px"
+    return html` <div style="display: flex;">
+      <div
+        class="d-flex row gap-2 p-2 ps-3"
+        style="width: ${this.resize.timelineVertical.leftOption}px"
+      >
+        <span class="text-secondary">Line</span>
+        <div class="btn-group p-2" role="group" id="timelineOptionLineEditor">
+          <button
+            line="0"
+            @click=${() => this.changeLineEditor("0")}
+            type="button"
+            class="btn ${this.selectLine == 0
+              ? "btn-primary"
+              : "btn-secondary"} btn-sm"
           >
-            <span class="text-secondary">Line</span>
-            <div
-              class="btn-group p-2"
-              role="group"
-              id="timelineOptionLineEditor"
-            >
-              <button
-                line="0"
-                @click=${() => this.changeLineEditor("0")}
-                type="button"
-                class="btn ${this.selectLine == 0
-                  ? "btn-primary"
-                  : "btn-secondary"} btn-sm"
-              >
-                x
-              </button>
+            x
+          </button>
 
-              <button
-                line="1"
-                @click=${() => this.changeLineEditor("1")}
-                type="button"
-                class="btn ${this.selectLine == 1
-                  ? "btn-primary"
-                  : "btn-secondary"} btn-sm ${this.lineCount == 1
-                  ? "d-none"
-                  : ""}"
-              >
-                y
-              </button>
-            </div>
+          <button
+            line="1"
+            @click=${() => this.changeLineEditor("1")}
+            type="button"
+            class="btn ${this.selectLine == 1
+              ? "btn-primary"
+              : "btn-secondary"} btn-sm ${this.lineCount == 1 ? "d-none" : ""}"
+          >
+            y
+          </button>
+        </div>
 
-            <span class="text-secondary">Range</span>
-            <input
-              type="range"
-              class="form-range p-2 ps-3"
-              min="0.1"
-              max="10"
-              step="0.1"
-              value="1"
-              id="verticalRange"
-              @change=${this.handleChangeVerticalRange}
-              @input=${this.handleChangeVerticalRange}
-            />
-          </div>
+        <span class="text-secondary">Range</span>
+        <input
+          type="range"
+          class="form-range p-2 ps-3"
+          min="0.1"
+          max="10"
+          step="0.1"
+          value="1"
+          id="verticalRange"
+          @change=${this.handleChangeVerticalRange}
+          @input=${this.handleChangeVerticalRange}
+        />
+      </div>
 
-          <canvas
-            id="keyframeEditerCanvasRef"
-            style="width: 100%; left: ${this.resize.timelineVertical
-              .leftOption}px; position: absolute; cursor: ${this.cursor};"
-            @mousewheel=${this._handleMouseWheel}
-            @mousedown=${this._handleMouseDown}
-            @mousemove=${this._handleMouseMove}
-            @mouseup=${this._handleMouseUp}
-          ></canvas>
-        </div>`;
-      } else {
-        this.hideKeyframeEditorButtonGroup();
-      }
-    } catch (error) {}
+      <canvas
+        id="keyframeEditerCanvasRef"
+        style="left: ${this.resize.timelineVertical
+          .leftOption}px; position: absolute; cursor: ${this.cursor};"
+        @mousewheel=${this._handleMouseWheel}
+        @mousedown=${this._handleMouseDown}
+        @mousemove=${this._handleMouseMove}
+        @mouseup=${this._handleMouseUp}
+      ></canvas>
+    </div>`;
   }
 
   handleChangeVerticalRange(e) {
@@ -390,7 +393,7 @@ export class KeyframeEditor extends LitElement {
 
     ctx.fillStyle = "#dbdaf0";
     ctx.beginPath();
-    ctx.rect(now, 0, 2, this.canvas.height);
+    ctx.rect(now, 0, 2, this.surface.height);
     ctx.fill();
   }
 
@@ -404,7 +407,7 @@ export class KeyframeEditor extends LitElement {
 
     ctx.fillStyle = "#000000";
     ctx.beginPath();
-    ctx.rect(0, 0, startPx, this.canvas.height);
+    ctx.rect(0, 0, startPx, this.surface.height);
     ctx.fill();
   }
 
@@ -420,41 +423,66 @@ export class KeyframeEditor extends LitElement {
 
     ctx.fillStyle = "#000000";
     ctx.beginPath();
-    ctx.rect(startPx, 0, this.canvas.width - startPx, this.canvas.height);
+    ctx.rect(
+      startPx,
+      0,
+      this.surface.width - startPx,
+      this.surface.height,
+    );
     ctx.fill();
   }
 
+  /**
+   * The canvas in CSS px — what every draw method below measures in.
+   *
+   * `this.canvas.width`/`.height` are the *device* pixel backing store, and
+   * drawing happens through a `dpr` transform, so using them as rect extents
+   * made every filled rect `dpr` times too large. The right-hand padding was
+   * the visible one: it started in the right place and ran `dpr` times too far.
+   */
+  private surface = { width: 0, height: 0 };
+
   private drawCanvas() {
-    if (!this.isShow) {
+    if (!this.isShow || !this.canvas) {
       return false;
     }
 
-    try {
-      const ctx = this.canvas.getContext("2d");
-      if (ctx) {
-        const dpr = window.devicePixelRatio;
-        this.canvas.style.width = `${window.innerWidth}px`;
+    const ctx = this.canvas.getContext("2d");
+    const timeline = document.querySelector("element-timeline");
+    if (!ctx || !timeline || this.timeline?.[this.elementId] == null) {
+      // The only condition the old blanket `try {}` around this was actually
+      // swallowing: a draw scheduled before the target element exists.
+      return false;
+    }
 
-        this.canvas.width = window.innerWidth * dpr;
-        this.canvas.height =
-          document.querySelector("element-timeline").offsetHeight * dpr;
+    // The canvas is positioned at `left: leftOption`, so the space it has is
+    // what remains of the window — not the whole window, which ran it off the
+    // right edge by exactly the header width.
+    const width = Math.max(
+      0,
+      window.innerWidth - this.resize.timelineVertical.leftOption,
+    );
+    const height = (timeline as HTMLElement).offsetHeight;
+    this.surface = { width, height };
 
-        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        ctx.scale(dpr, dpr);
+    applySurface(
+      this.canvas,
+      ctx,
+      surfaceSpec(width, height, window.devicePixelRatio || 1),
+    );
 
-        ctx.fillStyle = "#0f1012";
-        ctx.beginPath();
-        ctx.rect(0, 0, this.canvas.width, this.canvas.height);
-        ctx.fill();
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#0f1012";
+    ctx.beginPath();
+    ctx.rect(0, 0, width, height);
+    ctx.fill();
 
-        this.drawLeftPadding(ctx);
-        this.drawRightPadding(ctx);
-        this.drawRuler();
-        this.drawCursor(ctx);
-        this.drawDots(ctx);
-        this.drawLines(ctx);
-      }
-    } catch (error) {}
+    this.drawLeftPadding(ctx);
+    this.drawRightPadding(ctx);
+    this.drawRuler();
+    this.drawCursor(ctx);
+    this.drawDots(ctx);
+    this.drawLines(ctx);
   }
 
   updated() {
@@ -463,13 +491,22 @@ export class KeyframeEditor extends LitElement {
 
   showKeyframeEditorButtonGroup() {}
 
+  /**
+   * Collapse the bottom offcanvas.
+   *
+   * No longer calls `closeAnimationPanel`. It used to, and it used to be called
+   * from `render()` — a render writing to the store that decides whether it
+   * renders. That was harmless only because `isShow` was permanently truthy;
+   * with the converter above making it a real boolean, it would recurse.
+   * `Timeline._handleClickClosedKeyframe` owns the explicit close.
+   */
   hideKeyframeEditorButtonGroup() {
-    let keyframeEditor: any = document.getElementById("option_bottom");
-    keyframeEditor.classList.remove("show");
-    keyframeEditor.classList.add("hide");
-    document
-      .querySelector("element-timeline-canvas")
-      .closeAnimationPanel(this.elementId);
+    const offcanvas = document.getElementById("option_bottom");
+    if (offcanvas == null) {
+      return;
+    }
+    offcanvas.classList.remove("show");
+    offcanvas.classList.add("hide");
   }
 
   addPadding({ px, type }) {
@@ -507,6 +544,11 @@ export class KeyframeEditor extends LitElement {
 
   changeLineEditor(line) {
     this.selectLine = Number(line);
+    // The selected index belongs to the lane it was made in. Carrying it over
+    // meant Backspace after switching deleted the keyframe at the same index in
+    // the *other* lane — one the user never selected — and `drawDotsLoop`
+    // painted both of them yellow, so both looked selected.
+    this.activePointIndex = -1;
     this.requestUpdate();
   }
 
@@ -537,20 +579,19 @@ export class KeyframeEditor extends LitElement {
     if (this.activePointIndex == -1) {
       return false;
     }
-    const lineToAlpha = this.selectLine == 0 ? "x" : "y";
 
-    this.timeline[this.elementId].animation[this.animationType][
-      lineToAlpha
-    ].splice(this.activePointIndex, 1);
+    this.keyframeControl.removePoint({
+      elementId: this.elementId,
+      animationType: this.animationType,
+      line: this.selectLine,
+      index: this.activePointIndex,
+    });
 
-    this.activePointIndex == -1;
+    // `= -1`, not `== -1`. The comparison this replaces had no effect, so the
+    // index of a keyframe that no longer exists stayed live — and the next
+    // Backspace deleted whatever had shifted into its place.
+    this.activePointIndex = -1;
 
-    this.timelineState.patchTimeline(this.timeline);
-    this.keyframeControl.interpolate(
-      this.selectLine,
-      this.elementId,
-      this.animationType,
-    );
     this.requestUpdate();
   }
 
@@ -627,7 +668,10 @@ export class KeyframeEditor extends LitElement {
 
     this.drawCanvas();
 
-    this.activePointIndex == -1;
+    // `= -1`, not `== -1`. Scrolling is meant to drop the selection — the
+    // comparison it was written as did nothing, so a Backspace after a scroll
+    // deleted a keyframe the user could no longer see highlighted.
+    this.activePointIndex = -1;
 
     if (newScroll >= 0) {
       this.timelineState.setScroll(newScroll);
@@ -636,177 +680,215 @@ export class KeyframeEditor extends LitElement {
     this.requestUpdate();
   }
 
+  /** The authored keyframes for the lane currently being edited. */
+  private currentLane(): any[] {
+    const lane = this.selectLine == 0 ? "x" : "y";
+    const list = this.timeline?.[this.elementId]?.animation?.[
+      this.animationType
+    ]?.[lane];
+    return Array.isArray(list) ? list : [];
+  }
+
+  /** Pointer position as (element-relative ms, track value). */
+  private pointerValue(e): { tMs: number; value: number } {
+    return {
+      tMs:
+        pxToMilliseconds(e.offsetX, this.timelineRange) +
+        pxToMilliseconds(this.timelineScroll, this.timelineRange) -
+        this.timeline[this.elementId].startTime,
+      value: e.offsetY * this.verticalRange - this.verticalScroll,
+    };
+  }
+
   _handleMouseMove(e) {
-    //console.log(e);
-    const ox = e.offsetX;
-    const oy = e.offsetY;
-    const px =
-      pxToMilliseconds(e.offsetX, this.timelineRange) +
-      pxToMilliseconds(this.timelineScroll, this.timelineRange) -
-      this.timeline[this.elementId].startTime;
-    const py = e.offsetY * this.verticalRange - this.verticalScroll;
-    const lineToAlpha = this.selectLine == 0 ? "x" : "y";
-    const padding = 10;
-    const paddingY = 10;
-
-    let isCursorChange = false;
-
-    for (
-      let index = 0;
-      index <
-      this.timeline[this.elementId].animation[this.animationType][lineToAlpha]
-        .length;
-      index++
-    ) {
-      const element =
-        this.timeline[this.elementId].animation[this.animationType][
-          lineToAlpha
-        ][index];
-
-      const check = this.checkBoundary(element, ox, oy);
-
-      if (["p", "ce", "cs"].includes(check)) {
-        this.cursor = "pointer";
-        isCursorChange = true;
-      }
+    if (this.timeline?.[this.elementId] == null) {
+      return;
     }
 
-    if (isCursorChange == false) {
-      this.cursor = "default";
+    const list = this.currentLane();
+    this.cursor = list.some((point) =>
+      ["p", "ce", "cs"].includes(this.checkBoundary(point, e.offsetX, e.offsetY)),
+    )
+      ? "pointer"
+      : "default";
+
+    if (!this.isDrag || this.clickIndex < 0) {
+      this.requestUpdate();
+      return;
     }
 
-    //console.log(px);
+    const { tMs, value } = this.pointerValue(e);
 
-    if (this.isDrag) {
-      let isApply = true;
-      if (this.clickDot == "p") {
-        for (
-          let index = 0;
-          index <
-          this.timeline[this.elementId].animation[this.animationType][
-            lineToAlpha
-          ].length;
-          index++
-        ) {
-          const element =
-            this.timeline[this.elementId].animation[this.animationType][
-              lineToAlpha
-            ][index];
-
-          if (element.p[0] == px && index != this.clickIndex) {
-            isApply = false;
-          }
-        }
-      }
-
-      if (isApply == false) {
-        this.drawCanvas();
-        return false;
-      }
-
-      this.timeline[this.elementId].animation[this.animationType][lineToAlpha][
-        this.clickIndex
-      ][this.clickDot][0] = px;
-      this.timeline[this.elementId].animation[this.animationType][lineToAlpha][
-        this.clickIndex
-      ][this.clickDot][1] = py;
-
-      if (this.clickDot == "p") {
-        this.timeline[this.elementId].animation[this.animationType][
-          lineToAlpha
-        ][this.clickIndex].ce[0] = px + 100;
-        this.timeline[this.elementId].animation[this.animationType][
-          lineToAlpha
-        ][this.clickIndex].ce[1] = py;
-
-        this.timeline[this.elementId].animation[this.animationType][
-          lineToAlpha
-        ][this.clickIndex].cs[0] = px - 100;
-        this.timeline[this.elementId].animation[this.animationType][
-          lineToAlpha
-        ][this.clickIndex].cs[1] = py;
-      }
-
-      this.keyframeControl.interpolate(
-        this.selectLine,
+    // A drag previews through `previewDocument` — which neither normalises the
+    // document nor records history, so it is cheap at pointer rate — and
+    // commits exactly once on mouseup. Writing per mousemove is what made a
+    // single drag either fill the undo stack or, as it actually did, mutate the
+    // store snapshot in place and bypass history altogether.
+    //
+    // Every frame recomputes from `dragOriginDoc` rather than compounding, so
+    // the point tracks the pointer exactly instead of drifting.
+    if (this.clickDot == "p") {
+      const moved = moveKeyframe(
+        this.dragOriginDoc ?? useTimelineStore.getState().getDocument(),
         this.elementId,
         this.animationType,
+        this.selectLine == 0 ? "x" : "y",
+        this.dragOriginIndex,
+        tMs,
+        value,
       );
-
-      this.drawCanvas();
+      this.clickIndex = moved.index;
+      this.activePointIndex = moved.index;
+      this.pendingDoc = moved.doc;
+    } else {
+      const origin = this.dragOriginDoc?.elements[this.elementId] as any;
+      const anchor =
+        origin?.animation?.[this.animationType]?.[
+          this.selectLine == 0 ? "x" : "y"
+        ]?.[this.dragOriginIndex];
+      if (anchor == null) {
+        return;
+      }
+      this.pendingDoc = setHandles(
+        this.dragOriginDoc!,
+        this.elementId,
+        this.animationType,
+        this.selectLine == 0 ? "x" : "y",
+        this.dragOriginIndex,
+        this.clickDot == "cs"
+          ? { cs: [tMs, value] }
+          : { ce: [tMs, value] },
+      );
     }
 
+    useTimelineStore.getState().previewDocument(this.pendingDoc);
+    this.drawCanvas();
     this.requestUpdate();
   }
 
   _handleMouseDown(e) {
-    const lineToAlpha = this.selectLine == 0 ? "x" : "y";
-
-    const padding = 100;
-    const px =
-      pxToMilliseconds(e.offsetX, this.timelineRange) +
-      pxToMilliseconds(this.timelineScroll, this.timelineRange) -
-      this.timeline[this.elementId].startTime;
-    const py = e.offsetY * this.verticalRange - this.verticalScroll;
-
-    const ox = e.offsetX;
-
-    const oy = e.offsetY;
-    for (
-      let index = 0;
-      index <
-      this.timeline[this.elementId].animation[this.animationType][lineToAlpha]
-        .length;
-      index++
-    ) {
-      const element =
-        this.timeline[this.elementId].animation[this.animationType][
-          lineToAlpha
-        ][index];
-
-      const check = this.checkBoundary(element, ox, oy);
-
-      if (check == "p") {
-        this.clickIndex = index;
-        this.clickDot = "p";
-        this.activePointIndex = index;
-        this.isDrag = true;
-      } else if (check == "ce") {
-        this.clickIndex = index;
-        this.clickDot = "ce";
-        this.isDrag = true;
-      } else if (check == "cs") {
-        this.clickIndex = index;
-        this.clickDot = "cs";
-        this.isDrag = true;
-      }
+    if (this.timeline?.[this.elementId] == null) {
+      return;
     }
 
-    if (!this.isDrag) {
-      this.keyframeControl.addPoint({
-        x: px,
-        y: py,
-        line: this.selectLine,
-        elementId: this.elementId,
-        animationType: this.animationType,
-      });
-      this.drawCanvas();
-    }
+    const list = this.currentLane();
 
-    return;
-  }
-
-  _handleMouseUp() {
+    // Reverse order with an early exit, so the point drawn on top is the one
+    // grabbed. The loop this replaces ran forwards without breaking, so the
+    // *last* overlapping point won regardless of what the user was pointing at.
     this.isDrag = false;
+    for (let index = list.length - 1; index >= 0; index--) {
+      const check = this.checkBoundary(list[index], e.offsetX, e.offsetY);
+      if (check == "n") {
+        continue;
+      }
+      this.clickIndex = index;
+      this.clickDot = check;
+      this.isDrag = true;
+      if (check == "p") {
+        this.activePointIndex = index;
+      }
+      break;
+    }
+
+    if (this.isDrag) {
+      // The document as it stood when the drag began. Every mousemove
+      // recomputes from this rather than compounding, so the point tracks the
+      // pointer exactly instead of drifting.
+      this.dragOriginDoc = useTimelineStore.getState().getDocument();
+      this.dragOriginIndex = this.clickIndex;
+      this.pendingDoc = null;
+      return;
+    }
+
+    const { tMs, value } = this.pointerValue(e);
+    this.keyframeControl.addPoint({
+      x: tMs,
+      y: value,
+      line: this.selectLine,
+      elementId: this.elementId,
+      animationType: this.animationType,
+    });
+    this.drawCanvas();
   }
+
+  _handleMouseUp = () => {
+    // One undo entry for the whole gesture. `withCheckpoint` compares by
+    // identity, so a drag that never moved anything records nothing.
+    const pending = this.pendingDoc;
+    const origin = this.dragOriginDoc;
+    this.isDrag = false;
+    this.clickIndex = -1;
+    this.pendingDoc = null;
+    this.dragOriginDoc = null;
+
+    // Compare the curve, not the object. `moveKeyframe` builds a fresh document
+    // on every mousemove, so identity says "changed" about a drag that ended
+    // exactly where it began — and `withCheckpoint` cannot tell either, because
+    // the document it compares against is rebuilt on every call. Without this a
+    // cancelled drag left an undo step that appears to do nothing.
+    if (origin == null) {
+      return;
+    }
+    useTimelineStore.getState().previewDocument(origin);
+    if (pending != null && !this.sameCurve(origin, pending)) {
+      useTimelineStore.getState().withCheckpoint(() => pending);
+    }
+  };
+
+  /** Whether two documents hold the same curve for the lane being dragged. */
+  private sameCurve(a: TimelineDocument, b: TimelineDocument): boolean {
+    const lane = this.selectLine == 0 ? "x" : "y";
+    const read = (doc: TimelineDocument) =>
+      (doc.elements[this.elementId] as any)?.animation?.[this.animationType]?.[
+        lane
+      ] ?? [];
+    return sameKeyframes(read(a), read(b));
+  };
+
+  /** Abandon a drag that ended somewhere this component never hears about. */
+  private handleCancelDrag = () => {
+    if (this.dragOriginDoc != null) {
+      useTimelineStore.getState().previewDocument(this.dragOriginDoc);
+    }
+    this.isDrag = false;
+    this.clickIndex = -1;
+    this.pendingDoc = null;
+    this.dragOriginDoc = null;
+  };
+
+  private boundKeydown = (event: KeyboardEvent) => this._handleKeydown(event);
 
   _handleKeydown(event) {
-    if (event.keyCode == 8) {
-      // backspace
+    // This is bound to `window`, so a Backspace aimed at any text field in the
+    // app arrived here too — and deleted the selected keyframe. The timeline
+    // canvas already guards its own shortcuts with this helper.
+    if (isTypingEvent(event)) {
+      return;
+    }
+    if (!this.isShow) {
+      return;
+    }
 
+    // `event.code`, not `keyCode`: the latter is deprecated and, being
+    // layout-dependent on some engines, is exactly the sort of thing that works
+    // on one machine and not another.
+    if (event.code === "Backspace" || event.code === "Delete") {
       if (this.activePointIndex != -1) {
         this.removePoint();
       }
+      return;
     }
+
+    if (event.code === "Escape") {
+      this.handleCancelDrag();
+    }
+  }
+
+  disconnectedCallback(): void {
+    window.removeEventListener("keydown", this.boundKeydown);
+    window.removeEventListener("mouseup", this._handleMouseUp);
+    window.removeEventListener("blur", this.handleCancelDrag);
+    super.disconnectedCallback();
   }
 }

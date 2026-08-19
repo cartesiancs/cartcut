@@ -28,6 +28,7 @@ import {
   speedOf,
   type DynamicElement,
 } from "./geometry";
+import { rebaseAnimation, sliceAnimation } from "../animation/keyframes";
 
 function clamp(value: number, min: number, max: number): number {
   if (max < min) {
@@ -66,11 +67,18 @@ export function trimStart(
   if (!isDynamicElement(element)) {
     const room = element.duration - MIN_TIMELINE_MS;
     const applied = clamp(deltaMs, -element.startTime, room);
-    return {
-      ...element,
-      startTime: element.startTime + applied,
-      duration: element.duration - applied,
-    };
+    // Keyframe times are relative to `startTime`, so moving the left edge
+    // without rebasing slides the whole animation against the content it was
+    // drawn on. Rebase only — never slice: a trim is reversible, so a keyframe
+    // pushed outside the visible window has to survive being pulled back in.
+    return rebaseAnimation(
+      {
+        ...element,
+        startTime: element.startTime + applied,
+        duration: element.duration - applied,
+      },
+      applied,
+    );
   }
 
   const speed = speedOf(element);
@@ -83,12 +91,17 @@ export function trimStart(
   const appliedSource = clamp(deltaMs * speed, -maxLeftSource, maxRightSource);
 
   const nextSrcStart = srcStart + appliedSource;
-  return withTrim(
-    element,
-    element.startTime + appliedSource / speed,
-    srcEnd - nextSrcStart,
-    nextSrcStart,
-    srcEnd,
+  // `appliedSource` is source ms; the timeline edge moves by that over speed,
+  // and keyframes live in timeline ms, so that is the rebase distance.
+  return rebaseAnimation(
+    withTrim(
+      element,
+      element.startTime + appliedSource / speed,
+      srcEnd - nextSrcStart,
+      nextSrcStart,
+      srcEnd,
+    ),
+    appliedSource / speed,
   );
 }
 
@@ -147,14 +160,26 @@ export function splitAt(
     return null;
   }
 
+  // `offset` is timeline ms and so are keyframe times, so the same window
+  // serves both branches — the source-ms `cut` below is the wrong measure for
+  // animation and using it here would misplace every keyframe on a sped-up clip.
+  const span = spanLength(element);
+
   if (!isDynamicElement(element)) {
     return {
-      left: { ...element, duration: offset },
-      right: {
-        ...element,
-        startTime: element.startTime + offset,
-        duration: element.duration - offset,
-      },
+      left: sliceAnimation({ ...element, duration: offset }, 0, offset),
+      right: rebaseAnimation(
+        sliceAnimation(
+          {
+            ...element,
+            startTime: element.startTime + offset,
+            duration: element.duration - offset,
+          },
+          offset,
+          span,
+        ),
+        offset,
+      ),
     };
   }
 
@@ -163,13 +188,24 @@ export function splitAt(
   const cut = srcStart + offset * speed;
 
   return {
-    left: withTrim(element, element.startTime, cut - srcStart, srcStart, cut),
-    right: withTrim(
-      element,
-      element.startTime + offset,
-      srcEnd - cut,
-      cut,
-      srcEnd,
+    left: sliceAnimation(
+      withTrim(element, element.startTime, cut - srcStart, srcStart, cut),
+      0,
+      offset,
+    ),
+    right: rebaseAnimation(
+      sliceAnimation(
+        withTrim(
+          element,
+          element.startTime + offset,
+          srcEnd - cut,
+          cut,
+          srcEnd,
+        ),
+        offset,
+        span,
+      ),
+      offset,
     ),
   };
 }

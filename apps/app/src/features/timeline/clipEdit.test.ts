@@ -309,3 +309,180 @@ describe("splitAt", () => {
     expect(spanEnd(rejoined)).toBe(spanEnd(before));
   });
 });
+
+// =========================================================== keyframes
+//
+// Keyframe times are stored relative to `element.startTime`. That makes a plain
+// move free, but it means any edit that changes `startTime` has to rebase them,
+// and any edit that produces two elements from one has to give each its own
+// copy. Neither used to happen: `splitAt` returned two `{...element}` spreads
+// sharing a single `animation` object, and the right half's keyframes stayed
+// measured from the original start.
+
+import { bakeTrack, sampleTrack } from "../animation/keyframes";
+import { keys } from "../renderer/testing";
+
+/** The 4s clip above, with opacity ramping 0 -> 100 across its span. */
+function animatedClip(over = {}) {
+  const authored = keys([0, 0], [2000, 50], [4000, 100]);
+  return clip({
+    animation: {
+      position: { isActivate: false, x: [], y: [], ax: [], ay: [] },
+      opacity: { isActivate: true, x: authored, ax: bakeTrack(authored) },
+      scale: { isActivate: false, x: [], ax: [] },
+      rotation: { isActivate: false, x: [], ax: [] },
+    },
+    ...over,
+  });
+}
+
+/** What the element shows at an absolute timeline time. */
+function opacityAt(element: any, cursorMs: number): number {
+  return sampleTrack(
+    element.animation.opacity,
+    element.startTime,
+    cursorMs,
+    -1,
+  );
+}
+
+describe("splitAt and keyframes", () => {
+  it("gives each half its own animation object", () => {
+    // The two halves used to share one, so editing a keyframe on either
+    // silently changed the other.
+    const source = animatedClip();
+    const parts = splitAt(source, 7000)!;
+
+    expect(parts.left.animation).not.toBe(source.animation);
+    expect(parts.right.animation).not.toBe(source.animation);
+    expect(parts.left.animation).not.toBe(parts.right.animation);
+    expect(parts.left.animation.opacity.x).not.toBe(
+      parts.right.animation.opacity.x,
+    );
+    expect(parts.left.animation.opacity.x[0]).not.toBe(
+      parts.right.animation.opacity.x[0],
+    );
+  });
+
+  it("rebases the right half onto its own start time", () => {
+    // Cut 2s into a clip that starts at 5s: the keyframe that was at t=2000
+    // becomes the right half's t=0.
+    const parts = splitAt(animatedClip(), 7000)!;
+    expect(parts.right.startTime).toBe(7000);
+    expect(parts.right.animation.opacity.x[0].p[0]).toBe(0);
+    expect(parts.left.animation.opacity.x[0].p[0]).toBe(0);
+  });
+
+  it("drops keyframes that fall outside each half", () => {
+    const parts = splitAt(animatedClip(), 7000)!;
+    for (const k of parts.left.animation.opacity.x) {
+      expect(k.p[0]).toBeLessThanOrEqual(2000);
+    }
+    for (const k of parts.right.animation.opacity.x) {
+      expect(k.p[0]).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  /**
+   * The invariant that actually matters: cutting a clip must not change what
+   * the viewer sees at any moment.
+   */
+  it("shows the same value at every cursor position as the uncut clip", () => {
+    const source = animatedClip();
+    const cut = 7000;
+    const parts = splitAt(source, cut)!;
+
+    for (let cursor = 5000; cursor <= 9000; cursor += 50) {
+      const half = cursor < cut ? parts.left : parts.right;
+      expect(opacityAt(half, cursor)).toBeCloseTo(opacityAt(source, cursor), 0);
+    }
+  });
+
+  it("keeps each half's bake in step with its authored list", () => {
+    const parts = splitAt(animatedClip(), 7000)!;
+    for (const half of [parts.left, parts.right]) {
+      expect((half as any).animation.opacity.ax).toEqual(
+        bakeTrack((half as any).animation.opacity.x),
+      );
+    }
+  });
+
+  it("splits a sped-up clip on timeline time, not source time", () => {
+    // Keyframes live in timeline ms. Using the source-ms cut would misplace
+    // every one of them by the speed factor.
+    const source = animatedClip({
+      speed: 2,
+      duration: 4000,
+      trim: { startTime: 0, endTime: 4000 },
+    });
+    const cut = source.startTime + spanLength(source) / 2;
+    const parts = splitAt(source, cut)!;
+
+    // Sampling snaps to the nearest baked point rather than blending, and the
+    // boundary keyframe the cut inserts is itself a snapped read, so the errors
+    // compound: a few 60Hz samples' worth of the ramp. Over this clip one
+    // sample is 50 units across 2000ms, ~0.42. Three samples of slack still
+    // catches the bug this test is for by a wide margin — measuring the cut in
+    // source ms instead of timeline ms misplaces every keyframe by the speed
+    // factor, which here is ~25 units, twenty times the tolerance.
+    const slack = (3 * (50 * (1000 / 60))) / 2000;
+
+    for (let cursor = source.startTime; cursor < spanEnd(source); cursor += 50) {
+      const half = cursor < cut ? parts.left : parts.right;
+      expect(
+        Math.abs(opacityAt(half, cursor) - opacityAt(source, cursor)),
+      ).toBeLessThanOrEqual(slack);
+    }
+  });
+
+  it("leaves an element with no animation block untouched", () => {
+    const parts = splitAt(audioElement({ startTime: 0, duration: 4000 }), 2000)!;
+    expect((parts.left as any).animation).toBeUndefined();
+    expect((parts.right as any).animation).toBeUndefined();
+  });
+});
+
+describe("trimStart and keyframes", () => {
+  it("keeps the animation pinned to the content", () => {
+    // Trimming 1s off the head moves `startTime` from 5000 to 6000. Without a
+    // rebase the whole curve slid a second later against its own frames.
+    const source = animatedClip();
+    const trimmed = trimStart(source, 1000);
+
+    for (let cursor = 6000; cursor <= 9000; cursor += 50) {
+      expect(opacityAt(trimmed, cursor)).toBeCloseTo(
+        opacityAt(source, cursor),
+        0,
+      );
+    }
+  });
+
+  it("keeps keyframes that the trim pushed out of view", () => {
+    // A trim is reversible, so a keyframe outside the window has to survive
+    // being pulled back in — which is why trimStart rebases but never slices.
+    const source = animatedClip();
+    const trimmed: any = trimStart(source, 1000);
+    expect(trimmed.animation.opacity.x.some((k) => k.p[0] < 0)).toBe(true);
+
+    const restored: any = trimStart(trimmed, -1000);
+    expect(restored.animation.opacity.x.map((k: any) => k.p[0])).toEqual(
+      source.animation.opacity.x.map((k) => k.p[0]),
+    );
+  });
+
+  it("declines to rebase when the trim is clamped to nothing", () => {
+    const source = animatedClip({ startTime: 0 });
+    const trimmed: any = trimStart(source, -5000);
+    expect(trimmed.startTime).toBe(0);
+    expect(trimmed.animation).toBe(source.animation);
+  });
+});
+
+describe("trimEnd and keyframes", () => {
+  it("leaves keyframes alone, because startTime does not move", () => {
+    const source = animatedClip();
+    const trimmed: any = trimEnd(source, -1000);
+    expect(trimmed.startTime).toBe(source.startTime);
+    expect(trimmed.animation).toBe(source.animation);
+  });
+});

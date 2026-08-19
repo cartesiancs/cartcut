@@ -16,6 +16,7 @@ import { splitAt, trimEnd, trimStart } from "./clipEdit";
 import { spanLength, spanOf } from "./geometry";
 import { findCollisions, overlaps } from "./overlap";
 import { chooseTrackFor } from "./placement";
+import { cloneAnimation } from "../animation/keyframes";
 import {
   clipsOnTrack,
   normalizeDocument,
@@ -312,10 +313,15 @@ export function pasteClips(
       originalTrackExists &&
       findCollisions(next, clip.trackId, span).length === 0;
 
+    // `cloneAnimation`, because `{...clip}` shares the `animation` object with
+    // the clipboard entry: pasting the same clip twice gave two elements one
+    // animation, and editing a keyframe on either changed both. Cloning just
+    // the animation rather than the whole clip keeps `blob`, `shape` and
+    // `filter` shared, which is what makes a paste cheap.
     if (fitsOriginal) {
       next = withElements(next, {
         ...next.elements,
-        [newId]: { ...clip, startTime: start },
+        [newId]: cloneAnimation({ ...clip, startTime: start }),
       });
       continue;
     }
@@ -323,7 +329,11 @@ export function pasteClips(
     const chosen = chooseTrackFor(next, clip, start, idGen());
     next = withElements(chosen.doc, {
       ...chosen.doc.elements,
-      [newId]: { ...clip, startTime: start, trackId: chosen.trackId },
+      [newId]: cloneAnimation({
+        ...clip,
+        startTime: start,
+        trackId: chosen.trackId,
+      }),
     });
   }
 

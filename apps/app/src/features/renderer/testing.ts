@@ -19,6 +19,7 @@ import type {
   VideoElementType,
   AudioElementType,
 } from "../../@types/timeline";
+import { emptyAnimation, type Keyframe } from "../animation/keyframes";
 
 export type Rgba = { r: number; g: number; b: number; a: number };
 
@@ -76,6 +77,39 @@ export function points(...pairs: Array<[number, number]>): number[][] {
   return pairs.map(([t, v]) => [t, v]);
 }
 
+/**
+ * Authored keyframes from `[timeMs, value]` tuples — the `x`/`y` form, as
+ * `points` is the baked `ax`/`ay` form.
+ *
+ * Handles collapse onto the anchor, so a track built this way is a plain
+ * polyline and its baked output is easy to reason about in an assertion.
+ */
+export function keys(...pairs: Array<[number, number]>): Keyframe[] {
+  return pairs.map(([t, v]) => ({
+    type: "cubic" as const,
+    p: [t, v] as [number, number],
+    cs: [t, v] as [number, number],
+    ce: [t, v] as [number, number],
+  }));
+}
+
+/**
+ * A small deterministic PRNG for the property-based suites.
+ *
+ * Seeded so a failure is reproducible; `Math.random` would make a fuzz failure
+ * a one-off nobody can chase.
+ */
+export function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 const placed = {
   key: "el",
   localpath: "/tmp/asset",
@@ -96,14 +130,15 @@ const visual = {
   rotation: 0,
 };
 
-/** All four tracks present and inactive — the neutral animation state. */
+/**
+ * All four tracks present and inactive — the neutral animation state.
+ *
+ * Delegates to the shipping definition rather than restating it. This helper
+ * used to write the *correct* `ax: []` while every runtime factory wrote
+ * `ax: [[], []]`, so no test ever exercised the shape the app actually built.
+ */
 export function inactiveAnimation() {
-  return {
-    opacity: { isActivate: false, x: [], ax: [] },
-    position: { isActivate: false, x: [], y: [], ax: [], ay: [] },
-    scale: { isActivate: false, x: [], ax: [] },
-    rotation: { isActivate: false, x: [], ax: [] },
-  };
+  return emptyAnimation("image");
 }
 
 export function imageElement(

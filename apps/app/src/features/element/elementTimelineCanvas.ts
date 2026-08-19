@@ -41,6 +41,7 @@ import {
   type PointerEv,
 } from "../timeline/dragMachine";
 import { drawDropTarget, drawTimeline } from "../timeline/draw";
+import { applySurface, surfaceSpec } from "../timeline/canvasSurface";
 import {
   createVideoTileProvider,
   type VideoTileProvider,
@@ -52,7 +53,7 @@ import {
 import { collectSnapPoints, snapSpan } from "../timeline/snapping";
 import { type TimelineDocument } from "../timeline/tracks";
 import { AssetController } from "../../controllers/asset";
-import { isTypingTarget } from "../../utils/typingTarget";
+import { isTypingEvent } from "../../utils/typingTarget";
 
 /** How close, in px, an edge must come before it snaps. */
 const SNAP_TOLERANCE_PX = 10;
@@ -282,10 +283,10 @@ export class elementTimelineCanvas extends LitElement {
     );
     const height = (container as HTMLElement).offsetHeight;
 
-    this.canvas.style.width = `${width}px`;
-    this.canvas.width = width * dpr;
-    this.canvas.height = height * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // All four numbers, not three: `style.height` was missing and no
+    // stylesheet supplies one, so the CSS box fell back to the `height`
+    // attribute and every y coordinate was off by `dpr`. See `canvasSurface`.
+    applySurface(this.canvas, ctx, surfaceSpec(width, height, dpr));
 
     const doc = this.currentDoc();
     this.layout = layoutTimeline({
@@ -444,6 +445,17 @@ export class elementTimelineCanvas extends LitElement {
       // vertical still nudges the clip along its track by a sub-pixel amount
       // — enough to break the exact adjacency a split just produced.
       const appliedMs = Math.round(snapped.startMs - primary.startTime);
+
+      // A gesture that moves nothing must produce nothing. `moveClips` builds a
+      // fresh document even for a zero delta, so `next !== base` held and a
+      // press-and-hold with a steady hand committed an undo step that appears
+      // to do nothing — and, if a neighbour's edge happened to lie within the
+      // snap tolerance, silently relocated the clip the user never dragged.
+      if (appliedMs === 0 && trackDelta === 0) {
+        this.drawCanvas();
+        return;
+      }
+
       next = moveClips(base, this.dragIds, appliedMs, trackDelta);
 
       if (trackDelta !== 0 && next !== base) {
@@ -514,6 +526,15 @@ export class elementTimelineCanvas extends LitElement {
       this.dragIds = [];
       this.snapGuideMs = null;
       this.dropTrackId = null;
+      // `commit` and `revert` clear this themselves, but a press that ends
+      // without ever becoming a drag emits neither — and `applyDrag` has
+      // already run for it, because a `pressed` state still tracks the pointer.
+      // Left set, `currentDoc()` keeps returning that preview for good: the
+      // canvas shows a clip position the store does not have, later store
+      // changes are invisible, and the next real drag commits the stale
+      // document on top of whatever happened in between. An ordinary imprecise
+      // click — press, drift two pixels, release — was enough.
+      this.pendingDoc = null;
       this.drawCanvas();
       return;
     }
@@ -669,7 +690,7 @@ export class elementTimelineCanvas extends LitElement {
   _handleKeydown(event) {
     // Bound to `window`, so a keystroke aimed at a text field arrives here too.
     // Without this, Backspace while typing deleted the selected clip.
-    if (isTypingTarget(event.target)) {
+    if (isTypingEvent(event)) {
       return;
     }
 
@@ -838,6 +859,19 @@ export class elementTimelineCanvas extends LitElement {
 
   // ---------------------------------------------------------------- render
 
+  /**
+   * Re-apply the canvas sizing after every Lit render.
+   *
+   * The template writes the whole `style` attribute, so a re-render wipes the
+   * `width`/`height` that `drawCanvas` set imperatively — and with them the
+   * CSS box that `offsetY` is measured against. Redrawing here puts all four
+   * numbers back. The template no longer carries a hardcoded `width: 1122px`
+   * either; that was a fixed guess `drawCanvas` immediately overwrote.
+   */
+  protected updated(): void {
+    this.drawCanvas();
+  }
+
   protected render(): unknown {
     const canvasRef = document.querySelector("#elementTimelineCanvasRef");
     if (canvasRef) {
@@ -847,7 +881,7 @@ export class elementTimelineCanvas extends LitElement {
     return html`
       <canvas
         id="elementTimelineCanvasRef"
-        style="width: 1122px;left: ${this.resize.timelineVertical
+        style="left: ${this.resize.timelineVertical
           .leftOption}px;position: absolute;"
         @dragover=${this._handleDragOver}
         @dragleave=${this._handleDragLeave}

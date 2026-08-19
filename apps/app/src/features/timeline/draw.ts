@@ -23,6 +23,12 @@ import { nullTileProvider, type TileProvider } from "./strip/provider";
 import { planFilmstrip } from "./strip/tiles";
 import { planWaveform } from "./strip/peaks";
 import { nullPeakProvider, type PeakProvider } from "./strip/audioPeaks";
+import {
+  KEYFRAME_LANE_PX,
+  KEYFRAME_SIZE_PX,
+  keyframeLane,
+  planKeyframeMarkers,
+} from "./keyframeMarkers";
 
 export type ThemeColors = {
   background: string;
@@ -32,6 +38,11 @@ export type ThemeColors = {
   playhead: string;
   projectEnd: string;
   snapGuide: string;
+  keyframe: string;
+  /** More than one property keyed at the same instant. */
+  keyframeMerged: string;
+  /** Plate behind the diamonds, so they read over a bright filmstrip. */
+  keyframeLane: string;
 };
 
 export const defaultColors: ThemeColors = {
@@ -42,6 +53,11 @@ export const defaultColors: ThemeColors = {
   playhead: "#dbdaf0",
   projectEnd: "#ff173e",
   snapGuide: "#ffd400",
+  // The colour the dead `animation-panel` used for its CSS diamonds, which was
+  // the only thing `.keyframe-diamond` in `_keyframe.scss` was ever for.
+  keyframe: "#d7dce3",
+  keyframeMerged: "#ffffff",
+  keyframeLane: "rgba(0, 0, 0, 0.35)",
 };
 
 export type DrawOptions = {
@@ -166,10 +182,23 @@ export function drawClip(
     });
   }
 
+  // The lane is decided before the waveform draws, because the waveform has to
+  // move up out of its way — but only when there is a lane. A clip with no
+  // keyframes is painted exactly as it was before diamonds existed.
+  const lane = keyframeLane(rect, element, opts.range);
+
   if (canShowWaveform(element)) {
     drawWaveform(ctx, rect, element, opts.peaks, {
       range: opts.range,
       viewportW: opts.viewportW,
+      bottomInset: lane == null ? 0 : KEYFRAME_LANE_PX,
+    });
+  }
+
+  if (lane != null) {
+    drawKeyframeLane(ctx, rect, element, {
+      colors: opts.colors,
+      range: opts.range,
     });
   }
 
@@ -280,7 +309,7 @@ function drawWaveform(
   rect: ClipRect,
   element: TimelineElement,
   provider: PeakProvider,
-  opts: { range: number; viewportW: number },
+  opts: { range: number; viewportW: number; bottomInset?: number },
 ) {
   const data = provider.get(element.localpath);
   if (data == null) {
@@ -288,11 +317,18 @@ function drawWaveform(
     return;
   }
 
+  // Room reserved at the bottom for the keyframe lane, and zero whenever the
+  // clip has no keyframes — which is why an unanimated clip's waveform is
+  // pixel-identical to what it was before the lane existed. Audio never has a
+  // lane (its type carries no `animation` block), so a bare audio clip keeps
+  // the full row.
+  const inset = opts.bottomInset ?? 0;
   const isVideo = element.filetype === "video";
+  const available = Math.max(0, rect.h - inset);
   // A thin trace on a video, so the frames keep the height; a bare audio clip
   // has nothing to compete with and uses the whole row.
-  const band = isVideo ? Math.min(WAVEFORM_BAND_PX, rect.h) : rect.h;
-  const top = rect.y + rect.h - band;
+  const band = isVideo ? Math.min(WAVEFORM_BAND_PX, available) : available;
+  const top = rect.y + rect.h - inset - band;
   const mid = top + band / 2;
   const half = band / 2;
 
@@ -318,6 +354,78 @@ function drawWaveform(
     // than as a gap.
     ctx.fillRect(column.x, y0, 1, Math.max(1, y1 - y0));
   }
+}
+
+/**
+ * A diamond, as an explicit path.
+ *
+ * Four `lineTo`s rather than a rotated square: `ctx.rotate` would need a
+ * `save`/`restore` around every marker and would antialias the points into a
+ * blur at this size. Adding to an open path rather than filling here is what
+ * lets every diamond on a clip go down in one fill.
+ */
+function diamondPath(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+): void {
+  const r = size / 2;
+  ctx.moveTo(cx, cy - r);
+  ctx.lineTo(cx + r, cy);
+  ctx.lineTo(cx, cy + r);
+  ctx.lineTo(cx - r, cy);
+  ctx.closePath();
+}
+
+/**
+ * Mark where the clip's keyframes are.
+ *
+ * Drawn inside `drawClip`'s clip path, so a diamond on the clip's last frame is
+ * cut at the edge instead of poking into its neighbour — the same treatment the
+ * final filmstrip tile gets. That also means the selection border, which is
+ * painted after `ctx.restore()`, sits on top of a diamond at either end. That
+ * is the right way round: selection is the stronger signal and its 2px frame
+ * stays unbroken.
+ *
+ * Two fills total, however many diamonds there are.
+ */
+export function drawKeyframeLane(
+  ctx: CanvasRenderingContext2D,
+  rect: ClipRect,
+  element: TimelineElement,
+  opts: { colors: ThemeColors; range: number },
+): void {
+  const lane = keyframeLane(rect, element, opts.range);
+  if (lane == null) {
+    return;
+  }
+
+  const markers = planKeyframeMarkers({ element, rect, range: opts.range });
+  if (markers.length === 0) {
+    return;
+  }
+
+  ctx.fillStyle = opts.colors.keyframeLane;
+  ctx.fillRect(rect.x, lane.top, rect.w, lane.height);
+
+  ctx.beginPath();
+  for (const marker of markers) {
+    if (marker.count === 1) {
+      diamondPath(ctx, marker.x, lane.centerY, KEYFRAME_SIZE_PX);
+    }
+  }
+  ctx.fillStyle = opts.colors.keyframe;
+  ctx.fill();
+
+  ctx.beginPath();
+  for (const marker of markers) {
+    if (marker.count > 1) {
+      diamondPath(ctx, marker.x, lane.centerY, KEYFRAME_SIZE_PX);
+    }
+  }
+  ctx.fillStyle = opts.colors.keyframeMerged;
+  ctx.fill();
 }
 
 export function drawTimeline(

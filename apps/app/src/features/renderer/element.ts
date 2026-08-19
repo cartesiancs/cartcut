@@ -36,8 +36,18 @@ export function applyElementTransform(
   const canAnimate = "animation" in element;
 
   // Position
+  //
+  // Gated on `isActivate` like rotation, scale and opacity below. It used to be
+  // the one property that animated whenever a track merely existed, so turning
+  // position animation *off* left the element still moving — and, now that the
+  // timeline draws a diamond only for live tracks, would have meant a clip
+  // sliding around with no marker under it to say why.
   let { x, y } = element.location;
-  if (canAnimate && "position" in element.animation) {
+  if (
+    canAnimate &&
+    "position" in element.animation &&
+    element.animation.position.isActivate
+  ) {
     x = interpolate(
       x,
       element.animation.position.ax,

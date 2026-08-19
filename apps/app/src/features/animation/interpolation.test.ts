@@ -33,9 +33,25 @@ describe("interpolate", () => {
   });
 
   it("falls back to the initial value before the element starts", () => {
-    // The guard rounds the cursor onto a 16ms frame, remaps to a 20ms grid and
-    // bails when the result precedes the element.
     expect(interpolate(42, track, 5000, 0)).toBe(42);
+  });
+
+  it("falls back anywhere before the start, not just far before it", () => {
+    // The old guard rounded the cursor onto a 16ms frame and then remapped it
+    // onto a 20ms grid — a unit mismatch that stretched the cursor by 25%. A
+    // cursor within the last fifth before an element fell through it and
+    // snapped to that element's first keyframe; this case returned 0.
+    expect(interpolate(42, track, 5000, 4000)).toBe(42);
+    expect(interpolate(42, track, 5000, 4999)).toBe(42);
+  });
+
+  it("starts sampling exactly at the element's start time", () => {
+    expect(interpolate(42, track, 5000, 5000)).toBe(0);
+  });
+
+  it("falls back on a non-finite cursor or start time", () => {
+    expect(interpolate(42, track, 0, NaN)).toBe(42);
+    expect(interpolate(42, track, NaN, 1000)).toBe(42);
   });
 
   it("falls back to the initial value when there are no keyframes", () => {
