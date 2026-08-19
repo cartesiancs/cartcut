@@ -13,8 +13,11 @@ import { isElementVisibleAtTime } from "../element/time";
 import { sourceTimeAt, speedOf } from "../timeline/geometry";
 import {
   syncPlayback as syncPlaybackHandles,
+  whenSeeksLand,
   type MediaHandle,
+  type SeekRequest,
 } from "../timeline/playback";
+import { runAssetBatch, type AssetLoadTask } from "./assetBatch";
 import { SCHEMA_VERSION, type TimelineTrack } from "../timeline/tracks";
 
 type GifMetadata = {
@@ -44,8 +47,17 @@ export interface ILoadedAssetStore {
   // path, image
   _loadedImage: Record<string, HTMLImageElement>;
 
+  /**
+   * Paths whose decode is in flight, for the same reason video has one: the
+   * preview fires `loadAssetsNeededAtTime` un-awaited on every repaint, so
+   * without this a clip that takes a moment to decode spawns a fresh loader on
+   * every frame until the first one lands.
+   */
+  _loadingImage: Set<string>;
+
   // path, gif
   _loadedGif: Record<string, GifMetadata[]>;
+  _loadingGif: Set<string>;
 
   // elementId, video
   _loadedElementVideo: Record<string, VideoMetadataPerElement>;
@@ -102,25 +114,41 @@ export interface ILoadedAssetStore {
   seek: (timeline: Timeline, time: number) => Promise<void>;
 
   /**
-   * Bring every decoded video in line with the timeline.
+   * Bring every decoded handle in line with the timeline.
    *
    * Called from the preview's draw path, which runs on every store change —
    * including every cursor tick — so this is what keeps playback positions
    * honest and, crucially, silences a clip the moment the playhead leaves it.
+   *
+   * `onSeeksLand` is invoked once after the frames requested by this call have
+   * actually decoded. Callers that paint must pass it: assigning `currentTime`
+   * only requests a frame, so painting immediately paints the previous one.
+   *
+   * Returns the seeks it issued.
    */
   syncPlayback: (
     timeline: Timeline,
     cursorMs: number,
     isPlaying: boolean,
-  ) => void;
+    onSeeksLand?: () => void,
+  ) => SeekRequest[];
+
+  /**
+   * elementId → the seek target we last waited on, so the same target is never
+   * waited on twice. See `whenSeeksLand` for why that would otherwise loop.
+   */
+  _awaitedSeeks: Map<string, number>;
 
   /** Drop videos whose element is gone or whose source path changed. */
   releaseUnusedVideos: (timeline: Timeline) => void;
 }
 
 export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
+  _awaitedSeeks: new Map<string, number>(),
   _loadedImage: {},
+  _loadingImage: new Set<string>(),
   _loadedGif: {},
+  _loadingGif: new Set<string>(),
   _loadedElementVideo: {},
   _loadingElementVideo: new Set<string>(),
   _loadedElementAudio: {},
@@ -268,59 +296,61 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
     );
 
     const store = get();
-    const loadPromises = visibleElements.map(([elementId, element]) => {
+    const tasks: AssetLoadTask[] = [];
+
+    for (const [elementId, element] of visibleElements) {
       switch (element.filetype) {
         case "image":
           if (store._loadedImage[element.localpath] == null) {
-            return store.loadImage(element.localpath);
+            const key = element.localpath;
+            tasks.push({
+              key,
+              inFlight: store._loadingImage,
+              start: () => store.loadImage(key),
+            });
           }
           break;
         case "gif":
           if (store._loadedGif[element.localpath] == null) {
-            return store.loadGif(element.localpath);
+            const key = element.localpath;
+            tasks.push({
+              key,
+              inFlight: store._loadingGif,
+              start: () => store.loadGif(key),
+            });
           }
           break;
         case "video":
-          if (
-            store._loadedElementVideo[elementId] == null &&
-            !store._loadingElementVideo.has(elementId)
-          ) {
-            store._loadingElementVideo.add(elementId);
-            return store
-              .loadElementVideo(elementId, element)
-              .catch(() => {})
-              .finally(() => store._loadingElementVideo.delete(elementId));
+          if (store._loadedElementVideo[elementId] == null) {
+            tasks.push({
+              key: elementId,
+              inFlight: store._loadingElementVideo,
+              start: () => store.loadElementVideo(elementId, element),
+            });
           }
           break;
       }
+    }
 
-      return null;
-    });
     // Audio is not a visual element, so it never reaches the switch above.
     for (const [elementId, element] of idElementPairs) {
       if (
         element.filetype !== "audio" ||
-        store._loadedElementAudio[elementId] != null ||
-        store._loadingElementAudio.has(elementId)
+        store._loadedElementAudio[elementId] != null
       ) {
         continue;
       }
-      store._loadingElementAudio.add(elementId);
-      loadPromises.push(
-        store
-          .loadElementAudio(elementId, element)
-          .catch(() => {})
-          .finally(() => store._loadingElementAudio.delete(elementId)),
-      );
+      tasks.push({
+        key: elementId,
+        inFlight: store._loadingElementAudio,
+        start: () => store.loadElementAudio(elementId, element),
+      });
     }
-
-    const started = loadPromises.filter((x) => x != null);
-    await Promise.all(started);
 
     // Whether anything new arrived. A handle that finishes decoding after the
     // last repaint would otherwise sit unsynchronised — at position zero,
     // silent or not, until some unrelated change happened to redraw.
-    return started.length > 0;
+    return runAssetBatch(tasks);
   },
 
   /**
@@ -364,17 +394,33 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
     );
   },
 
-  syncPlayback(timeline, cursorMs, isPlaying) {
+  syncPlayback(timeline, cursorMs, isPlaying, onSeeksLand) {
     const state = get();
     const handles: Record<string, MediaHandle> = {};
     for (const meta of Object.values(state._loadedElementVideo)) {
       handles[meta.elementId] = meta.object;
     }
-    for (const [elementId, audio] of Object.entries(state._loadedElementAudio)) {
+    for (const [elementId, audio] of Object.entries(
+      state._loadedElementAudio,
+    )) {
       handles[elementId] = audio;
     }
 
-    syncPlaybackHandles(asDocument(timeline), cursorMs, isPlaying, handles);
+    const seeks = syncPlaybackHandles(
+      asDocument(timeline),
+      cursorMs,
+      isPlaying,
+      handles,
+    );
+
+    // The seeked frames are not decoded yet. A painter that stops here shows
+    // the frame from before the seek — which for a clip that was just added is
+    // no frame at all, until something unrelated happens to repaint.
+    if (onSeeksLand != null && seeks.length > 0) {
+      whenSeeksLand(handles, seeks, onSeeksLand, get()._awaitedSeeks);
+    }
+
+    return seeks;
   },
 
   releaseUnusedVideos(timeline) {

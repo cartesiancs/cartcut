@@ -140,7 +140,6 @@ export class PreviewCanvas extends LitElement {
     //document.querySelector("element-control").handleClickPreview();
   }
 
-
   @property()
   timelineState: ITimelineStore = useTimelineStore.getInitialState();
 
@@ -407,18 +406,26 @@ export class PreviewCanvas extends LitElement {
         if (loadedSomething) {
           this.scheduleDraw();
         }
-      });
+      })
+      // A batch that rejects must not also cost us the repaint — some of its
+      // assets did load.
+      .catch(() => this.scheduleDraw());
 
     // Every media handle is reconciled here, on every repaint — which includes
     // every cursor tick during playback. This is what mutes a clip the moment
     // the playhead leaves it; the compositor below skips clips outside their
     // window, so it can never do that job.
+    //
+    // Any seek it issues lands later, so we ask to be called back and repaint
+    // then: decoding finishing and the *frame* arriving are two events, and
+    // painting on only the first shows the frame from before the seek.
     loadedAssetStore
       .getState()
       .syncPlayback(
         this.timeline,
         this.timelineCursor,
         this.timelineControl.isPlay,
+        () => this.scheduleDraw(),
       );
 
     renderTimelineAtTime(
@@ -800,7 +807,9 @@ export class PreviewCanvas extends LitElement {
   public stopPlay() {
     loadedAssetStore
       .getState()
-      .syncPlayback(this.timeline, this.timelineCursor, false);
+      .syncPlayback(this.timeline, this.timelineCursor, false, () =>
+        this.scheduleDraw(),
+      );
     this.drawCanvas(this.canvas);
   }
 
@@ -951,22 +960,18 @@ export class PreviewCanvas extends LitElement {
         const startTime = element.startTime;
         const duration = element.duration;
 
-        if (
-          !(
-            this.timelineCursor >= startTime &&
-            this.timelineCursor < startTime + duration
-          )
-        ) {
+        if (!(
+          this.timelineCursor >= startTime &&
+          this.timelineCursor < startTime + duration
+        )) {
           continue;
         }
 
         if (fileType == "video") {
-          if (
-            !(
-              this.timelineCursor >= startTime + element.trim.startTime &&
-              this.timelineCursor < startTime + element.trim.endTime
-            )
-          ) {
+          if (!(
+            this.timelineCursor >= startTime + element.trim.startTime &&
+            this.timelineCursor < startTime + element.trim.endTime
+          )) {
             continue;
           }
         }
@@ -1238,22 +1243,18 @@ export class PreviewCanvas extends LitElement {
             y = animated.y;
           }
 
-          if (
-            !(
-              this.timelineCursor >= startTime &&
-              this.timelineCursor < startTime + duration
-            )
-          ) {
+          if (!(
+            this.timelineCursor >= startTime &&
+            this.timelineCursor < startTime + duration
+          )) {
             continue;
           }
 
           if (fileType == "video") {
-            if (
-              !(
-                this.timelineCursor >= startTime + element.trim.startTime &&
-                this.timelineCursor < startTime + element.trim.endTime
-              )
-            ) {
+            if (!(
+              this.timelineCursor >= startTime + element.trim.startTime &&
+              this.timelineCursor < startTime + element.trim.endTime
+            )) {
               continue;
             }
           }
@@ -1690,8 +1691,9 @@ export class PreviewCanvas extends LitElement {
     return html` <canvas
       id="elementPreviewCanvasRef"
       class="preview"
-      style="width: 100%; height: 100%; display: block; cursor: ${this
-        .cursorType};"
+      style="width: 100%; height: 100%; display: block; cursor: ${
+        this.cursorType
+      };"
       @mousedown=${this._handleMouseDown}
     ></canvas>`;
   }

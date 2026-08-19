@@ -37,6 +37,69 @@ export interface MediaHandle {
   pause(): void;
 }
 
+/**
+ * A handle that can say when a seek has finished.
+ *
+ * Assigning `currentTime` only *requests* a frame; the decoded picture arrives
+ * later, on `seeked`. Anything that paints straight after a seek paints the
+ * previous frame, so the painter needs this to come back for the real one.
+ */
+export interface SeekableHandle extends MediaHandle {
+  addEventListener(
+    type: "seeked",
+    listener: () => void,
+    options?: { once?: boolean },
+  ): void;
+}
+
+function isSeekable(handle: MediaHandle): handle is SeekableHandle {
+  return typeof (handle as SeekableHandle).addEventListener == "function";
+}
+
+/** A seek that was issued and whose frame has not arrived yet. */
+export type SeekRequest = {
+  elementId: string;
+  /** Where the handle was asked to go, in seconds into the source. */
+  sourceTimeSec: number;
+};
+
+/**
+ * Call `onLanded` once, after the handles just seeked have produced their
+ * frames.
+ *
+ * `alreadyAwaited` is the caller's memory of the target it last waited on per
+ * element, and it is what keeps this from spinning. A browser may land a seek a
+ * little off the requested time — `currentTime` is only guaranteed to be near a
+ * keyframe — and the paused tolerance is exactly zero, so the next reconcile
+ * re-issues the *same* seek. Repainting on each of those landings would loop at
+ * frame rate forever. Waiting only when the target has actually moved makes
+ * that unrepresentable.
+ *
+ * Handles that cannot report (no `addEventListener`, e.g. a plain test double)
+ * are not waited on: `onLanded` never fires for them, rather than firing early
+ * on a frame that is not there yet.
+ */
+export function whenSeeksLand(
+  handles: Record<string, MediaHandle>,
+  seeks: readonly SeekRequest[],
+  onLanded: () => void,
+  alreadyAwaited?: Map<string, number>,
+): void {
+  for (const seek of seeks) {
+    if (alreadyAwaited?.get(seek.elementId) === seek.sourceTimeSec) {
+      continue;
+    }
+
+    const handle = handles[seek.elementId];
+    if (handle == null || !isSeekable(handle)) {
+      continue;
+    }
+
+    alreadyAwaited?.set(seek.elementId, seek.sourceTimeSec);
+    handle.addEventListener("seeked", onLanded, { once: true });
+  }
+}
+
 export type PlaybackIntent = {
   /** Where the handle should be, in seconds into the source file. */
   sourceTimeSec: number;
@@ -123,12 +186,15 @@ export function intentFor(
  * Seeks are conditional: while playing, only when drift exceeds the tolerance,
  * so normal playback is left alone; while paused, always, so scrubbing moves
  * the frame immediately.
+ *
+ * Returns whether a seek was issued, so the caller can wait for the frame
+ * instead of painting the stale one that is still on the handle.
  */
 export function applyIntent(
   handle: MediaHandle,
   intent: PlaybackIntent,
   playingToleranceSec: number = PLAYING_DRIFT_TOLERANCE_SEC,
-): void {
+): boolean {
   // Only write when the value actually changes. This runs on every animation
   // frame for every loaded clip, and a media element treats each assignment as
   // a real state change however redundant it is.
@@ -144,10 +210,12 @@ export function applyIntent(
   const rolling = intent.playing && !handle.paused;
   const tolerance = rolling ? playingToleranceSec : DRIFT_TOLERANCE_SEC;
 
+  let seeked = false;
   if (Math.abs(handle.currentTime - intent.sourceTimeSec) > tolerance) {
     // Seek before starting playback, so a handle entering its window cannot
     // emit a burst of audio from wherever it had run on to.
     handle.currentTime = intent.sourceTimeSec;
+    seeked = true;
   }
 
   if (intent.playing) {
@@ -157,6 +225,8 @@ export function applyIntent(
   } else if (!handle.paused) {
     handle.pause();
   }
+
+  return seeked;
 }
 
 /**
@@ -164,6 +234,9 @@ export function applyIntent(
  *
  * A handle whose element has gone — deleted, undone, project switched — is
  * silenced rather than left running, since nothing else will ever visit it.
+ *
+ * Returns the seeks it issued. Those frames are not on the handles yet, so a
+ * caller that paints needs to come back once they land — see `whenSeeksLand`.
  */
 export function syncPlayback(
   doc: TimelineDocument,
@@ -171,7 +244,9 @@ export function syncPlayback(
   isPlaying: boolean,
   handles: Record<string, MediaHandle>,
   playingToleranceSec: number = PLAYING_DRIFT_TOLERANCE_SEC,
-): void {
+): SeekRequest[] {
+  const seeks: SeekRequest[] = [];
+
   for (const [elementId, handle] of Object.entries(handles)) {
     const element = doc.elements[elementId];
 
@@ -183,6 +258,11 @@ export function syncPlayback(
       continue;
     }
 
-    applyIntent(handle, intentFor(element, cursorMs, isPlaying), playingToleranceSec);
+    const intent = intentFor(element, cursorMs, isPlaying);
+    if (applyIntent(handle, intent, playingToleranceSec)) {
+      seeks.push({ elementId, sourceTimeSec: intent.sourceTimeSec });
+    }
   }
+
+  return seeks;
 }
