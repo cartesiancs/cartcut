@@ -1,6 +1,5 @@
 import { html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { v4 as uuidv4 } from "uuid";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { IUIStore, uiStore } from "../../states/uiStore";
 import { consume } from "@lit/context";
@@ -10,7 +9,7 @@ import {
   TRACK_GAP,
   TRACK_HEIGHT,
 } from "../timeline/layout";
-import { clipsOnTrack, type TrackKind } from "../timeline/tracks";
+import { clipsOnTrack } from "../timeline/tracks";
 
 /**
  * The track header column.
@@ -45,6 +44,16 @@ export class ElementTimelineLeftOption extends LitElement {
   @property({ attribute: false })
   isAbleResize: boolean = false;
 
+  /**
+   * The track whose ⋯ menu is open, and where to draw it.
+   *
+   * The column clips its overflow, so the menu is positioned `fixed` against
+   * coordinates captured from the button at click time rather than nested in
+   * the row — a row is only 40px tall and would cut the menu off.
+   */
+  @property({ attribute: false })
+  openMenu: { trackId: string; x: number; y: number } | null = null;
+
   @consume({ context: timelineContext })
   @property({ attribute: false })
   public timelineOptions: any = {
@@ -65,8 +74,56 @@ export class ElementTimelineLeftOption extends LitElement {
 
     window.addEventListener("mouseup", this._handleMouseUp.bind(this));
     window.addEventListener("mousemove", this._handleMouseMove.bind(this));
+    window.addEventListener("mousedown", this._handleDocumentMouseDown);
+    window.addEventListener("keydown", this._handleMenuKeydown);
 
     return this;
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    window.removeEventListener("mousedown", this._handleDocumentMouseDown);
+    window.removeEventListener("keydown", this._handleMenuKeydown);
+  }
+
+  /** Any press that is not on the menu itself dismisses it. */
+  private _handleDocumentMouseDown = (e: MouseEvent) => {
+    if (this.openMenu == null) {
+      return;
+    }
+    const target = e.target as HTMLElement | null;
+    if (target?.closest(".track-menu") != null) {
+      return;
+    }
+    this.closeMenu();
+  };
+
+  private _handleMenuKeydown = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      this.closeMenu();
+    }
+  };
+
+  private closeMenu() {
+    if (this.openMenu != null) {
+      this.openMenu = null;
+      this.requestUpdate();
+    }
+  }
+
+  private toggleMenu(trackId: string, e: MouseEvent) {
+    // The window-level dismisser sees this press too; without stopping it the
+    // menu would close in the same gesture that opened it.
+    e.stopPropagation();
+
+    if (this.openMenu?.trackId === trackId) {
+      this.closeMenu();
+      return;
+    }
+
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    this.openMenu = { trackId, x: rect.right, y: rect.bottom + 2 };
+    this.requestUpdate();
   }
 
   private redrawTimeline() {
@@ -74,27 +131,28 @@ export class ElementTimelineLeftOption extends LitElement {
     canvas?.drawCanvas();
   }
 
-  addTrack(kind: TrackKind) {
-    this.timelineState.addTrack(kind, uuidv4());
+  /**
+   * Delete a track and whatever is on it.
+   *
+   * This used to refuse whenever the track held clips, leaving only a toast —
+   * so on any track a user actually had something on, the button looked
+   * broken. Behind a menu the choice is deliberate, the label says how many
+   * clips go with it, and the whole thing is one checkpoint, so undo brings
+   * the track and its clips back together.
+   */
+  removeTrack(trackId: string) {
+    this.closeMenu();
+    this.timelineState.removeTrackById(trackId, "delete-clips");
     this.redrawTimeline();
   }
 
-  removeTrack(trackId: string) {
-    const doc = useTimelineStore.getState().getDocument();
-    if (clipsOnTrack(doc, trackId).length > 0) {
-      // Deleting a track with clips on it would silently delete footage; the
-      // store refuses, and saying so beats appearing to do nothing.
-      document
-        .querySelector("toast-box")
-        ?.showToast({ message: "Track is not empty", delay: "3000" });
-      return;
-    }
-
-    this.timelineState.removeTrackById(trackId);
-    this.redrawTimeline();
+  private clipCountOn(trackId: string): number {
+    return clipsOnTrack(useTimelineStore.getState().getDocument(), trackId)
+      .length;
   }
 
   moveTrack(trackId: string, delta: number) {
+    this.closeMenu();
     const track = this.tracks.find((candidate) => candidate.id === trackId);
     if (!track) {
       return;
@@ -125,6 +183,66 @@ export class ElementTimelineLeftOption extends LitElement {
     this.isAbleResize = false;
   }
 
+  /**
+   * The open track's ⋯ menu, drawn once at the top level.
+   *
+   * Kept out of the row so the column's `overflow: hidden` cannot clip it, and
+   * so only one menu exists at a time regardless of how many tracks there are.
+   */
+  private renderMenu(ordered: typeof this.tracks) {
+    const open = this.openMenu;
+    if (open == null) {
+      return null;
+    }
+
+    const track = ordered.find((candidate) => candidate.id === open.trackId);
+    if (track == null) {
+      return null;
+    }
+
+    const clips = this.clipCountOn(track.id);
+    const deleteLabel =
+      clips === 0
+        ? "Delete track"
+        : `Delete track and ${clips} clip${clips === 1 ? "" : "s"}`;
+
+    return html`
+      <ul
+        class="dropdown-menu show track-menu"
+        style="position: fixed; top: ${open.y}px; left: ${open.x}px;
+               transform: translateX(-100%); z-index: 6000;"
+      >
+        <li>
+          <button
+            class="dropdown-item dropdown-item-sm"
+            ?disabled=${track.index === 0}
+            @click=${() => this.moveTrack(track.id, -1)}
+          >
+            Move up
+          </button>
+        </li>
+        <li>
+          <button
+            class="dropdown-item dropdown-item-sm"
+            ?disabled=${track.index === ordered.length - 1}
+            @click=${() => this.moveTrack(track.id, 1)}
+          >
+            Move down
+          </button>
+        </li>
+        <li><hr class="dropdown-divider" /></li>
+        <li>
+          <button
+            class="dropdown-item dropdown-item-sm text-danger"
+            @click=${() => this.removeTrack(track.id)}
+          >
+            ${deleteLabel}
+          </button>
+        </li>
+      </ul>
+    `;
+  }
+
   render() {
     const ordered = [...this.tracks].sort((a, b) => a.index - b.index);
     const width = this.resize.timelineVertical.leftOption;
@@ -136,38 +254,20 @@ export class ElementTimelineLeftOption extends LitElement {
           style="height: ${TRACK_HEIGHT}px; margin-bottom: ${TRACK_GAP}px;"
         >
           <span class="track-name">${track.name}</span>
-          <div class="track-actions">
-            <button
-              class="btn btn-xxs btn-default text-light"
-              title="Move up"
-              ?disabled=${track.index === 0}
-              @click=${() => this.moveTrack(track.id, -1)}
-            >
-              <span class="material-symbols-outlined icon-xs">
-                keyboard_arrow_up
-              </span>
-            </button>
-            <button
-              class="btn btn-xxs btn-default text-light"
-              title="Move down"
-              ?disabled=${track.index === ordered.length - 1}
-              @click=${() => this.moveTrack(track.id, 1)}
-            >
-              <span class="material-symbols-outlined icon-xs">
-                keyboard_arrow_down
-              </span>
-            </button>
-            <button
-              class="btn btn-xxs btn-default text-light"
-              title="Delete track"
-              @click=${() => this.removeTrack(track.id)}
-            >
-              <span class="material-symbols-outlined icon-xs">delete</span>
-            </button>
-          </div>
+          <button
+            class="btn btn-xxs btn-default text-light track-menu"
+            title="Track options"
+            aria-haspopup="menu"
+            aria-expanded=${this.openMenu?.trackId === track.id}
+            @click=${(e: MouseEvent) => this.toggleMenu(track.id, e)}
+          >
+            <span class="material-symbols-outlined icon-xs">more_vert</span>
+          </button>
         </div>
       `,
     );
+
+    const menu = this.renderMenu(ordered);
 
     return html`
       <style>
@@ -189,15 +289,20 @@ export class ElementTimelineLeftOption extends LitElement {
           overflow: hidden;
         }
 
-        .track-actions {
-          display: flex;
-          gap: 2px;
+        .track-menu {
+          flex: 0 0 auto;
         }
 
-        .track-add {
-          display: flex;
-          gap: 4px;
-          padding: 4px 0.5rem;
+        ul.track-menu .dropdown-item {
+          width: 100%;
+          text-align: left;
+          background: none;
+          border: 0;
+        }
+
+        ul.track-menu .dropdown-item:disabled {
+          opacity: 0.4;
+          pointer-events: none;
         }
       </style>
       <div
@@ -212,26 +317,6 @@ export class ElementTimelineLeftOption extends LitElement {
                with the rows they name. -->
           <div style="height: ${RULER_OFFSET}px;"></div>
           ${rows}
-          <div class="track-add">
-            <button
-              class="btn btn-xxs btn-default text-light"
-              @click=${() => this.addTrack("video")}
-            >
-              + V
-            </button>
-            <button
-              class="btn btn-xxs btn-default text-light"
-              @click=${() => this.addTrack("audio")}
-            >
-              + A
-            </button>
-            <button
-              class="btn btn-xxs btn-default text-light"
-              @click=${() => this.addTrack("text")}
-            >
-              + T
-            </button>
-          </div>
         </div>
       </div>
       <div
@@ -239,6 +324,7 @@ export class ElementTimelineLeftOption extends LitElement {
         style="left: ${width}px;"
         @mousedown=${this._handleClickResizePanel}
       ></div>
+      ${menu}
     `;
   }
 }

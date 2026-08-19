@@ -178,6 +178,44 @@ describe("timelineStore track operations", () => {
     expect(store().tracks).toHaveLength(1);
   });
 
+  it("deletes a track with its clips when asked explicitly", () => {
+    // What the track menu's Delete does. The refusing default is right for
+    // programmatic callers, but a user who picked "Delete track and 1 clip"
+    // has said what they meant, and a button that quietly does nothing reads
+    // as broken.
+    store().addTrack("video", "v1");
+    store().addTrack("video", "v2");
+    store().patchTimeline({
+      doomed: imageElement({ trackId: "v1" }),
+      kept: imageElement({ trackId: "v2" }),
+    });
+
+    store().removeTrackById("v1", "delete-clips");
+
+    expect(store().tracks.map((t) => t.id)).toEqual(["v2"]);
+    expect(Object.keys(store().timeline)).toEqual(["kept"]);
+  });
+
+  it("undoes a track deletion and its clips as one step", () => {
+    store().addTrack("video", "v1");
+    // Through a checkpoint, the way a real drop or paste arrives — the clip
+    // has to be in the recorded history for undo to have anything to restore.
+    store().withCheckpoint((doc) => ({
+      ...doc,
+      elements: { a: imageElement({ trackId: "v1" }) },
+    }));
+
+    store().removeTrackById("v1", "delete-clips");
+    expect(store().tracks).toHaveLength(0);
+
+    store().rollbackTimelineFromCheckPoint(-1);
+
+    // Both halves come back together, or undo would leave a clip stranded on
+    // a track that no longer exists.
+    expect(store().tracks.map((t) => t.id)).toEqual(["v1"]);
+    expect(store().timeline.a?.trackId).toBe("v1");
+  });
+
   it("reorders tracks, which reorders the composite", () => {
     store().addTrack("video", "v1");
     store().addTrack("video", "v2");

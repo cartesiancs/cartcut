@@ -52,6 +52,7 @@ import {
 import { collectSnapPoints, snapSpan } from "../timeline/snapping";
 import { type TimelineDocument } from "../timeline/tracks";
 import { AssetController } from "../../controllers/asset";
+import { isTypingTarget } from "../../utils/typingTarget";
 
 /** How close, in px, an edge must come before it snaps. */
 const SNAP_TOLERANCE_PX = 10;
@@ -666,6 +667,12 @@ export class elementTimelineCanvas extends LitElement {
   }
 
   _handleKeydown(event) {
+    // Bound to `window`, so a keystroke aimed at a text field arrives here too.
+    // Without this, Backspace while typing deleted the selected clip.
+    if (isTypingTarget(event.target)) {
+      return;
+    }
+
     if (event.code === "Escape") {
       this.handleCancelGesture();
       return;
