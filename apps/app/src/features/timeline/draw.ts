@@ -21,6 +21,8 @@ import { xAtTime, type ClipRect, type TimelineLayout } from "./layout";
 import type { TimelineDocument } from "./tracks";
 import { nullTileProvider, type TileProvider } from "./strip/provider";
 import { planFilmstrip } from "./strip/tiles";
+import { planWaveform } from "./strip/peaks";
+import { nullPeakProvider, type PeakProvider } from "./strip/audioPeaks";
 
 export type ThemeColors = {
   background: string;
@@ -55,6 +57,7 @@ export type DrawOptions = {
   /** Time to mark with a guide line while a drag is snapping, if any. */
   snapGuideMs?: number | null;
   provider?: TileProvider;
+  peaks?: PeakProvider;
   colors?: ThemeColors;
 };
 
@@ -108,6 +111,14 @@ export function clipLabel(element: TimelineElement): string {
   return name || element.filetype;
 }
 
+/** Clip types with a waveform worth drawing. */
+export function canShowWaveform(element: TimelineElement): boolean {
+  return (
+    element.filetype === "audio" ||
+    (element.filetype === "video" && element.isExistAudio === true)
+  );
+}
+
 /** Clip types with frames to show. A type guard so `drawFilmstrip` can rely on
  * the visual fields — audio has no width or height at all. */
 export function canShowFilmstrip(
@@ -123,6 +134,7 @@ export function drawClip(
   opts: {
     selected: boolean;
     provider: TileProvider;
+    peaks: PeakProvider;
     colors: ThemeColors;
     range: number;
     viewportW: number;
@@ -144,6 +156,13 @@ export function drawClip(
 
   if (canShowFilmstrip(element)) {
     drawFilmstrip(ctx, rect, element, opts.provider, {
+      range: opts.range,
+      viewportW: opts.viewportW,
+    });
+  }
+
+  if (canShowWaveform(element)) {
+    drawWaveform(ctx, rect, element, opts.peaks, {
       range: opts.range,
       viewportW: opts.viewportW,
     });
@@ -238,12 +257,67 @@ function drawFilmstrip(
   }
 }
 
+/**
+ * Draw the clip's waveform across its lower half.
+ *
+ * Lower half rather than the whole clip: on a video with sound the filmstrip
+ * owns the frame and the waveform rides underneath it, and on a bare audio clip
+ * a centred trace reads the same either way.
+ */
+function drawWaveform(
+  ctx: CanvasRenderingContext2D,
+  rect: ClipRect,
+  element: TimelineElement,
+  provider: PeakProvider,
+  opts: { range: number; viewportW: number },
+) {
+  const data = provider.get(element.localpath);
+  if (data == null) {
+    provider.request(element.localpath);
+    return;
+  }
+
+  const isVideo = element.filetype === "video";
+  const band = isVideo ? rect.h * 0.4 : rect.h;
+  const top = rect.y + rect.h - band;
+  const mid = top + band / 2;
+  const half = band / 2;
+
+  const columns = planWaveform({
+    data,
+    clipX: rect.x,
+    clipW: rect.w,
+    spanStartMs: spanStart(element),
+    sourceInMs: isDynamicElement(element) ? element.trim.startTime : 0,
+    speed: speedOf(element),
+    range: opts.range,
+    viewportX0: 0,
+    viewportX1: opts.viewportW,
+  });
+
+  if (isVideo) {
+    // Darken behind the trace so it stays readable over the frames.
+    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.fillRect(rect.x, top, rect.w, band);
+  }
+
+  ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
+  for (const column of columns) {
+    const y0 = mid - column.max * half;
+    const y1 = mid - column.min * half;
+    // A silent column still gets a hairline, so the clip reads as audio rather
+    // than as a gap.
+    ctx.fillRect(column.x, y0, 1, Math.max(1, y1 - y0));
+  }
+}
+
 export function drawTimeline(
   ctx: CanvasRenderingContext2D,
   opts: DrawOptions,
 ) {
   const colors = opts.colors ?? defaultColors;
   const provider = opts.provider ?? nullTileProvider;
+  const peaks = opts.peaks ?? nullPeakProvider;
   const selection = new Set(opts.selection);
 
   ctx.fillStyle = colors.background;
@@ -262,6 +336,7 @@ export function drawTimeline(
     drawClip(ctx, rect, element, {
       selected: selection.has(rect.elementId),
       provider,
+      peaks,
       colors,
       range: opts.range,
       viewportW: opts.viewportW,

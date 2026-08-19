@@ -35,6 +35,10 @@ import {
   createVideoTileProvider,
   type VideoTileProvider,
 } from "../timeline/strip/videoTiles";
+import {
+  createAudioPeakProvider,
+  type AudioPeakProvider,
+} from "../timeline/strip/audioPeaks";
 import { collectSnapPoints, snapSpan } from "../timeline/snapping";
 import { type TimelineDocument } from "../timeline/tracks";
 
@@ -96,7 +100,8 @@ export class elementTimelineCanvas extends LitElement {
    * nothing; when one lands it asks for a repaint.
    */
   private tiles: VideoTileProvider = createVideoTileProvider();
-  private disposeTiles: (() => void) | null = null;
+  private peaks: AudioPeakProvider = createAudioPeakProvider();
+  private disposeStrips: Array<() => void> = [];
 
   constructor() {
     super();
@@ -144,14 +149,20 @@ export class elementTimelineCanvas extends LitElement {
       this.timelineResizeObserver = new ResizeObserver(() => this.drawCanvas());
       this.timelineResizeObserver.observe(timeline);
     }
-    this.disposeTiles = this.tiles.onReady(() => this.drawCanvas());
+    this.disposeStrips = [
+      this.tiles.onReady(() => this.drawCanvas()),
+      this.peaks.onReady(() => this.drawCanvas()),
+    ];
     this.drawCanvas();
   }
 
   disconnectedCallback(): void {
-    this.disposeTiles?.();
-    this.disposeTiles = null;
+    for (const dispose of this.disposeStrips) {
+      dispose();
+    }
+    this.disposeStrips = [];
     this.tiles.dispose();
+    this.peaks.dispose();
     this.timelineResizeObserver?.disconnect();
     this.timelineResizeObserver = undefined;
     window.removeEventListener("resize", this.handleWindowResize);
@@ -283,6 +294,7 @@ export class elementTimelineCanvas extends LitElement {
       projectEndMs: this.renderOption.duration * 1000,
       snapGuideMs: this.snapGuideMs,
       provider: this.tiles,
+      peaks: this.peaks,
     });
   }
 

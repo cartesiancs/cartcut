@@ -15,6 +15,8 @@ import {
   type TimelineDocument,
 } from "./tracks";
 import { nullTileProvider, type TileProvider } from "./strip/provider";
+import type { PeakProvider } from "./strip/audioPeaks";
+import type { PeakData } from "./strip/peaks";
 import { pixel, scene, solid } from "../renderer/testing";
 import { audioElement, imageElement, textElement, videoElement } from "../renderer/testing";
 
@@ -426,6 +428,118 @@ describe("drawTimeline filmstrip", () => {
       { provider },
     );
     expect(provider.get).not.toHaveBeenCalled();
+  });
+});
+
+describe("drawTimeline waveform", () => {
+  /** Peaks at a constant level, covering 10s of source. */
+  function loudPeaks(level = 0.9): PeakData {
+    const buckets = 500;
+    const peaks = new Float32Array(buckets * 2);
+    for (let i = 0; i < buckets; i++) {
+      peaks[i * 2] = -level;
+      peaks[i * 2 + 1] = level;
+    }
+    return { peaks, bucketMs: 20, durationMs: buckets * 20 };
+  }
+
+  const audioDoc = () =>
+    doc({
+      a: audioElement({
+        trackId: "v1",
+        startTime: 0,
+        duration: 4000,
+        localpath: "/song.mp3",
+        timelineOptions: { color: "#000080" },
+      }),
+    });
+
+  it("draws a trace when the peaks are decoded", () => {
+    const peaks: PeakProvider = { get: () => loudPeaks(), request: vi.fn() };
+    const { canvas } = paint(audioDoc(), { peaks });
+
+    // A loud signal reaches most of the way to the row's edges.
+    expect(pixel(canvas, 50, TRACK_HEIGHT - 3).r).toBeGreaterThan(100);
+  });
+
+  it("requests the file when it has no peaks yet", () => {
+    const peaks: PeakProvider = { get: () => null, request: vi.fn() };
+    paint(audioDoc(), { peaks });
+    expect(peaks.request).toHaveBeenCalledWith("/song.mp3");
+  });
+
+  it("leaves the flat colour showing while the decode is pending", () => {
+    const { canvas } = paint(audioDoc(), {
+      peaks: { get: () => null, request: vi.fn() },
+    });
+    expect(pixel(canvas, 50, 30)).toMatchObject({ r: 0, g: 0, b: 0x80 });
+  });
+
+  it("draws a quiet passage smaller than a loud one", () => {
+    const quiet = paint(audioDoc(), {
+      peaks: { get: () => loudPeaks(0.05), request: vi.fn() },
+    });
+    const loud = paint(audioDoc(), {
+      peaks: { get: () => loudPeaks(0.95), request: vi.fn() },
+    });
+
+    const ink = (c: any) => {
+      let count = 0;
+      for (let y = 0; y < TRACK_HEIGHT; y++) {
+        if (pixel(c, 50, y).r > 100) count++;
+      }
+      return count;
+    };
+    expect(ink(quiet.canvas)).toBeLessThan(ink(loud.canvas));
+  });
+
+  it("does not ask for a waveform for a silent video", () => {
+    const peaks: PeakProvider = { get: () => null, request: vi.fn() };
+    paint(
+      doc({
+        v: videoElement({
+          trackId: "v1",
+          startTime: 0,
+          duration: 4000,
+          isExistAudio: false,
+        }),
+      }),
+      { peaks },
+    );
+    expect(peaks.request).not.toHaveBeenCalled();
+  });
+
+  it("asks for one for a video that carries sound", () => {
+    const peaks: PeakProvider = { get: () => null, request: vi.fn() };
+    paint(
+      doc({
+        v: videoElement({
+          trackId: "v1",
+          startTime: 0,
+          duration: 4000,
+          localpath: "/clip.mp4",
+          isExistAudio: true,
+        }),
+      }),
+      { peaks },
+    );
+    expect(peaks.request).toHaveBeenCalledWith("/clip.mp4");
+  });
+
+  it("does not ask for one for text", () => {
+    const peaks: PeakProvider = { get: () => null, request: vi.fn() };
+    paint(
+      doc({ t: textElement({ trackId: "v1", startTime: 0, duration: 4000 }) }),
+      { peaks },
+    );
+    expect(peaks.request).not.toHaveBeenCalled();
+  });
+
+  it("keeps the trace inside the clip", () => {
+    const peaks: PeakProvider = { get: () => loudPeaks(1), request: vi.fn() };
+    const { canvas } = paint(audioDoc(), { peaks });
+    // The clip is 180px wide; nothing past it.
+    expect(pixel(canvas, 190, 20).r).toBeLessThan(100);
   });
 });
 
