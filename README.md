@@ -12,11 +12,11 @@ Opensource alternative to capcut
 
 <p align='center'>
 
-<a href="#"><img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/cartesiancs/nugget-app?style=for-the-badge" /></a>
+<a href="#"><img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/cartesiancs/cartcut?style=for-the-badge" /></a>
 &nbsp;
-<a href="#"><img alt="GitHub Repo stars" src="https://img.shields.io/github/license/cartesiancs/nugget-app?style=for-the-badge" /></a>
+<a href="#"><img alt="GitHub Repo stars" src="https://img.shields.io/github/license/cartesiancs/cartcut?style=for-the-badge" /></a>
 &nbsp;
-<img alt="GitHub Release" src="https://img.shields.io/github/v/release/cartesiancs/nugget-app?style=for-the-badge">
+<img alt="GitHub Release" src="https://img.shields.io/github/v/release/cartesiancs/cartcut?style=for-the-badge">
 
 </p>
 
@@ -27,7 +27,7 @@ English | <a href="./docs/README.ko.md">한국어</a>
 </p>
 
 <p align='center'>
-<a href="https://www.youtube.com/watch?v=Bh06VOYSMIM">View Demo</a> · <a href="https://github.com/cartesiancs/nugget-app/issues">Report Bugs</a> · <a href="https://github.com/cartesiancs/nugget-app/releases"><b>Download</b></a> · <a href="https://github.com/cartesiancs/nugget-app/issues/new">Suggest Features </a>
+<a href="https://www.youtube.com/watch?v=Bh06VOYSMIM">View Demo</a> · <a href="https://github.com/cartesiancs/cartcut/issues">Report Bugs</a> · <a href="https://github.com/cartesiancs/cartcut/releases"><b>Download</b></a> · <a href="https://github.com/cartesiancs/cartcut/issues/new">Suggest Features </a>
 </p>
 
 #
@@ -100,8 +100,8 @@ Please refer to the [roadmap file](./docs/ROADMAP.md) for more details.
 
 ## Contributors
 
- <a href = "https://github.com/cartesiancs/nugget-app/graphs/contributors">
-   <img src = "https://contrib.rocks/image?repo=cartesiancs/nugget-app"/>
+ <a href = "https://github.com/cartesiancs/cartcut/graphs/contributors">
+   <img src = "https://contrib.rocks/image?repo=cartesiancs/cartcut"/>
  </a>
 
 ## License
