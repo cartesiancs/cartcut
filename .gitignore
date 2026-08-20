@@ -10,3 +10,4 @@
 /apps/app/dist
 .DS_Store
 /even-terminal-*.log
+.claude/settings.local.json

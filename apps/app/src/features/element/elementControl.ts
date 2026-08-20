@@ -11,6 +11,10 @@ import {
 import { decompressFrames, parseGIF } from "gifuct-js";
 import { getLocationEnv } from "../../functions/getLocationEnv";
 import { placeNewElement } from "../timeline/placement";
+import {
+  createTextElement,
+  type TextElementOptions,
+} from "./textElement";
 
 @customElement("element-control")
 export class ElementControl extends LitElement {
@@ -550,63 +554,14 @@ export class ElementControl extends LitElement {
     };
   }
 
-  addText({
-    text = "TITLE",
-    textcolor = "#ffffff",
-    fontsize = 52,
-    optionsAlign = "left",
-    backgroundEnable = false,
-    locationX = 0,
-    locationY = 0,
-    height = 66,
-    width = 500,
-    startTime = 0,
-    duration = 1000,
-  }) {
+  addText(options: TextElementOptions) {
     const elementId = this.generateUUID();
 
-    this.timeline[elementId] = {
-      startTime: startTime,
-      duration: duration,
-      text: text,
-      textcolor: textcolor,
-      fontsize: fontsize,
-      fontpath: "default",
-      fontname: "notosanskr",
-      fontweight: "medium",
-      fonttype: "otf",
-      letterSpacing: 0,
-      options: {
-        isBold: false,
-        isItalic: false,
-        align: optionsAlign,
-        outline: {
-          enable: false,
-          size: 1,
-          color: "#000000",
-        },
-      },
-      background: {
-        enable: backgroundEnable,
-        color: "#000000",
-      },
-      location: { x: locationX, y: locationY },
-      rotation: 0,
-      localpath: "/TEXTELEMENT",
-      filetype: "text",
-      height: height,
-      width: width,
-      widthInner: 200,
-      opacity: 100,
-      animation: emptyAnimation("text"),
-      timelineOptions: {
-        color: "rgb(59, 143, 179)",
-      },
-    };
+    this.timeline[elementId] = createTextElement(options);
 
     // Captions arrive with their own timing, already converted to timeline
     // time by the caller, so they must not be nudged to the playhead.
-    this.commitNewElement(elementId, startTime);
+    this.commitNewElement(elementId, options.startTime ?? 0);
 
     // this.showText(elementId);
     // this.elementTimeline.addElementBar(elementId);

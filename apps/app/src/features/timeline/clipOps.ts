@@ -280,6 +280,182 @@ export function rippleDelete(
   return withElements(doc, elements);
 }
 
+/** A half-open window of timeline time, in ms. */
+export type TimeRange = { startMs: number; endMs: number };
+
+/**
+ * Merge overlapping and touching ranges, latest first.
+ *
+ * Descending order is not cosmetic: cutting from the end backwards means each
+ * cut lands at coordinates the earlier cuts have not moved yet. Ascending order
+ * would need every remaining range rewritten after each removal, and a
+ * transcript's ranges arrive ascending, so this is the conversion that makes
+ * the caller's natural input safe.
+ */
+export function normalizeRanges(ranges: TimeRange[]): TimeRange[] {
+  const valid = ranges
+    .map((range) => ({
+      startMs: Math.max(0, Math.min(range.startMs, range.endMs)),
+      endMs: Math.max(range.startMs, range.endMs),
+    }))
+    .filter((range) => range.endMs > range.startMs)
+    .sort((a, b) => a.startMs - b.startMs);
+
+  const merged: TimeRange[] = [];
+  for (const range of valid) {
+    const last = merged[merged.length - 1];
+    if (last != null && range.startMs <= last.endMs) {
+      last.endMs = Math.max(last.endMs, range.endMs);
+      continue;
+    }
+    merged.push({ ...range });
+  }
+
+  return merged.reverse();
+}
+
+/**
+ * Cut a set of time windows out of one clip.
+ *
+ * This is the operation an automatic cut edit is made of — "drop every silence"
+ * or "drop these six filler words" is one call, not sixty. Doing it as one
+ * transform matters for two reasons beyond convenience: the caller gets a
+ * single undo step for what the user experienced as a single instruction, and
+ * the ranges are interpreted against the *original* timeline, so a caller
+ * holding a transcript does not have to re-derive coordinates after every cut.
+ *
+ * Each range becomes at most two splits and one delete. With `ripple`, the
+ * surviving tail slides back to close the hole, which is what makes the result
+ * play as continuous speech; without it the cut leaves a gap.
+ *
+ * Ranges that fall outside the clip contribute nothing, and a call where none
+ * of them bite returns `doc` unchanged — same identity, so no undo step.
+ */
+export function removeRanges(
+  doc: TimelineDocument,
+  elementId: string,
+  ranges: TimeRange[],
+  ripple: boolean,
+  idGen: () => string,
+): TimelineDocument {
+  if (doc.elements[elementId] == null) {
+    return doc;
+  }
+
+  const ordered = normalizeRanges(ranges);
+  if (ordered.length === 0) {
+    return doc;
+  }
+
+  let next = doc;
+
+  // Which elements are pieces of the clip we were asked to cut. Splitting
+  // grows this set; nothing else on the track may ever enter it. Without it
+  // the search below would happily find — and delete — a neighbouring clip
+  // that merely happens to overlap the range.
+  const pieces = new Set<string>([elementId]);
+
+  for (const range of ordered) {
+    // Re-read every iteration: an earlier (later-in-time) cut may have split
+    // this element, and the piece this range falls in is not necessarily the
+    // one that kept the original id.
+    const target = findPieceCovering(next, pieces, range);
+    if (target == null) {
+      continue;
+    }
+
+    const [targetId, element] = target;
+    const span = spanOf(element);
+    const from = Math.max(span.start, range.startMs);
+    const to = Math.min(span.end, range.endMs);
+    if (to <= from) {
+      continue;
+    }
+
+    // Each range is applied to a scratch document and only adopted once all
+    // three steps land. A split can still decline — a cut closer to the edge
+    // than the minimum window leaves an empty half — and committing the first
+    // split without the delete that justified it would leave the clip severed
+    // for no reason, which is a worse outcome than declining the range.
+    let attempt = next;
+    const added: string[] = [];
+
+    // Cut the tail off first. Splitting at `from` afterwards would have to
+    // hunt for the middle piece again, and `splitClip` names only the right
+    // half, so working right-to-left keeps every id known.
+    let middleId = targetId;
+    let declined = false;
+
+    if (to < span.end) {
+      const rightId = idGen();
+      const afterTail = splitClip(attempt, targetId, to, rightId);
+      if (afterTail === attempt) {
+        declined = true;
+      } else {
+        attempt = afterTail;
+        added.push(rightId);
+      }
+    }
+
+    if (!declined && from > span.start) {
+      const rightId = idGen();
+      const afterHead = splitClip(attempt, middleId, from, rightId);
+      if (afterHead === attempt) {
+        declined = true;
+      } else {
+        attempt = afterHead;
+        added.push(rightId);
+        middleId = rightId;
+      }
+    }
+
+    if (declined) {
+      continue;
+    }
+
+    next = ripple
+      ? rippleDelete(attempt, middleId)
+      : deleteClips(attempt, [middleId]);
+
+    for (const id of added) {
+      pieces.add(id);
+    }
+    pieces.delete(middleId);
+  }
+
+  return next;
+}
+
+/**
+ * The piece of a once-single clip that `range` falls in.
+ *
+ * After the first cut the original element is several elements, all still on
+ * the same track, and the one a later range lands in is not necessarily the one
+ * holding the original id — so the search is by position. It is confined to
+ * `pieces` because position alone would also match the clip sitting next to
+ * ours, and deleting a bystander because it shared a lane would be the worst
+ * possible reading of "remove this range".
+ */
+function findPieceCovering(
+  doc: TimelineDocument,
+  pieces: Set<string>,
+  range: TimeRange,
+): [string, TimelineElement] | null {
+  for (const id of pieces) {
+    const candidate = doc.elements[id];
+    if (candidate == null) {
+      continue;
+    }
+    if (
+      overlaps(spanOf(candidate), { start: range.startMs, end: range.endMs })
+    ) {
+      return [id, candidate];
+    }
+  }
+
+  return null;
+}
+
 /**
  * Paste clips so the earliest of them lands on `atMs`, preserving the shape of
  * the copied group.

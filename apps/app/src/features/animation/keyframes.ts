@@ -22,6 +22,7 @@
  */
 
 import type { CubicKeyframeType, TimelineElement } from "../../@types/timeline";
+import { clampHandles } from "./handleBounds";
 
 export type Lane = "x" | "y";
 
@@ -135,7 +136,10 @@ export function normalizeKeyframes(raw: unknown): Keyframe[] {
     }
     out.push(keyframe);
   }
-  return out;
+  // Ingress is where project files authored before handles were constrained get
+  // repaired. Without this, a legacy `.ngt` would draw handles the baker
+  // silently ignores — the exact divergence `handleBounds` exists to end.
+  return clampHandles(out);
 }
 
 /**
@@ -546,7 +550,7 @@ export function addKeyframe(
       cs: [current.cs[0], current.cs[1] + (value - current.p[1])],
       ce: [current.ce[0], current.ce[1] + (value - current.p[1])],
     };
-    return next;
+    return clampHandles(next);
   }
 
   let at = list.length;
@@ -556,7 +560,10 @@ export function addKeyframe(
       break;
     }
   }
-  return [...list.slice(0, at), fresh, ...list.slice(at)];
+  // Inserting changes the bounds of both neighbours as well as seating the new
+  // keyframe's own `±handleMs`, which lands outside the segment whenever the
+  // gap is under 100ms. Clamping the whole list is the only way to catch both.
+  return clampHandles([...list.slice(0, at), fresh, ...list.slice(at)]);
 }
 
 /**
@@ -617,10 +624,21 @@ export function moveKeyframe(
     }
   }
   next.splice(at, 0, moved);
-  return { list: next, index: at };
+  // The anchor carried its handles with it, and moving it also redefined what
+  // its neighbours' handles are allowed to span. Constraining only the dragged
+  // keyframe would leave the two beside it pointing past it.
+  return { list: clampHandles(next), index: at };
 }
 
-/** Replace one keyframe's bezier handles. */
+/**
+ * Replace one keyframe's bezier handles, constrained to their segment.
+ *
+ * The clamp is here rather than in the editor's drag because this is the choke
+ * point every handle edit passes through — the curve editor, the option panels,
+ * and any easing preset added later. Putting it in the drag handler would mean
+ * the next caller reintroduces the divergence between the drawn handle and the
+ * baked curve. See `handleBounds` for the rule and why the value axis is free.
+ */
 export function setHandles(
   list: Keyframe[],
   index: number,
@@ -638,14 +656,20 @@ export function setHandles(
 
   const next = [...list];
   next[index] = { ...current, cs: cs ?? current.cs, ce: ce ?? current.ce };
-  return next;
+  const clamped = clampHandles(next);
+  // `clampHandles` cannot see that `next` is a copy, so it hands back the same
+  // array when the patch was already in bounds. Compare against the original to
+  // keep the decline-by-identity contract when the patch was a no-op.
+  return sameKeyframes(list, clamped) ? list : clamped;
 }
 
 export function removeKeyframe(list: Keyframe[], index: number): Keyframe[] {
   if (index < 0 || index >= list.length) {
     return list;
   }
-  return [...list.slice(0, index), ...list.slice(index + 1)];
+  // Removing widens the gap its neighbours span, and turns whichever keyframe
+  // was next-to-last into the last — whose `ce` is now inert and must collapse.
+  return clampHandles([...list.slice(0, index), ...list.slice(index + 1)]);
 }
 
 /** Slide every keyframe by `deltaMs`, handles included. */
@@ -788,6 +812,24 @@ function planted(list: Keyframe[], tMs: number): Keyframe[] {
 }
 
 /**
+ * Plant a keyframe at `tMs` without changing the curve.
+ *
+ * The public face of `planted`. Clip splitting needed this so a cut would not
+ * change what plays; the paired-lane ops need it for the same reason at the
+ * other end of the app — when a keyframe is added to `x`, the matching one on
+ * `y` must land *on* the curve `y` already had, not resample it through fresh
+ * default handles. Returns the input by identity when there is already a
+ * keyframe at that instant, or when the list is empty and there is no curve to
+ * preserve.
+ */
+export function plantKeyframe(list: Keyframe[], tMs: number): Keyframe[] {
+  if (!Number.isFinite(tMs)) {
+    return list;
+  }
+  return clampHandles(planted(list, tMs));
+}
+
+/**
  * Keep the keyframes inside `[fromMs, toMs]`, with the boundaries pinned.
  *
  * A cut that simply dropped what fell outside would change the picture at the
@@ -827,8 +869,13 @@ export function sliceKeyframes(
 /** Property names that carry a second lane. */
 const VECTOR_PROPERTIES = new Set(["position"]);
 
-function lanesOf(property: string): Lane[] {
+export function lanesOf(property: string): Lane[] {
   return VECTOR_PROPERTIES.has(property) ? ["x", "y"] : ["x"];
+}
+
+/** The other lane of a two-lane property. */
+export function siblingLane(lane: Lane): Lane {
+  return lane === "x" ? "y" : "x";
 }
 
 /**

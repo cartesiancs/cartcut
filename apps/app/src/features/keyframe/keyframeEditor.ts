@@ -1,15 +1,30 @@
 import { LitElement, PropertyValues, html } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
-import { millisecondsToPx, pxToMilliseconds } from "../../utils/time";
+import { millisecondsToPx } from "../../utils/time";
 import { IUIStore, uiStore } from "../../states/uiStore";
 import { ImageElementType } from "../../@types/timeline";
 import { KeyframeController } from "../../controllers/keyframe";
 import { applySurface, surfaceSpec } from "../timeline/canvasSurface";
-import { moveKeyframe, setHandles } from "../animation/keyframeOps";
-import { sameKeyframes } from "../animation/keyframes";
+import { isCollapsedHandle } from "../animation/handleBounds";
+import type { Keyframe, Lane } from "../animation/keyframes";
 import type { TimelineDocument } from "../timeline/tracks";
 import { isTypingEvent } from "../../utils/typingTarget";
+import {
+  clampToClip,
+  hitTest,
+  toScreen,
+  toTrack,
+  type Hit,
+  type Viewport,
+} from "./editorGeometry";
+import {
+  beginDrag,
+  curveChanged,
+  updateDrag,
+  type DragState,
+  type DragTarget,
+} from "./dragKeyframe";
 
 @customElement("keyframe-editor")
 export class KeyframeEditor extends LitElement {
@@ -33,12 +48,12 @@ export class KeyframeEditor extends LitElement {
   verticalRange: number;
   activePointIndex: number;
 
-  /** The document as it stood when the current drag began. */
-  private dragOriginDoc: TimelineDocument | null = null;
-  /** Index of the grabbed keyframe in `dragOriginDoc`, which never re-sorts. */
-  private dragOriginIndex = -1;
+  /** The drag in progress, or `null`. Owned by `dragKeyframe`. */
+  private drag: DragState | null = null;
   /** The drag's preview document; committed once, on mouseup. */
   private pendingDoc: TimelineDocument | null = null;
+  /** Whether the pointer is over something grabbable, for the cursor. */
+  private hover: Hit | null = null;
 
   constructor() {
     super();
@@ -262,127 +277,101 @@ export class KeyframeEditor extends LitElement {
   }
 
   private drawDots(ctx) {
-    const points = this.timeline[this.elementId].animation[this.animationType];
+    const track = this.timeline[this.elementId].animation[this.animationType];
 
-    for (const key in points) {
-      if (Object.prototype.hasOwnProperty.call(points, key)) {
-        if (["x", "y"].includes(key)) {
-          const point =
-            this.timeline[this.elementId].animation[this.animationType][key];
-          if (key == "x") {
-            let color = this.selectLine == 0 ? "#403af0" : "#3d3e45";
-            let subcolor = this.selectLine == 0 ? "#b7bcf7" : "#3d3e45";
-
-            this.drawDotsLoop({
-              ctx: ctx,
-              dots: point,
-              color: color,
-              subColor: subcolor,
-            });
-          } else {
-            let color = this.selectLine == 1 ? "#e83535" : "#3d3e45";
-            let subcolor = this.selectLine == 1 ? "#ed7979" : "#3d3e45";
-
-            this.drawDotsLoop({
-              ctx: ctx,
-              dots: point,
-              color: color,
-              subColor: subcolor,
-            });
-          }
-        }
+    for (const lane of ["x", "y"] as const) {
+      const dots = track[lane];
+      if (!Array.isArray(dots)) {
+        continue;
       }
+      const selected = this.currentLaneName() === lane;
+      this.drawDotsLoop({
+        ctx,
+        dots,
+        // The lane being edited keeps its colour; the other greys out.
+        color: selected ? (lane === "x" ? "#403af0" : "#e83535") : "#3d3e45",
+        subColor: selected ? (lane === "x" ? "#b7bcf7" : "#ed7979") : "#3d3e45",
+        selected,
+      });
     }
   }
 
-  drawDotsLoop({ ctx, dots, color, subColor }) {
+  drawDotsLoop({ ctx, dots, color, subColor, selected }) {
+    const viewport = this.viewport();
+
     for (let index = 0; index < dots.length; index++) {
       const element = dots[index];
-      ctx.fillStyle = color;
 
-      if (this.activePointIndex == index && this.activePointIndex != -1) {
-        ctx.fillStyle = "#f7f414"; // yellow color
+      // `selected` as well as the index. Without it, choosing keyframe 2 on the
+      // x lane painted keyframe 2 on the y lane yellow too, so two points in
+      // two different curves both looked like the selection.
+      const isActive = selected && this.activePointIndex === index;
+
+      const anchor = toScreen(viewport, element.p[0], element.p[1]);
+
+      // Handles for the selected keyframe alone. Drawing all of them turned a
+      // busy curve into a thicket of near-identical dots, and every one of them
+      // was a grab target sitting on top of the anchors.
+      if (isActive) {
+        ctx.strokeStyle = subColor;
+        ctx.fillStyle = subColor;
+
+        for (const which of ["cs", "ce"] as const) {
+          // The first keyframe's `cs` and the last one's `ce` sit exactly on
+          // their anchors and the baker never reads them — see `handleBounds`.
+          // Drawing them would offer a control that cannot affect the curve.
+          if (isCollapsedHandle(element, which)) {
+            continue;
+          }
+          const handle = toScreen(viewport, element[which][0], element[which][1]);
+
+          ctx.beginPath();
+          ctx.moveTo(anchor.x, anchor.y);
+          ctx.lineTo(handle.x, handle.y);
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.arc(handle.x, handle.y, 4, 0, 2 * Math.PI);
+          ctx.fill();
+        }
       }
 
+      // The anchor last, so it is never buried under its own handles.
+      ctx.fillStyle = isActive ? "#f7f414" : color;
       ctx.beginPath();
-
-      const x =
-        millisecondsToPx(
-          element.p[0] + this.timeline[this.elementId].startTime,
-          this.timelineRange,
-        ) - this.timelineScroll;
-
-      const y = element.p[1] + this.verticalScroll;
-      ctx.arc(x, y / this.verticalRange, 4, 0, 2 * Math.PI);
+      ctx.arc(anchor.x, anchor.y, isActive ? 5 : 4, 0, 2 * Math.PI);
       ctx.fill();
-
-      ctx.fillStyle = subColor;
-
-      ctx.beginPath();
-      const sx =
-        millisecondsToPx(
-          element.cs[0] + this.timeline[this.elementId].startTime,
-          this.timelineRange,
-        ) - this.timelineScroll;
-      const sy = element.cs[1] + this.verticalScroll;
-      ctx.arc(sx, sy / this.verticalRange, 4, 0, 2 * Math.PI);
-      ctx.fill();
-
-      ctx.beginPath();
-      const ex =
-        millisecondsToPx(
-          element.ce[0] + this.timeline[this.elementId].startTime,
-          this.timelineRange,
-        ) - this.timelineScroll;
-      const ey = element.ce[1] + this.verticalScroll;
-      ctx.arc(ex, ey / this.verticalRange, 4, 0, 2 * Math.PI);
-      ctx.fill();
-
-      ctx.strokeStyle = subColor;
-
-      ctx.beginPath();
-      ctx.moveTo(x, y / this.verticalRange);
-      ctx.lineTo(sx, sy / this.verticalRange);
-      ctx.stroke();
-
-      ctx.strokeStyle = subColor;
-
-      ctx.beginPath();
-      ctx.moveTo(x, y / this.verticalRange);
-      ctx.lineTo(ex, ey / this.verticalRange);
-      ctx.stroke();
     }
   }
 
   private drawLines(ctx) {
-    const points = this.timeline[this.elementId].animation[this.animationType];
+    const track = this.timeline[this.elementId].animation[this.animationType];
+    const viewport = this.viewport();
 
-    for (const key in points) {
-      if (Object.prototype.hasOwnProperty.call(points, key)) {
-        if (["ax", "ay"].includes(key)) {
-          const point =
-            this.timeline[this.elementId].animation[this.animationType][key];
-          ctx.strokeStyle = this.selectLine == 0 ? "#403af0" : "#3d3e45";
-          if (key == "ay") {
-            ctx.strokeStyle = this.selectLine == 1 ? "#e83535" : "#3d3e45";
-          }
-
-          ctx.beginPath();
-          for (let index = 0; index < point.length; index++) {
-            const element = point[index];
-            const x =
-              millisecondsToPx(
-                element[0] + this.timeline[this.elementId].startTime,
-                this.timelineRange,
-              ) - this.timelineScroll;
-            ctx.lineTo(
-              x,
-              (element[1] + this.verticalScroll) / this.verticalRange,
-            );
-          }
-          ctx.stroke();
-        }
+    for (const [lane, key] of [
+      ["x", "ax"],
+      ["y", "ay"],
+    ] as const) {
+      const baked = track[key];
+      if (!Array.isArray(baked)) {
+        continue;
       }
+      const selected = this.currentLaneName() === lane;
+      ctx.strokeStyle = selected
+        ? lane === "x"
+          ? "#403af0"
+          : "#e83535"
+        : "#3d3e45";
+
+      // The same `toScreen` the dots go through. Drawing the curve and its
+      // control points with two different mappings is how the handle you drew
+      // and the curve it was supposed to shape came to disagree.
+      ctx.beginPath();
+      for (const [tMs, value] of baked) {
+        const point = toScreen(viewport, tMs, value);
+        ctx.lineTo(point.x, point.y);
+      }
+      ctx.stroke();
     }
   }
 
@@ -595,61 +584,32 @@ export class KeyframeEditor extends LitElement {
     this.requestUpdate();
   }
 
-  checkBoundary(element, mouseX, mouseY) {
-    const padding = 10;
+  /**
+   * The mapping between track space and canvas px, as `editorGeometry` wants it.
+   *
+   * Built fresh per use rather than cached: every field is a live store value,
+   * and a stale copy is exactly how the forward and inverse maps drifted apart
+   * in the first place.
+   */
+  private viewport(): Viewport {
+    const element = this.timeline[this.elementId];
+    return {
+      timelineRange: this.timelineRange,
+      timelineScroll: this.timelineScroll,
+      verticalScroll: this.verticalScroll,
+      verticalRange: this.verticalRange,
+      startTime: element?.startTime ?? 0,
+      duration: element?.duration ?? 0,
+    };
+  }
 
-    const csx =
-      millisecondsToPx(
-        element.cs[0] + this.timeline[this.elementId].startTime,
-        this.timelineRange,
-      ) - this.timelineScroll;
-
-    const csy = (element.cs[1] + this.verticalScroll) / this.verticalRange;
-
-    if (
-      csx > mouseX - padding &&
-      csx < mouseX + padding &&
-      csy > mouseY - padding &&
-      csy < mouseY + padding
-    ) {
-      return "cs";
-    }
-
-    const cex =
-      millisecondsToPx(
-        element.ce[0] + this.timeline[this.elementId].startTime,
-        this.timelineRange,
-      ) - this.timelineScroll;
-
-    const cey = (element.ce[1] + this.verticalScroll) / this.verticalRange;
-
-    if (
-      cex > mouseX - padding &&
-      cex < mouseX + padding &&
-      cey > mouseY - padding &&
-      cey < mouseY + padding
-    ) {
-      return "ce";
-    }
-
-    const dotx =
-      millisecondsToPx(
-        element.p[0] + this.timeline[this.elementId].startTime,
-        this.timelineRange,
-      ) - this.timelineScroll;
-
-    const doty = (element.p[1] + this.verticalScroll) / this.verticalRange;
-
-    if (
-      dotx > mouseX - padding &&
-      dotx < mouseX + padding &&
-      doty > mouseY - padding &&
-      doty < mouseY + padding
-    ) {
-      return "p";
-    }
-
-    return "n";
+  /** Which curve the x/y buttons currently address. */
+  private dragTarget(): DragTarget {
+    return {
+      elementId: this.elementId,
+      property: this.animationType,
+      lane: this.currentLaneName(),
+    };
   }
 
   handleScroll(e) {
@@ -680,24 +640,17 @@ export class KeyframeEditor extends LitElement {
     this.requestUpdate();
   }
 
-  /** The authored keyframes for the lane currently being edited. */
-  private currentLane(): any[] {
-    const lane = this.selectLine == 0 ? "x" : "y";
-    const list = this.timeline?.[this.elementId]?.animation?.[
-      this.animationType
-    ]?.[lane];
-    return Array.isArray(list) ? list : [];
+  /** The lane name the x/y buttons currently select. */
+  private currentLaneName(): Lane {
+    return this.selectLine == 0 ? "x" : "y";
   }
 
-  /** Pointer position as (element-relative ms, track value). */
-  private pointerValue(e): { tMs: number; value: number } {
-    return {
-      tMs:
-        pxToMilliseconds(e.offsetX, this.timelineRange) +
-        pxToMilliseconds(this.timelineScroll, this.timelineRange) -
-        this.timeline[this.elementId].startTime,
-      value: e.offsetY * this.verticalRange - this.verticalScroll,
-    };
+  /** The authored keyframes for the lane currently being edited. */
+  private currentLane(): Keyframe[] {
+    const list = this.timeline?.[this.elementId]?.animation?.[
+      this.animationType
+    ]?.[this.currentLaneName()];
+    return Array.isArray(list) ? list : [];
   }
 
   _handleMouseMove(e) {
@@ -705,19 +658,18 @@ export class KeyframeEditor extends LitElement {
       return;
     }
 
-    const list = this.currentLane();
-    this.cursor = list.some((point) =>
-      ["p", "ce", "cs"].includes(this.checkBoundary(point, e.offsetX, e.offsetY)),
-    )
-      ? "pointer"
-      : "default";
-
-    if (!this.isDrag || this.clickIndex < 0) {
+    if (this.drag == null) {
+      this.hover = hitTest(
+        this.currentLane(),
+        this.viewport(),
+        e.offsetX,
+        e.offsetY,
+        { activeIndex: this.activePointIndex },
+      );
+      this.cursor = this.hover == null ? "default" : "pointer";
       this.requestUpdate();
       return;
     }
-
-    const { tMs, value } = this.pointerValue(e);
 
     // A drag previews through `previewDocument` — which neither normalises the
     // document nor records history, so it is cheap at pointer rate — and
@@ -725,43 +677,29 @@ export class KeyframeEditor extends LitElement {
     // single drag either fill the undo stack or, as it actually did, mutate the
     // store snapshot in place and bypass history altogether.
     //
-    // Every frame recomputes from `dragOriginDoc` rather than compounding, so
-    // the point tracks the pointer exactly instead of drifting.
-    if (this.clickDot == "p") {
-      const moved = moveKeyframe(
-        this.dragOriginDoc ?? useTimelineStore.getState().getDocument(),
-        this.elementId,
-        this.animationType,
-        this.selectLine == 0 ? "x" : "y",
-        this.dragOriginIndex,
-        tMs,
-        value,
-      );
-      this.clickIndex = moved.index;
-      this.activePointIndex = moved.index;
-      this.pendingDoc = moved.doc;
-    } else {
-      const origin = this.dragOriginDoc?.elements[this.elementId] as any;
-      const anchor =
-        origin?.animation?.[this.animationType]?.[
-          this.selectLine == 0 ? "x" : "y"
-        ]?.[this.dragOriginIndex];
-      if (anchor == null) {
-        return;
-      }
-      this.pendingDoc = setHandles(
-        this.dragOriginDoc!,
-        this.elementId,
-        this.animationType,
-        this.selectLine == 0 ? "x" : "y",
-        this.dragOriginIndex,
-        this.clickDot == "cs"
-          ? { cs: [tMs, value] }
-          : { ce: [tMs, value] },
-      );
-    }
+    // `updateDrag` recomputes from the document as it stood when the drag
+    // began rather than compounding, so the point tracks the pointer exactly
+    // instead of drifting.
+    const moved = updateDrag(
+      this.drag,
+      this.viewport(),
+      e.offsetX,
+      e.offsetY,
+      {
+        playheadMs: this.timelineCursor,
+        // Alt is the escape hatch for placing a keyframe a few ms off the
+        // playhead deliberately.
+        enableSnap: !e.altKey,
+      },
+    );
 
-    useTimelineStore.getState().previewDocument(this.pendingDoc);
+    this.clickIndex = moved.index;
+    if (this.drag.part == "p") {
+      this.activePointIndex = moved.index;
+    }
+    this.pendingDoc = moved.doc;
+
+    useTimelineStore.getState().previewDocument(moved.doc);
     this.drawCanvas();
     this.requestUpdate();
   }
@@ -771,39 +709,35 @@ export class KeyframeEditor extends LitElement {
       return;
     }
 
-    const list = this.currentLane();
+    const hit = hitTest(
+      this.currentLane(),
+      this.viewport(),
+      e.offsetX,
+      e.offsetY,
+      { activeIndex: this.activePointIndex },
+    );
 
-    // Reverse order with an early exit, so the point drawn on top is the one
-    // grabbed. The loop this replaces ran forwards without breaking, so the
-    // *last* overlapping point won regardless of what the user was pointing at.
-    this.isDrag = false;
-    for (let index = list.length - 1; index >= 0; index--) {
-      const check = this.checkBoundary(list[index], e.offsetX, e.offsetY);
-      if (check == "n") {
-        continue;
+    if (hit != null) {
+      if (hit.part == "p") {
+        this.activePointIndex = hit.index;
       }
-      this.clickIndex = index;
-      this.clickDot = check;
+      this.clickIndex = hit.index;
+      this.clickDot = hit.part;
       this.isDrag = true;
-      if (check == "p") {
-        this.activePointIndex = index;
-      }
-      break;
-    }
-
-    if (this.isDrag) {
-      // The document as it stood when the drag began. Every mousemove
-      // recomputes from this rather than compounding, so the point tracks the
-      // pointer exactly instead of drifting.
-      this.dragOriginDoc = useTimelineStore.getState().getDocument();
-      this.dragOriginIndex = this.clickIndex;
+      this.drag = beginDrag(
+        useTimelineStore.getState().getDocument(),
+        this.dragTarget(),
+        hit,
+      );
       this.pendingDoc = null;
+      this.requestUpdate();
       return;
     }
 
-    const { tMs, value } = this.pointerValue(e);
+    this.isDrag = false;
+    const { tMs, value } = toTrack(this.viewport(), e.offsetX, e.offsetY);
     this.keyframeControl.addPoint({
-      x: tMs,
+      x: clampToClip(this.viewport(), tMs),
       y: value,
       line: this.selectLine,
       elementId: this.elementId,
@@ -813,48 +747,38 @@ export class KeyframeEditor extends LitElement {
   }
 
   _handleMouseUp = () => {
-    // One undo entry for the whole gesture. `withCheckpoint` compares by
-    // identity, so a drag that never moved anything records nothing.
+    // One undo entry for the whole gesture. A drag that never moved anything
+    // records nothing — see `curveChanged`, which compares the curve rather
+    // than the document, because the ops build a fresh document every frame.
     const pending = this.pendingDoc;
-    const origin = this.dragOriginDoc;
+    const drag = this.drag;
     this.isDrag = false;
     this.clickIndex = -1;
     this.pendingDoc = null;
-    this.dragOriginDoc = null;
+    this.drag = null;
 
-    // Compare the curve, not the object. `moveKeyframe` builds a fresh document
-    // on every mousemove, so identity says "changed" about a drag that ended
-    // exactly where it began — and `withCheckpoint` cannot tell either, because
-    // the document it compares against is rebuilt on every call. Without this a
-    // cancelled drag left an undo step that appears to do nothing.
-    if (origin == null) {
+    if (drag == null) {
       return;
     }
-    useTimelineStore.getState().previewDocument(origin);
-    if (pending != null && !this.sameCurve(origin, pending)) {
+
+    // Put the store back to where the gesture started, so the checkpoint below
+    // has an accurate baseline to diff against and a cancelled drag leaves no
+    // trace at all.
+    useTimelineStore.getState().previewDocument(drag.originDoc);
+    if (pending != null && curveChanged(drag.originDoc, pending, drag.target)) {
       useTimelineStore.getState().withCheckpoint(() => pending);
     }
   };
 
-  /** Whether two documents hold the same curve for the lane being dragged. */
-  private sameCurve(a: TimelineDocument, b: TimelineDocument): boolean {
-    const lane = this.selectLine == 0 ? "x" : "y";
-    const read = (doc: TimelineDocument) =>
-      (doc.elements[this.elementId] as any)?.animation?.[this.animationType]?.[
-        lane
-      ] ?? [];
-    return sameKeyframes(read(a), read(b));
-  };
-
   /** Abandon a drag that ended somewhere this component never hears about. */
   private handleCancelDrag = () => {
-    if (this.dragOriginDoc != null) {
-      useTimelineStore.getState().previewDocument(this.dragOriginDoc);
+    if (this.drag != null) {
+      useTimelineStore.getState().previewDocument(this.drag.originDoc);
     }
     this.isDrag = false;
     this.clickIndex = -1;
     this.pendingDoc = null;
-    this.dragOriginDoc = null;
+    this.drag = null;
   };
 
   private boundKeydown = (event: KeyboardEvent) => this._handleKeydown(event);

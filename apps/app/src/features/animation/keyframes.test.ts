@@ -25,6 +25,7 @@ import {
   type Keyframe,
 } from "./keyframes";
 import { imageElement, keys, mulberry32, points } from "../renderer/testing";
+import { handlesInBounds } from "./handleBounds";
 
 /** A deep structural copy, for proving a function did not touch its input. */
 function snapshot<T>(value: T): T {
@@ -37,6 +38,17 @@ const kf = (t: number, v: number, handle = 100): Keyframe => ({
   cs: [t - handle, v],
   ce: [t + handle, v],
 });
+
+/**
+ * A list that already satisfies the handle-bounds invariant.
+ *
+ * `kf` hands every keyframe a ±100ms handle, including the two on the ends
+ * whose outward handles the baker never reads. That is not a state the ops can
+ * produce or preserve any more — see `handleBounds` — so tests that assert on
+ * handle *positions* have to start from a legal list or they are measuring the
+ * clamp repairing their fixture.
+ */
+const legal = (...list: Keyframe[]): Keyframe[] => normalizeKeyframes(list);
 
 // =========================================================== normalisation
 
@@ -213,14 +225,16 @@ describe("addKeyframe", () => {
   });
 
   it("replaces the keyframe already at that instant, keeping its handles", () => {
-    const list = [kf(100, 1, 40), kf(200, 2)];
+    // A middle keyframe, so both of its handles are ones the baker reads and
+    // the clamp leaves alone.
+    const list = legal(kf(0, 0), kf(100, 1, 40), kf(200, 2));
     const out = addKeyframe(list, 100, 7);
-    expect(out).toHaveLength(2);
-    expect(out[0].p).toEqual([100, 7]);
+    expect(out).toHaveLength(3);
+    expect(out[1].p).toEqual([100, 7]);
     // The handle times survive; only the values follow the anchor.
-    expect(out[0].cs[0]).toBe(60);
-    expect(out[0].ce[0]).toBe(140);
-    expect(out[0].cs[1]).toBe(7);
+    expect(out[1].cs[0]).toBe(60);
+    expect(out[1].ce[0]).toBe(140);
+    expect(out[1].cs[1]).toBe(7);
   });
 
   it("declines by identity when nothing would change", () => {
@@ -251,11 +265,13 @@ describe("moveKeyframe", () => {
     // The editor's drag used to flatten `cs`/`ce` to `[px-100, py]`/`[px+100,
     // py]` on every mousemove, so any easing the user drew was destroyed the
     // moment they nudged the point.
-    const list = [kf(100, 1, 40)];
-    const { list: out } = moveKeyframe(list, 0, 300, 5);
-    expect(out[0].p).toEqual([300, 5]);
-    expect(out[0].cs).toEqual([260, 5]);
-    expect(out[0].ce).toEqual([340, 5]);
+    // Neighbours on both sides, and room between them, so the translated
+    // handles land inside their bounds and the clamp has nothing to say.
+    const list = legal(kf(0, 0), kf(100, 1, 40), kf(500, 9));
+    const { list: out } = moveKeyframe(list, 1, 300, 5);
+    expect(out[1].p).toEqual([300, 5]);
+    expect(out[1].cs).toEqual([260, 5]);
+    expect(out[1].ce).toEqual([340, 5]);
   });
 
   it("re-sorts and reports the corrected index when dragged past a neighbour", () => {
@@ -309,11 +325,25 @@ describe("moveKeyframe", () => {
 
 describe("setHandles", () => {
   it("replaces one handle and leaves the other", () => {
-    const list = [kf(100, 1)];
-    const out = setHandles(list, 0, { cs: [50, 3] });
-    expect(out[0].cs).toEqual([50, 3]);
-    expect(out[0].ce).toEqual(list[0].ce);
-    expect(out[0].p).toEqual([100, 1]);
+    const list = legal(kf(0, 0), kf(100, 1), kf(300, 4));
+    const out = setHandles(list, 1, { cs: [50, 3] });
+    expect(out[1].cs).toEqual([50, 3]);
+    expect(out[1].ce).toEqual(list[1].ce);
+    expect(out[1].p).toEqual([100, 1]);
+  });
+
+  it("folds a handle dragged past its neighbour onto the boundary", () => {
+    // The editor drew the handle wherever the pointer went while `bakeTrack`
+    // clamped the abscissa before solving, so past the neighbour the handle
+    // kept moving and the curve stopped changing. See `handleBounds`.
+    const list = legal(kf(0, 0), kf(100, 1), kf(300, 4));
+    const out = setHandles(list, 1, { cs: [-900, 3], ce: [9000, 7] });
+    expect(out[1].cs[0]).toBe(0);
+    expect(out[1].ce[0]).toBe(300);
+    // Time only. The value axis stays free, which is what makes overshoot and
+    // bounce easings expressible.
+    expect(out[1].cs[1]).toBe(3);
+    expect(out[1].ce[1]).toBe(7);
   });
 
   it("declines an empty patch and an out-of-range index by identity", () => {
@@ -356,9 +386,15 @@ describe("add / remove round trip", () => {
       while (times.size < size) {
         times.add(Math.floor(random() * 4000));
       }
-      const list = [...times]
-        .sort((a, b) => a - b)
-        .map((t) => kf(t, Math.floor(random() * 100)));
+      // Through `legal`, because the round trip is a property of lists the ops
+      // can actually produce. A raw `kf` list has live handles on both ends,
+      // which the first op through would repair — and the repair, not the
+      // add/remove pair, would be what the comparison caught.
+      const list = legal(
+        ...[...times]
+          .sort((a, b) => a - b)
+          .map((t) => kf(t, Math.floor(random() * 100))),
+      );
 
       let fresh = Math.floor(random() * 4000);
       while (times.has(fresh)) {
@@ -368,8 +404,35 @@ describe("add / remove round trip", () => {
       const added = addKeyframe(list, fresh, 42);
       const index = added.findIndex((k) => k.p[0] === fresh);
       expect(index).toBeGreaterThanOrEqual(0);
-      expect(removeKeyframe(added, index)).toEqual(list);
+
+      const back = removeKeyframe(added, index);
+      // Anchors, not whole keyframes. Handle bounds depend on the neighbours,
+      // so inserting can narrow a neighbour's handle and removing does not
+      // widen it back — see the test below, which pins that down deliberately.
+      // What this fuzz is for is the insert/remove *positioning*: that the
+      // fresh keyframe lands in sorted order and that removing it restores
+      // exactly the anchors that were there before.
+      expect(back.map((k) => k.p)).toEqual(list.map((k) => k.p));
+      expect(handlesInBounds(back)).toBe(true);
     }
+  });
+
+  // Recorded because it is a real consequence of constraining handles, not an
+  // oversight: the clamp is lossy. Inserting a keyframe close to its neighbour
+  // folds that neighbour's handle onto the new anchor, and removing the
+  // keyframe again leaves the handle where the clamp put it. Undo is what
+  // restores the original curve, which is why every editor gesture is one
+  // checkpoint.
+  it("does not restore a handle that inserting had folded in", () => {
+    const list = legal(kf(0, 0), kf(1000, 50), kf(2000, 100));
+    expect(list[1].cs[0]).toBe(900);
+
+    const added = addKeyframe(list, 950, 42);
+    expect(added[2].cs[0]).toBe(950);
+
+    const back = removeKeyframe(added, 1);
+    expect(back.map((k) => k.p[0])).toEqual([0, 1000, 2000]);
+    expect(back[1].cs[0]).toBe(950);
   });
 });
 

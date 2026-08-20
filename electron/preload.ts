@@ -95,6 +95,11 @@ const request = {
     getKey: () => ipcRenderer.invoke("ai:getKey"),
     runMcpServer: () => ipcRenderer.invoke("ai:runMcpServer"),
   },
+  agent: {
+    /** Answer one `agent:request`. See `electron/mcp/bridge.ts`. */
+    respond: (id, response) => ipcRenderer.send("agent:response", id, response),
+    getStatus: () => ipcRenderer.invoke("agent:getStatus"),
+  },
   stream: {
     saveBufferToVideo: (arrayBuffer) =>
       ipcRenderer.invoke("stream:saveBufferToVideo", arrayBuffer),
@@ -163,6 +168,10 @@ const response = {
   timeline: {
     get: (callback) => ipcRenderer.on("timeline:get", callback),
     add: (callback) => ipcRenderer.on("timeline:add", callback),
+  },
+  agent: {
+    /** `(event, id, command, params)` — reply via `req.agent.respond(id, …)`. */
+    onRequest: (callback) => ipcRenderer.on("agent:request", callback),
   },
 };
 

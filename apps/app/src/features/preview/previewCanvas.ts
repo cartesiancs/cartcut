@@ -1,5 +1,7 @@
 import { emptyAnimation, sampleTrackXY } from "../animation/keyframes";
-import { addKeyframe } from "../animation/keyframeOps";
+import { addKeyframePaired } from "../animation/keyframeOps";
+import { displayPosition, isPositionAnimated } from "./elementPosition";
+import type { TimelineDocument } from "../timeline/tracks";
 import { html, LitElement } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
@@ -766,34 +768,46 @@ export class PreviewCanvas extends LitElement {
     };
   }
 
-  addAnimationPoint(x, y) {
+  /** The document a position keyframe at the cursor would produce, or `null`. */
+  private withPositionKeyframe(
+    x: number,
+    y: number,
+  ): ((doc: TimelineDocument) => TimelineDocument) | null {
     const activeElement = this.timeline[this.activeElementId];
-    const startTime = activeElement.startTime;
-
-    const animationType = "position";
+    if (activeElement == null) {
+      return null;
+    }
 
     if (
       activeElement.filetype != "image" &&
       activeElement.filetype != "video" &&
       activeElement.filetype != "text"
     ) {
-      return false;
+      return null;
     }
 
-    if (activeElement.animation["position"].isActivate != true) {
-      return false;
+    if (!isPositionAnimated(activeElement)) {
+      return null;
     }
 
-    // Both lanes in one checkpoint. As two, a single undo left an x keyframe
-    // with no y to match it — the element jumping to a position it was never
-    // dragged to.
     const elementId = this.activeElementId;
-    const atMs = this.timelineCursor - startTime;
+    const atMs = this.timelineCursor - activeElement.startTime;
 
-    useTimelineStore.getState().withCheckpoint((doc) => {
-      const withX = addKeyframe(doc, elementId, "position", "x", atMs, x);
-      return addKeyframe(withX, elementId, "position", "y", atMs, y);
-    });
+    // Both lanes in one transform. As two, a single undo left an x keyframe
+    // with no y to match it — the element jumping to a position it was never
+    // dragged to. `addKeyframePaired` is that guarantee made structural.
+    return (doc) => {
+      const withX = addKeyframePaired(doc, elementId, "position", "x", atMs, x);
+      return addKeyframePaired(withX, elementId, "position", "y", atMs, y);
+    };
+  }
+
+  addAnimationPoint(x, y) {
+    const write = this.withPositionKeyframe(x, y);
+    if (write == null) {
+      return false;
+    }
+    useTimelineStore.getState().withCheckpoint(write);
   }
 
   /**
@@ -950,8 +964,12 @@ export class PreviewCanvas extends LitElement {
     for (const elementId of Object.keys(sortedTimeline)) {
       const element = this.timeline[elementId];
       if (isVisualTimelineElement(element)) {
-        const x = element.location.x;
-        const y = element.location.y;
+        // Where the element is *drawn*, not where `location` says it would be
+        // with no animation. Those are different the moment a position track is
+        // active, and taking the static one here is what made grabbing an
+        // animated element miss its rectangle and then jump by the difference.
+        // `drawCanvas` and `_handleMouseMove` sample the same function.
+        const { x, y } = displayPosition(element, this.timelineCursor);
         const w = element.width;
         const h = element.height;
         const rotation = element.rotation;
@@ -1319,24 +1337,45 @@ export class PreviewCanvas extends LitElement {
     if (this.isMove) {
       const dx = mx - this.mouseOrigin.x;
       const dy = my - this.mouseOrigin.y;
-      const location = this.timeline[this.activeElementId].location;
-      location.x = this.elementOrigin.x + dx;
-      location.y = this.elementOrigin.y + dy;
 
+      // `elementOrigin` is where the element was *drawn* when the drag began,
+      // so this is the position it is drawn at now — animated or not.
       const alignLocation = this.isAlign({
         x: this.elementOrigin.x + dx,
         y: this.elementOrigin.y + dy,
         w: this.elementOrigin.w,
         h: this.elementOrigin.h,
       });
-
-      if (alignLocation) {
-        location.x = alignLocation?.x;
-        location.y = alignLocation?.y;
-      }
+      const next = {
+        x: alignLocation?.x ?? this.elementOrigin.x + dx,
+        y: alignLocation?.y ?? this.elementOrigin.y + dy,
+      };
 
       this.updateAlignDirection();
-      this.timelineState.patchTimeline(this.timeline);
+
+      const write = this.withPositionKeyframe(next.x, next.y);
+      if (write != null) {
+        // An animated element is not at `location`; it is wherever its track
+        // says. Writing `location` during the drag therefore moved nothing on
+        // screen — the element sat still until mouseup committed a keyframe,
+        // and then jumped. Previewing the keyframe instead makes it follow the
+        // pointer, and `previewDocument` records no history, so the gesture is
+        // still one undo step once `_handleMouseUp` commits it.
+        const store = useTimelineStore.getState();
+        store.previewDocument(write(store.getDocument()));
+      } else {
+        // Not animated: `location` is the position. Written immutably —
+        // mutating the store's own object in place is the aliasing hazard the
+        // keyframe subsystem was rewritten to remove, and history entries share
+        // these objects. See the header of `controllers/keyframe.ts`.
+        this.timelineState.patchTimeline({
+          ...this.timeline,
+          [this.activeElementId]: {
+            ...this.timeline[this.activeElementId],
+            location: next,
+          },
+        });
+      }
     }
 
     if (this.isRotation) {
@@ -1556,10 +1595,15 @@ export class PreviewCanvas extends LitElement {
     }
 
     try {
-      this.addAnimationPoint(
-        this.timeline[this.activeElementId].location.x,
-        this.timeline[this.activeElementId].location.y,
+      // Where the element ended up on screen, which for an animated element is
+      // its previewed keyframe rather than `location`. Reading `location` here
+      // is what wrote the un-animated position into the keyframe and made the
+      // element jump by `animated − static` the moment the drag finished.
+      const settled = displayPosition(
+        this.timeline[this.activeElementId],
+        this.timelineCursor,
       );
+      this.addAnimationPoint(settled.x, settled.y);
     } catch (error) {}
 
     this.isMove = false;

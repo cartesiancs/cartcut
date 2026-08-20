@@ -34,6 +34,11 @@ import { ipcSelfhosted } from "./ipc/ipcSelfhosted.js";
 import { httpFFmpegRenderV2 } from "./server/controllers/render.js";
 import { ipcAi } from "./ipc/ipcAi.js";
 import { ipcYtdlp } from "./ipc/ipcYtdlp.js";
+import { attachBridge } from "./mcp/bridge.js";
+import { startMcpServer, stopMcpServer } from "./mcp/server.js";
+import Store from "electron-store";
+
+const store = new Store();
 
 let resourcesPath = "";
 export let mainWindow;
@@ -146,6 +151,7 @@ ipcMain.handle("ai:text", ipcAi.text);
 ipcMain.handle("ai:setKey", ipcAi.setKey);
 ipcMain.handle("ai:getKey", ipcAi.getKey);
 ipcMain.handle("ai:runMcpServer", ipcAi.runMcpServer);
+ipcMain.handle("agent:getStatus", ipcAi.mcpStatus);
 
 ipcMain.handle("ytdlp:downloadVideo", ipcYtdlp.downloadVideo);
 
@@ -197,6 +203,23 @@ if (!gotTheLock) {
     mainWindow = window.createMainWindow();
     validateFFmpeg();
 
+    // The MCP tools reach the timeline through this window; without it every
+    // tool call fails with "editor window is not available".
+    attachBridge(mainWindow.webContents);
+
+    // Started here rather than behind the settings button so that Claude Code
+    // can connect to a running Cartcut without the user first remembering to
+    // switch something on. It listens on loopback and requires a bearer token
+    // (`electron/mcp/server.ts`), and a failure to bind is not fatal — the
+    // settings dialog reports it.
+    if (store.get("mcp_autostart") !== false) {
+      startMcpServer().then((result) => {
+        if (!result.ok) {
+          log.warn("[mcp] could not start:", result.error);
+        }
+      });
+    }
+
     // window.createAutomaticCaptionWindow();
 
     mainWindow.on("close", function (e) {
@@ -212,4 +235,9 @@ if (!gotTheLock) {
 
 app.on("window-all-closed", function () {
   if (process.platform !== "darwin") app.quit();
+});
+
+// Release port 9826 on the way out, so relaunching does not hit EADDRINUSE.
+app.on("will-quit", () => {
+  stopMcpServer();
 });

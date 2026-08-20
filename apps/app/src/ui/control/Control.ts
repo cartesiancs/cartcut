@@ -20,10 +20,7 @@ import {
   controlPanelStore,
 } from "../../states/controlPanelStore";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
-import {
-  isDynamicElement,
-  timelineTimeAt,
-} from "../../features/timeline/geometry";
+import { captionToTimeline } from "../../features/caption/timing";
 
 @customElement("control-ui")
 export class Control extends LitElement {
@@ -127,21 +124,9 @@ export class Control extends LitElement {
       const { sourceKey, ...caption } = result[index];
       const source = sourceKey ? timeline[sourceKey] : undefined;
 
-      if (source == null || !isDynamicElement(source)) {
-        control.addText(caption);
-        continue;
-      }
-
-      const start = timelineTimeAt(source, caption.startTime);
-      const end = timelineTimeAt(
-        source,
-        caption.startTime + caption.duration,
-      );
-
       control.addText({
         ...caption,
-        startTime: Math.max(0, Math.round(start)),
-        duration: Math.max(1, Math.round(end - start)),
+        ...captionToTimeline(caption, source),
       });
     }
   }

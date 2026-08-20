@@ -2,9 +2,9 @@ import { ReactiveController, ReactiveControllerHost } from "lit";
 import { useTimelineStore } from "../states/timelineStore";
 import type { AnimatableProperty } from "../@types/timeline";
 import {
-  addKeyframe,
-  moveKeyframe,
-  removeKeyframe,
+  addKeyframePaired,
+  moveKeyframePaired,
+  removeKeyframePaired,
   setHandles,
   setTrackActive,
   type Lane,
@@ -73,7 +73,7 @@ export class KeyframeController implements ReactiveController {
 
     this.commit((doc) =>
       setTrackActive(
-        addKeyframe(doc, elementId, property, lane, tMs, value),
+        addKeyframePaired(doc, elementId, property, lane, tMs, value),
         elementId,
         property,
         true,
@@ -93,7 +93,7 @@ export class KeyframeController implements ReactiveController {
     index: number;
   }) {
     this.commit((doc) =>
-      removeKeyframe(
+      removeKeyframePaired(
         doc,
         elementId,
         animationType as AnimatableProperty,
@@ -130,7 +130,7 @@ export class KeyframeController implements ReactiveController {
     let landedAt = index;
 
     this.commit((doc) => {
-      const moved = moveKeyframe(
+      const moved = moveKeyframePaired(
         doc,
         elementId,
         property,
