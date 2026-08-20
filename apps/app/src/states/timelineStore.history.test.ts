@@ -7,6 +7,7 @@ import {
   type TimelineDocument,
 } from "../features/timeline/tracks";
 import { imageElement } from "../features/renderer/testing";
+import { createGroup, ungroup } from "../features/timeline/groupOps";
 
 const store = () => useTimelineStore.getState();
 
@@ -237,5 +238,103 @@ describe("timelineStore track operations", () => {
     // Every pre-existing caller of patchTimeline expects a plain replace.
     store().patchTimeline({ a: imageElement({ priority: 7 }) });
     expect(store().timeline.a.priority).toBe(7);
+  });
+});
+
+describe("group edits through withCheckpoint", () => {
+  beforeEach(reset);
+
+  /** Two clips on a video row plus an empty group row, already checkpointed. */
+  function seeded() {
+    store().patchDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: [createTrack("v1", "video", 0), createTrack("g1", "group", 1)],
+      elements: {
+        a: imageElement({
+          trackId: "v1",
+          location: { x: 100, y: 50 },
+          width: 40,
+          height: 40,
+        }),
+        b: imageElement({
+          trackId: "v1",
+          startTime: 5000,
+          location: { x: 200, y: 90 },
+          width: 60,
+          height: 20,
+        }),
+      },
+    });
+    store().checkPointTimeline();
+  }
+
+  it("makes grouping exactly one undo step", () => {
+    seeded();
+    const before = store().history.timelineHistory.length;
+
+    store().withCheckpoint((doc) => createGroup(doc, ["a", "b"], "grp", "g1"));
+
+    expect(store().history.timelineHistory).toHaveLength(before + 1);
+    expect(store().timeline.grp).toBeDefined();
+  });
+
+  it("undoes a group back to exactly what was there", () => {
+    seeded();
+    store().withCheckpoint((doc) => createGroup(doc, ["a", "b"], "grp", "g1"));
+
+    store().rollbackTimelineFromCheckPoint(-1);
+
+    expect(store().timeline.grp).toBeUndefined();
+    expect((store().timeline.a as any).parentId).toBeUndefined();
+    expect((store().timeline.a as any).location).toEqual({ x: 100, y: 50 });
+    expect((store().timeline.b as any).location).toEqual({ x: 200, y: 90 });
+  });
+
+  it("records no step when the group is declined", () => {
+    // Identity in, identity out — the contract `withCheckpoint` reads.
+    seeded();
+    const before = store().history.timelineHistory.length;
+    store().withCheckpoint((doc) => createGroup(doc, [], "grp", "g1"));
+    expect(store().history.timelineHistory).toHaveLength(before);
+  });
+
+  it("makes ungrouping one step, and undoing it restore the group", () => {
+    seeded();
+    store().withCheckpoint((doc) => createGroup(doc, ["a", "b"], "grp", "g1"));
+    const afterGroup = store().history.timelineHistory.length;
+
+    store().withCheckpoint((doc) => ungroup(doc, "grp", 0));
+    expect(store().history.timelineHistory).toHaveLength(afterGroup + 1);
+    expect(store().timeline.grp).toBeUndefined();
+
+    store().rollbackTimelineFromCheckPoint(-1);
+    expect(store().timeline.grp).toBeDefined();
+    expect((store().timeline.a as any).parentId).toBe("grp");
+  });
+
+  it("keeps the hierarchy invariant after a rollback", () => {
+    // History entries are post-normalisation snapshots, so a restored document
+    // has already been through `repairHierarchy`.
+    seeded();
+    store().withCheckpoint((doc) => createGroup(doc, ["a", "b"], "grp", "g1"));
+    store().rollbackTimelineFromCheckPoint(-1);
+    store().rollbackTimelineFromCheckPoint(1);
+
+    for (const element of Object.values(store().timeline)) {
+      const parentId = (element as any).parentId;
+      if (parentId != null) {
+        expect(store().timeline[parentId].filetype).toBe("group");
+      }
+    }
+  });
+
+  it("strips a dangling parentId on load", () => {
+    // `patchDocument` is the ingress path a `.ngt` comes through.
+    store().patchDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: [createTrack("v1", "video", 0)],
+      elements: { a: imageElement({ trackId: "v1", parentId: "never" }) },
+    });
+    expect((store().timeline.a as any).parentId).toBeUndefined();
   });
 });

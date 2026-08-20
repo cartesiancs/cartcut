@@ -1,6 +1,23 @@
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 
+/**
+ * Filetypes whose panel is not simply `option-${filetype}`.
+ *
+ * `group` is the one entry, and it has to be: this container element is itself
+ * `<option-group>`, so `querySelector("option-group")` from inside it does not
+ * find the panel for a group clip — it finds nothing, and the side panel goes
+ * blank with no error anyone can see, because the lookup below is wrapped in a
+ * bare `try`.
+ */
+const PANEL_TAG: Record<string, string> = {
+  group: "option-groupelement",
+};
+
+function panelTagFor(filetype: string): string {
+  return PANEL_TAG[filetype] ?? `option-${filetype}`;
+}
+
 @customElement("option-group")
 export class OptionGroup extends LitElement {
   constructor() {
@@ -14,7 +31,7 @@ export class OptionGroup extends LitElement {
   showOption({ filetype, elementId }: { filetype: string; elementId: string }) {
     try {
       this.hideAllOptions();
-      const fileTypeOption: any = this.querySelector(`option-${filetype}`);
+      const fileTypeOption: any = this.querySelector(panelTagFor(filetype));
       fileTypeOption.show();
       fileTypeOption.setElementId({
         elementId: elementId,
@@ -38,7 +55,7 @@ export class OptionGroup extends LitElement {
 
     try {
       this.hideAllOptions();
-      const fileTypeOption: any = this.querySelector(`option-${filetype}`);
+      const fileTypeOption: any = this.querySelector(panelTagFor(filetype));
       fileTypeOption.show();
       fileTypeOption.setElementIds({
         elementIds: elementIds,

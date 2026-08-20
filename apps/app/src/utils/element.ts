@@ -2,7 +2,9 @@ const elementUtils = {
   getElementType(filetype): "undefined" | "static" | "dynamic" {
     let elementType: any = "undefined";
     const elementFileExtensionType = {
-      static: ["image", "text", "png", "jpg", "jpeg", "gif", "shape"],
+      // A group carries no source file, so it is "static" in the only sense
+      // this function means: it has no `trim` window and no `speed`.
+      static: ["image", "text", "png", "jpg", "jpeg", "gif", "shape", "group"],
       dynamic: ["video", "audio", "mp4", "mp3", "mov"],
     };
 

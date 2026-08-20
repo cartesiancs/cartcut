@@ -17,6 +17,7 @@ import { spanLength, spanOf } from "./geometry";
 import { findCollisions, overlaps } from "./overlap";
 import { chooseTrackFor } from "./placement";
 import { cloneAnimation } from "../animation/keyframes";
+import { withDescendants } from "./hierarchy";
 import {
   clipsOnTrack,
   normalizeDocument,
@@ -235,7 +236,13 @@ export function deleteClips(
   doc: TimelineDocument,
   elementIds: string[],
 ): TimelineDocument {
-  const present = elementIds.filter((id) => doc.elements[id] != null);
+  // A group takes its contents with it. That is what grouping means in every
+  // editor that has it, and the alternative — orphaning the children, which is
+  // what After Effects does when you delete a parent — would scatter them to
+  // wherever their parent-local coordinates happen to land in canvas space.
+  // `ungroup` is the way to keep the contents, and it is a separate gesture
+  // precisely so that neither outcome can arrive by surprise.
+  const present = withDescendants(doc.elements, elementIds);
   if (present.length === 0) {
     return doc;
   }
@@ -263,10 +270,17 @@ export function rippleDelete(
 
   const { end, length } = spanOf(element);
   const elements = { ...doc.elements };
-  delete elements[elementId];
+  // Same rule as `deleteClips`: a group's contents go with it. The gap that
+  // closes afterwards is still only the one this clip left on its own track —
+  // the children sit on other rows and their own lanes are not rippled, which
+  // keeps this a lane-local operation rather than a magnetic timeline.
+  const removed = withDescendants(doc.elements, [elementId]);
+  for (const id of removed) {
+    delete elements[id];
+  }
 
   for (const [id, sibling] of clipsOnTrack(doc, element.trackId)) {
-    if (id === elementId) {
+    if (elements[id] == null) {
       continue;
     }
     if (spanOf(sibling).start >= end) {
@@ -477,10 +491,34 @@ export function pasteClips(
   const anchor = Math.min(...entries.map((clip) => clip.startTime));
   let next = doc;
 
-  for (const clip of entries) {
+  // Old id -> new id, for every clip in this paste. Without it a pasted child
+  // keeps a `parentId` pointing at the *original* group, so duplicating a
+  // group and its contents produces two groups sharing one set of children —
+  // and moving either group would move clips out from under the other.
+  //
+  // A `parentId` naming something outside the paste is left as it is: pasting
+  // a lone child back into the project it came from should land it in the
+  // group it belongs to. `repairHierarchy` drops it if that group has since
+  // gone.
+  const remap = new Map<string, string>();
+  for (const [oldId] of Object.entries(clips)) {
+    remap.set(oldId, idGen());
+  }
+
+  const reparent = (clip: TimelineElement): TimelineElement => {
+    const parentId = (clip as any).parentId;
+    if (parentId == null) {
+      return clip;
+    }
+    const moved = remap.get(parentId);
+    return moved == null ? clip : ({ ...clip, parentId: moved } as TimelineElement);
+  };
+
+  for (const [oldId, original] of Object.entries(clips)) {
+    const clip = reparent(original);
     const start = Math.max(0, atMs + (clip.startTime - anchor));
     const span = { start, end: start + spanLength(clip) };
-    const newId = idGen();
+    const newId = remap.get(oldId) as string;
 
     const originalTrackExists = next.tracks.some(
       (track) => track.id === clip.trackId,

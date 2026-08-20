@@ -13,6 +13,7 @@
 import { createCanvas, type Canvas } from "@napi-rs/canvas";
 import type {
   GifElementType,
+  GroupElementType,
   ImageElementType,
   ShapeElementType,
   TextElementType,
@@ -155,6 +156,28 @@ export function imageElement(
 
 export function gifElement(over: Partial<GifElementType> = {}): GifElementType {
   return { ...placed, ...visual, filetype: "gif", ...over };
+}
+
+/**
+ * A transform parent.
+ *
+ * `width`/`height` are the pivot rather than a size to draw, so a suite that
+ * cares where a group rotates about sets them to the bounding box it is
+ * standing in for. The default 100×100 puts the pivot at (50, 50).
+ */
+export function groupElement(
+  over: Partial<GroupElementType> = {},
+): GroupElementType {
+  return {
+    ...placed,
+    ...visual,
+    trackId: "group-1",
+    localpath: "GROUP",
+    filetype: "group",
+    name: "Group",
+    animation: emptyAnimation("group"),
+    ...over,
+  };
 }
 
 export function shapeElement(

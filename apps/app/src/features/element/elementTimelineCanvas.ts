@@ -51,7 +51,18 @@ import {
   type AudioPeakProvider,
 } from "../timeline/strip/audioPeaks";
 import { collectSnapPoints, snapSpan } from "../timeline/snapping";
-import { type TimelineDocument } from "../timeline/tracks";
+import {
+  appendTrackOfKind,
+  type TimelineDocument,
+} from "../timeline/tracks";
+import {
+  canBeGrouped,
+  createGroup,
+  isGroupAnimated,
+  removeFromParent,
+  ungroup,
+} from "../timeline/groupOps";
+import { parentOf, withDescendants } from "../timeline/hierarchy";
 import { AssetController } from "../../controllers/asset";
 import { isTypingEvent } from "../../utils/typingTarget";
 
@@ -305,7 +316,16 @@ export class elementTimelineCanvas extends LitElement {
       hScroll: this.timelineScroll,
       viewportW: width,
       viewportH: height,
-      selection: this.targetId,
+      // Selecting a group outlines its contents too. A group's bar sits on its
+      // own row, often far from the clips it holds, so without this there is no
+      // way to see what is in one — and the outline is drawn by the painter
+      // already, so showing it costs nothing but the id list.
+      //
+      // Only the *drawn* selection is widened. `this.targetId` still holds what
+      // the user picked, so a drag moves the group's bar alone and a delete
+      // removes the group (taking its contents through `withDescendants`,
+      // which is a decision `deleteClips` owns rather than the painter).
+      selection: withDescendants(this.timeline, this.targetId),
       playheadMs: this.timelineCursor,
       projectEndMs: this.renderOption.duration * 1000,
       snapGuideMs: this.snapGuideMs,
@@ -380,6 +400,113 @@ export class elementTimelineCanvas extends LitElement {
 
   public removeSeletedElements() {
     this.removeElements(this.targetIdDuringRightClick);
+  }
+
+  // ---------------------------------------------------------------- groups
+
+  /**
+   * Wrap the right-clicked selection in a new group.
+   *
+   * One `withCheckpoint`, so the whole thing is one undo step — and if
+   * `createGroup` declines (audio in the selection, clips from two different
+   * groups) it returns the document by identity and no step is recorded at all.
+   */
+  public groupSelected() {
+    const ids = [...this.targetIdDuringRightClick];
+    const groupId = uuidv4();
+    const trackId = uuidv4();
+
+    this.commit((doc) => {
+      // Groups live on their own kind of row, so a group bar never competes
+      // with a real clip for a slot. Reuse a group track if one is free at that
+      // moment; `chooseTrackFor` is not used because it keys off the element's
+      // filetype and would have to build the group first.
+      const withTrack = doc.tracks.some((track) => track.kind === "group")
+        ? doc
+        : appendTrackOfKind(doc, "group", trackId);
+
+      const target =
+        withTrack.tracks.find((track) => track.kind === "group")?.id ?? trackId;
+
+      return createGroup(withTrack, ids, groupId, target);
+    });
+
+    this.targetId = [groupId];
+    this.drawCanvas();
+  }
+
+  /** Dissolve the right-clicked group, leaving its contents where they look. */
+  public ungroupSelected() {
+    const ids = [...this.targetIdDuringRightClick];
+    const atMs = useTimelineStore.getState().cursor;
+
+    // Losing a group's animation is not something a menu click should do
+    // silently: there is no way to fold a time-varying transform into a child's
+    // static fields, so `ungroup` keeps only the instant at the playhead.
+    const doc = this.currentDoc();
+    const animated = ids.filter(
+      (id) =>
+        doc.elements[id]?.filetype === "group" &&
+        isGroupAnimated(doc.elements, id),
+    );
+    if (animated.length > 0) {
+      const ok = window.confirm(
+        "This group is animated. Ungrouping keeps only its transform at the " +
+          "playhead and discards the animation. Continue?",
+      );
+      if (!ok) {
+        return;
+      }
+    }
+
+    this.commit((next) => {
+      let out = next;
+      for (const id of ids) {
+        out = ungroup(out, id, atMs);
+      }
+      return out;
+    });
+    this.drawCanvas();
+  }
+
+  /** Detach the right-clicked clips from their group, keeping them in place. */
+  public removeSelectedFromGroup() {
+    const ids = [...this.targetIdDuringRightClick];
+    const atMs = useTimelineStore.getState().cursor;
+    this.commit((doc) => removeFromParent(doc, ids, atMs));
+    this.drawCanvas();
+  }
+
+  /**
+   * The group entries for the context menu, chosen from what is selected.
+   *
+   * "Ungroup" only when a group is in the selection; "remove from group" only
+   * when something in it actually has a parent — offering an item that can only
+   * decline is worse than not offering it.
+   */
+  private groupMenuTemplate(): string {
+    const ids = this.targetIdDuringRightClick;
+    if (ids.length === 0) {
+      return "";
+    }
+
+    const doc = this.currentDoc();
+    const call = (method: string, label: string) =>
+      `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').${method}()" item-name="${label}"> </menu-dropdown-item>`;
+
+    const rows: string[] = [];
+
+    if (ids.every((id) => canBeGrouped(doc.elements[id]))) {
+      rows.push(call("groupSelected", "group selected"));
+    }
+    if (ids.some((id) => doc.elements[id]?.filetype === "group")) {
+      rows.push(call("ungroupSelected", "ungroup"));
+    }
+    if (ids.some((id) => parentOf(doc.elements, id) != null)) {
+      rows.push(call("removeSelectedFromGroup", "remove from group"));
+    }
+
+    return rows.join("\n          ");
   }
 
   // ----------------------------------------------------------------- drag
@@ -817,6 +944,7 @@ export class elementTimelineCanvas extends LitElement {
     document.querySelector("#menuRightClick").innerHTML = `
         <menu-dropdown-body top="${y}" left="${x}">
           ${this.animationMenuTemplate()}
+          ${this.groupMenuTemplate()}
           <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').removeSeletedElements()" item-name="remove"> </menu-dropdown-item>
           <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').rippleDeleteSelected()" item-name="remove and close gap"> </menu-dropdown-item>
         </menu-dropdown-body>`;

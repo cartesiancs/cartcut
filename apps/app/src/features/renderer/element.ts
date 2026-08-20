@@ -1,8 +1,33 @@
-import type { VisualTimelineElement } from "../../@types/timeline";
+import type {
+  Timeline,
+  TimelineElement,
+  VisualTimelineElement,
+} from "../../@types/timeline";
 import { interpolate } from "../animation/interpolation";
-import { toRadian } from "../math/geom";
+import {
+  inheritedOpacityOf,
+  localMatrixOf,
+  parentMatrixOf,
+  type TransformMemo,
+} from "../timeline/transform";
 import { renderControlOutline } from "./controlOutline";
 import type { ElementRenderFunction } from "./type";
+
+/**
+ * What `renderElement` needs to resolve an element's parent chain.
+ *
+ * Optional throughout, and that is deliberate: an element with no `parentId`
+ * needs none of it, so every existing caller and every existing test keeps
+ * working untouched. Pass it and groups apply; omit it and the element is drawn
+ * in canvas space exactly as before.
+ *
+ * `memo` must not outlive the frame — the matrices it holds are resolved at one
+ * cursor. `renderTimelineAtTime` builds a fresh one per call.
+ */
+export type ElementRenderContext = {
+  elements: Timeline;
+  memo?: TransformMemo;
+};
 
 /**
  * Move `ctx` into the element's local space: after this call the element's
@@ -13,87 +38,45 @@ import type { ElementRenderFunction } from "./type";
  * separate pass — the preview dims out-of-frame pixels, and the control handles
  * must stay at full opacity so they can still be seen and grabbed.
  *
+ * The arithmetic moved to `features/timeline/transform.ts#localMatrixOf`, and
+ * this is now a one-line application of it. The reason is not tidiness: while
+ * the placement rule lived here, as a sequence of ctx calls, nothing else could
+ * ask where an element was without reimplementing it — and `previewCanvas`
+ * duly did, by hand, for rotation only. Drawing and hit-testing can no longer
+ * disagree because they can no longer ask separately.
+ *
  * Opacity is deliberately not applied here; it is not part of the transform.
  */
 export function applyElementTransform(
   ctx: CanvasRenderingContext2D,
-  element: VisualTimelineElement,
+  element: TimelineElement,
   timelineCursor: number,
 ): void {
-  let { width, height, rotation: rotationInDegrees, startTime } = element;
+  const m = localMatrixOf(element, timelineCursor);
+  ctx.transform(m.a, m.b, m.c, m.d, m.e, m.f);
+}
 
-  // TODO: 회전, 스케일 중심을 사용자가 지정할 수 있도록 수정
-  const rotationCenter = {
-    x: width / 2,
-    y: height / 2,
-  };
-
-  const scaleCenter = {
-    x: width / 2,
-    y: height / 2,
-  };
-
-  const canAnimate = "animation" in element;
-
-  // Position
-  //
-  // Gated on `isActivate` like rotation, scale and opacity below. It used to be
-  // the one property that animated whenever a track merely existed, so turning
-  // position animation *off* left the element still moving — and, now that the
-  // timeline draws a diamond only for live tracks, would have meant a clip
-  // sliding around with no marker under it to say why.
-  let { x, y } = element.location;
-  if (
-    canAnimate &&
-    "position" in element.animation &&
-    element.animation.position.isActivate
-  ) {
-    x = interpolate(
-      x,
-      element.animation.position.ax,
-      startTime,
-      timelineCursor,
-    );
-    y = interpolate(
-      y,
-      element.animation.position.ay,
-      startTime,
-      timelineCursor,
-    );
-  }
-  ctx.translate(x, y);
-
-  // Rotation
-  ctx.translate(rotationCenter.x, rotationCenter.y);
-  if (
-    canAnimate &&
-    "rotation" in element.animation &&
-    element.animation.rotation.isActivate
-  ) {
-    rotationInDegrees = interpolate(
-      rotationInDegrees,
-      element.animation.rotation.ax,
-      startTime,
-      timelineCursor,
-    );
-  }
-  ctx.rotate(toRadian(rotationInDegrees));
-  ctx.translate(-rotationCenter.x, -rotationCenter.y);
-
-  // Scale
-  ctx.translate(scaleCenter.x, scaleCenter.y);
-  let scale = 1;
-  if (
-    canAnimate &&
-    "scale" in element.animation &&
-    element.animation.scale.isActivate
-  ) {
-    scale =
-      interpolate(10, element.animation.scale.ax, startTime, timelineCursor) /
-      10;
-  }
-  ctx.scale(scale, scale); // TODO: x, y 스케일을 다르게 지정할 수 있도록 수정
-  ctx.translate(-scaleCenter.x, -scaleCenter.y);
+/**
+ * Move `ctx` into the space the element's `location` is expressed in.
+ *
+ * For a root element that is canvas space and this does nothing. For a child it
+ * is the product of every ancestor group's transform — which is the entire
+ * mechanism by which moving a group moves what is inside it, with not one of
+ * the child's keyframes rewritten.
+ */
+export function applyParentTransform(
+  ctx: CanvasRenderingContext2D,
+  elementId: string,
+  timelineCursor: number,
+  context: ElementRenderContext,
+): void {
+  const m = parentMatrixOf(
+    context.elements,
+    elementId,
+    timelineCursor,
+    context.memo,
+  );
+  ctx.transform(m.a, m.b, m.c, m.d, m.e, m.f);
 }
 
 export function renderElement<T extends VisualTimelineElement>(
@@ -103,12 +86,16 @@ export function renderElement<T extends VisualTimelineElement>(
   timelineCursor: number,
   controlOutlineEnabled: boolean,
   renderFunction: ElementRenderFunction<T>,
+  context?: ElementRenderContext,
 ): void {
   ctx.save();
 
   const { width, height, opacity, startTime } = element;
   const canAnimate = "animation" in element;
 
+  if (context != null) {
+    applyParentTransform(ctx, elementId, timelineCursor, context);
+  }
   applyElementTransform(ctx, element, timelineCursor);
 
   // Opacity
@@ -122,6 +109,20 @@ export function renderElement<T extends VisualTimelineElement>(
       opacity,
       element.animation.opacity.ax,
       startTime,
+      timelineCursor,
+    );
+  }
+  // Ancestor opacity multiplies in alongside the element's own. Unlike position,
+  // scale and rotation this is a *group* convention rather than an After
+  // Effects one — AE parenting deliberately does not pass opacity down — but
+  // fading a group ought to fade what is in it, or the name misleads.
+  //
+  // `globalAlpha *=` was already a multiplication, so the two compose without
+  // either side knowing about the other.
+  if (context != null) {
+    ctx.globalAlpha *= inheritedOpacityOf(
+      context.elements,
+      elementId,
       timelineCursor,
     );
   }

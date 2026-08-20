@@ -18,8 +18,9 @@
  */
 
 import type { Timeline, TimelineElement } from "../../@types/timeline";
+import { repairHierarchy } from "./hierarchy";
 
-export type TrackKind = "video" | "audio" | "text";
+export type TrackKind = "video" | "audio" | "text" | "group";
 
 export type TimelineTrack = {
   id: string;
@@ -42,6 +43,7 @@ const KIND_PREFIX: Record<TrackKind, string> = {
   video: "V",
   audio: "A",
   text: "T",
+  group: "G",
 };
 
 /** Which kind of track a newly added element belongs on. */
@@ -51,6 +53,12 @@ export function defaultTrackKindFor(filetype: string): TrackKind {
   }
   if (filetype === "text") {
     return "text";
+  }
+  // Groups get rows of their own so that a group bar never competes with a real
+  // clip for a slot. Their row carries no z-order meaning — they draw nothing —
+  // so where the rows land in the stack does not matter.
+  if (filetype === "group") {
+    return "group";
   }
   // Images, GIFs and shapes are visual overlays and live on video tracks, as
   // they do in every NLE.
@@ -183,11 +191,22 @@ export function derivePriorities(doc: TimelineDocument): Timeline {
   return next;
 }
 
-/** Re-derives indices, names and priorities. Every mutation below ends here. */
+/**
+ * Re-derives indices, names, priorities and parent links. Every mutation below
+ * ends here.
+ *
+ * The hierarchy repair is imported lazily-shaped — as a plain function call, but
+ * from a module that imports nothing from here at runtime — to keep the cycle
+ * `tracks -> hierarchy -> tracks` type-only. `repairHierarchy` returns its input
+ * by identity when no element carries a `parentId` at all, which is the case for
+ * every project with no groups in it, so the cost on the common path is one pass
+ * over the element keys.
+ */
 export function normalizeDocument(doc: TimelineDocument): TimelineDocument {
   const tracks = nameTracks(doc.tracks);
   const withTracks: TimelineDocument = { ...doc, tracks };
-  return { ...withTracks, elements: derivePriorities(withTracks) };
+  const repaired = repairHierarchy(withTracks);
+  return { ...repaired, elements: derivePriorities(repaired) };
 }
 
 export function insertTrackAt(

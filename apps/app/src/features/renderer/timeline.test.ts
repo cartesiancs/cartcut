@@ -9,7 +9,10 @@ import {
   gifElement,
   videoElement,
   audioElement,
+  groupElement,
+  keys,
 } from "./testing";
+import { bakeTrack } from "../animation/keyframes";
 import type { Timeline, VisualTimelineElement } from "../../@types/timeline";
 
 /** Renderers that just fill the element's local box, one colour per kind. */
@@ -243,5 +246,156 @@ describe("renderTimelineAtTime", () => {
       after.push(id),
     );
     expect(after).toEqual(["clip"]);
+  });
+});
+
+describe("groups reach the compositor", () => {
+  /** A red 40x40 image at `location`, optionally inside group `parentId`. */
+  function child(location: { x: number; y: number }, parentId?: string) {
+    return imageElement({
+      width: 40,
+      height: 40,
+      location,
+      ...(parentId != null ? { parentId } : {}),
+    });
+  }
+
+  it("never draws the group itself", () => {
+    // A group has no picture. If one ever reached `renderers[filetype]` there
+    // would be no function to call, so this is about more than aesthetics.
+    const { canvas } = render(
+      {
+        g: groupElement({ location: { x: 0, y: 0 }, width: 200, height: 200 }),
+      },
+      0,
+    );
+    expect(pixel(canvas, 100, 100)).toMatchObject({ r: 0x10, g: 0x10, b: 0x20 });
+  });
+
+  it("draws a child at its parent's offset, not its own", () => {
+    const { canvas } = render(
+      {
+        g: groupElement({ location: { x: 100, y: 100 }, width: 0, height: 0 }),
+        c: child({ x: 0, y: 0 }, "g"),
+      },
+      0,
+    );
+    // Inside the group's offset: painted. At the clip's raw location: not.
+    expect(pixel(canvas, 120, 120)).toMatchObject({ r: 255, g: 0, b: 0 });
+    expect(pixel(canvas, 20, 20)).toMatchObject({ r: 0x10, g: 0x10, b: 0x20 });
+  });
+
+  it("leaves an unparented clip exactly where it always was", () => {
+    // The regression guard for the whole refactor: no parent, no change.
+    const { canvas } = render({ c: child({ x: 20, y: 20 }) }, 0);
+    expect(pixel(canvas, 30, 30)).toMatchObject({ r: 255, g: 0, b: 0 });
+  });
+
+  it("moves the child as the group's position animates", () => {
+    const xs = keys([0, 0], [1000, 100]);
+    const ys = keys([0, 0], [1000, 0]);
+    const timeline: Timeline = {
+      g: groupElement({
+        location: { x: 0, y: 0 },
+        width: 0,
+        height: 0,
+        animation: {
+          ...groupElement().animation,
+          position: {
+            isActivate: true,
+            x: xs,
+            y: ys,
+            ax: bakeTrack(xs),
+            ay: bakeTrack(ys),
+          },
+        },
+      }),
+      c: child({ x: 0, y: 0 }, "g"),
+    };
+
+    expect(pixel(render(timeline, 0).canvas, 20, 20)).toMatchObject({ r: 255 });
+    expect(pixel(render(timeline, 1000).canvas, 120, 20)).toMatchObject({ r: 255 });
+    // …and it has left where it started.
+    expect(pixel(render(timeline, 1000).canvas, 20, 20)).toMatchObject({
+      r: 0x10,
+      b: 0x20,
+    });
+  });
+
+  it("multiplies the group's opacity into the child", () => {
+    // Group 50% over a child at 100%: the red lands at half strength against
+    // the background, which is what `globalAlpha *=` composes to.
+    const { canvas } = render(
+      {
+        g: groupElement({
+          location: { x: 0, y: 0 },
+          width: 0,
+          height: 0,
+          opacity: 50,
+        }),
+        c: child({ x: 0, y: 0 }, "g"),
+      },
+      0,
+    );
+    const p = pixel(canvas, 20, 20);
+    expect(p.r).toBeGreaterThan(100);
+    expect(p.r).toBeLessThan(160);
+  });
+
+  it("compounds opacity down two levels of group", () => {
+    const { canvas } = render(
+      {
+        outer: groupElement({
+          location: { x: 0, y: 0 },
+          width: 0,
+          height: 0,
+          opacity: 50,
+        }),
+        inner: groupElement({
+          parentId: "outer",
+          location: { x: 0, y: 0 },
+          width: 0,
+          height: 0,
+          opacity: 50,
+        }),
+        c: child({ x: 0, y: 0 }, "inner"),
+      },
+      0,
+    );
+    // 0.25 of full red.
+    const p = pixel(canvas, 20, 20);
+    expect(p.r).toBeGreaterThan(40);
+    expect(p.r).toBeLessThan(100);
+  });
+
+  it("does not gate a child on the group's own span", () => {
+    // Parenting is spatial. A caption must not vanish because the title block
+    // it is attached to has a shorter bar on the timeline.
+    const { canvas } = render(
+      {
+        g: groupElement({
+          startTime: 0,
+          duration: 500,
+          location: { x: 0, y: 0 },
+          width: 0,
+          height: 0,
+        }),
+        c: imageElement({
+          parentId: "g",
+          startTime: 0,
+          duration: 4000,
+          width: 40,
+          height: 40,
+          location: { x: 0, y: 0 },
+        }),
+      },
+      2000,
+    );
+    expect(pixel(canvas, 20, 20)).toMatchObject({ r: 255, g: 0, b: 0 });
+  });
+
+  it("ignores a parent link that does not resolve", () => {
+    const { canvas } = render({ c: child({ x: 20, y: 20 }, "gone") }, 0);
+    expect(pixel(canvas, 30, 30)).toMatchObject({ r: 255, g: 0, b: 0 });
   });
 });

@@ -127,6 +127,10 @@ export function clipLabel(element: TimelineElement): string {
   if (element.filetype === "text") {
     return (element as any).text ?? "text";
   }
+  // A group has no source file to be named after, so it carries its own name.
+  if (element.filetype === "group") {
+    return (element as any).name || "Group";
+  }
   const path = element.localpath ?? "";
   const name = path.split(/[\\/]/).pop() ?? "";
   return name || element.filetype;

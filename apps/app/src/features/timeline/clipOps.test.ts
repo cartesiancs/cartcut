@@ -20,7 +20,12 @@ import {
   type TimelineDocument,
 } from "./tracks";
 import { assertTrimInvariant, spanOf } from "./geometry";
-import { imageElement, textElement, videoElement } from "../renderer/testing";
+import {
+  groupElement,
+  imageElement,
+  textElement,
+  videoElement,
+} from "../renderer/testing";
 
 function doc(
   tracks: Array<[string, "video" | "audio" | "text"]>,
@@ -781,5 +786,162 @@ describe("removeRanges", () => {
     expect(removeRanges(before, "nope", [{ startMs: 0, endMs: 1 }], true, idGen)).toBe(
       before,
     );
+  });
+});
+
+// ------------------------------------------------------------ groups
+
+describe("clip ops with a transform hierarchy", () => {
+  /** A group on "g1" holding two clips, plus an unrelated bystander. */
+  function grouped(): TimelineDocument {
+    return doc(
+      [
+        ["v1", "video"],
+        ["g1", "group" as any],
+      ],
+      {
+        grp: groupElement({ trackId: "g1", startTime: 0, duration: 4000 }),
+        a: imageElement({ parentId: "grp", trackId: "v1", startTime: 0, duration: 1000 }),
+        b: imageElement({ parentId: "grp", trackId: "v1", startTime: 2000, duration: 1000 }),
+        loose: imageElement({ trackId: "v1", startTime: 6000, duration: 1000 }),
+      },
+    );
+  }
+
+  it("deletes a group's contents along with it", () => {
+    // "Delete the group" has to mean the contents too, or the children scatter
+    // to wherever their parent-local coordinates land in canvas space.
+    const after = deleteClips(grouped(), ["grp"]);
+    expect(after.elements.grp).toBeUndefined();
+    expect(after.elements.a).toBeUndefined();
+    expect(after.elements.b).toBeUndefined();
+    expect(after.elements.loose).toBeDefined();
+  });
+
+  it("deletes a nested group's whole subtree", () => {
+    const base = normalizeDocument({
+      ...grouped(),
+      elements: {
+        ...grouped().elements,
+        outer: groupElement({ trackId: "g1", startTime: 0, duration: 4000 }),
+        grp: groupElement({
+          trackId: "g1",
+          startTime: 0,
+          duration: 4000,
+          parentId: "outer",
+        }),
+      },
+    });
+    const after = deleteClips(base, ["outer"]);
+    expect(Object.keys(after.elements)).toEqual(["loose"]);
+  });
+
+  it("leaves a child's siblings alone when only the child is deleted", () => {
+    const after = deleteClips(grouped(), ["a"]);
+    expect(after.elements.grp).toBeDefined();
+    expect(after.elements.b).toBeDefined();
+  });
+
+  it("takes the contents along on a ripple delete too", () => {
+    const after = rippleDelete(grouped(), "grp");
+    expect(after.elements.a).toBeUndefined();
+    expect(after.elements.b).toBeUndefined();
+  });
+
+  it("keeps parentId on both halves of a split", () => {
+    const after = splitClip(grouped(), "a", 500, "right");
+    expect((after.elements.a as any).parentId).toBe("grp");
+    expect((after.elements.right as any).parentId).toBe("grp");
+  });
+
+  it("keeps parentId when a clip is trimmed", () => {
+    expect((trimClipStart(grouped(), "a", 200).elements.a as any).parentId).toBe("grp");
+    expect((trimClipEnd(grouped(), "a", -200).elements.a as any).parentId).toBe("grp");
+  });
+
+  it("keeps parentId when a clip moves in time", () => {
+    const after = moveClips(grouped(), ["a"], 4000);
+    expect((after.elements.a as any).parentId).toBe("grp");
+  });
+
+  it("does not move a group's children when the group moves in time", () => {
+    // Parenting here is spatial only. A group's bar carries its own keyframe
+    // time base and nothing else.
+    const after = moveClips(grouped(), ["grp"], 1000);
+    expect(after.elements.grp.startTime).toBe(1000);
+    expect(after.elements.a.startTime).toBe(0);
+    expect(after.elements.b.startTime).toBe(2000);
+  });
+
+  it("remaps parentId when a group and its children are pasted together", () => {
+    // Without the remap the copies keep pointing at the *original* group, so
+    // two groups end up sharing one set of children.
+    const source = grouped();
+    const clipboard = {
+      grp: source.elements.grp,
+      a: source.elements.a,
+      b: source.elements.b,
+    };
+    let n = 0;
+    const gen = () => `new${n++}`;
+    const after = pasteClips(source, clipboard as any, 10000, gen);
+
+    const pastedGroupId = Object.keys(after.elements).find(
+      (id) => id.startsWith("new") && after.elements[id].filetype === "group",
+    );
+    expect(pastedGroupId).toBeDefined();
+
+    const pastedChildren = Object.entries(after.elements).filter(
+      ([id, el]) => id.startsWith("new") && el.filetype !== "group",
+    );
+    expect(pastedChildren).toHaveLength(2);
+    for (const [, child] of pastedChildren) {
+      expect((child as any).parentId).toBe(pastedGroupId);
+    }
+    // …and the originals still point at the original group.
+    expect((after.elements.a as any).parentId).toBe("grp");
+  });
+
+  it("keeps a lone pasted child attached to the group it came from", () => {
+    const source = grouped();
+    let n = 0;
+    const after = pasteClips(
+      source,
+      { a: source.elements.a } as any,
+      10000,
+      () => `new${n++}`,
+    );
+    const pasted = Object.keys(after.elements).find((id) => id.startsWith("new"));
+    expect((after.elements[pasted as string] as any).parentId).toBe("grp");
+  });
+
+  it("drops the link when the pasted child's group is not in the document", () => {
+    // `normalizeDocument` runs `repairHierarchy`, so a dangling link cannot
+    // survive a paste into a project that never had the group.
+    const orphanSource = doc(
+      [["v1", "video"]],
+      { a: imageElement({ trackId: "v1", parentId: "elsewhere" }) },
+    );
+    const after = pasteClips(
+      orphanSource,
+      { a: orphanSource.elements.a } as any,
+      5000,
+      () => "fresh",
+    );
+    expect((after.elements.fresh as any).parentId).toBeUndefined();
+  });
+
+  it("gives each pasted clip a distinct id", () => {
+    const source = grouped();
+    let n = 0;
+    const after = pasteClips(
+      source,
+      { a: source.elements.a, b: source.elements.b } as any,
+      10000,
+      () => `new${n++}`,
+    );
+    const pasted = Object.keys(after.elements).filter((id) => id.startsWith("new"));
+    expect(new Set(pasted).size).toBe(pasted.length);
+    expect(pasted).toHaveLength(2);
   });
 });

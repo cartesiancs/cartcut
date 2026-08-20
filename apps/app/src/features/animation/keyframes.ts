@@ -685,6 +685,62 @@ export function shiftKeyframes(list: Keyframe[], deltaMs: number): Keyframe[] {
   }));
 }
 
+/**
+ * Slide every keyframe's **value** by `delta`, handles included.
+ *
+ * The value-axis twin of `shiftKeyframes`, and what makes grouping exact.
+ * Re-expressing a clip's position in a group's coordinate space is a pure
+ * translation of its position curve, and a translation acts on the control
+ * points of a bezier exactly as it acts on the points of the curve — so
+ * offsetting anchors and handles alike reproduces the original path with no
+ * error at all, and the timing is untouched because the time axis is not.
+ *
+ * This is why `createGroup` seats the group at the selection's bounding box
+ * rather than at the origin: the compensation it owes each child is then a
+ * translation, which is representable, instead of a general affine, which is
+ * not — the two position lanes carry independent handle abscissae, so a
+ * transform that mixes x into y has no exact form here.
+ */
+export function offsetKeyframeValues(
+  list: Keyframe[],
+  delta: number,
+): Keyframe[] {
+  if (delta === 0 || !Number.isFinite(delta) || list.length === 0) {
+    return list;
+  }
+  return list.map((keyframe) => ({
+    type: keyframe.type,
+    p: [keyframe.p[0], keyframe.p[1] + delta] as [number, number],
+    cs: [keyframe.cs[0], keyframe.cs[1] + delta] as [number, number],
+    ce: [keyframe.ce[0], keyframe.ce[1] + delta] as [number, number],
+  }));
+}
+
+/**
+ * Map every keyframe's value through `fn`, handles included.
+ *
+ * For the compensations a plain offset cannot express — a group carrying
+ * rotation or scale, which `ungroup` and `setParent` have to bake into their
+ * children. Anchors come out exact; the handles are carried through the same
+ * map, which is exact for the linear part and an approximation of the easing
+ * only where the two lanes' handle abscissae disagree. `groupOps.test.ts` pins
+ * the anchor exactness rather than leaving the distinction to this comment.
+ */
+export function mapKeyframeValues(
+  list: Keyframe[],
+  fn: (value: number, timeMs: number) => number,
+): Keyframe[] {
+  if (list.length === 0) {
+    return list;
+  }
+  return list.map((keyframe) => ({
+    type: keyframe.type,
+    p: [keyframe.p[0], fn(keyframe.p[1], keyframe.p[0])] as [number, number],
+    cs: [keyframe.cs[0], fn(keyframe.cs[1], keyframe.cs[0])] as [number, number],
+    ce: [keyframe.ce[0], fn(keyframe.ce[1], keyframe.ce[0])] as [number, number],
+  }));
+}
+
 /** Slide a baked lane by `deltaMs`. */
 export function shiftBaked(baked: Baked, deltaMs: number): Baked {
   if (deltaMs === 0 || !Number.isFinite(deltaMs) || baked.length === 0) {
@@ -892,7 +948,12 @@ export function emptyAnimation(filetype: string): any {
   if (filetype === "shape") {
     return { opacity: scalar() };
   }
-  if (filetype === "image" || filetype === "video" || filetype === "text") {
+  if (
+    filetype === "image" ||
+    filetype === "video" ||
+    filetype === "text" ||
+    filetype === "group"
+  ) {
     return {
       position: { isActivate: false, x: [], y: [], ax: [], ay: [] },
       opacity: scalar(),

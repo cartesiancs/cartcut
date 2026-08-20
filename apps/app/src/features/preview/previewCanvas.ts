@@ -24,6 +24,18 @@ import {
 } from "../renderer/timeline";
 import { isVisualTimelineElement } from "../../@types/timeline";
 import { applyElementTransform } from "../renderer/element";
+import { hitZoneOf, type HitZone } from "./hitTest";
+import {
+  applyPoint,
+  applyVector,
+  invert,
+  parentMatrixOf,
+  rotationOf,
+  scaleOf,
+  worldMatrixOf,
+  worldToParentLocal,
+  worldVectorToParentLocal,
+} from "../timeline/transform";
 import { isElementVisibleAtTime } from "../element/time";
 import { renderControlOutline } from "../renderer/controlOutline";
 import {
@@ -55,6 +67,16 @@ export class PreviewCanvas extends LitElement {
   activeElementId: string;
   mouseOrigin: { x: number; y: number };
   elementOrigin: { x: number; y: number; w: number; h: number };
+  /**
+   * The same rect in the element's *parent* space, captured at drag start.
+   *
+   * `elementOrigin` is where the element is on the canvas, which is what a
+   * pointer gesture is measured against. `width`, `height` and `location`
+   * are not canvas quantities though — they are read inside the parent's
+   * frame — so the resize math needs this one, or a clip inside a moved
+   * group jumps to the group's offset the moment a handle is touched.
+   */
+  elementOriginLocal: { x: number; y: number; w: number; h: number };
   moveType:
     | "none"
     | "position"
@@ -132,6 +154,7 @@ export class PreviewCanvas extends LitElement {
     this.activeElementId = "";
     this.mouseOrigin = { x: 0, y: 0 };
     this.elementOrigin = { x: 0, y: 0, w: 0, h: 0 };
+    this.elementOriginLocal = { x: 0, y: 0, w: 0, h: 0 };
 
     this.nowShapeId = "";
   }
@@ -497,17 +520,39 @@ export class PreviewCanvas extends LitElement {
 
   /** Assumes `ctx` is already in world space. */
   private drawActiveOutline(ctx: CanvasRenderingContext2D) {
-    const element = this.timeline[this.activeElementId];
-    if (element == undefined || !isVisualTimelineElement(element)) {
-      return;
-    }
-    if (!isElementVisibleAtTime(this.timelineCursor, this.timeline, element)) {
+    const element: any = this.timeline[this.activeElementId];
+    if (element == undefined) {
       return;
     }
 
+    // A group draws nothing, so it cannot be picked in the preview — it is
+    // selected from its bar on the timeline. Once it is, its handles have to
+    // appear, or there is no way to move a group with the mouse at all. Its own
+    // span is not a reason to hide them either: parenting is spatial, so a
+    // group is "there" whenever it is selected.
+    const isGroup = element.filetype === "group";
+    if (!isGroup) {
+      if (!isVisualTimelineElement(element)) {
+        return;
+      }
+      if (!isElementVisibleAtTime(this.timelineCursor, this.timeline, element)) {
+        return;
+      }
+    }
+
     ctx.save();
+    // The parent chain first, then the element's own transform — the same two
+    // steps `renderElement` takes, so the box lands exactly on the pixels.
+    const parent = parentMatrixOf(
+      this.timeline,
+      this.activeElementId,
+      this.timelineCursor,
+    );
+    ctx.transform(parent.a, parent.b, parent.c, parent.d, parent.e, parent.f);
     applyElementTransform(ctx, element, this.timelineCursor);
-    renderControlOutline(ctx, 0, 0, element.width, element.height);
+    renderControlOutline(ctx, 0, 0, element.width, element.height, {
+      dashed: isGroup,
+    });
     ctx.restore();
   }
 
@@ -523,9 +568,14 @@ export class PreviewCanvas extends LitElement {
       return;
     }
 
+    // Guides line up with the frame, so the element's position has to be the
+    // one on the canvas. Reading the raw `location` showed guides for where the
+    // clip would be with no animation and no group above it — which is nowhere
+    // the user can see.
+    const world = this.worldTopLeft(this.activeElementId);
     const checkAlign = this.isAlign({
-      x: element.location.x,
-      y: element.location.y,
+      x: world.x,
+      y: world.y,
       w: element.width,
       h: element.height,
     });
@@ -579,11 +629,16 @@ export class PreviewCanvas extends LitElement {
   }
 
   isAlign({ x, y, w, h }) {
-    const padding = 20;
     let isChange = false;
     let direction: string[] = [];
     let nx = x;
     let ny = y;
+
+    // How near an edge counts as "snapped", in canvas units. Its own constant
+    // rather than one shared with hit-testing: this is a distance between two
+    // things being drawn, so it does not follow the pointer's screen scale the
+    // way a grab band does.
+    const padding = 20;
 
     const cw = this.frameSize.w;
     const ch = this.frameSize.h;
@@ -636,109 +691,108 @@ export class PreviewCanvas extends LitElement {
     }
   }
 
-  collisionCheck({
-    x,
-    y,
-    w,
-    h,
-    mx,
-    my,
-    padding,
-    rotation = 0,
-  }: {
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-    mx: number;
-    my: number;
-    padding: number;
-    rotation: number;
-  }) {
-    const cx = x + w / 2;
-    const cy = y + h / 2;
-
-    const dx = mx - cx;
-    const dy = my - cy;
-
-    const cos = Math.cos(rotation * (Math.PI / 180));
-    const sin = Math.sin(rotation * (Math.PI / 180));
-    const localMouseX = dx * cos + dy * sin + cx;
-    const localMouseY = -dx * sin + dy * cos + cy;
-
-    if (
-      localMouseX > x + padding / 2 &&
-      localMouseX < x + w - padding / 2 &&
-      localMouseY > y + padding / 2 &&
-      localMouseY < y + h - padding / 2
-    ) {
-      return { type: "position" };
-    } else if (
-      localMouseX > x + w / 2 - 25 &&
-      localMouseX < x + w / 2 + 25 &&
-      localMouseY > y - 75 &&
-      localMouseY < y
-    ) {
-      return { type: "rotation" };
-    } else if (
-      localMouseX > x + w &&
-      localMouseX < x + w + padding &&
-      localMouseY > y + padding &&
-      localMouseY < y + h - padding
-    ) {
-      return { type: "stretchE" };
-    } else if (
-      localMouseX > x - padding &&
-      localMouseX < x &&
-      localMouseY > y + padding &&
-      localMouseY < y + h - padding
-    ) {
-      return { type: "stretchW" };
-    } else if (
-      localMouseX > x + padding &&
-      localMouseX < x + w - padding &&
-      localMouseY > y - padding &&
-      localMouseY < y
-    ) {
-      return { type: "stretchN" };
-    } else if (
-      localMouseX > x + padding &&
-      localMouseX < x + w - padding &&
-      localMouseY > y + h &&
-      localMouseY < y + h + padding
-    ) {
-      return { type: "stretchS" };
-    } else if (
-      localMouseX > x - padding &&
-      localMouseX < x + padding &&
-      localMouseY > y - padding &&
-      localMouseY < y + padding
-    ) {
-      return { type: "stretchNW" };
-    } else if (
-      localMouseX > x - padding &&
-      localMouseX < x + padding &&
-      localMouseY > y + h - padding &&
-      localMouseY < y + h + padding
-    ) {
-      return { type: "stretchSW" };
-    } else if (
-      localMouseX > x + w - padding &&
-      localMouseX < x + w + padding &&
-      localMouseY > y - padding &&
-      localMouseY < y + padding
-    ) {
-      return { type: "stretchNE" };
-    } else if (
-      localMouseX > x + w - padding &&
-      localMouseX < x + w + padding &&
-      localMouseY > y + h - padding &&
-      localMouseY < y + h + padding
-    ) {
-      return { type: "stretchSE" };
-    } else {
-      return { type: "none" };
+  /**
+   * Which handle, if any, the canvas-space point `(mx, my)` is over.
+   *
+   * Replaces the hand-rolled un-rotation `collisionCheck` did. That version was
+   * a second, independent answer to "where is this element", and it knew about
+   * rotation only — which was survivable while nothing but the element's own
+   * `rotation` could turn it, and is not survivable now that an ancestor group
+   * can rotate *and* scale it.
+   *
+   * The pointer goes through the inverse of the same world matrix the renderer
+   * draws with, so drawing and hit-testing cannot disagree. `worldScale` keeps
+   * the grips a fixed size on screen rather than in artwork pixels.
+   */
+  hitZoneAt(elementId: string, mx: number, my: number): HitZone {
+    const element: any = this.timeline[elementId];
+    if (element == null) {
+      return "none";
     }
+    const m = worldMatrixOf(this.timeline, elementId, this.timelineCursor);
+    return hitZoneOf(
+      applyPoint(invert(m), { x: mx, y: my }),
+      element.width ?? 0,
+      element.height ?? 0,
+      { worldScale: scaleOf(m) },
+    );
+  }
+
+  /**
+   * The element's top-left on the canvas.
+   *
+   * A drag works in canvas space — that is where the pointer is — so this is
+   * what `elementOrigin` holds, and `toParentLocal` is what turns the result
+   * back into the parent-space value that belongs in `location`.
+   */
+  worldTopLeft(elementId: string): { x: number; y: number } {
+    return applyPoint(
+      worldMatrixOf(this.timeline, elementId, this.timelineCursor),
+      { x: 0, y: 0 },
+    );
+  }
+
+  /**
+   * Whether the pointer may interact with this element at all.
+   *
+   * Everything drawable is always a target. A **group** is the exception, and
+   * needs one: its frame is invisible and, by construction, encloses its own
+   * children — so a group that answered the pointer all the time would be an
+   * invisible rectangle swallowing every click aimed at what is inside it.
+   *
+   * It goes live only once it is the active element, which happens by selecting
+   * its bar on the timeline. That is what makes an invisible, resizable box on
+   * the canvas safe to have: until you ask for it, it is not there.
+   */
+  private isPointerTarget(elementId: string, element: any): boolean {
+    if (element == null) {
+      return false;
+    }
+    if (element.filetype === "group") {
+      return elementId === this.activeElementId;
+    }
+    return isVisualTimelineElement(element);
+  }
+
+  /**
+   * The element's rect as its own fields describe it — parent space, animation
+   * resolved.
+   *
+   * `location` is where the top-left sits inside the parent, so this is what
+   * the resize math has to start from; `worldTopLeft` answers the different
+   * question the pointer asks.
+   */
+  localRectOf(elementId: string): { x: number; y: number; w: number; h: number } {
+    const element: any = this.timeline[elementId];
+    const { x, y } = displayPosition(element, this.timelineCursor);
+    return { x, y, w: element?.width ?? 0, h: element?.height ?? 0 };
+  }
+
+  /** A canvas-space point as the value to write into the element's `location`. */
+  toParentLocal(elementId: string, point: { x: number; y: number }) {
+    return worldToParentLocal(
+      this.timeline,
+      elementId,
+      this.timelineCursor,
+      point,
+    );
+  }
+
+  /** A canvas-space drag delta as a delta in the element's own parent space. */
+  toParentLocalDelta(elementId: string, delta: { x: number; y: number }) {
+    return worldVectorToParentLocal(
+      this.timeline,
+      elementId,
+      this.timelineCursor,
+      delta,
+    );
+  }
+
+  /** How much the parent chain rotates this element, in degrees. */
+  parentRotationOf(elementId: string): number {
+    return rotationOf(
+      parentMatrixOf(this.timeline, elementId, this.timelineCursor),
+    );
   }
 
   showSideOption(elementId) {
@@ -778,10 +832,15 @@ export class PreviewCanvas extends LitElement {
       return null;
     }
 
+    // The filetypes carrying a two-lane `position` track. A group is one of
+    // them — dragging it with position animation on has to lay down keyframes
+    // like any other element, and that animation is the whole reason a group
+    // exists.
     if (
       activeElement.filetype != "image" &&
       activeElement.filetype != "video" &&
-      activeElement.filetype != "text"
+      activeElement.filetype != "text" &&
+      activeElement.filetype != "group"
     ) {
       return null;
     }
@@ -934,7 +993,6 @@ export class PreviewCanvas extends LitElement {
     const world = this.toWorld(e);
     const mx = world.x;
     const my = world.y;
-    const padding = 20;
     let isMoveTemp = false;
     let isStretchTemp = false;
     let isRotationTemp = false;
@@ -962,26 +1020,32 @@ export class PreviewCanvas extends LitElement {
     );
 
     for (const elementId of Object.keys(sortedTimeline)) {
-      const element = this.timeline[elementId];
-      if (isVisualTimelineElement(element)) {
+      const element: any = this.timeline[elementId];
+      if (this.isPointerTarget(elementId, element)) {
         // Where the element is *drawn*, not where `location` says it would be
-        // with no animation. Those are different the moment a position track is
-        // active, and taking the static one here is what made grabbing an
+        // with no animation, and not where it would be with no parent either.
+        // Those diverge the moment a position track is active or a group sits
+        // above the clip, and taking the wrong one is what made grabbing an
         // animated element miss its rectangle and then jump by the difference.
-        // `drawCanvas` and `_handleMouseMove` sample the same function.
-        const { x, y } = displayPosition(element, this.timelineCursor);
+        // `drawCanvas` and `_handleMouseMove` resolve through the same matrix.
+        const { x, y } = this.worldTopLeft(elementId);
         const w = element.width;
         const h = element.height;
-        const rotation = element.rotation;
 
         const fileType = element.filetype;
         const startTime = element.startTime;
         const duration = element.duration;
 
-        if (!(
-          this.timelineCursor >= startTime &&
-          this.timelineCursor < startTime + duration
-        )) {
+        // A group's frame is live whenever it is selected, whatever the
+        // playhead is doing: its transform applies to its children at every
+        // instant, so hiding its handles outside its own bar would be arbitrary.
+        if (
+          fileType != "group" &&
+          !(
+            this.timelineCursor >= startTime &&
+            this.timelineCursor < startTime + duration
+          )
+        ) {
           continue;
         }
 
@@ -994,16 +1058,7 @@ export class PreviewCanvas extends LitElement {
           }
         }
 
-        const collide = this.collisionCheck({
-          x: x,
-          y: y,
-          w: w,
-          h: h,
-          my: my,
-          mx: mx,
-          padding: padding,
-          rotation: rotation,
-        });
+        const collide = { type: this.hitZoneAt(elementId, mx, my) };
 
         if (collide.type == "position") {
           activeElementTemp = elementId;
@@ -1012,6 +1067,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
+          this.elementOriginLocal = this.localRectOf(elementId);
           this.moveType = "position";
           this.cursorType = "grabbing";
           clearTempStatus();
@@ -1026,6 +1082,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
+          this.elementOriginLocal = this.localRectOf(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1041,6 +1098,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
+          this.elementOriginLocal = this.localRectOf(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1055,6 +1113,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
+          this.elementOriginLocal = this.localRectOf(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1069,6 +1128,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
+          this.elementOriginLocal = this.localRectOf(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1083,6 +1143,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
+          this.elementOriginLocal = this.localRectOf(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1097,6 +1158,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
+          this.elementOriginLocal = this.localRectOf(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1111,6 +1173,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
+          this.elementOriginLocal = this.localRectOf(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1125,6 +1188,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
+          this.elementOriginLocal = this.localRectOf(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1139,6 +1203,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
+          this.elementOriginLocal = this.localRectOf(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1207,7 +1272,6 @@ export class PreviewCanvas extends LitElement {
     const world = this.toWorld(e);
     const mx = world.x;
     const my = world.y;
-    const padding = 20;
 
     let isCollide = false;
 
@@ -1226,16 +1290,10 @@ export class PreviewCanvas extends LitElement {
     if (!this.isMove || !this.isStretch) {
       for (const elementId of Object.keys(sortedTimeline)) {
         const element = this.timeline[elementId];
-        if (element.filetype != "audio") {
-          let x = element.location.x;
-          let y = element.location.y;
-
-          const w = element.width;
-          const h = element.height;
+        if (this.isPointerTarget(elementId, element)) {
           const fileType = element.filetype;
           const startTime = element.startTime;
           const duration = element.duration;
-          const rotation = element.rotation;
 
           // Where the selection box and its drag handles sit, which has to be
           // wherever the element is actually being drawn.
@@ -1248,23 +1306,21 @@ export class PreviewCanvas extends LitElement {
           // which exits the whole method, so one element whose animation had
           // not started yet stopped every later element from being drawn at
           // all.
-          const positionTrack = (element as any).animation?.position;
-          if (positionTrack?.isActivate === true) {
-            const animated = sampleTrackXY(
-              positionTrack,
-              element.startTime,
-              this.timelineCursor,
-              x,
-              y,
-            );
-            x = animated.x;
-            y = animated.y;
-          }
+          //
+          // A fourth is gone now: it sampled the position track by hand, so it
+          // saw the clip's own animation but not the transform of any group
+          // above it. `hitZoneAt` resolves the whole chain through the matrix
+          // the renderer draws with.
 
-          if (!(
-            this.timelineCursor >= startTime &&
-            this.timelineCursor < startTime + duration
-          )) {
+          // As in `_handleMouseDown`: a selected group's frame is live at
+          // every instant, so its handles do not blink out with its bar.
+          if (
+            fileType != "group" &&
+            !(
+              this.timelineCursor >= startTime &&
+              this.timelineCursor < startTime + duration
+            )
+          ) {
             continue;
           }
 
@@ -1277,16 +1333,7 @@ export class PreviewCanvas extends LitElement {
             }
           }
 
-          const collide = this.collisionCheck({
-            x: x,
-            y: y,
-            w: w,
-            h: h,
-            my: my,
-            mx: mx,
-            padding: padding,
-            rotation: rotation,
-          });
+          const collide = { type: this.hitZoneAt(elementId, mx, my) };
 
           if (collide.type == "position") {
             //this.activeElementId = elementId;
@@ -1329,8 +1376,13 @@ export class PreviewCanvas extends LitElement {
     }
     this.updateCursor();
 
-    const activeElement = this.timeline[this.activeElementId];
-    if (activeElement == undefined || !isVisualTimelineElement(activeElement)) {
+    // Deliberately `any`, not narrowed to `VisualTimelineElement`: a group is
+    // excluded from that union — it draws nothing — yet it is exactly what the
+    // move, rotate and resize branches below have to be able to act on. The
+    // narrowing guard that used to be here returned early for every group, so
+    // its handles drew and then refused to do anything.
+    const activeElement: any = this.timeline[this.activeElementId];
+    if (activeElement == undefined || activeElement.filetype === "audio") {
       return;
     }
 
@@ -1346,10 +1398,21 @@ export class PreviewCanvas extends LitElement {
         w: this.elementOrigin.w,
         h: this.elementOrigin.h,
       });
-      const next = {
+      // Snapping is a canvas-space question — guides line up with the frame
+      // and with other clips as the user sees them — so it happens here, in
+      // world coordinates, before the result is taken back into the element's
+      // own space.
+      const world = {
         x: alignLocation?.x ?? this.elementOrigin.x + dx,
         y: alignLocation?.y ?? this.elementOrigin.y + dy,
       };
+
+      // `location` and the position track are read in the *parent's* space, so
+      // a pointer position has to come back through the parent chain before it
+      // is written. For a clip with no group above it this is the identity and
+      // `next` is `world`; inside a group scaled to 2x, a 100px drag on screen
+      // becomes the 50 that belongs in the field.
+      const next = this.toParentLocal(this.activeElementId, world);
 
       this.updateAlignDirection();
 
@@ -1391,7 +1454,13 @@ export class PreviewCanvas extends LitElement {
         y: my,
       };
 
-      const r = this.calculateRotation(p2, p1);
+      // `calculateRotation` gives the angle on the canvas, but `rotation` is
+      // read inside the parent's frame — so a child of a group already turned
+      // 30° must store 30° less than the pointer says, or it snaps by the
+      // group's rotation the moment the drag begins.
+      const r =
+        this.calculateRotation(p2, p1) -
+        this.parentRotationOf(this.activeElementId);
       activeElement.rotation = r;
     }
 
@@ -1400,135 +1469,155 @@ export class PreviewCanvas extends LitElement {
       const dx = mx - this.mouseOrigin.x;
       const dy = my - this.mouseOrigin.y;
 
-      const rotationDeg = activeElement.rotation || 0;
-      const rotationRad = (rotationDeg * Math.PI) / 180;
-      const cosTheta = Math.cos(rotationRad);
-      const sinTheta = Math.sin(rotationRad);
-      const localDx = dx * cosTheta + dy * sinTheta;
-      const localDy = -dx * sinTheta + dy * cosTheta;
+      // The pointer moved `dx, dy` across the canvas; `width` and `height` are
+      // measured along the element's own axes. Inverting the world matrix takes
+      // the delta into those axes in one step — it removes the element's own
+      // rotation, as the hand-rolled cos/sin here used to, and also every
+      // rotation and scale contributed by groups above it, which nothing did.
+      //
+      // For an unparented, unscaled clip this reduces to exactly the old
+      // formula, so its drag behaviour is unchanged to the bit.
+      const localDelta = applyVector(
+        invert(worldMatrixOf(this.timeline, this.activeElementId, this.timelineCursor)),
+        { x: dx, y: dy },
+      );
+      const localDx = localDelta.x;
+      const localDy = localDelta.y;
 
+      // Everything below is in the parent's frame, where `location` lives.
+      const origin = this.elementOriginLocal;
       const location = activeElement.location;
       const filetype = activeElement.filetype;
 
+      // Which kinds resize freely instead of holding their aspect ratio.
+      //
+      // Text always has: a caption's box is a text-wrapping width, not a
+      // picture. A group is the other one, and for the same reason — its
+      // `width`/`height` are not a size to draw but an invisible frame, and the
+      // frame's job is to sit where the user wants the pivot. Locking it to the
+      // proportions of whatever happened to be selected when it was made would
+      // stop it doing that job.
+      const freeAspect = filetype == "text" || filetype == "group";
+
       const moveE = () => {
-        if (this.elementOrigin.w + localDx <= minSize) return false;
-        const width = this.elementOrigin.w + localDx;
+        if (origin.w + localDx <= minSize) return false;
+        const width = origin.w + localDx;
         const ratio = activeElement.ratio;
         activeElement.width = width;
 
-        if (filetype == "text") {
+        if (freeAspect) {
           return false;
         }
         activeElement.height = width / ratio;
         activeElement.location.y =
-          this.elementOrigin.y - (width / ratio - this.elementOrigin.h) / 2;
+          origin.y - (width / ratio - origin.h) / 2;
       };
 
       const moveW = () => {
-        if (this.elementOrigin.w - localDx <= minSize) return false;
-        const width = this.elementOrigin.w - localDx;
+        if (origin.w - localDx <= minSize) return false;
+        const width = origin.w - localDx;
         const ratio = activeElement.ratio;
 
         activeElement.width = width;
-        activeElement.location.x = this.elementOrigin.x + localDx;
+        activeElement.location.x = origin.x + localDx;
 
-        if (filetype == "text") {
+        if (freeAspect) {
           return false;
         }
         activeElement.height = width / ratio;
         activeElement.location.y =
-          this.elementOrigin.y - (width / ratio - this.elementOrigin.h) / 2;
+          origin.y - (width / ratio - origin.h) / 2;
       };
 
       const moveN = () => {
-        if (this.elementOrigin.h - localDy <= minSize) return false;
-        const height = this.elementOrigin.h - localDy;
+        if (origin.h - localDy <= minSize) return false;
+        const height = origin.h - localDy;
         const ratio = activeElement.ratio;
 
         activeElement.height = height;
-        activeElement.location.y = this.elementOrigin.y + localDy;
+        activeElement.location.y = origin.y + localDy;
 
-        if (filetype == "text") {
+        if (freeAspect) {
           return false;
         }
         activeElement.width = height * ratio;
         activeElement.location.x =
-          this.elementOrigin.x - (height * ratio - this.elementOrigin.w) / 2;
+          origin.x - (height * ratio - origin.w) / 2;
       };
 
       const moveS = () => {
-        if (this.elementOrigin.h + localDy <= minSize) return false;
-        const height = this.elementOrigin.h + localDy;
+        if (origin.h + localDy <= minSize) return false;
+        const height = origin.h + localDy;
         const ratio = activeElement.ratio;
         activeElement.height = height;
 
-        if (filetype == "text") {
+        if (freeAspect) {
           return false;
         }
         activeElement.width = height * ratio;
         activeElement.location.x =
-          this.elementOrigin.x - (height * ratio - this.elementOrigin.w) / 2;
+          origin.x - (height * ratio - origin.w) / 2;
       };
 
       const moveNW = () => {
-        if (filetype == "text") {
+        if (freeAspect) {
           moveN();
           moveW();
         } else {
           const ratio = activeElement.ratio;
           const intr = this.getIntersection({
             m: 1,
-            a1: this.elementOrigin.x,
-            b1: this.elementOrigin.y,
-            a2: this.elementOrigin.x + localDx,
-            b2: this.elementOrigin.y + localDy,
+            a1: origin.x,
+            b1: origin.y,
+            a2: origin.x + localDx,
+            b2: origin.y + localDy,
           });
 
           activeElement.width =
-            this.elementOrigin.w + (this.elementOrigin.x - intr.x);
+            origin.w + (origin.x - intr.x);
           activeElement.height =
-            (this.elementOrigin.w + (this.elementOrigin.x - intr.x)) / ratio;
+            (origin.w + (origin.x - intr.x)) / ratio;
           activeElement.location.y =
-            this.elementOrigin.y +
-            (this.elementOrigin.h - activeElement.height);
+            origin.y +
+            (origin.h - activeElement.height);
 
           activeElement.location.x = intr.x;
         }
       };
 
       const moveSW = () => {
-        if (filetype == "text") {
+        if (freeAspect) {
           moveS();
           moveW();
         } else {
           const ratio = activeElement.ratio;
           const intr = this.getIntersection({
             m: -1,
-            a1: this.elementOrigin.x,
-            b1: this.elementOrigin.h,
-            a2: this.elementOrigin.x + localDx,
-            b2: this.elementOrigin.h + localDy,
+            a1: origin.x,
+            b1: origin.h,
+            a2: origin.x + localDx,
+            b2: origin.h + localDy,
           });
 
           activeElement.height = intr.y;
           activeElement.width = intr.y * ratio;
           activeElement.location.x =
-            this.elementOrigin.x - (intr.y * ratio - this.elementOrigin.w);
+            origin.x - (intr.y * ratio - origin.w);
         }
       };
 
       const moveSE = () => {
-        if (filetype == "text") {
+        if (freeAspect) {
           moveS();
           moveE();
         } else {
           const ratio = activeElement.ratio;
           const intr = this.getIntersection({
             m: 1,
-            a1: this.elementOrigin.w,
-            b1: this.elementOrigin.h,
-            a2: this.elementOrigin.w + localDx,
-            b2: this.elementOrigin.h + localDy,
+            a1: origin.w,
+            b1: origin.h,
+            a2: origin.w + localDx,
+            b2: origin.h + localDy,
           });
 
           activeElement.height = intr.y;
@@ -1537,23 +1626,23 @@ export class PreviewCanvas extends LitElement {
       };
 
       const moveNE = () => {
-        if (filetype == "text") {
+        if (freeAspect) {
           moveN();
           moveE();
         } else {
           const ratio = activeElement.ratio;
           const intr = this.getIntersection({
             m: -1,
-            a1: this.elementOrigin.w,
-            b1: this.elementOrigin.y,
-            a2: this.elementOrigin.w + localDx,
-            b2: this.elementOrigin.y + localDy,
+            a1: origin.w,
+            b1: origin.y,
+            a2: origin.w + localDx,
+            b2: origin.y + localDy,
           });
 
           activeElement.width = intr.x;
           activeElement.height = intr.x / ratio;
           activeElement.location.y =
-            this.elementOrigin.y - (intr.x / ratio - this.elementOrigin.h);
+            origin.y - (intr.x / ratio - origin.h);
         }
       };
 
@@ -1693,32 +1782,25 @@ export class PreviewCanvas extends LitElement {
     for (const elementId of Object.keys(this.timeline)) {
       const element = this.timeline[elementId];
       if (isVisualTimelineElement(element)) {
-        const x = element.location.x;
-        const y = element.location.y;
-        const w = element.width;
-        const h = element.height;
-        const rotation = element.rotation;
-        const fileType = element.filetype;
-
-        if (fileType != "text") {
+        if (element.filetype != "text") {
           continue;
         }
 
-        const collide = this.collisionCheck({
-          x: x,
-          y: y,
-          w: w,
-          h: h,
-          my: my,
-          mx: mx,
-          padding: padding,
-          rotation: rotation,
-        });
+        // Was reading the raw `location`, so double-clicking an animated
+        // caption to edit it missed wherever the animation had put it. Now the
+        // same world resolve every other pointer path uses, which also makes a
+        // caption inside a group double-clickable where it is drawn.
+        const { x, y } = this.worldTopLeft(elementId);
+        const w = element.width;
+        const h = element.height;
+
+        const collide = { type: this.hitZoneAt(elementId, mx, my) };
 
         if (collide.type == "position") {
           this.activeElementId = elementId;
 
           this.elementOrigin = { x: x, y: y, w: w, h: h };
+          this.elementOriginLocal = this.localRectOf(elementId);
           this.isEditText = true;
           this.drawCanvas(this.canvas);
         } else {
