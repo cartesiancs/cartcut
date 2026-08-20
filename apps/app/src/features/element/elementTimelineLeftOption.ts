@@ -10,6 +10,7 @@ import {
   TRACK_HEIGHT,
 } from "../timeline/layout";
 import { clipsOnTrack } from "../timeline/tracks";
+import { applyMenuPlacement } from "../menu/menuPlacement";
 
 /**
  * The track header column.
@@ -184,6 +185,31 @@ export class ElementTimelineLeftOption extends LitElement {
   }
 
   /**
+   * Place the open menu once Lit has rendered it.
+   *
+   * Runs on every update because the template re-emits the placeholder `top`
+   * and `left` each time, so the measured values have to be written back after
+   * each render. Cheap: one forced layout on a three-item list, and only while
+   * a menu is open.
+   */
+  protected updated() {
+    const open = this.openMenu;
+    if (open == null) {
+      return;
+    }
+    // `ul.` matters: every row's `⋯` button also carries `.track-menu`, so the
+    // dismisser's `closest()` check covers both. A bare `.track-menu` here
+    // finds the first button instead — the rows are rendered before the menu —
+    // and would leave the real menu hidden for good.
+    const menu = this.querySelector("ul.track-menu") as HTMLElement | null;
+    if (menu == null) {
+      return;
+    }
+    applyMenuPlacement(menu, { x: open.x, y: open.y }, { alignRight: true });
+    menu.style.visibility = "visible";
+  }
+
+  /**
    * The open track's ⋯ menu, drawn once at the top level.
    *
    * Kept out of the row so the column's `overflow: hidden` cannot clip it, and
@@ -206,11 +232,17 @@ export class ElementTimelineLeftOption extends LitElement {
         ? "Delete track"
         : `Delete track and ${clips} clip${clips === 1 ? "" : "s"}`;
 
+    // Positioned imperatively in `updated()`, not here: `left` and `top` depend
+    // on the menu's measured size, which does not exist until this template has
+    // rendered. The `translateX(-100%)` that used to right-align it is gone —
+    // `placeMenu`'s `alignRight` does the same thing, and doing it through the
+    // real `left` is what lets the horizontal clamp see where the menu's left
+    // edge actually is.
     return html`
       <ul
         class="dropdown-menu show track-menu"
-        style="position: fixed; top: ${open.y}px; left: ${open.x}px;
-               transform: translateX(-100%); z-index: 6000;"
+        style="position: fixed; top: 0px; left: 0px; z-index: 6000;
+               visibility: hidden;"
       >
         <li>
           <button

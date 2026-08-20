@@ -16,6 +16,14 @@
   background-color: #25262bba;
   -webkit-backdrop-filter: saturate(120%) blur(8px);
   backdrop-filter: saturate(120%) blur(8px);
+
+  // The height itself is set inline by `features/menu/menuPlacement.ts`, which
+  // has to measure the menu and the window to know what it should be. What
+  // belongs here is the rest of the scrolling contract: rounded corners that
+  // clip the scrolled content, and a scroll that stops at the menu's own edge
+  // instead of chaining to the timeline pane behind it.
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .dropdown-item-sm {
