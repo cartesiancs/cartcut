@@ -16,11 +16,17 @@ export class ElementTimelineBottomScroll extends LitElement {
 
   openaiKey: string;
 
+  /** The `claude mcp add …` line, token included, for the user to paste. */
+  mcpCommand = "";
+  mcpError = "";
+  copied = false;
+
   constructor() {
     super();
     this.openaiKey = "";
 
     this.getOpenAiKey();
+    this.refreshMcpStatus();
   }
 
   getOpenAiKey() {
@@ -32,12 +38,37 @@ export class ElementTimelineBottomScroll extends LitElement {
     });
   }
 
-  runMcpServer() {
-    window.electronAPI.req.ai.runMcpServer().then((result) => {
-      if (result.status == 1) {
-        this.isRunMcp = true;
+  /**
+   * The server now starts with the app, so this reports rather than launches.
+   * The button below is only a retry for the case where the port was taken.
+   */
+  refreshMcpStatus() {
+    window.electronAPI.req.agent?.getStatus?.().then((result) => {
+      if (result?.status == 1) {
+        this.isRunMcp = result.running;
+        this.mcpCommand = result.command;
         this.requestUpdate();
       }
+    });
+  }
+
+  runMcpServer() {
+    window.electronAPI.req.ai.runMcpServer().then((result) => {
+      this.isRunMcp = result.status == 1;
+      this.mcpCommand = result.command ?? "";
+      this.mcpError = result.error ?? "";
+      this.requestUpdate();
+    });
+  }
+
+  _handleCopyMcpCommand() {
+    navigator.clipboard.writeText(this.mcpCommand).then(() => {
+      this.copied = true;
+      this.requestUpdate();
+      setTimeout(() => {
+        this.copied = false;
+        this.requestUpdate();
+      }, 1500);
     });
   }
 
@@ -207,13 +238,66 @@ export class ElementTimelineBottomScroll extends LitElement {
         <div class="modal-dialog modal-dialog-dark modal-dialog-centered">
           <div class="modal-content modal-dark modal-darker">
             <div class="modal-body modal-body-dark">
-              <h6 class="modal-title text-light font-weight-lg mb-2">Set AI</h6>
+              <h6 class="modal-title text-light font-weight-lg mb-2">
+                Connect Claude Code
+              </h6>
 
-              <span class="text-secondary">OpenAI API Key </span>
+              <span class="text-secondary" style="font-size: 13px;">
+                ${this.isRunMcp
+                  ? html`Cartcut is listening. Run this once in your terminal,
+                      from any folder, then just ask Claude Code to edit.`
+                  : html`The editor bridge is not running.`}
+              </span>
 
-              <br />
+              <div
+                class="input-group mb-2 mt-2 ${this.isRunMcp ? "" : "d-none"}"
+              >
+                <input
+                  type="text"
+                  class="form-control bg-default text-light"
+                  style="font-family: monospace; font-size: 11px;"
+                  readonly
+                  .value=${this.mcpCommand}
+                />
+                <button
+                  class="btn btn-primary btn-sm"
+                  @click=${this._handleCopyMcpCommand}
+                >
+                  ${this.copied ? "Copied" : "Copy"}
+                </button>
+              </div>
 
-              <div class="input-group mb-3">
+              <span
+                class="text-secondary ${this.isRunMcp ? "" : "d-none"}"
+                style="font-size: 12px;"
+              >
+                The command carries an access token. Anyone with it can edit
+                this project, so keep it to yourself.
+              </span>
+
+              <span
+                class="text-danger ${this.mcpError ? "" : "d-none"}"
+                style="font-size: 12px;"
+                >${this.mcpError}</span
+              >
+
+              <button
+                class="btn btn-primary btn-sm mt-2 ${this.isRunMcp
+                  ? "d-none"
+                  : ""}"
+                @click=${this.runMcpServer}
+              >
+                Start bridge
+              </button>
+
+              <hr class="text-secondary" />
+
+              <span class="text-secondary" style="font-size: 13px;"
+                >OpenAI API key — used for speech-to-text when no local
+                transcription server is running.</span
+              >
+
+              <div class="input-group mb-1 mt-2">
                 <span
                   class="input-group-text bg-default text-light"
                   id="basic-addon2"
@@ -228,25 +312,6 @@ export class ElementTimelineBottomScroll extends LitElement {
                   @input=${this._handleSetOpenAIKey}
                 />
               </div>
-
-              <button
-                class="btn btn-primary btn-sm mt-2 ${!this.isRunMcp == true
-                  ? ""
-                  : "d-none"}"
-                @click=${this.runMcpServer}
-              >
-                Run MCP Server
-              </button>
-
-              <input
-                type="text"
-                class="form-control bg-default text-light ${this.isRunMcp ==
-                true
-                  ? ""
-                  : "d-none"}"
-                placeholder="mcp"
-                .value=${"http://localhost:9826/sse"}
-              />
             </div>
           </div>
         </div>

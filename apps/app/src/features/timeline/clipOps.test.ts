@@ -3,7 +3,9 @@ import {
   deleteClips,
   moveClip,
   moveClips,
+  normalizeRanges,
   pasteClips,
+  removeRanges,
   rippleDelete,
   splitAtPlayhead,
   splitClip,
@@ -597,5 +599,187 @@ describe("rippleDelete and keyframes", () => {
     const moved: any = after.elements.b;
     expect(moved.startTime).toBe(0);
     expect(moved.animation.opacity.x.map((k: any) => k.p[0])).toEqual([0, 2000]);
+  });
+});
+
+describe("normalizeRanges", () => {
+  it("merges overlapping and touching ranges and orders them latest first", () => {
+    expect(
+      normalizeRanges([
+        { startMs: 1000, endMs: 2000 },
+        { startMs: 1500, endMs: 2500 },
+        { startMs: 4000, endMs: 5000 },
+        { startMs: 2500, endMs: 3000 },
+      ]),
+    ).toEqual([
+      { startMs: 4000, endMs: 5000 },
+      { startMs: 1000, endMs: 3000 },
+    ]);
+  });
+
+  it("drops empty and inverted ranges", () => {
+    expect(
+      normalizeRanges([
+        { startMs: 500, endMs: 500 },
+        { startMs: 900, endMs: 300 },
+      ]),
+    ).toEqual([{ startMs: 300, endMs: 900 }]);
+  });
+
+  it("clamps a negative start rather than producing one", () => {
+    expect(normalizeRanges([{ startMs: -200, endMs: 400 }])).toEqual([
+      { startMs: 0, endMs: 400 },
+    ]);
+  });
+});
+
+describe("removeRanges", () => {
+  const base = () =>
+    doc([["v1", "video"]], {
+      a: videoElement({
+        trackId: "v1",
+        startTime: 0,
+        duration: 10000,
+        trim: { startTime: 0, endTime: 10000 },
+        sourceDuration: 10000,
+      }),
+    });
+
+  it("cuts one window out and closes the gap", () => {
+    const after = removeRanges(
+      base(),
+      "a",
+      [{ startMs: 3000, endMs: 5000 }],
+      true,
+      idGen,
+    );
+
+    const spans = clipsOnTrack(after, "v1").map(([, el]) => spanOf(el));
+    expect(spans).toHaveLength(2);
+    // Head keeps its place; tail slides back by the 2s that was removed.
+    expect(spans[0]).toMatchObject({ start: 0, end: 3000 });
+    expect(spans[1]).toMatchObject({ start: 3000, end: 8000 });
+    expectValid(after);
+  });
+
+  it("leaves a hole when ripple is off", () => {
+    const after = removeRanges(
+      base(),
+      "a",
+      [{ startMs: 3000, endMs: 5000 }],
+      false,
+      idGen,
+    );
+
+    const spans = clipsOnTrack(after, "v1").map(([, el]) => spanOf(el));
+    expect(spans[0]).toMatchObject({ start: 0, end: 3000 });
+    expect(spans[1]).toMatchObject({ start: 5000, end: 10000 });
+    expectValid(after);
+  });
+
+  it("applies several ranges in one pass, in original coordinates", () => {
+    // The caller holds a transcript: every range is stated against the clip as
+    // it is now, not as it will be after the earlier cuts land.
+    const after = removeRanges(
+      base(),
+      "a",
+      [
+        { startMs: 1000, endMs: 2000 },
+        { startMs: 4000, endMs: 5000 },
+        { startMs: 8000, endMs: 9000 },
+      ],
+      true,
+      idGen,
+    );
+
+    const spans = clipsOnTrack(after, "v1").map(([, el]) => spanOf(el));
+    expect(spans).toHaveLength(4);
+    // 3s removed in total, and the survivors are contiguous.
+    expect(spans[0]).toMatchObject({ start: 0, end: 1000 });
+    expect(spans[spans.length - 1].end).toBe(7000);
+    for (let i = 1; i < spans.length; i++) {
+      expect(spans[i].start).toBe(spans[i - 1].end);
+    }
+    expectValid(after);
+  });
+
+  it("keeps every surviving frame of the source", () => {
+    const after = removeRanges(
+      base(),
+      "a",
+      [{ startMs: 2000, endMs: 4000 }],
+      true,
+      idGen,
+    );
+
+    const windows = clipsOnTrack(after, "v1")
+      .map(([, el]: any) => el.trim)
+      .sort((x, y) => x.startTime - y.startTime);
+    expect(windows).toEqual([
+      { startTime: 0, endTime: 2000 },
+      { startTime: 4000, endTime: 10000 },
+    ]);
+  });
+
+  it("trims from the head when the range starts before the clip", () => {
+    const after = removeRanges(
+      base(),
+      "a",
+      [{ startMs: 0, endMs: 2000 }],
+      false,
+      idGen,
+    );
+
+    const spans = clipsOnTrack(after, "v1").map(([, el]) => spanOf(el));
+    expect(spans).toHaveLength(1);
+    expect(spans[0]).toMatchObject({ start: 2000, end: 10000 });
+    expectValid(after);
+  });
+
+  it("never touches a neighbour that merely shares the track", () => {
+    // The pieces of the target clip are found by position, so a bystander in
+    // the same lane and the same window is exactly the thing that could be
+    // deleted by mistake.
+    const before = doc([["v1", "video"], ["v2", "video"]], {
+      a: videoElement({ trackId: "v1", startTime: 0, duration: 4000 }),
+      bystander: videoElement({ trackId: "v2", startTime: 1000, duration: 2000 }),
+    });
+
+    const after = removeRanges(
+      before,
+      "a",
+      [{ startMs: 1000, endMs: 2000 }],
+      false,
+      idGen,
+    );
+
+    expect(after.elements.bystander).toBeDefined();
+    expect(spanOf(after.elements.bystander)).toMatchObject({
+      start: 1000,
+      end: 3000,
+    });
+  });
+
+  it("removes the whole clip when a range covers it", () => {
+    const after = removeRanges(
+      base(),
+      "a",
+      [{ startMs: 0, endMs: 10000 }],
+      true,
+      idGen,
+    );
+    expect(Object.keys(after.elements)).toHaveLength(0);
+  });
+
+  it("declines by identity when nothing bites", () => {
+    const before = base();
+    // Entirely past the clip, an empty range, and an unknown id.
+    expect(removeRanges(before, "a", [{ startMs: 20000, endMs: 21000 }], true, idGen)).toBe(
+      before,
+    );
+    expect(removeRanges(before, "a", [], true, idGen)).toBe(before);
+    expect(removeRanges(before, "nope", [{ startMs: 0, endMs: 1 }], true, idGen)).toBe(
+      before,
+    );
   });
 });

@@ -4,7 +4,14 @@ import fse from "fs-extra";
 import axios from "axios";
 import Store from "electron-store";
 import path from "path";
-import { runMcpServer } from "../mcp/mcpServer";
+import {
+  isMcpRunning,
+  mcpAddCommand,
+  mcpToken,
+  mcpUrl,
+  startMcpServer,
+} from "../mcp/server";
+import { fileBlob } from "../mcp/transcribe";
 const store = new Store();
 
 const llmPromptfilePath = path.join(
@@ -28,24 +35,24 @@ export const ipcAi = {
         return { status: 0 };
       }
 
-      const fileStream = fs.createReadStream(filepath);
+      // A `fs.ReadStream` inside a plain object is not a multipart body — the
+      // header said `multipart/form-data` but axios serialised the object as
+      // JSON, and the stream became `{}`. Every call failed. A real `FormData`
+      // is what axios needs in order to build the parts.
+      const form = new FormData();
+      form.append("file", fileBlob(filepath, "audio/wav"), path.basename(filepath));
+      form.append("model", "whisper-1");
+      form.append("response_format", "verbose_json");
 
       const response = await axios.post(
         "https://api.openai.com/v1/audio/transcriptions",
+        form,
         {
-          model: "whisper-1",
-          file: fileStream,
-          response_format: "verbose_json",
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${OPENAI_API_KEY}`,
-            "Content-Type": "multipart/form-data",
-          },
+          headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
         },
       );
-
-      console.log(response);
 
       return { status: 1, text: response.data };
     } catch (error) {
@@ -90,10 +97,32 @@ export const ipcAi = {
     }
   },
 
-  runMcpServer: async (evt, key) => {
-    runMcpServer();
-    return { status: 1 };
+  /**
+   * Start the MCP server, or report the one already running.
+   *
+   * The previous version called `runMcpServer()` and returned `{status: 1}`
+   * without waiting for it, so a second press threw an unhandled `EADDRINUSE`
+   * while the UI cheerfully reported success.
+   */
+  runMcpServer: async () => {
+    const result = await startMcpServer();
+    return {
+      status: result.ok ? 1 : 0,
+      url: result.url,
+      token: result.token,
+      command: mcpAddCommand(),
+      alreadyRunning: result.alreadyRunning,
+      error: result.error,
+    };
   },
+
+  mcpStatus: async () => ({
+    status: 1,
+    running: isMcpRunning(),
+    url: mcpUrl(),
+    token: mcpToken(),
+    command: mcpAddCommand(),
+  }),
 
   setKey: async (evt, key) => {
     store.set("ai_openai_key", key);

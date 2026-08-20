@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "cartcut": {
+      "type": "http",
+      "url": "http://127.0.0.1:9826/mcp",
+      "headers": {
+        "Authorization": "Bearer ${CARTCUT_MCP_TOKEN}"
+      }
+    }
+  }
+}

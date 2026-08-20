@@ -57,6 +57,11 @@ import "./features/font/selectFont";
 
 import "./event";
 
+// Imported for effect: this is what connects the editor to Claude Code. It
+// must come after the components it drives, since a command may reach for
+// `<element-control>` the moment the first tool call arrives.
+import "./features/agent/bridge";
+
 customElements.define("tutorial-group", Tutorial);
 customElements.define("tutorial-popover", TutorialPopover);
 
