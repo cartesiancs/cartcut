@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   addKeyframe,
+  addKeyframePaired,
   moveKeyframe,
+  moveKeyframePaired,
   normalizeAnimations,
   removeKeyframe,
+  removeKeyframePaired,
   setHandles,
   setTrackActive,
 } from "./keyframeOps";
@@ -342,5 +345,172 @@ describe("a heavily edited track stays coherent", () => {
     }
 
     expect(sampleBaked(baked(d), 0, -1)).not.toBeNaN();
+  });
+});
+
+// ================================================== paired lanes (position)
+
+/**
+ * An image whose `position` track is animated on both lanes.
+ *
+ * The two lanes carry keyframes at the same instants, which is what every
+ * producer in the app already writes and what the paired ops maintain.
+ */
+function positioned(over: Record<string, any> = {}) {
+  const base = imageElement();
+  return imageElement({
+    trackId: "v1",
+    location: { x: 7, y: 9 },
+    animation: {
+      ...(base.animation as any),
+      position: {
+        isActivate: true,
+        x: keys([0, 0], [1000, 100]),
+        ax: bakeTrack(keys([0, 0], [1000, 100])),
+        y: keys([0, 200], [1000, 400]),
+        ay: bakeTrack(keys([0, 200], [1000, 400])),
+        ...over,
+      },
+    } as any,
+  });
+}
+
+/** The instants at which a lane carries a keyframe. */
+const times = (d: TimelineDocument, lane: "x" | "y") =>
+  track(d, "position", lane).map((k: any) => k.p[0]);
+
+describe("paired lanes", () => {
+  const base = doc({ a: positioned() });
+
+  // The bug this exists for: the curve editor edited whichever lane its x/y
+  // buttons had selected, so dragging a position dot along the time axis moved
+  // the x keyframe and left the y keyframe behind. Every other producer writes
+  // the pair together, so the element then traced a path nobody drew.
+  it("keeps the two lanes at the same instants through a time drag", () => {
+    const moved = moveKeyframePaired(base, "a", "position", "x", 1, 600, 100);
+    expect(times(moved.doc, "x")).toEqual([0, 600]);
+    expect(times(moved.doc, "y")).toEqual([0, 600]);
+  });
+
+  it("moves only the edited lane's value", () => {
+    const moved = moveKeyframePaired(base, "a", "position", "x", 1, 600, 55);
+    expect(track(moved.doc, "position", "x")[1].p[1]).toBe(55);
+    // The sibling kept its own value: the drag said something about x's curve.
+    expect(track(moved.doc, "position", "y")[1].p[1]).toBe(400);
+  });
+
+  it("plants a matching keyframe on the sibling lane when one is added", () => {
+    const added = addKeyframePaired(base, "a", "position", "x", 500, 42);
+    expect(times(added, "x")).toEqual([0, 500, 1000]);
+    expect(times(added, "y")).toEqual([0, 500, 1000]);
+  });
+
+  // Seeding the sibling from the static `location` — all there was to go on
+  // before — would yank the other axis to wherever the element started. The
+  // sibling has to gain a point *on the curve it already has*.
+  it("leaves the sibling curve's shape alone when adding", () => {
+    const before = baked(base, "position", "ay");
+    const added = addKeyframePaired(base, "a", "position", "x", 500, 42);
+    const after = baked(added, "position", "ay");
+
+    for (const t of [0, 125, 250, 500, 750, 1000]) {
+      expect(sampleBaked(after, t, NaN)).toBeCloseTo(
+        sampleBaked(before, t, NaN),
+        6,
+      );
+    }
+  });
+
+  it("takes the sibling with it when a keyframe is removed", () => {
+    const gone = removeKeyframePaired(base, "a", "position", "x", 1);
+    expect(times(gone, "x")).toEqual([0]);
+    expect(times(gone, "y")).toEqual([0]);
+  });
+
+  it.each([
+    ["adding", (d: TimelineDocument) =>
+      addKeyframePaired(d, "a", "position", "y", 400, 1)],
+    ["moving", (d: TimelineDocument) =>
+      moveKeyframePaired(d, "a", "position", "y", 1, 700, 1).doc],
+    ["removing", (d: TimelineDocument) =>
+      removeKeyframePaired(d, "a", "position", "y", 0)],
+  ])("keeps the lanes in step when %s from the y side", (_name, op) => {
+    const out = (op as (d: TimelineDocument) => TimelineDocument)(base);
+    expect(times(out, "x")).toEqual(times(out, "y"));
+  });
+
+  it("re-bakes both lanes", () => {
+    const moved = moveKeyframePaired(base, "a", "position", "x", 1, 600, 100);
+    for (const key of ["ax", "ay"] as const) {
+      const b = baked(moved.doc, "position", key);
+      expect(b[b.length - 1][0]).toBe(600);
+    }
+  });
+
+  // Refusing outright is what `moveKeyframe` already does when a drag would
+  // land on top of another keyframe. Letting the primary move while the
+  // sibling stayed put is precisely the desync being prevented.
+  it("declines the whole gesture when the sibling cannot follow", () => {
+    const lopsided = doc({
+      a: positioned({
+        y: keys([0, 200], [500, 300], [1000, 400]),
+        ay: bakeTrack(keys([0, 200], [500, 300], [1000, 400])),
+      }),
+    });
+    const out = moveKeyframePaired(lopsided, "a", "position", "x", 1, 500, 5);
+    expect(out.doc).toBe(lopsided);
+  });
+
+  // A project authored before pairing can have a keyframe on one lane with no
+  // partner. Moving the one that exists beats refusing the drag with no
+  // explanation.
+  it("moves alone when the sibling has no keyframe at that instant", () => {
+    const lopsided = doc({
+      a: positioned({ y: keys([0, 200]), ay: bakeTrack(keys([0, 200])) }),
+    });
+    const out = moveKeyframePaired(lopsided, "a", "position", "x", 1, 600, 5);
+    expect(times(out.doc, "x")).toEqual([0, 600]);
+    expect(times(out.doc, "y")).toEqual([0]);
+  });
+
+  it.each([
+    ["add", (d: TimelineDocument) =>
+      addKeyframePaired(d, "a", "opacity", "x", 500, 50)],
+    ["move", (d: TimelineDocument) =>
+      moveKeyframePaired(d, "a", "opacity", "x", 1, 600, 50).doc],
+    ["remove", (d: TimelineDocument) =>
+      removeKeyframePaired(d, "a", "opacity", "x", 1)],
+  ])("degrades to a single lane for a scalar property on %s", (_name, op) => {
+    const scalars = doc({ a: animated() });
+    const out = (op as (d: TimelineDocument) => TimelineDocument)(scalars);
+    expect(out).not.toBe(scalars);
+    expect((out.elements.a as any).animation.opacity.y).toBeUndefined();
+  });
+
+  it.each([
+    ["add", (d: TimelineDocument) =>
+      addKeyframePaired(d, "nope", "position", "x", 500, 50)],
+    ["move", (d: TimelineDocument) =>
+      moveKeyframePaired(d, "nope", "position", "x", 1, 600, 50).doc],
+    ["remove", (d: TimelineDocument) =>
+      removeKeyframePaired(d, "nope", "position", "x", 1)],
+  ])("declines an unknown element by identity on %s", (_name, op) => {
+    expect((op as (d: TimelineDocument) => TimelineDocument)(base)).toBe(base);
+  });
+
+  it.each([-1, 5, 99])(
+    "declines an out-of-range index %s by identity",
+    (index) => {
+      expect(
+        moveKeyframePaired(base, "a", "position", "x", index, 600, 50).doc,
+      ).toBe(base);
+      expect(removeKeyframePaired(base, "a", "position", "x", index)).toBe(base);
+    },
+  );
+
+  it("shares the elements it did not touch", () => {
+    const two = doc({ a: positioned(), b: imageElement({ trackId: "v1" }) });
+    const out = addKeyframePaired(two, "a", "position", "x", 500, 42);
+    expect(out.elements.b).toBe(two.elements.b);
   });
 });
