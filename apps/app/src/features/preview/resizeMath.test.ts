@@ -3,13 +3,17 @@ import {
   constrainsAspect,
   resizedDocument,
   resizedRect,
+  resizeSnap,
+  SNAP_PADDING,
   type StretchZone,
 } from "./resizeMath";
 import type { Rect } from "./dragMath";
 import {
   applyPoint,
+  applyVector,
   IDENTITY,
   localMatrixOf,
+  type Mat,
 } from "../timeline/transform";
 
 const ZONES: StretchZone[] = [
@@ -22,6 +26,24 @@ const ZONES: StretchZone[] = [
   "stretchSW",
   "stretchSE",
 ];
+
+/**
+ * Where each grip's anchor sits, as a fraction of the box: the corner or edge
+ * diagonally opposite the one being dragged.
+ *
+ * Stated here independently of the implementation's own sign table, so the
+ * tests assert what the behaviour should be rather than what it happens to do.
+ */
+const ANCHOR: Record<StretchZone, { u: number; v: number }> = {
+  stretchE: { u: 0, v: 0.5 }, // west edge
+  stretchW: { u: 1, v: 0.5 }, // east edge
+  stretchN: { u: 0.5, v: 1 }, // south edge
+  stretchS: { u: 0.5, v: 0 }, // north edge
+  stretchNW: { u: 1, v: 1 }, // SE corner
+  stretchNE: { u: 0, v: 1 }, // SW corner
+  stretchSW: { u: 1, v: 0 }, // NE corner
+  stretchSE: { u: 0, v: 0 }, // NW corner
+};
 
 const resize = (
   origin: Rect,
@@ -438,21 +460,6 @@ describe("constrainsAspect", () => {
  * The anchor each grip must hold is spelled out independently below.
  */
 describe("resizedRect — rotated and scaled", () => {
-  /**
-   * Where each grip's anchor sits, as a fraction of the box: the corner or edge
-   * diagonally opposite the one being dragged.
-   */
-  const ANCHOR: Record<StretchZone, { u: number; v: number }> = {
-    stretchE: { u: 0, v: 0.5 }, // west edge
-    stretchW: { u: 1, v: 0.5 }, // east edge
-    stretchN: { u: 0.5, v: 1 }, // south edge
-    stretchS: { u: 0.5, v: 0 }, // north edge
-    stretchNW: { u: 1, v: 1 }, // SE corner
-    stretchNE: { u: 0, v: 1 }, // SW corner
-    stretchSW: { u: 1, v: 0 }, // NE corner
-    stretchSE: { u: 0, v: 0 }, // NW corner
-  };
-
   const elementAt = (rect: Rect, rotation: number, scaleTenths?: number) =>
     ({
       filetype: "shape",
@@ -628,6 +635,320 @@ describe("resizedRect — rotated and scaled", () => {
           linear: { ...IDENTITY, ...bad },
         }),
       ).toBeNull();
+    }
+  });
+});
+
+/**
+ * Snapping a resize, which did not exist.
+ *
+ * `alignDirection` was written only by the move branch and `isAlign` was never
+ * called from the resize one, so dragging an element out to fill the frame was
+ * a pixel-hunt with no magnet and no guide. `isAlign` could not be reused as it
+ * stands: it slides a rect of *fixed size* until an edge lands on a line, where
+ * a resize has to hold the anchor and change the size instead.
+ *
+ * These assert on where the edge actually lands, through the same matrix
+ * composition the renderer uses, and on the anchor still being held afterwards.
+ */
+describe("resizeSnap", () => {
+  const FRAME = { w: 1920, h: 1080 };
+
+  /** The parent-space box of the element `resizedRect` would produce. */
+  const boxOf = (rect: Rect, linear = IDENTITY) => {
+    const cx = rect.w / 2;
+    const cy = rect.h / 2;
+    const corner = (u: number, v: number) => {
+      const spun = applyVector(linear, { x: u * rect.w - cx, y: v * rect.h - cy });
+      return { x: rect.x + cx + spun.x, y: rect.y + cy + spun.y };
+    };
+    return { nw: corner(0, 0), se: corner(1, 1) };
+  };
+
+  /** Run the real two-step the canvas runs: snap the delta, then resize. */
+  const drag = (input: {
+    origin: Rect;
+    zone: StretchZone;
+    dx?: number;
+    dy?: number;
+    constrain?: boolean;
+    linear?: Mat;
+    parentMatrix?: Mat;
+    minSize?: number;
+  }) => {
+    const dx = input.dx ?? 0;
+    const dy = input.dy ?? 0;
+    const common = {
+      origin: input.origin,
+      zone: input.zone,
+      constrain: input.constrain ?? false,
+      minSize: input.minSize ?? 10,
+      linear: input.linear,
+    };
+    const snapped = resizeSnap({
+      ...common,
+      localDx: dx,
+      localDy: dy,
+      parentMatrix: input.parentMatrix,
+      frame: FRAME,
+    });
+    const rect = resizedRect({
+      ...common,
+      localDx: snapped.localDx,
+      localDy: snapped.localDy,
+    })!;
+    return { rect, direction: snapped.direction, snapped };
+  };
+
+  /**
+   * The case that prompted this: an element dragged out to fill the frame lands
+   * on it exactly, rather than a few pixels short with nothing to aim at.
+   */
+  it("fills the frame exactly from a corner drag that comes close", () => {
+    const origin: Rect = { x: 0, y: 0, w: 1000, h: 600 };
+    // Pointer 7px short of the bottom-right corner — well inside the magnet.
+    const { rect, direction } = drag({
+      origin,
+      zone: "stretchSE",
+      dx: FRAME.w - origin.w - 7,
+      dy: FRAME.h - origin.h - 7,
+    });
+
+    expect(rect).toEqual({ x: 0, y: 0, w: FRAME.w, h: FRAME.h });
+    expect(direction.sort()).toEqual(["bottom", "right"]);
+  });
+
+  it("snaps a single edge to each frame line, and names the guide", () => {
+    const origin: Rect = { x: 400, y: 300, w: 400, h: 200 };
+
+    const right = drag({ zone: "stretchE", origin, dx: FRAME.w - 800 - 6, dy: 0 });
+    expect(boxOf(right.rect).se.x).toBeCloseTo(FRAME.w, 9);
+    expect(right.direction).toEqual(["right"]);
+
+    const left = drag({ zone: "stretchW", origin, dx: -394, dy: 0 });
+    expect(boxOf(left.rect).nw.x).toBeCloseTo(0, 9);
+    expect(left.direction).toEqual(["left"]);
+
+    const bottom = drag({ zone: "stretchS", origin, dx: 0, dy: FRAME.h - 500 - 9 });
+    expect(boxOf(bottom.rect).se.y).toBeCloseTo(FRAME.h, 9);
+    expect(bottom.direction).toEqual(["bottom"]);
+
+    const top = drag({ zone: "stretchN", origin, dx: 0, dy: -294 });
+    expect(boxOf(top.rect).nw.y).toBeCloseTo(0, 9);
+    expect(top.direction).toEqual(["top"]);
+  });
+
+  it("snaps to the frame's centre lines too", () => {
+    const origin: Rect = { x: 0, y: 0, w: 400, h: 200 };
+
+    const vertical = drag({ zone: "stretchE", origin, dx: FRAME.w / 2 - 400 - 8 });
+    expect(boxOf(vertical.rect).se.x).toBeCloseTo(FRAME.w / 2, 9);
+    expect(vertical.direction).toEqual(["vertical"]);
+
+    const horizontal = drag({ zone: "stretchS", origin, dx: 0, dy: FRAME.h / 2 - 200 + 5 });
+    expect(boxOf(horizontal.rect).se.y).toBeCloseTo(FRAME.h / 2, 9);
+    expect(horizontal.direction).toEqual(["horizontal"]);
+  });
+
+  it("leaves the drag alone outside the magnet's reach", () => {
+    const origin: Rect = { x: 0, y: 0, w: 400, h: 200 };
+    const far = FRAME.w - 400 - (SNAP_PADDING + 1);
+    const { rect, direction, snapped } = drag({ zone: "stretchE", origin, dx: far });
+
+    expect(direction).toEqual([]);
+    expect(snapped.localDx).toBe(far);
+    expect(boxOf(rect).se.x).toBeCloseTo(FRAME.w - (SNAP_PADDING + 1), 9);
+  });
+
+  it("pulls from either side of the line", () => {
+    const origin: Rect = { x: 0, y: 0, w: 400, h: 200 };
+    for (const overshoot of [-9, -1, 0, 1, 9]) {
+      const { rect } = drag({
+        zone: "stretchE",
+        origin,
+        dx: FRAME.w - 400 + overshoot,
+      });
+      expect(boxOf(rect).se.x, `${overshoot}`).toBeCloseTo(FRAME.w, 9);
+    }
+  });
+
+  /**
+   * The invariant the previous fix established. A snap that moved the edge
+   * without telling the anchor arithmetic would drag the opposite corner along
+   * with it, which is why the correction goes into the delta and not the rect.
+   */
+  it("still holds the anchor after snapping, on every zone", () => {
+    const origin: Rect = { x: 300, y: 200, w: 400, h: 300 };
+
+    const anchorPointOf = (rect: Rect, { u, v }: { u: number; v: number }) => {
+      const cx = rect.w / 2;
+      const cy = rect.h / 2;
+      const spun = applyVector(IDENTITY, {
+        x: u * rect.w - cx,
+        y: v * rect.h - cy,
+      });
+      return { x: rect.x + cx + spun.x, y: rect.y + cy + spun.y };
+    };
+
+    for (const zone of ZONES) {
+      // Deltas chosen to land inside a frame line's pull, so a snap really does
+      // fire and the anchor is tested against a corrected delta.
+      for (const [dx, dy] of [
+        [FRAME.w - 700 - 5, FRAME.h - 500 - 5],
+        [-295, -195],
+        [900, 400],
+      ]) {
+        const held = ANCHOR[zone];
+        const before = anchorPointOf(origin, held);
+        const { rect } = drag({ zone, origin, dx, dy });
+        const after = anchorPointOf(rect, held);
+
+        const label = `${zone} ${dx},${dy}`;
+        expect(after.x, label).toBeCloseTo(before.x, 9);
+        expect(after.y, label).toBeCloseTo(before.y, 9);
+      }
+    }
+  });
+
+  it("snaps a scaled element by where it is drawn, not by its fields", () => {
+    // Scale 2 about the centre: a 400-wide box is drawn 800 wide.
+    const linear: Mat = { ...IDENTITY, a: 2, d: 2 };
+    const origin: Rect = { x: 0, y: 0, w: 400, h: 200 };
+    const { rect, direction } = drag({
+      zone: "stretchE",
+      origin,
+      // Drawn east edge starts at 0 + 200 + 2*200 = 600; aim near the frame's
+      // right edge, which the *drawn* box must reach, not the field.
+      dx: (FRAME.w - 600) / 2 - 6,
+      linear,
+    });
+
+    expect(boxOf(rect, linear).se.x).toBeCloseTo(FRAME.w, 8);
+    expect(direction).toEqual(["right"]);
+  });
+
+  it("snaps in world space for a child of a translated, scaled group", () => {
+    // Parent halves everything and shifts it right by 200.
+    const parentMatrix: Mat = { a: 0.5, b: 0, c: 0, d: 0.5, e: 200, f: 0 };
+    const origin: Rect = { x: 0, y: 0, w: 400, h: 200 };
+    // The child's east edge sits at world 200 + 0.5*400 = 400. Reaching the
+    // frame's right edge needs (1920 - 400) / 0.5 = 3040 in local units.
+    const { rect, direction } = drag({
+      zone: "stretchE",
+      origin,
+      dx: 3040 - 5,
+      parentMatrix,
+    });
+
+    const worldEast = applyPoint(parentMatrix, boxOf(rect).se);
+    expect(worldEast.x).toBeCloseTo(FRAME.w, 8);
+    expect(direction).toEqual(["right"]);
+  });
+
+  it("declines to snap a rotated element, and draws no guide for it", () => {
+    const origin: Rect = { x: 0, y: 0, w: 400, h: 200 };
+    for (const rotation of [1, 30, 45, -20]) {
+      const theta = (rotation * Math.PI) / 180;
+      const linear: Mat = {
+        ...IDENTITY,
+        a: Math.cos(theta),
+        b: Math.sin(theta),
+        c: -Math.sin(theta),
+        d: Math.cos(theta),
+      };
+      const dx = FRAME.w - 400 - 3;
+      const snapped = resizeSnap({
+        origin,
+        zone: "stretchE",
+        localDx: dx,
+        localDy: 0,
+        constrain: false,
+        minSize: 10,
+        linear,
+        frame: FRAME,
+      });
+      expect(snapped.direction, `${rotation}°`).toEqual([]);
+      expect(snapped.localDx, `${rotation}°`).toBe(dx);
+    }
+  });
+
+  it("declines to snap a child of a rotated group", () => {
+    const theta = Math.PI / 6;
+    const parentMatrix: Mat = {
+      a: Math.cos(theta),
+      b: Math.sin(theta),
+      c: -Math.sin(theta),
+      d: Math.cos(theta),
+      e: 0,
+      f: 0,
+    };
+    const snapped = resizeSnap({
+      origin: { x: 0, y: 0, w: 400, h: 200 },
+      zone: "stretchE",
+      localDx: 1500,
+      localDy: 0,
+      constrain: false,
+      minSize: 10,
+      parentMatrix,
+      frame: FRAME,
+    });
+    expect(snapped.direction).toEqual([]);
+  });
+
+  /**
+   * One scale drives both sides, so honouring two targets at once is generally
+   * impossible. Take the nearer line and let the proportions place the rest.
+   */
+  it("snaps one axis only when proportions are constrained, and keeps them", () => {
+    const origin: Rect = { x: 0, y: 0, w: 400, h: 200 };
+    const { rect, direction } = drag({
+      zone: "stretchSE",
+      origin,
+      dx: FRAME.w - 400 - 4,
+      dy: 300,
+      constrain: true,
+    });
+
+    expect(direction).toEqual(["right"]);
+    expect(boxOf(rect).se.x).toBeCloseTo(FRAME.w, 8);
+    expect(rect.w / rect.h).toBeCloseTo(origin.w / origin.h, 9);
+  });
+
+  /** A guide drawn where the element is not is worse than no guide. */
+  it("claims no guide when minSize stops the edge short of the line", () => {
+    const origin: Rect = { x: 0, y: 0, w: 400, h: 200 };
+    // Aim the east edge at the frame's left edge: the box would have to be
+    // negative, so `minSize` clamps it and the edge never arrives.
+    const { rect, direction } = drag({ zone: "stretchE", origin, dx: -400 + 3 });
+
+    expect(direction).toEqual([]);
+    expect(rect.w).toBe(10);
+  });
+
+  it("never snaps an axis the grip does not drive", () => {
+    // A pure east drag whose *vertical* edges happen to sit on frame lines.
+    const origin: Rect = { x: 0, y: 0, w: 400, h: FRAME.h };
+    const { direction } = drag({ zone: "stretchE", origin, dx: 50 });
+    expect(direction).toEqual([]);
+  });
+
+  it("survives a degenerate frame or zone without throwing", () => {
+    const origin: Rect = { x: 0, y: 0, w: 400, h: 200 };
+    for (const frame of [
+      { w: NaN, h: 1080 },
+      { w: 1920, h: Infinity },
+    ]) {
+      const snapped = resizeSnap({
+        origin,
+        zone: "stretchE",
+        localDx: 30,
+        localDy: 0,
+        constrain: false,
+        minSize: 10,
+        frame,
+      });
+      expect(snapped.direction).toEqual([]);
+      expect(snapped.localDx).toBe(30);
     }
   });
 });

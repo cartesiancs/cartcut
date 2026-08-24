@@ -25,7 +25,12 @@ import {
 import { isVisualTimelineElement } from "../../@types/timeline";
 import { applyElementTransform } from "../renderer/element";
 import { hitZoneOf, isStretchZone, type HitZone } from "./hitTest";
-import { constrainsAspect, resizedDocument, resizedRect } from "./resizeMath";
+import {
+  constrainsAspect,
+  resizedDocument,
+  resizedRect,
+  resizeSnap,
+} from "./resizeMath";
 import { GestureCommit } from "../option/gestureCommit";
 import {
   applyPoint,
@@ -1560,18 +1565,44 @@ export class PreviewCanvas extends LitElement {
       );
 
       const origin = this.elementOriginLocal;
-      const next = resizedRect({
+      // The element's own rotation and scale, so the grip's opposite corner
+      // stays under the same pixel as the box grows. Only the linear part is
+      // read, and neither rotation nor scale can change during a resize, so
+      // recomputing it per event is the same matrix every time.
+      const linear = localMatrixOf(activeElement, this.timelineCursor);
+      const parentMatrix = parentMatrixOf(
+        this.timeline,
+        this.activeElementId,
+        this.timelineCursor,
+      );
+
+      // Snapping corrects the *delta*, then the corrected delta goes back
+      // through `resizedRect`. Adjusting the returned rect instead would move
+      // the edge without telling the anchor arithmetic, and the opposite corner
+      // — the thing the last fix established stays put — would drift by exactly
+      // the magnet's pull. Same shape as the move path folding its correction
+      // back into the world delta before it changes spaces.
+      const snapped = resizeSnap({
         origin,
         zone: this.moveType,
         localDx: localDelta.x,
         localDy: localDelta.y,
         constrain,
         minSize: 10,
-        // The element's own rotation and scale, so the grip's opposite corner
-        // stays under the same pixel as the box grows. Only the linear part is
-        // read, and neither rotation nor scale can change during a resize, so
-        // recomputing it per event is the same matrix every time.
-        linear: localMatrixOf(activeElement, this.timelineCursor),
+        linear,
+        parentMatrix,
+        frame: this.frameSize,
+      });
+      this.alignDirection = snapped.direction;
+
+      const next = resizedRect({
+        origin,
+        zone: this.moveType,
+        localDx: snapped.localDx,
+        localDy: snapped.localDy,
+        constrain,
+        minSize: 10,
+        linear,
       });
 
       if (next != null) {

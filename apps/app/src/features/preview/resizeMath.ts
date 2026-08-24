@@ -26,8 +26,10 @@
  */
 
 import {
+  applyPoint,
   applyVector,
   IDENTITY,
+  multiply,
   type Mat,
   type Point,
 } from "../timeline/transform";
@@ -329,4 +331,249 @@ export function resizedDocument(
       [elementId]: { ...current, width: next.w, height: next.h, location },
     },
   };
+}
+
+
+/**
+ * How near a frame line counts as a hit, in canvas units.
+ *
+ * The same figure the move path's `isAlign` uses, and for the same reason: this
+ * is a distance between two things being *drawn*, so unlike a grab band it does
+ * not follow the pointer's screen scale.
+ */
+export const SNAP_PADDING = 20;
+
+/** How far off an axis a transform may be and still count as upright. */
+const AXIS_EPSILON = 1e-9;
+
+type SnapTarget = { at: number; direction: string };
+
+const xTargetsOf = (frame: { w: number; h: number }): SnapTarget[] => [
+  { at: 0, direction: "left" },
+  { at: frame.w / 2, direction: "vertical" },
+  { at: frame.w, direction: "right" },
+];
+
+const yTargetsOf = (frame: { w: number; h: number }): SnapTarget[] => [
+  { at: 0, direction: "top" },
+  { at: frame.h / 2, direction: "horizontal" },
+  { at: frame.h, direction: "bottom" },
+];
+
+export type ResizeSnapInput = {
+  origin: Rect;
+  zone: StretchZone;
+  localDx: number;
+  localDy: number;
+  constrain: boolean;
+  minSize: number;
+  /** The element's own local matrix, as `resizedRect` takes it. */
+  linear?: Mat;
+  /** Parent space to world space, so the frame lines mean what the user sees. */
+  parentMatrix?: Mat;
+  /** The frame the guides belong to, in world units. */
+  frame: { w: number; h: number };
+  padding?: number;
+};
+
+/**
+ * Pull the dragged edge onto a frame line, and say which guides to draw.
+ *
+ * Resizing had no snapping of any kind: `alignDirection` was written only by
+ * the move branch, and `isAlign` was never called from the resize one — so
+ * dragging an element out to fill the frame was a pixel-hunt with no magnet and
+ * no guide to aim at.
+ *
+ * `isAlign` could not simply be reused, because it answers a *move* question.
+ * It slides a rect of fixed size until an edge lands on a line (`nx = cw - w`).
+ * A resize has to do the opposite: hold the anchor still and change the size
+ * until the *dragged* edge lands there. So this returns a correction to the
+ * pointer delta rather than a position, and the caller feeds the corrected
+ * delta back through `resizedRect` — which is what keeps the anchor arithmetic
+ * in one place, and means a snap can never break the invariant that the
+ * opposite corner stays put. It is the same shape as the move path folding its
+ * snap correction back into the world delta before changing spaces.
+ *
+ * The driven edge's world position is affine in the delta, so one extra probe
+ * measures the rate exactly — no case analysis over rotation, scale, or which
+ * side the grip is on, and it stays right for an element inside a scaled group.
+ *
+ * Snapping is declined outright when the element is not upright in the world
+ * (`b` or `c` non-zero once the parent is composed in). A rotated element's
+ * edge is not a vertical or horizontal line, so "put it on the frame's right
+ * edge" has no single answer, and guessing one would pull the box somewhere the
+ * user cannot predict. `resizedRect` still runs; only the magnet is off.
+ */
+export function resizeSnap(input: ResizeSnapInput): {
+  localDx: number;
+  localDy: number;
+  direction: string[];
+} {
+  const { origin, zone, localDx, localDy, constrain, minSize, frame } = input;
+  const linear = input.linear ?? IDENTITY;
+  const parentMatrix = input.parentMatrix ?? IDENTITY;
+  const padding = Number.isFinite(input.padding as number)
+    ? (input.padding as number)
+    : SNAP_PADDING;
+
+  const unsnapped = { localDx, localDy, direction: [] as string[] };
+
+  const sign = AXIS_SIGN[zone];
+  if (sign == null) {
+    return unsnapped;
+  }
+  if (!Number.isFinite(frame?.w) || !Number.isFinite(frame?.h)) {
+    return unsnapped;
+  }
+
+  // Upright in the world, or no magnet. Measured on the composed matrix, so a
+  // child of a rotated group is correctly excluded even though it carries no
+  // rotation of its own.
+  const world = multiply(parentMatrix, linear);
+  const scale = Math.max(
+    Math.abs(world.a),
+    Math.abs(world.b),
+    Math.abs(world.c),
+    Math.abs(world.d),
+    1,
+  );
+  if (
+    !Number.isFinite(world.b) ||
+    !Number.isFinite(world.c) ||
+    Math.abs(world.b) > AXIS_EPSILON * scale ||
+    Math.abs(world.c) > AXIS_EPSILON * scale
+  ) {
+    return unsnapped;
+  }
+
+  // The side the grip drives — the one opposite the anchor `anchoredAt` holds.
+  const u = 0.5 + sign.sx / 2;
+  const v = 0.5 + sign.sy / 2;
+
+  const drivenAt = (dx: number, dy: number): Point | null => {
+    const rect = resizedRect({
+      origin,
+      zone,
+      localDx: dx,
+      localDy: dy,
+      constrain,
+      minSize,
+      linear,
+    });
+    if (rect == null) {
+      return null;
+    }
+    // `localMatrixOf`'s composition, written out for a hypothetical rect:
+    // the box turns about its own centre, then sits at `rect.x, rect.y`.
+    const cx = rect.w / 2;
+    const cy = rect.h / 2;
+    const spun = applyVector(linear, { x: u * rect.w - cx, y: v * rect.h - cy });
+    return applyPoint(parentMatrix, {
+      x: rect.x + cx + spun.x,
+      y: rect.y + cy + spun.y,
+    });
+  };
+
+  const base = drivenAt(localDx, localDy);
+  if (base == null) {
+    return unsnapped;
+  }
+
+  type Candidate = {
+    axis: "x" | "y";
+    delta: number;
+    distance: number;
+    direction: string;
+  };
+  const candidates: Candidate[] = [];
+
+  const consider = (
+    axis: "x" | "y",
+    driven: boolean,
+    here: number,
+    probed: Point | null,
+    targets: SnapTarget[],
+  ) => {
+    if (!driven || probed == null) {
+      return;
+    }
+    const rate = probed[axis] - here;
+    if (!Number.isFinite(rate) || Math.abs(rate) <= AXIS_EPSILON) {
+      return;
+    }
+    let best: SnapTarget | null = null;
+    let bestDistance = Infinity;
+    for (const target of targets) {
+      const distance = Math.abs(target.at - here);
+      if (distance <= padding && distance < bestDistance) {
+        best = target;
+        bestDistance = distance;
+      }
+    }
+    if (best == null) {
+      return;
+    }
+    candidates.push({
+      axis,
+      delta: (best.at - here) / rate,
+      distance: bestDistance,
+      direction: best.direction,
+    });
+  };
+
+  consider(
+    "x",
+    sign.sx !== 0,
+    base.x,
+    drivenAt(localDx + 1, localDy),
+    xTargetsOf(frame),
+  );
+  consider(
+    "y",
+    sign.sy !== 0,
+    base.y,
+    drivenAt(localDx, localDy + 1),
+    yTargetsOf(frame),
+  );
+
+  if (candidates.length === 0) {
+    return unsnapped;
+  }
+
+  // Free: the axes are independent, so both can land at once — which is what
+  // makes a corner drag fill the frame exactly. Constrained: one scale drives
+  // both sides, so honouring two targets is generally impossible; take the
+  // nearer one and let the other follow the proportions.
+  const chosen = constrain
+    ? [candidates.reduce((a, b) => (b.distance < a.distance ? b : a))]
+    : candidates;
+
+  let nextDx = localDx;
+  let nextDy = localDy;
+  for (const candidate of chosen) {
+    if (candidate.axis === "x") {
+      nextDx += candidate.delta;
+    } else {
+      nextDy += candidate.delta;
+    }
+  }
+
+  // Only claim a guide the edge actually reached. `minSize` can clamp a snap
+  // short, and a line drawn where the element is not is worse than no line.
+  const landed = drivenAt(nextDx, nextDy);
+  const direction = landed == null
+    ? []
+    : chosen
+        .filter((candidate) => {
+          const targets =
+            candidate.axis === "x" ? xTargetsOf(frame) : yTargetsOf(frame);
+          const target = targets.find((t) => t.direction === candidate.direction);
+          return (
+            target != null &&
+            Math.abs(landed[candidate.axis] - target.at) <= 1e-6 * scale
+          );
+        })
+        .map((candidate) => candidate.direction);
+
+  return { localDx: nextDx, localDy: nextDy, direction };
 }
