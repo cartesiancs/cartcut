@@ -173,9 +173,11 @@ export class ElementTimelineLeftOption extends LitElement {
 
     const elementControlComponent: any =
       document.querySelector("element-control");
-    const resizeX = Math.max(20, e.clientX);
 
-    this.uiState.updateTimelineVertical(resizeX);
+    // The window width goes along so the store can keep the canvas from being
+    // pushed off the right edge on a narrow window; the fixed px bounds live in
+    // `TIMELINE_LEFT_OPTION_LIMITS`.
+    this.uiState.updateTimelineVertical(e.clientX, window.innerWidth);
     elementControlComponent?.resizeEvent();
     this.redrawTimeline();
   }

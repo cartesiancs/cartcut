@@ -72,22 +72,20 @@ export class Control extends LitElement {
   }
 
   _handleMouseMove(e) {
-    const elementControlComponent = document.querySelector("element-control");
-
-    if (this.isAbleResize) {
-      const windowWidth = window.innerWidth - this.resize.chatSidebar;
-      const nowX = e.clientX;
-      const resizeX = (nowX / windowWidth) * 100;
-
-      if (this.targetResize == "panel" && resizeX <= 20) {
-        this.uiState.updateHorizontal(20, this.targetResize);
-        elementControlComponent.resizeEvent();
-        return false;
-      }
-
-      this.uiState.updateHorizontal(resizeX, this.targetResize);
-      elementControlComponent.resizeEvent();
+    if (!this.isAbleResize) {
+      return;
     }
+
+    const elementControlComponent = document.querySelector("element-control");
+    const windowWidth = window.innerWidth - this.resize.chatSidebar;
+    const nowX = e.clientX;
+    const resizeX = (nowX / windowWidth) * 100;
+
+    // `HORIZONTAL_LIMITS` in the store is the single owner of how far a column
+    // may go, so a drag past an edge pins there instead of being turned away by
+    // a bound duplicated here.
+    this.uiState.updateHorizontal(resizeX, this.targetResize);
+    elementControlComponent.resizeEvent();
   }
 
   _handleMouseUp() {

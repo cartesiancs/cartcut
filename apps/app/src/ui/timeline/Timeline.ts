@@ -117,23 +117,22 @@ export class Timeline extends LitElement {
   }
 
   _handleMouseMove(e) {
-    const elementControlComponent = document.querySelector("element-control");
-
-    if (this.isAbleResize) {
-      const topBarHeight = 60;
-
-      const windowHeight = window.innerHeight + topBarHeight;
-      const nowY = e.clientY;
-      const resizeY = 100 - (nowY / windowHeight) * 103; // 103인 이유는 Vertical 전체가 windowHeight의 97%이기 떄문.
-      if (resizeY <= 20) {
-        this.uiState.updateVertical(20);
-        elementControlComponent.resizeEvent();
-        return false;
-      }
-
-      this.uiState.updateVertical(resizeY);
-      elementControlComponent.resizeEvent();
+    if (!this.isAbleResize) {
+      return;
     }
+
+    const elementControlComponent = document.querySelector("element-control");
+    const topBarHeight = 60;
+
+    const windowHeight = window.innerHeight + topBarHeight;
+    const nowY = e.clientY;
+    const resizeY = 100 - (nowY / windowHeight) * 103; // 103인 이유는 Vertical 전체가 windowHeight의 97%이기 떄문.
+
+    // Bounded by `VERTICAL_LIMITS` in the store, so dragging off either end of
+    // the window pins the timeline rather than collapsing it or swallowing the
+    // preview.
+    this.uiState.updateVertical(resizeY);
+    elementControlComponent.resizeEvent();
   }
 
   _handleMouseUp() {
