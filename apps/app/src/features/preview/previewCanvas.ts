@@ -29,13 +29,13 @@ import {
   applyPoint,
   applyVector,
   invert,
+  localSampleAt,
   parentMatrixOf,
-  rotationOf,
   scaleOf,
+  worldBoundsOf,
   worldMatrixOf,
-  worldToParentLocal,
-  worldVectorToParentLocal,
 } from "../timeline/transform";
+import { angleStep, movedLocation, normalizeDegrees } from "./dragMath";
 import { isElementVisibleAtTime } from "../element/time";
 import { renderControlOutline } from "../renderer/controlOutline";
 import {
@@ -77,6 +77,31 @@ export class PreviewCanvas extends LitElement {
    * group jumps to the group's offset the moment a handle is touched.
    */
   elementOriginLocal: { x: number; y: number; w: number; h: number };
+  /**
+   * The element's world-space axis-aligned box at drag start.
+   *
+   * What snapping has to be measured against: for a rotated element there is no
+   * on-canvas rectangle, only the box around its quad, and that box is what the
+   * user sees line up with the frame. `elementOrigin` is the drawn *corner*, so
+   * feeding it to `isAlign` as if it were a rect snapped the wrong edges.
+   */
+  elementOriginBounds: { x: number; y: number; w: number; h: number };
+  /**
+   * Rotation drag state, all captured at mousedown.
+   *
+   * `rotationPivot` is the element's true centre on canvas — and a fixed point
+   * of both the rotation and the scale, so it stays put for the whole gesture
+   * and does not have to be recomputed as the angle changes.
+   *
+   * The drag then applies the *change* in pointer angle to `rotationStartDeg`
+   * rather than the angle itself. That is what makes grabbing the knob anywhere
+   * in its 50px band cost nothing, and it needs no parent-rotation correction:
+   * the parent's contribution is constant through the drag, so it cancels out of
+   * the difference.
+   */
+  rotationPivot: { x: number; y: number };
+  rotationStartDeg: number;
+  rotationPrevPointerDeg: number;
   moveType:
     | "none"
     | "position"
@@ -155,6 +180,10 @@ export class PreviewCanvas extends LitElement {
     this.mouseOrigin = { x: 0, y: 0 };
     this.elementOrigin = { x: 0, y: 0, w: 0, h: 0 };
     this.elementOriginLocal = { x: 0, y: 0, w: 0, h: 0 };
+    this.elementOriginBounds = { x: 0, y: 0, w: 0, h: 0 };
+    this.rotationPivot = { x: 0, y: 0 };
+    this.rotationStartDeg = 0;
+    this.rotationPrevPointerDeg = 0;
 
     this.nowShapeId = "";
   }
@@ -556,31 +585,14 @@ export class PreviewCanvas extends LitElement {
     ctx.restore();
   }
 
-  /** Snap guides for the element being dragged, refreshed every mouse move. */
-  private updateAlignDirection() {
-    const element = this.timeline[this.activeElementId];
-    if (!this.isMove || element == undefined) {
-      this.alignDirection = [];
-      return;
-    }
-    if (!isVisualTimelineElement(element)) {
-      this.alignDirection = [];
-      return;
-    }
-
-    // Guides line up with the frame, so the element's position has to be the
-    // one on the canvas. Reading the raw `location` showed guides for where the
-    // clip would be with no animation and no group above it — which is nowhere
-    // the user can see.
-    const world = this.worldTopLeft(this.activeElementId);
-    const checkAlign = this.isAlign({
-      x: world.x,
-      y: world.y,
-      w: element.width,
-      h: element.height,
-    });
-    this.alignDirection = checkAlign ? checkAlign.direction : [];
-  }
+  // `updateAlignDirection` used to live here, asking `isAlign` a second time
+  // from the element's already-written position to decide which guides to draw.
+  // Two answers to one question: it ran a frame behind the drag, and it passed
+  // the drawn corner plus the unrotated `width`/`height` as if that were the
+  // element's box on canvas, which for anything rotated it is not. The move
+  // branch of `_handleMouseMove` now sets `alignDirection` from the same
+  // `movedLocation` call that placed the element, so the guides and the position
+  // cannot disagree.
 
   drawAlign(ctx: CanvasRenderingContext2D, direction: string[]) {
     const frame = this.frameSize;
@@ -721,9 +733,14 @@ export class PreviewCanvas extends LitElement {
   /**
    * The element's top-left on the canvas.
    *
-   * A drag works in canvas space — that is where the pointer is — so this is
-   * what `elementOrigin` holds, and `toParentLocal` is what turns the result
-   * back into the parent-space value that belongs in `location`.
+   * Where the element is *drawn*, which is what the pointer is aimed at: it is
+   * how double-click finds a caption to edit, and it is what `elementOrigin`
+   * holds for the resize math.
+   *
+   * It is deliberately **not** what a move drag starts from. `location` holds
+   * the *unrotated* top-left, so for a rotated element this corner is a
+   * different point, and adding a drag delta to it and writing the sum into
+   * `location` is what made the element jump. See `dragMath.ts`.
    */
   worldTopLeft(elementId: string): { x: number; y: number } {
     return applyPoint(
@@ -768,32 +785,13 @@ export class PreviewCanvas extends LitElement {
     return { x, y, w: element?.width ?? 0, h: element?.height ?? 0 };
   }
 
-  /** A canvas-space point as the value to write into the element's `location`. */
-  toParentLocal(elementId: string, point: { x: number; y: number }) {
-    return worldToParentLocal(
-      this.timeline,
-      elementId,
-      this.timelineCursor,
-      point,
-    );
-  }
-
-  /** A canvas-space drag delta as a delta in the element's own parent space. */
-  toParentLocalDelta(elementId: string, delta: { x: number; y: number }) {
-    return worldVectorToParentLocal(
-      this.timeline,
-      elementId,
-      this.timelineCursor,
-      delta,
-    );
-  }
-
-  /** How much the parent chain rotates this element, in degrees. */
-  parentRotationOf(elementId: string): number {
-    return rotationOf(
-      parentMatrixOf(this.timeline, elementId, this.timelineCursor),
-    );
-  }
+  // `toParentLocal`, `toParentLocalDelta` and `parentRotationOf` used to sit
+  // here. They are gone with the two callers that misused them: the move path
+  // took a canvas *position* back through the parent chain and wrote it into
+  // `location`, which is a different quantity, and the rotate path corrected the
+  // pointer's absolute angle by the parent's rotation. Both now work in deltas
+  // (`dragMath.movedLocation`, `dragMath.angleStep`), where the parent's
+  // translation and rotation cancel on their own.
 
   showSideOption(elementId) {
     const optionGroup = document.querySelector("option-group");
@@ -1068,6 +1066,11 @@ export class PreviewCanvas extends LitElement {
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
           this.elementOriginLocal = this.localRectOf(elementId);
+          this.elementOriginBounds = worldBoundsOf(
+            this.timeline,
+            elementId,
+            this.timelineCursor,
+          );
           this.moveType = "position";
           this.cursorType = "grabbing";
           clearTempStatus();
@@ -1083,6 +1086,21 @@ export class PreviewCanvas extends LitElement {
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
           this.elementOriginLocal = this.localRectOf(elementId);
+          // The centre through the same matrix the renderer draws with — not
+          // the drawn corner plus half the unrotated size, which is a point in
+          // no space at all and made the angle snap on grab.
+          this.rotationPivot = applyPoint(
+            worldMatrixOf(this.timeline, elementId, this.timelineCursor),
+            { x: (w ?? 0) / 2, y: (h ?? 0) / 2 },
+          );
+          this.rotationStartDeg = localSampleAt(
+            element,
+            this.timelineCursor,
+          ).rotationDeg;
+          this.rotationPrevPointerDeg = this.calculateRotation(
+            { x: mx, y: my },
+            this.rotationPivot,
+          );
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1390,31 +1408,30 @@ export class PreviewCanvas extends LitElement {
       const dx = mx - this.mouseOrigin.x;
       const dy = my - this.mouseOrigin.y;
 
-      // `elementOrigin` is where the element was *drawn* when the drag began,
-      // so this is the position it is drawn at now — animated or not.
-      const alignLocation = this.isAlign({
-        x: this.elementOrigin.x + dx,
-        y: this.elementOrigin.y + dy,
-        w: this.elementOrigin.w,
-        h: this.elementOrigin.h,
+      // A drag is a delta, and it is added to an origin already in the space
+      // the result is written to. The version this replaces started from
+      // `elementOrigin` — the element's drawn *corner* — and wrote the sum into
+      // `location`, which is where the element's *unrotated* top-left goes. The
+      // two coincide only at rotation 0 and scale 1; anywhere else the element
+      // teleported by the difference on the first mouse move. See `dragMath.ts`.
+      //
+      // Snapping stays a canvas-space question — guides line up with the frame
+      // as the user sees it — so it is handed the world box, and its correction
+      // crosses back into parent space with the rest of the delta.
+      const moved = movedLocation({
+        originLocal: this.elementOriginLocal,
+        originBounds: this.elementOriginBounds,
+        dx,
+        dy,
+        parentMatrix: parentMatrixOf(
+          this.timeline,
+          this.activeElementId,
+          this.timelineCursor,
+        ),
+        snap: (rect) => this.isAlign(rect),
       });
-      // Snapping is a canvas-space question — guides line up with the frame
-      // and with other clips as the user sees them — so it happens here, in
-      // world coordinates, before the result is taken back into the element's
-      // own space.
-      const world = {
-        x: alignLocation?.x ?? this.elementOrigin.x + dx,
-        y: alignLocation?.y ?? this.elementOrigin.y + dy,
-      };
-
-      // `location` and the position track are read in the *parent's* space, so
-      // a pointer position has to come back through the parent chain before it
-      // is written. For a clip with no group above it this is the identity and
-      // `next` is `world`; inside a group scaled to 2x, a 100px drag on screen
-      // becomes the 50 that belongs in the field.
-      const next = this.toParentLocal(this.activeElementId, world);
-
-      this.updateAlignDirection();
+      const next = moved.location;
+      this.alignDirection = moved.direction;
 
       const write = this.withPositionKeyframe(next.x, next.y);
       if (write != null) {
@@ -1442,26 +1459,37 @@ export class PreviewCanvas extends LitElement {
     }
 
     if (this.isRotation) {
-      const dx = mx - this.mouseOrigin.x;
-      const dy = my - this.mouseOrigin.y;
+      // The pivot is the element's real centre, captured at mousedown through
+      // the renderer's own matrix. It used to be `drawnCorner + (w/2, h/2)`,
+      // which is neither — for a 200x100 clip already at 45° that put it 80px
+      // away from the centre, and the first mouse move threw the angle from 45°
+      // to 334°.
+      // A pointer sitting on the pivot has no angle — `atan2(0, 0)` is 0, which
+      // would read as a real step and kick the element somewhere arbitrary.
+      // Holding the last angle instead means dragging through the centre and
+      // out the other side simply resumes.
+      const reach = Math.hypot(
+        mx - this.rotationPivot.x,
+        my - this.rotationPivot.y,
+      );
+      if (reach > 1) {
+        const pointerDeg = this.calculateRotation(
+          { x: mx, y: my },
+          this.rotationPivot,
+        );
 
-      const p1 = {
-        x: this.elementOrigin.x + this.elementOrigin.w / 2,
-        y: this.elementOrigin.y + this.elementOrigin.h / 2,
-      };
-      const p2 = {
-        x: mx,
-        y: my,
-      };
-
-      // `calculateRotation` gives the angle on the canvas, but `rotation` is
-      // read inside the parent's frame — so a child of a group already turned
-      // 30° must store 30° less than the pointer says, or it snaps by the
-      // group's rotation the moment the drag begins.
-      const r =
-        this.calculateRotation(p2, p1) -
-        this.parentRotationOf(this.activeElementId);
-      activeElement.rotation = r;
+        // Apply the *change* in pointer angle, not its value. Grabbing the knob
+        // off its centre then costs nothing, a drag past a full turn keeps
+        // going instead of wrapping, and no parent-rotation correction is
+        // needed: the parent's contribution is constant through the gesture, so
+        // it cancels out of the difference.
+        this.rotationStartDeg += angleStep(
+          this.rotationPrevPointerDeg,
+          pointerDeg,
+        );
+        this.rotationPrevPointerDeg = pointerDeg;
+        activeElement.rotation = normalizeDegrees(this.rotationStartDeg);
+      }
     }
 
     if (this.isStretch) {
