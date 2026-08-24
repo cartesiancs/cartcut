@@ -46,7 +46,9 @@ export type ThemeColors = {
 };
 
 export const defaultColors: ThemeColors = {
-  background: "#17181c",
+  // Matches `$background-color` in `sass/var.scss`, so the canvas is seamless
+  // with the ruler above it and the app chrome around it.
+  background: "#0f1012",
   row: "#1e1f25",
   label: "#ffffff",
   selection: "#ffffff",

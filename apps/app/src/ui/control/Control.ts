@@ -196,17 +196,6 @@ export class Control extends LitElement {
               <button
                 class="btn-nav"
                 data-bs-toggle="pill"
-                data-bs-target="#nav-filter"
-                type="button"
-                role="tab"
-                aria-selected="false"
-              >
-                <span class="material-symbols-outlined"> library_books</span>
-              </button>
-
-              <button
-                class="btn-nav"
-                data-bs-toggle="pill"
                 data-bs-target="#nav-util"
                 type="button"
                 role="tab"

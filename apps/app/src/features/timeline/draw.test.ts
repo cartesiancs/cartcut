@@ -126,7 +126,7 @@ describe("drawTimeline", () => {
   it("fills the background before anything else", () => {
     const { canvas } = paint(doc({}));
     // Below the last row there is only background.
-    expect(pixel(canvas, 200, 190)).toMatchObject({ r: 0x17, g: 0x18, b: 0x1c });
+    expect(pixel(canvas, 200, 190)).toMatchObject({ r: 0x0f, g: 0x10, b: 0x12 });
   });
 
   it("paints a row band across the full width", () => {
