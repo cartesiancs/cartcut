@@ -6,6 +6,11 @@ import {
   type StretchZone,
 } from "./resizeMath";
 import type { Rect } from "./dragMath";
+import {
+  applyPoint,
+  IDENTITY,
+  localMatrixOf,
+} from "../timeline/transform";
 
 const ZONES: StretchZone[] = [
   "stretchE",
@@ -414,6 +419,215 @@ describe("constrainsAspect", () => {
       expect(constrainsAspect(filetype, true), filetype).toBe(
         !constrainsAspect(filetype, false),
       );
+    }
+  });
+});
+
+/**
+ * What a rotated resize has to do, and what it used to do instead.
+ *
+ * `localMatrixOf` turns the element about the centre of its box, and that
+ * centre moves the moment `width` or `height` change. Holding the anchor by
+ * pinning the unrotated rect's own coordinates — keeping `x + w` fixed — is
+ * therefore only correct while the element is upright; at any other angle the
+ * pinned corner swings around the moving centre and the box slides off in a
+ * direction unrelated to the drag.
+ *
+ * These assert through `localMatrixOf` and `applyPoint`, the functions the
+ * renderer actually draws with, rather than restating the formula under test.
+ * The anchor each grip must hold is spelled out independently below.
+ */
+describe("resizedRect — rotated and scaled", () => {
+  /**
+   * Where each grip's anchor sits, as a fraction of the box: the corner or edge
+   * diagonally opposite the one being dragged.
+   */
+  const ANCHOR: Record<StretchZone, { u: number; v: number }> = {
+    stretchE: { u: 0, v: 0.5 }, // west edge
+    stretchW: { u: 1, v: 0.5 }, // east edge
+    stretchN: { u: 0.5, v: 1 }, // south edge
+    stretchS: { u: 0.5, v: 0 }, // north edge
+    stretchNW: { u: 1, v: 1 }, // SE corner
+    stretchNE: { u: 0, v: 1 }, // SW corner
+    stretchSW: { u: 1, v: 0 }, // NE corner
+    stretchSE: { u: 0, v: 0 }, // NW corner
+  };
+
+  const elementAt = (rect: Rect, rotation: number, scaleTenths?: number) =>
+    ({
+      filetype: "shape",
+      location: { x: rect.x, y: rect.y },
+      width: rect.w,
+      height: rect.h,
+      rotation,
+      startTime: 0,
+      animation:
+        scaleTenths == null
+          ? undefined
+          : {
+              scale: { isActivate: true, x: [], ax: [[0, scaleTenths]] },
+            },
+    }) as any;
+
+  /** The anchor's position in the parent's space, through the real matrix. */
+  const anchorPoint = (element: any, { u, v }: { u: number; v: number }) =>
+    applyPoint(localMatrixOf(element, 0), {
+      x: u * element.width,
+      y: v * element.height,
+    });
+
+  const ROTATIONS = [0, 30, 45, 90, 137, 180, 270, -45, 359];
+
+  it("keeps the opposite corner under the same pixel, at every angle", () => {
+    const origin: Rect = { x: 100, y: 60, w: 200, h: 120 };
+
+    for (const rotation of ROTATIONS) {
+      for (const zone of ZONES) {
+        for (const constrain of [false, true]) {
+          for (const [dx, dy] of [
+            [50, 30],
+            [-40, 25],
+            [80, -60],
+            [-15, -15],
+          ]) {
+            const before = elementAt(origin, rotation);
+            const next = resizedRect({
+              origin,
+              zone,
+              localDx: dx,
+              localDy: dy,
+              constrain,
+              minSize: 10,
+              linear: localMatrixOf(before, 0),
+            })!;
+            const after = elementAt(next, rotation);
+
+            const label = `${zone} @${rotation}° ${dx},${dy} c=${constrain}`;
+            const held = ANCHOR[zone];
+            expect(anchorPoint(after, held).x, label).toBeCloseTo(
+              anchorPoint(before, held).x,
+              8,
+            );
+            expect(anchorPoint(after, held).y, label).toBeCloseTo(
+              anchorPoint(before, held).y,
+              8,
+            );
+          }
+        }
+      }
+    }
+  });
+
+  it("keeps the opposite corner fixed for a scaled element too", () => {
+    const origin: Rect = { x: 40, y: 40, w: 160, h: 90 };
+
+    for (const scaleTenths of [5, 10, 25]) {
+      for (const zone of ZONES) {
+        const before = elementAt(origin, 35, scaleTenths);
+        const next = resizedRect({
+          origin,
+          zone,
+          localDx: 45,
+          localDy: -30,
+          constrain: false,
+          minSize: 10,
+          linear: localMatrixOf(before, 0),
+        })!;
+        const after = elementAt(next, 35, scaleTenths);
+
+        const label = `${zone} s=${scaleTenths}`;
+        const held = ANCHOR[zone];
+        expect(anchorPoint(after, held).x, label).toBeCloseTo(
+          anchorPoint(before, held).x,
+          8,
+        );
+        expect(anchorPoint(after, held).y, label).toBeCloseTo(
+          anchorPoint(before, held).y,
+          8,
+        );
+      }
+    }
+  });
+
+  /**
+   * Rotation places the box; it must not change how big the drag makes it. The
+   * pointer delta arrives already taken into the element's own axes, so the
+   * same delta means the same size whichever way the element is facing.
+   */
+  it("sizes the box identically however the element is rotated", () => {
+    const origin: Rect = { x: 100, y: 60, w: 200, h: 120 };
+
+    for (const zone of ZONES) {
+      for (const constrain of [false, true]) {
+        const upright = resizedRect({
+          origin,
+          zone,
+          localDx: 55,
+          localDy: -35,
+          constrain,
+          minSize: 10,
+        })!;
+
+        for (const rotation of ROTATIONS) {
+          const turned = resizedRect({
+            origin,
+            zone,
+            localDx: 55,
+            localDy: -35,
+            constrain,
+            minSize: 10,
+            linear: localMatrixOf(elementAt(origin, rotation), 0),
+          })!;
+          const label = `${zone} @${rotation}° c=${constrain}`;
+          expect(turned.w, label).toBeCloseTo(upright.w, 10);
+          expect(turned.h, label).toBeCloseTo(upright.h, 10);
+        }
+      }
+    }
+  });
+
+  /** An upright element must behave exactly as it did before `linear` existed. */
+  it("matches the identity result when the element is upright", () => {
+    const origin: Rect = { x: 100, y: 60, w: 200, h: 120 };
+
+    for (const zone of ZONES) {
+      for (const constrain of [false, true]) {
+        const withoutLinear = resizedRect({
+          origin,
+          zone,
+          localDx: 55,
+          localDy: -35,
+          constrain,
+          minSize: 10,
+        });
+        const withIdentity = resizedRect({
+          origin,
+          zone,
+          localDx: 55,
+          localDy: -35,
+          constrain,
+          minSize: 10,
+          linear: localMatrixOf(elementAt(origin, 0), 0),
+        });
+        expect(withIdentity, `${zone} c=${constrain}`).toEqual(withoutLinear);
+      }
+    }
+  });
+
+  it("returns null rather than NaN for a degenerate matrix", () => {
+    const origin: Rect = { x: 0, y: 0, w: 100, h: 100 };
+    for (const bad of [{ a: NaN }, { b: Infinity }, { c: NaN }, { d: NaN }]) {
+      expect(
+        resizedRect({
+          origin,
+          zone: "stretchSE",
+          localDx: 10,
+          localDy: 10,
+          constrain: false,
+          minSize: 10,
+          linear: { ...IDENTITY, ...bad },
+        }),
+      ).toBeNull();
     }
   });
 });

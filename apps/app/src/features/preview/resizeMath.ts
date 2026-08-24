@@ -25,7 +25,12 @@
  * `hitTest`.
  */
 
-import type { Point } from "../timeline/transform";
+import {
+  applyVector,
+  IDENTITY,
+  type Mat,
+  type Point,
+} from "../timeline/transform";
 import type { TimelineDocument } from "../timeline/tracks";
 import type { Rect } from "./dragMath";
 import type { StretchZone } from "./hitTest";
@@ -43,6 +48,16 @@ export type ResizeInput = {
   constrain: boolean;
   /** Smallest side a drag may produce, in parent-space units. */
   minSize: number;
+  /**
+   * The element's own local matrix — `localMatrixOf`, the one the renderer
+   * draws with. Only its linear part is read, so the rotation and scale it
+   * carries are what matter; defaults to the identity.
+   *
+   * Required for a rotated or scaled element, and the reason is in
+   * `anchoredAt`: without it the anchor is held in the *unrotated* rect's
+   * coordinates, which is not where the user sees it.
+   */
+  linear?: Mat;
 };
 
 type AxisSign = { sx: -1 | 0 | 1; sy: -1 | 0 | 1 };
@@ -66,6 +81,7 @@ const AXIS_SIGN: Record<StretchZone, AxisSign> = {
 
 export function resizedRect(input: ResizeInput): Rect | null {
   const { origin, zone, localDx, localDy, constrain, minSize } = input;
+  const linear = input.linear ?? IDENTITY;
 
   const sign = AXIS_SIGN[zone];
   if (sign == null) {
@@ -82,6 +98,14 @@ export function resizedRect(input: ResizeInput): Rect | null {
   ) {
     return null;
   }
+  if (
+    !Number.isFinite(linear.a) ||
+    !Number.isFinite(linear.b) ||
+    !Number.isFinite(linear.c) ||
+    !Number.isFinite(linear.d)
+  ) {
+    return null;
+  }
 
   const floor = Number.isFinite(minSize) ? Math.max(0, minSize) : 0;
   // Proportions of a degenerate box are not a ratio, and scaling a box already
@@ -89,15 +113,66 @@ export function resizedRect(input: ResizeInput): Rect | null {
   // back to the free path, which guards each axis on its own.
   const canConstrain = constrain && origin.w > floor && origin.h > floor;
 
+  const size = canConstrain
+    ? constrainedSize(origin, sign, localDx, localDy, floor)
+    : freeSize(origin, sign, localDx, localDy, floor);
+
   // Always a rect, never "no change" — the *document* decides whether anything
   // happened, by comparing what this returns against what the element already
   // holds (`resizedDocument`). Returning null for a rect that equalled `origin`
   // read as "skip the write", which quietly made the element keep the previous
   // mousemove's size: bring the pointer back to exactly where the drag began
   // and it stayed one event stale instead of returning to its original size.
-  return canConstrain
-    ? constrainedRect(origin, sign, localDx, localDy, floor)
-    : freeRect(origin, sign, localDx, localDy, floor);
+  return anchoredAt(origin, sign, size, linear);
+}
+
+/**
+ * Place the resized box so the grip's opposite corner stays where it is.
+ *
+ * The subtlety this exists for, and the bug it fixes: `localMatrixOf` composes
+ * as `location + centre + RS·(p − centre)` — it turns the element about the
+ * *centre of its box*, and that centre moves as soon as `width` or `height`
+ * change. Holding the anchor by pinning the unrotated rect's own coordinates
+ * (keeping `x + w` fixed, as this used to) therefore only holds it while the
+ * element is upright. Rotate it and the pinned corner swings around the moving
+ * centre, so the box slid off in a direction unrelated to the drag.
+ *
+ * Writing the renderer's own composition for the anchor `a` before and after,
+ * with `k = (a − centre)` expressed as a fraction of each side, and requiring
+ * the two to land on the same parent-space point:
+ *
+ * ```
+ * location_new = location_old + (dw/2, dh/2) + RS·(k.x·dw, k.y·dh)
+ * ```
+ *
+ * `k` is `−sign/2`: the grip drives one side, so the anchor is the opposite one
+ * — `stretchE` (`sx = +1`) hangs off the western edge, `stretchNW` off the SE
+ * corner, and an undriven axis anchors at the centre and spreads both ways.
+ *
+ * At `RS = I` the two terms collapse to `(k.x + 0.5)·dw`, which is the plain
+ * edge-pinning arithmetic this replaces — so an upright element behaves exactly
+ * as before, to the bit.
+ */
+function anchoredAt(
+  origin: Rect,
+  sign: AxisSign,
+  size: { w: number; h: number },
+  linear: Mat,
+): Rect {
+  const dw = origin.w - size.w;
+  const dh = origin.h - size.h;
+
+  const swing = applyVector(linear, {
+    x: (-sign.sx / 2) * dw,
+    y: (-sign.sy / 2) * dh,
+  });
+
+  return {
+    x: origin.x + dw / 2 + swing.x,
+    y: origin.y + dh / 2 + swing.y,
+    w: size.w,
+    h: size.h,
+  };
 }
 
 /**
@@ -108,31 +183,23 @@ export function resizedRect(input: ResizeInput): Rect | null {
  * carried their own guard — and it is what lets you flatten a shape against one
  * side without the whole drag freezing.
  *
- * Clamped rather than declined, as `constrainedRect` is. Declining meant
+ * Clamped rather than declined, as `constrainedSize` is. Declining meant
  * returning the side's *original* length, so a drag past the floor described a
  * box at full size; only the caller throwing the result away kept the element
  * pinned at the minimum, and a floor that depends on its caller ignoring it is
  * not a floor.
  */
-function freeRect(
+function freeSize(
   o: Rect,
   sign: AxisSign,
   dx: number,
   dy: number,
   floor: number,
-): Rect {
-  let { x, y, w, h } = o;
-
-  if (sign.sx !== 0) {
-    w = Math.max(floor, o.w + sign.sx * dx);
-    x = sign.sx > 0 ? o.x : o.x + o.w - w;
-  }
-  if (sign.sy !== 0) {
-    h = Math.max(floor, o.h + sign.sy * dy);
-    y = sign.sy > 0 ? o.y : o.y + o.h - h;
-  }
-
-  return { x, y, w, h };
+): { w: number; h: number } {
+  return {
+    w: sign.sx === 0 ? o.w : Math.max(floor, o.w + sign.sx * dx),
+    h: sign.sy === 0 ? o.h : Math.max(floor, o.h + sign.sy * dy),
+  };
 }
 
 /**
@@ -141,16 +208,16 @@ function freeRect(
  * A corner follows whichever axis the pointer pushed further — `max`, so the
  * grabbed corner reaches at least as far as the pointer on its dominant axis
  * and the element grows to meet a drag rather than splitting the difference.
- * An edge has only its own axis to go on and spreads the other about the
- * centre, which is what a locked edge drag has always done.
+ * An edge has only its own axis to go on; `anchoredAt` then spreads the other
+ * about the centre, which is what a locked edge drag has always done.
  */
-function constrainedRect(
+function constrainedSize(
   o: Rect,
   sign: AxisSign,
   dx: number,
   dy: number,
   floor: number,
-): Rect {
+): { w: number; h: number } {
   const sw = sign.sx === 0 ? null : (o.w + sign.sx * dx) / o.w;
   const sh = sign.sy === 0 ? null : (o.h + sign.sy * dy) / o.h;
 
@@ -161,15 +228,7 @@ function constrainedRect(
   // and this can never force the element to grow.
   s = Math.max(s, floor / o.w, floor / o.h);
 
-  const w = o.w * s;
-  const h = o.h * s;
-
-  const x =
-    sign.sx > 0 ? o.x : sign.sx < 0 ? o.x + o.w - w : o.x - (w - o.w) / 2;
-  const y =
-    sign.sy > 0 ? o.y : sign.sy < 0 ? o.y + o.h - h : o.y - (h - o.h) / 2;
-
-  return { x, y, w, h };
+  return { w: o.w * s, h: o.h * s };
 }
 
 /**

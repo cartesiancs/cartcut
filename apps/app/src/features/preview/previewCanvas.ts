@@ -31,6 +31,7 @@ import {
   applyPoint,
   applyVector,
   invert,
+  localMatrixOf,
   localSampleAt,
   parentMatrixOf,
   scaleOf,
@@ -1566,6 +1567,11 @@ export class PreviewCanvas extends LitElement {
         localDy: localDelta.y,
         constrain,
         minSize: 10,
+        // The element's own rotation and scale, so the grip's opposite corner
+        // stays under the same pixel as the box grows. Only the linear part is
+        // read, and neither rotation nor scale can change during a resize, so
+        // recomputing it per event is the same matrix every time.
+        linear: localMatrixOf(activeElement, this.timelineCursor),
       });
 
       if (next != null) {
