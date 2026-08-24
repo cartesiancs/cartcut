@@ -146,7 +146,7 @@ describe("renderTimeline", () => {
     expect(seeks[24]).toBe(960);
   });
 
-  it("hands back an encoded buffer for every frame", async () => {
+  it("hands back one raw RGBA buffer per frame, at the exact stride", async () => {
     const buffers: ArrayBuffer[] = [];
     await renderTimeline(
       makeStore(),
@@ -158,8 +158,185 @@ describe("renderTimeline", () => {
 
     expect(buffers).toHaveLength(2);
     for (const buf of buffers) {
-      expect(buf.byteLength).toBeGreaterThan(0);
+      // The pipe is `-f rawvideo -pix_fmt rgba`, which is unframed: a frame
+      // that is off by even one byte shears every frame after it.
+      expect(buf.byteLength).toBe(options.previewSize.w * options.previewSize.h * 4);
     }
+  });
+
+  /**
+   * These replace an earlier pair that pinned a window of exactly one — the
+   * loop awaited every callback before rendering the next frame. Measured at
+   * 1080p that strict alternation cost ~38 ms per frame against ~25 ms with
+   * two or more outstanding, because the renderer and FFmpeg each idled while
+   * the other worked. The contract is now a bounded window, not a lockstep.
+   */
+  describe("in-flight window", () => {
+    /**
+     * Frame callbacks that resolve only when told to.
+     *
+     * `openAll` also has to make *future* callbacks resolve immediately:
+     * releasing only the promises outstanding at that moment lets the loop
+     * start the next frames, which would then block forever on gates nobody
+     * is left to open.
+     */
+    function gated() {
+      const started: number[] = [];
+      const pending: Array<() => void> = [];
+      let open = false;
+
+      const callback = (_buf: ArrayBuffer, i: number) => {
+        started.push(i);
+        if (open) return Promise.resolve();
+        return new Promise<void>((resolve) => pending.push(resolve));
+      };
+      const releaseOne = () => pending.shift()?.();
+      const openAll = () => {
+        open = true;
+        while (pending.length > 0) pending.shift()!();
+      };
+      return { started, callback, releaseOne, openAll };
+    }
+
+    it("runs ahead up to the window without waiting", async () => {
+      const { started, callback, openAll } = gated();
+      // 40x40 frames, so the window is the maximum of 4.
+      const done = renderTimeline(
+        makeStore(),
+        {},
+        renderers,
+        { ...options, fps: 8, duration: 1 },
+        callback,
+      );
+
+      await vi.waitFor(() => expect(started).toEqual([0, 1, 2, 3]));
+      // Held there: the window is full and nothing has been acknowledged.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(started).toEqual([0, 1, 2, 3]);
+
+      openAll();
+      await done;
+      expect(started).toHaveLength(8);
+    });
+
+    it("admits exactly one more frame per acknowledgement", async () => {
+      const { started, callback, releaseOne, openAll } = gated();
+      const done = renderTimeline(
+        makeStore(),
+        {},
+        renderers,
+        { ...options, fps: 8, duration: 1 },
+        callback,
+      );
+
+      await vi.waitFor(() => expect(started).toHaveLength(4));
+      releaseOne();
+      await vi.waitFor(() => expect(started).toHaveLength(5));
+      await new Promise((r) => setTimeout(r, 20));
+      expect(started).toHaveLength(5);
+
+      openAll();
+      await done;
+    });
+
+    it("hands frames over in order", async () => {
+      const seen: number[] = [];
+      await renderTimeline(
+        makeStore(),
+        {},
+        renderers,
+        { ...options, fps: 10, duration: 2 },
+        async (_buf, i) => {
+          seen.push(i);
+          // Resolve out of order on purpose: a later frame acknowledged first
+          // must still not change the order they were handed over in.
+          await new Promise((r) => setTimeout(r, i % 3));
+        },
+      );
+
+      expect(seen).toEqual([...Array(20).keys()]);
+    });
+
+    it("does not resolve until every outstanding frame has landed", async () => {
+      // The caller closes FFmpeg's stdin the moment this resolves, so an
+      // unacknowledged frame here would be a truncated file.
+      let settled = 0;
+      await renderTimeline(
+        makeStore(),
+        {},
+        renderers,
+        { ...options, fps: 8, duration: 1 },
+        async () => {
+          await new Promise((r) => setTimeout(r, 5));
+          settled += 1;
+        },
+      );
+
+      expect(settled).toBe(8);
+    });
+
+    it("surfaces a rejection from a frame that was already in flight", async () => {
+      await expect(
+        renderTimeline(
+          makeStore(),
+          {},
+          renderers,
+          { ...options, fps: 8, duration: 1 },
+          async (_buf, i) => {
+            if (i === 1) throw new Error("pipe died");
+          },
+        ),
+      ).rejects.toThrow("pipe died");
+    });
+  });
+
+  it("stops on an aborted signal and does not emit the rest", async () => {
+    const controller = new AbortController();
+    const frames: number[] = [];
+
+    await expect(
+      renderTimeline(
+        makeStore(),
+        {},
+        renderers,
+        { ...options, fps: 4, duration: 1 },
+        (_buf, i) => {
+          frames.push(i);
+          if (i === 1) {
+            controller.abort();
+          }
+        },
+        { signal: controller.signal },
+      ),
+    ).rejects.toThrow(/cancelled/i);
+
+    expect(frames).toEqual([0, 1]);
+  });
+
+  it("does not start at all when the signal is already aborted", async () => {
+    const frames: number[] = [];
+    await expect(
+      renderTimeline(
+        makeStore(),
+        {},
+        renderers,
+        options,
+        (_buf, i) => frames.push(i),
+        { signal: AbortSignal.abort() },
+      ),
+    ).rejects.toThrow(/cancelled/i);
+
+    expect(frames).toEqual([]);
+  });
+
+  it("skips decoding audio handles, which export never reads", async () => {
+    const store = makeStore();
+    await renderTimeline(store, {}, renderers, options, () => {});
+
+    expect(store.loadEntireTimeline).toHaveBeenCalledWith(
+      {},
+      { audio: false },
+    );
   });
 
   it("composites the timeline onto a canvas at the requested size", async () => {

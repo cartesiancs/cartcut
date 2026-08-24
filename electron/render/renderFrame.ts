@@ -1,42 +1,120 @@
-import { spawn } from "child_process";
+import { unlink } from "fs/promises";
 import { mainWindow } from "../main";
-import { ipcMain } from "electron";
 import { ffmpegConfig } from "../lib/ffmpeg";
-import { buildFFmpegArgs } from "./ffmpegArgs";
+import { RenderOptions } from "./ffmpegArgs";
+import {
+  cancelSession,
+  ExportSession,
+  FrameSizeError,
+  startExportSession,
+  writeFrame,
+} from "./framePipe";
 
-let ffmpegProcess;
+let session: ExportSession | null = null;
 
-export function startFFmpegProcess(options, timeline) {
-  const ffmpegPath = ffmpegConfig.FFMPEG_PATH;
+function send(channel: string, payload: unknown): void {
+  if (mainWindow != null && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+}
 
-  // Argument construction lives in `ffmpegArgs.ts` so it can be unit tested;
-  // this function only owns the process.
-  const args = buildFFmpegArgs(options, timeline);
+/** The live session, or null when `id` names one that has been superseded. */
+function currentSession(id: string | undefined): ExportSession | null {
+  if (session == null) {
+    return null;
+  }
+  // A missing id keeps any un-migrated caller working.
+  if (id != null && session.id !== id) {
+    return null;
+  }
+  return session;
+}
 
-  ffmpegProcess = spawn(ffmpegPath, args);
+export function startFFmpegProcess(
+  options: RenderOptions,
+  timeline: Record<string, any>,
+): ExportSession {
+  const started = startExportSession(ffmpegConfig.FFMPEG_PATH, options, timeline, {
+    onSuccess: (finished) => {
+      if (finished === session) session = null;
+      send("PROCESSING_FINISH", { destination: finished.destination });
+    },
+    onError: (failed, detail) => {
+      if (failed === session) session = null;
+      send("render:v2:error", {
+        sessionId: failed.id,
+        ...detail,
+        stderrTail: failed.stderrTail.join("\n"),
+      });
+    },
+    onCancelled: (cancelled) => {
+      if (cancelled === session) session = null;
 
-  ffmpegProcess.stderr.on("data", (data) => {
-    console.log("[ffmpeg]", data.toString());
+      // The kill is asynchronous, so by the time it is reaped the user may
+      // already have started another export — and if that one writes to the
+      // same path, deleting "the partial file" would delete theirs instead.
+      const takenOver =
+        session != null && session.destination === cancelled.destination;
+      if (!takenOver) {
+        void unlink(cancelled.destination).catch(() => {});
+      }
+
+      send("render:v2:cancelled", { sessionId: cancelled.id });
+    },
   });
 
-  ffmpegProcess.on("close", (code) => {
-    mainWindow.webContents.send("PROCESSING_FINISH");
-  });
+  session = started;
+  return started;
 }
 
 export const ipcRenderV2 = {
-  start: (event, options, timeline) => {
-    startFFmpegProcess(options, timeline);
+  start: (_event: unknown, options: RenderOptions, timeline: any) => {
+    if (session != null && !session.finished) {
+      throw new Error("An export is already running");
+    }
+    const started = startFFmpegProcess(options, timeline);
+    return {
+      sessionId: started.id,
+      expectedFrameBytes: started.expectedFrameBytes,
+    };
   },
-  sendFrame: (event, arrayBuffer) => {
-    const buffer = Buffer.from(arrayBuffer);
-    if (ffmpegProcess && ffmpegProcess.stdin.writable) {
-      ffmpegProcess.stdin.write(buffer);
+
+  sendFrame: async (
+    _event: unknown,
+    arrayBuffer: ArrayBuffer,
+    sessionId?: string,
+  ) => {
+    const target = currentSession(sessionId);
+    if (target == null || target.cancelled) {
+      return;
+    }
+
+    try {
+      await writeFrame(target, Buffer.from(arrayBuffer));
+    } catch (error) {
+      // A torn frame cannot be recovered from — every later frame in a
+      // rawvideo stream is offset by the same amount — so stop rather than
+      // finish a silently corrupt file.
+      if (error instanceof FrameSizeError) {
+        cancelSession(target);
+        send("render:v2:error", {
+          sessionId: target.id,
+          message: error.message,
+        });
+      }
+      throw error;
     }
   },
-  finishStream: () => {
-    if (ffmpegProcess) {
-      ffmpegProcess.stdin.end();
+
+  finishStream: (_event: unknown, sessionId?: string) => {
+    const target = currentSession(sessionId);
+    target?.process.stdin.end();
+  },
+
+  cancel: (_event: unknown, sessionId?: string) => {
+    const target = currentSession(sessionId);
+    if (target != null) {
+      cancelSession(target);
     }
   },
 };

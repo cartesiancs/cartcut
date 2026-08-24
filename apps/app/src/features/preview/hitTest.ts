@@ -18,6 +18,12 @@
  */
 
 import type { Point } from "../timeline/transform";
+import type {
+  Timeline,
+  TimelineElement,
+} from "../../@types/timeline";
+import { isVisualTimelineElement } from "../../@types/timeline";
+import { isElementVisibleAtTime } from "../element/time";
 
 export type HitZone =
   | "position"
@@ -157,4 +163,45 @@ function normaliseScale(raw: number | undefined): number {
     return 1;
   }
   return raw;
+}
+
+/**
+ * Whether the pointer may act on this element at the current playhead.
+ *
+ * Split out of `previewCanvas.isPointerTarget` so the rule has one home and a
+ * test. It used to be re-decided inline in both `_handleMouseDown` and
+ * `_handleMouseMove`, and both copies added `trim` to `startTime` — `trim` is a
+ * window into the *source file* in source ms, `startTime` is a position on the
+ * timeline, and their sum is a time in no coordinate system at all. An
+ * untrimmed clip has `trim.startTime === 0`, so the sum was accidentally right
+ * and the bug survived; the second half of a split carries a non-zero trim, so
+ * its grabbable window slid forward by exactly that amount and it could not be
+ * clicked over its own opening seconds.
+ *
+ * The predicate is deliberately `isElementVisibleAtTime` — the same one
+ * `renderTimelineAtTime` gates drawing on — so the pointer and the picture
+ * cannot disagree.
+ */
+export function canPointerTarget(
+  element: TimelineElement | undefined,
+  cursorMs: number,
+  timeline: Timeline,
+  isActiveElement: boolean,
+): boolean {
+  if (element == null) {
+    return false;
+  }
+
+  // A group's frame is live whenever it is selected, whatever the playhead is
+  // doing: its transform applies to its children at every instant, so hiding
+  // its handles outside its own bar would be arbitrary.
+  if (element.filetype === "group") {
+    return isActiveElement;
+  }
+
+  if (!isVisualTimelineElement(element)) {
+    return false;
+  }
+
+  return isElementVisibleAtTime(cursorMs, timeline, element);
 }

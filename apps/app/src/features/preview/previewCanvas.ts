@@ -24,7 +24,12 @@ import {
 } from "../renderer/timeline";
 import { isVisualTimelineElement } from "../../@types/timeline";
 import { applyElementTransform } from "../renderer/element";
-import { hitZoneOf, isStretchZone, type HitZone } from "./hitTest";
+import {
+  canPointerTarget,
+  hitZoneOf,
+  isStretchZone,
+  type HitZone,
+} from "./hitTest";
 import {
   constrainsAspect,
   resizedDocument,
@@ -804,14 +809,14 @@ export class PreviewCanvas extends LitElement {
    * its bar on the timeline. That is what makes an invisible, resizable box on
    * the canvas safe to have: until you ask for it, it is not there.
    */
+  /** See `canPointerTarget`, which owns the rule and carries its history. */
   private isPointerTarget(elementId: string, element: any): boolean {
-    if (element == null) {
-      return false;
-    }
-    if (element.filetype === "group") {
-      return elementId === this.activeElementId;
-    }
-    return isVisualTimelineElement(element);
+    return canPointerTarget(
+      element,
+      this.timelineCursor,
+      this.timeline,
+      elementId === this.activeElementId,
+    );
   }
 
   /**
@@ -1073,32 +1078,9 @@ export class PreviewCanvas extends LitElement {
         const w = element.width;
         const h = element.height;
 
-        const fileType = element.filetype;
-        const startTime = element.startTime;
-        const duration = element.duration;
-
-        // A group's frame is live whenever it is selected, whatever the
-        // playhead is doing: its transform applies to its children at every
-        // instant, so hiding its handles outside its own bar would be arbitrary.
-        if (
-          fileType != "group" &&
-          !(
-            this.timelineCursor >= startTime &&
-            this.timelineCursor < startTime + duration
-          )
-        ) {
-          continue;
-        }
-
-        if (fileType == "video") {
-          if (!(
-            this.timelineCursor >= startTime + element.trim.startTime &&
-            this.timelineCursor < startTime + element.trim.endTime
-          )) {
-            continue;
-          }
-        }
-
+        // Whether this element is live at the playhead is `isPointerTarget`'s
+        // job, above — it used to be re-decided here and in `_handleMouseMove`,
+        // and both copies got `trim` wrong.
         const collide = { type: this.hitZoneAt(elementId, mx, my) };
 
         if (collide.type == "position") {
@@ -1352,10 +1334,6 @@ export class PreviewCanvas extends LitElement {
       for (const elementId of Object.keys(sortedTimeline)) {
         const element = this.timeline[elementId];
         if (this.isPointerTarget(elementId, element)) {
-          const fileType = element.filetype;
-          const startTime = element.startTime;
-          const duration = element.duration;
-
           // Where the selection box and its drag handles sit, which has to be
           // wherever the element is actually being drawn.
           //
@@ -1373,27 +1351,8 @@ export class PreviewCanvas extends LitElement {
           // above it. `hitZoneAt` resolves the whole chain through the matrix
           // the renderer draws with.
 
-          // As in `_handleMouseDown`: a selected group's frame is live at
-          // every instant, so its handles do not blink out with its bar.
-          if (
-            fileType != "group" &&
-            !(
-              this.timelineCursor >= startTime &&
-              this.timelineCursor < startTime + duration
-            )
-          ) {
-            continue;
-          }
-
-          if (fileType == "video") {
-            if (!(
-              this.timelineCursor >= startTime + element.trim.startTime &&
-              this.timelineCursor < startTime + element.trim.endTime
-            )) {
-              continue;
-            }
-          }
-
+          // Liveness at the playhead is `isPointerTarget`'s job, as in
+          // `_handleMouseDown` — this used to re-decide it, and got `trim` wrong.
           const collide = { type: this.hitZoneAt(elementId, mx, my) };
 
           if (collide.type == "position") {

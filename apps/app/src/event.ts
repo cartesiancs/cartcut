@@ -30,6 +30,33 @@ window.electronAPI.res.render.error((evt, errormsg) => {
   document.querySelector("#progressErrorMsg").innerHTML = `${errormsg}`;
 });
 
+/**
+ * A `render:v2` export that failed.
+ *
+ * FFmpeg encodes behind the frame loop, so a mux or codec failure can surface
+ * after the last frame has been written and the loop has already resolved
+ * happily. Nothing listened for that, and the old `close` handler reported
+ * success whatever the exit code — so the user got a checkmark and a truncated
+ * file.
+ */
+window.electronAPI.res.render.v2Error((evt, detail) => {
+  rendererModal.progressModal.hide();
+  rendererModal.progressError.show();
+
+  const message = detail?.message ?? "Export failed";
+  const tail = detail?.stderrTail ? `\n\n${detail.stderrTail}` : "";
+  const target = document.querySelector("#progressErrorMsg");
+  if (target != null) {
+    // `textContent`, not `innerHTML`: this carries raw FFmpeg stderr.
+    target.textContent = `${message}${tail}`;
+  }
+  console.error("[render:v2]", message, detail?.stderrTail);
+});
+
+window.electronAPI.res.render.v2Cancelled(() => {
+  rendererModal.progressModal.hide();
+});
+
 window.electronAPI.res.app.forceClose((evt) => {
   let isTimelineChange = document
     .querySelector("element-timeline")

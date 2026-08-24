@@ -5,31 +5,43 @@ import { Router, Response, Request } from "express";
 import path from "path";
 import ffmpeg from "fluent-ffmpeg";
 import { window } from "../../lib/window.js";
-import { spawn } from "child_process";
 import { mainWindow } from "../../main";
 import { ipcMain } from "electron";
 import { ffmpegConfig } from "../../lib/ffmpeg";
 import { sendRenderDone, sendRenderProgress } from "../sockets/conn.js";
-import { buildFFmpegArgs } from "../../render/ffmpegArgs";
+import {
+  cancelSession,
+  ExportSession,
+  FrameSizeError,
+  startExportSession,
+  writeFrame,
+} from "../../render/framePipe";
 
-let ffmpegProcess;
+let session: ExportSession | null = null;
 let offscreenRender;
 
 export function startFFmpegProcess(options, timeline) {
-  const ffmpegPath = ffmpegConfig.FFMPEG_PATH;
-
-  // Shares the tested builder with the in-app export path; this used to be a
-  // near-verbatim copy, so the two could disagree about the audio graph.
-  const args = buildFFmpegArgs(options, timeline);
-
-  ffmpegProcess = spawn(ffmpegPath, args);
-
-  ffmpegProcess.stderr.on("data", (data) => {
-    console.log("[ffmpeg]", data.toString());
-  });
-
-  ffmpegProcess.on("close", (code) => {
-    mainWindow.webContents.send("PROCESSING_FINISH");
+  // Shares the session/backpressure machinery with the in-app export path.
+  // This used to be a second bare `let ffmpegProcess` with its own copy of the
+  // spawn, so the two could disagree and neither honoured `write`'s return.
+  session = startExportSession(ffmpegConfig.FFMPEG_PATH, options, timeline, {
+    onSuccess: (finished) => {
+      if (finished === session) session = null;
+      mainWindow.webContents.send("PROCESSING_FINISH", {
+        destination: finished.destination,
+      });
+    },
+    onError: (failed, detail) => {
+      if (failed === session) session = null;
+      console.error("[render:offscreen]", detail.message, failed.stderrTail);
+      mainWindow.webContents.send("render:offscreen:error", {
+        ...detail,
+        stderrTail: failed.stderrTail.join("\n"),
+      });
+    },
+    onCancelled: (cancelled) => {
+      if (cancelled === session) session = null;
+    },
   });
 }
 
@@ -69,16 +81,30 @@ export const httpFFmpegRenderV2 = {
     //startFFmpegProcess(options, timeline);
   },
 
-  sendFrame: (event, arrayBuffer, per) => {
-    const buffer = Buffer.from(arrayBuffer);
+  sendFrame: async (event, arrayBuffer, per) => {
+    if (session == null || session.cancelled) {
+      return;
+    }
     sendRenderProgress(per);
-    if (ffmpegProcess && ffmpegProcess.stdin.writable) {
-      ffmpegProcess.stdin.write(buffer);
+
+    try {
+      // Awaited: resolves when the pipe has room, which is the backpressure
+      // signal the offscreen window's frame loop waits on.
+      await writeFrame(session, Buffer.from(arrayBuffer));
+    } catch (error) {
+      // A torn frame cannot be recovered from — every later frame in a
+      // rawvideo stream carries the same offset — so stop rather than finish a
+      // silently corrupt file.
+      if (error instanceof FrameSizeError) {
+        console.error("[render:offscreen]", error.message);
+        cancelSession(session);
+      }
+      throw error;
     }
   },
   finishStream: () => {
-    if (ffmpegProcess) {
-      ffmpegProcess.stdin.end();
+    if (session != null) {
+      session.process.stdin.end();
       sendRenderDone(options.videoDestination);
     }
   },

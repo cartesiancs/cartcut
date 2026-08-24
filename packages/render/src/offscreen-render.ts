@@ -36,27 +36,46 @@ export class RenderController implements ReactiveController {
 
   public requestRenderV2(timeline: Timeline, options: ExportOptions) {
     this.timeline = timeline;
-    window.electronAPI.req.render.offscreen.start(options, timeline);
-
     void this.runExport(options);
   }
 
   private async runExport(options: ExportOptions) {
     const assetStore = loadedAssetStore.getState();
 
+    // Awaited, so frame 0 cannot reach the main process before FFmpeg has
+    // spawned — it worked before only by luck of message ordering.
+    await window.electronAPI.req.render.offscreen.start(options, this.timeline);
+
+    // Progress used to be one socket.io message per frame. Throttling to
+    // ~10 Hz keeps the bar smooth without a broadcast per frame.
+    let lastReportedAt = 0;
+    let percent = 0;
+
     await renderTimeline(
       assetStore,
       this.timeline,
       elementRenderers,
       options,
-      (frameBuffer, currentFrame, totalFrames) => {
-        const percent = (currentFrame / totalFrames) * 100;
-        window.electronAPI.req.render.offscreen.sendFrame(frameBuffer, percent);
-        if (currentFrame === totalFrames - 1) {
-          window.electronAPI.req.render.offscreen.finishStream();
+      async (frameBuffer, currentFrame, totalFrames) => {
+        const isLast = currentFrame === totalFrames - 1;
+        const now = performance.now();
+        if (now - lastReportedAt >= 100 || isLast) {
+          lastReportedAt = now;
+          percent = (currentFrame / totalFrames) * 100;
         }
+
+        // Awaited: resolves when FFmpeg's stdin has room, which is what stops
+        // the renderer outrunning the encoder now that frames are raw.
+        await window.electronAPI.req.render.offscreen.sendFrame(
+          frameBuffer,
+          percent,
+        );
       },
     );
+
+    // After the loop, not on the last frame: a zero-length project emits none,
+    // and stdin would then never close, leaving FFmpeg on the pipe forever.
+    await window.electronAPI.req.render.offscreen.finishStream();
   }
 
   hostConnected() {}

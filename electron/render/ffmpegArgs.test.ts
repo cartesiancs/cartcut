@@ -4,6 +4,8 @@ import {
   audioFilterFor,
   buildFFmpegArgs,
   collectAudioInputs,
+  frameByteLength,
+  frameFormatFor,
   isAudible,
 } from "./ffmpegArgs";
 import { ffmpegWindow } from "../../apps/app/src/features/timeline/geometry";
@@ -22,6 +24,16 @@ const options = {
   videoDuration: 10,
   videoBitrate: 4000,
   videoDestination: "/tmp/out.mp4",
+};
+
+/**
+ * The current shape, which carries a frame size and therefore reaches the
+ * default `rawvideo` pipe. `options` above deliberately does not.
+ */
+const rawOptions = {
+  ...options,
+  fps: 60,
+  previewSize: { w: 1920, h: 1080 },
 };
 
 /** Reads back the value FFmpeg was given for a flag preceding an input path. */
@@ -201,6 +213,94 @@ describe("audioFilterFor", () => {
       "audio0",
     );
     expect(filter).toContain("adelay=1501|1501");
+  });
+});
+
+describe("frameFormatFor", () => {
+  it("defaults to rawvideo once a frame size is known", () => {
+    expect(frameFormatFor(rawOptions)).toBe("rawvideo");
+  });
+
+  it("falls back to PNG when no frame size is carried", () => {
+    // rawvideo has no dimensions of its own, so `-s WxH` is mandatory and
+    // FFmpeg refuses to start without it. Legacy and HTTP/offscreen callers
+    // build the flat shape, which has none — PNG is the runnable answer, not
+    // an unrunnable command.
+    expect(frameFormatFor(options)).toBe("png");
+    expect(
+      frameFormatFor({ ...options, previewSize: { w: 0, h: 1080 } }),
+    ).toBe("png");
+    expect(
+      frameFormatFor({
+        ...options,
+        previewSize: { w: Number.NaN, h: 1080 },
+      }),
+    ).toBe("png");
+  });
+
+  it("honours an explicit PNG request even with a frame size", () => {
+    expect(frameFormatFor({ ...rawOptions, frameFormat: "png" })).toBe("png");
+  });
+});
+
+describe("frameByteLength", () => {
+  it("is four bytes per pixel, matching -pix_fmt rgba", () => {
+    expect(frameByteLength(1920, 1080)).toBe(1920 * 1080 * 4);
+    expect(frameByteLength(2, 3)).toBe(24);
+  });
+});
+
+describe("buildFFmpegArgs, rawvideo pipe", () => {
+  it("declares the stride before the input, as FFmpeg requires", () => {
+    const args = buildFFmpegArgs(rawOptions, {});
+    expect(args.slice(0, 12)).toEqual([
+      "-f",
+      "rawvideo",
+      "-pix_fmt",
+      "rgba",
+      "-s",
+      "1920x1080",
+      "-r",
+      "60",
+      "-thread_queue_size",
+      "512",
+      "-i",
+      "pipe:0",
+    ]);
+  });
+
+  it("puts -pix_fmt and -s before -i, or they parse as output options", () => {
+    const args = buildFFmpegArgs(rawOptions, {});
+    const input = args.indexOf("pipe:0");
+    expect(args.indexOf("-pix_fmt")).toBeLessThan(input);
+    expect(args.indexOf("-s")).toBeLessThan(input);
+  });
+
+  it("sizes the frame from previewSize, not the encoder settings", () => {
+    const args = buildFFmpegArgs(
+      { ...rawOptions, previewSize: { w: 640, h: 360 } },
+      {},
+    );
+    expect(args[args.indexOf("-s") + 1]).toBe("640x360");
+  });
+
+  it("clocks the pipe at the project's frame rate", () => {
+    const args = buildFFmpegArgs({ ...rawOptions, fps: 30 }, {});
+    expect(args[args.indexOf("-r") + 1]).toBe("30");
+  });
+
+  it("leaves the audio graph and output settings untouched", () => {
+    // The pipe format is a transport detail; swapping it must not disturb
+    // anything downstream of stream 0.
+    const raw = buildFFmpegArgs(rawOptions, { a: audioElement({}) });
+    const png = buildFFmpegArgs(
+      { ...rawOptions, frameFormat: "png" },
+      { a: audioElement({}) },
+    );
+    expect(filterComplexOf(raw)).toEqual(filterComplexOf(png));
+    expect(raw.slice(raw.indexOf("-map"))).toEqual(
+      png.slice(png.indexOf("-map")),
+    );
   });
 });
 

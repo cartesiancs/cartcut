@@ -132,4 +132,33 @@ describe("renderGif", () => {
     expect(pixel(second.canvas, 25, 25)).toMatchObject({ r: 0, g: 255, b: 0 });
     expect(pixel(second.canvas, 5, 5)).toMatchObject({ r: 0, g: 255, b: 0 });
   });
+
+  it("keeps two GIFs on screen apart, even at different frame indices", () => {
+    // The staging canvas used to be a single module-level singleton shared by
+    // every GIF element. It happened to work only because the blit followed
+    // the upload immediately; caching the staged frame makes that assumption
+    // false, so each element now stages into its own.
+    const slow = [frame(RED, 100, 16), frame(GREEN, 100, 16)];
+    const fast = [frame(BLUE, 50, 4), frame(GREEN, 50, 4)];
+    store.getGif.mockImplementation((path: string) =>
+      path === "/slow.gif" ? slow : fast,
+    );
+
+    const a = gifElement({ localpath: "/slow.gif", width: 50, height: 50 });
+    const b = gifElement({ localpath: "/fast.gif", width: 50, height: 50 });
+
+    const first = scene(60, 60, "#000000");
+    renderGif(first.ctx, "a", a, 0);
+    expect(pixel(first.canvas, 25, 25)).toMatchObject({ r: 255, g: 0, b: 0 });
+
+    const second = scene(60, 60, "#000000");
+    renderGif(second.ctx, "b", b, 0);
+    expect(pixel(second.canvas, 25, 25)).toMatchObject({ r: 0, g: 0, b: 255 });
+
+    // Back to the first element at the same cursor: its own staged frame must
+    // still be red, not whatever the other element last staged.
+    const third = scene(60, 60, "#000000");
+    renderGif(third.ctx, "a", a, 0);
+    expect(pixel(third.canvas, 25, 25)).toMatchObject({ r: 255, g: 0, b: 0 });
+  });
 });

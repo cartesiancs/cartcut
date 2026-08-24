@@ -71,19 +71,24 @@ const request = {
     outputVideo: (elements, options) =>
       ipcRenderer.send("RENDER", elements, options),
     v2: {
-      sendFrame: (base64Data) =>
-        ipcRenderer.send("render:v2:sendFrame", base64Data),
-      finishStream: () => ipcRenderer.send("render:v2:finishStream"),
+      // All `invoke`: `start` must resolve after the spawn so frame 0 cannot
+      // beat it, and `sendFrame` resolves only when the pipe has room — that
+      // resolution is the backpressure signal the frame loop awaits.
+      sendFrame: (frameBuffer, sessionId) =>
+        ipcRenderer.invoke("render:v2:sendFrame", frameBuffer, sessionId),
+      finishStream: (sessionId) =>
+        ipcRenderer.invoke("render:v2:finishStream", sessionId),
       start: (options, timeline) =>
-        ipcRenderer.send("render:v2:start", options, timeline),
+        ipcRenderer.invoke("render:v2:start", options, timeline),
+      cancel: (sessionId) => ipcRenderer.invoke("render:v2:cancel", sessionId),
     },
     offscreen: {
       readyToRender: () => ipcRenderer.invoke("render:offscreen:readyToRender"),
       start: (options, timeline) =>
-        ipcRenderer.send("render:offscreen:start", options, timeline),
-      sendFrame: (base64Data, pers) =>
-        ipcRenderer.send("render:offscreen:sendFrame", base64Data, pers),
-      finishStream: () => ipcRenderer.send("render:offscreen:finishStream"),
+        ipcRenderer.invoke("render:offscreen:start", options, timeline),
+      sendFrame: (frameBuffer, pers) =>
+        ipcRenderer.invoke("render:offscreen:sendFrame", frameBuffer, pers),
+      finishStream: () => ipcRenderer.invoke("render:offscreen:finishStream"),
     },
   },
   url: {
@@ -143,6 +148,13 @@ const response = {
     progressing: (callback) => ipcRenderer.on("PROCESSING", callback),
     finish: (callback) => ipcRenderer.on("PROCESSING_FINISH", callback),
     error: (callback) => ipcRenderer.on("PROCESSING_ERROR", callback),
+    /**
+     * FFmpeg exited nonzero. Distinct from `PROCESSING_ERROR`, which only the
+     * legacy fluent path emits — this one fires for `render:v2`, including for
+     * failures that surface after the last frame has been written.
+     */
+    v2Error: (callback) => ipcRenderer.on("render:v2:error", callback),
+    v2Cancelled: (callback) => ipcRenderer.on("render:v2:cancelled", callback),
     finishCombineFrame: (callback) =>
       ipcRenderer.on("FINISH_COMBINE_FRAME", callback),
     offscreen: {

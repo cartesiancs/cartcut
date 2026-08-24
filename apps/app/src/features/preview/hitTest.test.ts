@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  canPointerTarget,
   HANDLE_PADDING_PX,
   hitZoneOf,
   isStretchZone,
@@ -12,7 +13,14 @@ import {
   worldMatrixOf,
 } from "../timeline/transform";
 import { bakeTrack } from "../animation/keyframes";
-import { groupElement, imageElement, keys } from "../renderer/testing";
+import {
+  audioElement,
+  groupElement,
+  imageElement,
+  keys,
+  videoElement,
+} from "../renderer/testing";
+import { splitAt } from "../timeline/clipEdit";
 import type { Timeline } from "../../@types/timeline";
 
 const W = 200;
@@ -247,5 +255,86 @@ describe("isStretchZone", () => {
     expect(isStretchZone("position")).toBe(false);
     expect(isStretchZone("rotation")).toBe(false);
     expect(isStretchZone("none")).toBe(false);
+  });
+});
+
+
+describe("canPointerTarget", () => {
+  const timeline: Timeline = {};
+
+  it("takes a clip while the playhead is inside its span", () => {
+    const el = imageElement({ startTime: 1000, duration: 2000 });
+    expect(canPointerTarget(el, 1000, timeline, false)).toBe(true);
+    expect(canPointerTarget(el, 2999, timeline, false)).toBe(true);
+  });
+
+  it("refuses a clip the playhead has left", () => {
+    const el = imageElement({ startTime: 1000, duration: 2000 });
+    expect(canPointerTarget(el, 999, timeline, false)).toBe(false);
+    expect(canPointerTarget(el, 3000, timeline, false)).toBe(false);
+  });
+
+  /**
+   * The bug this file's `canPointerTarget` exists to prevent.
+   *
+   * Both mouse handlers used to gate on `startTime + trim.startTime`, mixing a
+   * timeline position with a source-file offset. An unsplit clip has
+   * `trim.startTime === 0`, so it looked fine — but after a split the second
+   * half's grabbable window slid forward by the trim and it could not be
+   * clicked over its own opening seconds.
+   */
+  it("takes the second half of a split over its whole span", () => {
+    const whole = videoElement({
+      startTime: 0,
+      duration: 20_000,
+      speed: 1,
+      trim: { startTime: 0, endTime: 20_000 },
+      sourceDuration: 20_000,
+    });
+    const parts = splitAt(whole, 5000)!;
+    expect(parts).not.toBeNull();
+    // The half that broke: a non-zero trim into the source file.
+    expect(parts.right.trim.startTime).toBeGreaterThan(0);
+
+    // Grabbable from the cut, not from cut + trim.
+    expect(canPointerTarget(parts.right, 5000, timeline, false)).toBe(true);
+    expect(canPointerTarget(parts.right, 6000, timeline, false)).toBe(true);
+    expect(canPointerTarget(parts.right, 9999, timeline, false)).toBe(true);
+    expect(canPointerTarget(parts.right, 19_999, timeline, false)).toBe(true);
+    expect(canPointerTarget(parts.right, 20_000, timeline, false)).toBe(false);
+
+    // And the first half still stops at the cut.
+    expect(canPointerTarget(parts.left, 4999, timeline, false)).toBe(true);
+    expect(canPointerTarget(parts.left, 5000, timeline, false)).toBe(false);
+  });
+
+  it("measures the span through speed, not raw duration", () => {
+    // A 2x clip holding 4s of source occupies 2s of timeline.
+    const fast = videoElement({
+      startTime: 0,
+      duration: 4000,
+      speed: 2,
+      trim: { startTime: 0, endTime: 4000 },
+      sourceDuration: 10_000,
+    });
+    expect(canPointerTarget(fast, 1999, timeline, false)).toBe(true);
+    expect(canPointerTarget(fast, 2000, timeline, false)).toBe(false);
+  });
+
+  it("keeps a selected group grabbable at any playhead", () => {
+    // Its transform applies to its children at every instant, so its handles
+    // must not blink out with its own bar.
+    const group = groupElement({ startTime: 1000, duration: 1000 });
+    expect(canPointerTarget(group, 50_000, timeline, true)).toBe(true);
+    expect(canPointerTarget(group, 50_000, timeline, false)).toBe(false);
+  });
+
+  it("refuses audio, which has nothing to grab on the canvas", () => {
+    const sound = audioElement({ startTime: 0, duration: 5000 });
+    expect(canPointerTarget(sound, 1000, timeline, false)).toBe(false);
+  });
+
+  it("refuses a missing element", () => {
+    expect(canPointerTarget(undefined, 0, timeline, false)).toBe(false);
   });
 });

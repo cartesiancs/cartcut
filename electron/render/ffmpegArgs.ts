@@ -1,8 +1,14 @@
 /**
  * Pure construction of the FFmpeg argument list for the `render:v2` export.
  *
- * Video frames arrive as a PNG stream on stdin; the audio is re-derived here
- * from the timeline, one input per audible clip, delayed into place and mixed.
+ * Video frames arrive on stdin as raw RGBA; the audio is re-derived here from
+ * the timeline, one input per audible clip, delayed into place and mixed.
+ *
+ * The frame pipe used to carry PNG. Deflating a 1080p frame cost ~120 ms of
+ * CPU only for FFmpeg to inflate it again two milliseconds later — about 60%
+ * of export wall time — against ~3.6 ms for the raw round trip. `"png"` is
+ * still reachable through `frameFormat` as a fallback, and its argument shape
+ * is pinned by tests.
  *
  * This file is deliberately self-contained — importing
  * `apps/app/src/features/timeline/geometry.ts` would pull the renderer tree
@@ -43,6 +49,11 @@ export type AudioInput = {
   speed: number;
 };
 
+/** How the renderer serialises each frame onto stdin. */
+export type FramePipeFormat = "rawvideo" | "png";
+
+export const DEFAULT_FRAME_FORMAT: FramePipeFormat = "rawvideo";
+
 export type RenderOptions = {
   videoDuration: number;
   /** Legacy mirror of `exportSettings.videoBitrate`; see `resolveExportSettings`. */
@@ -50,9 +61,44 @@ export type RenderOptions = {
   videoDestination: string;
   /** Absent on the HTTP/offscreen path, which still builds the flat shape. */
   exportSettings?: Partial<ExportSettings>;
-  /** Absent on the legacy path, where the PNG pipe rate falls back to 60. */
+  /** Absent on the legacy path, where the pipe rate falls back to 60. */
   fps?: number;
+  /**
+   * Frame size, required by `rawvideo`, which carries no dimensions of its
+   * own. Absent only on legacy callers, which are pinned to `"png"`.
+   */
+  previewSize?: { w: number; h: number };
+  /** Defaults to `rawvideo`; `png` keeps the pre-existing pipe shape. */
+  frameFormat?: FramePipeFormat;
 };
+
+/**
+ * Which pipe format a set of options actually resolves to.
+ *
+ * `rawvideo` needs `-s WxH` and FFmpeg errors out with "Video size not set"
+ * without it, so options that carry no `previewSize` — the legacy and
+ * HTTP/offscreen shapes — fall back to PNG rather than producing a command
+ * that cannot run.
+ */
+export function frameFormatFor(options: RenderOptions): FramePipeFormat {
+  const requested = options.frameFormat ?? DEFAULT_FRAME_FORMAT;
+  if (requested !== "rawvideo") {
+    return "png";
+  }
+  const size = options.previewSize;
+  const usable =
+    size != null &&
+    Number.isFinite(size.w) &&
+    Number.isFinite(size.h) &&
+    size.w > 0 &&
+    size.h > 0;
+  return usable ? "rawvideo" : "png";
+}
+
+/** Bytes one `rawvideo` RGBA frame must be, exactly. */
+export function frameByteLength(width: number, height: number): number {
+  return width * height * 4;
+}
 
 function speedOf(element: any): number {
   const speed = element?.speed;
@@ -156,16 +202,37 @@ export function buildFFmpegArgs(
   // rate. Legacy callers carry no fps and keep the old behaviour.
   const inputFps = Number(options.fps) > 0 ? Number(options.fps) : 60;
 
-  args.push(
-    "-f",
-    "image2pipe",
-    "-vcodec",
-    "png",
-    "-r",
-    `${inputFps}`,
-    "-i",
-    "pipe:0",
-  );
+  if (frameFormatFor(options) === "rawvideo") {
+    const { w, h } = options.previewSize!;
+    args.push(
+      "-f",
+      "rawvideo",
+      // Both must precede `-i` or they are parsed as output options.
+      "-pix_fmt",
+      "rgba",
+      "-s",
+      `${w}x${h}`,
+      "-r",
+      `${inputFps}`,
+      // ~500 MB/s overruns the default input queue, which then stalls with
+      // "Thread message queue blocking".
+      "-thread_queue_size",
+      "512",
+      "-i",
+      "pipe:0",
+    );
+  } else {
+    args.push(
+      "-f",
+      "image2pipe",
+      "-vcodec",
+      "png",
+      "-r",
+      `${inputFps}`,
+      "-i",
+      "pipe:0",
+    );
+  }
 
   const inputs = collectAudioInputs(timeline);
 

@@ -155,17 +155,26 @@ ipcMain.handle("agent:getStatus", ipcAi.mcpStatus);
 
 ipcMain.handle("ytdlp:downloadVideo", ipcYtdlp.downloadVideo);
 
-ipcMain.on("render:v2:start", ipcRenderV2.start);
-ipcMain.on("render:v2:sendFrame", ipcRenderV2.sendFrame);
-ipcMain.on("render:v2:finishStream", ipcRenderV2.finishStream);
+// `handle`, not `on`: `start` has to resolve after the spawn so frame 0 cannot
+// race it, and `sendFrame` resolves only once the pipe has room, which is what
+// applies backpressure now that frames are raw.
+ipcMain.handle("render:v2:start", ipcRenderV2.start);
+ipcMain.handle("render:v2:sendFrame", ipcRenderV2.sendFrame);
+ipcMain.handle("render:v2:finishStream", ipcRenderV2.finishStream);
+ipcMain.handle("render:v2:cancel", ipcRenderV2.cancel);
 
 ipcMain.handle(
   "render:offscreen:readyToRender",
   httpFFmpegRenderV2.readyToRender,
 );
-ipcMain.on("render:offscreen:start", httpFFmpegRenderV2.start);
-ipcMain.on("render:offscreen:sendFrame", httpFFmpegRenderV2.sendFrame);
-ipcMain.on("render:offscreen:finishStream", httpFFmpegRenderV2.finishStream);
+ipcMain.handle("render:offscreen:start", httpFFmpegRenderV2.start);
+// `handle`: `sendFrame` resolves only when the pipe has room, and that
+// resolution is what applies backpressure to the offscreen frame loop.
+ipcMain.handle("render:offscreen:sendFrame", httpFFmpegRenderV2.sendFrame);
+ipcMain.handle(
+  "render:offscreen:finishStream",
+  httpFFmpegRenderV2.finishStream,
+);
 
 // ipcMain.on("overlayRecord:stop:res", async (evt) => {
 //   mainWindow.webContents.send("overlayRecord:stop:res", "");

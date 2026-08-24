@@ -39,8 +39,16 @@ export type VideoMetadataPerElement = {
   /** The source this was decoded from, so a changed path can be detected. */
   localpath: string;
   path: string;
-  canvas: HTMLCanvasElement;
   object: HTMLVideoElement;
+};
+
+/** What a load pass may skip. */
+export type AssetLoadOptions = {
+  /**
+   * Decode `<audio>` handles. Export passes `false`: FFmpeg reconstructs the
+   * audio graph from the timeline, so the renderer never reads them.
+   */
+  audio?: boolean;
 };
 
 export interface ILoadedAssetStore {
@@ -103,12 +111,16 @@ export interface ILoadedAssetStore {
   ) => Promise<void>;
   getElementVideo: (elementId: string) => VideoMetadataPerElement | null;
 
-  loadEntireTimeline: (timeline: Timeline) => Promise<void>;
+  loadEntireTimeline: (
+    timeline: Timeline,
+    options?: AssetLoadOptions,
+  ) => Promise<void>;
   /** Resolves true when something new finished decoding. */
   loadAssetsNeededAtTime: (t: number, timeline: Timeline) => Promise<boolean>;
   _loadAssetsWithFilter: (
     timeline: Timeline,
     filter: ((element: VisualTimelineElement) => boolean) | null,
+    options?: AssetLoadOptions,
   ) => Promise<boolean>;
 
   seek: (timeline: Timeline, time: number) => Promise<void>;
@@ -220,10 +232,6 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
       const video = document.createElement("video");
       video.playbackRate = videoElement.speed;
 
-      const canvas = document.createElement("canvas");
-      canvas.width = videoElement.width;
-      canvas.height = videoElement.height;
-
       video.src = videoElement.localpath;
 
       video.addEventListener(
@@ -234,7 +242,6 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
             elementId,
             localpath: videoElement.localpath,
             path: getPath(videoElement.localpath),
-            canvas: canvas,
             object: video,
           };
           resolve();
@@ -275,15 +282,15 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
     });
   },
 
-  async loadEntireTimeline(timeline: Timeline) {
-    await this._loadAssetsWithFilter(timeline, null);
+  async loadEntireTimeline(timeline: Timeline, options) {
+    await this._loadAssetsWithFilter(timeline, null, options);
   },
   async loadAssetsNeededAtTime(t: number, timeline: Timeline) {
     return this._loadAssetsWithFilter(timeline, (element) => {
       return isElementVisibleAtTime(t, timeline, element);
     });
   },
-  async _loadAssetsWithFilter(timeline, filter) {
+  async _loadAssetsWithFilter(timeline, filter, options) {
     // Drop handles for clips that are gone or now point at another file, so
     // the cache cannot outlive the timeline it was built from.
     get().releaseUnusedVideos(timeline);
@@ -333,18 +340,24 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
     }
 
     // Audio is not a visual element, so it never reaches the switch above.
-    for (const [elementId, element] of idElementPairs) {
-      if (
-        element.filetype !== "audio" ||
-        store._loadedElementAudio[elementId] != null
-      ) {
-        continue;
+    //
+    // Export opts out: FFmpeg rebuilds the whole audio graph from the timeline,
+    // so an `Audio()` per clip is pure cost there — and a hazard, since export
+    // never calls `syncPlayback`, leaving nothing to own their state.
+    if (options?.audio !== false) {
+      for (const [elementId, element] of idElementPairs) {
+        if (
+          element.filetype !== "audio" ||
+          store._loadedElementAudio[elementId] != null
+        ) {
+          continue;
+        }
+        tasks.push({
+          key: elementId,
+          inFlight: store._loadingElementAudio,
+          start: () => store.loadElementAudio(elementId, element),
+        });
       }
-      tasks.push({
-        key: elementId,
-        inFlight: store._loadingElementAudio,
-        start: () => store.loadElementAudio(elementId, element),
-      });
     }
 
     // Whether anything new arrived. A handle that finishes decoding after the

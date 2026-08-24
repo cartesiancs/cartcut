@@ -19,6 +19,31 @@ type OutlineOption = {
   activeElementId: string;
 };
 
+/**
+ * `Object.entries().sort()` per frame, keyed by document identity.
+ *
+ * Every edit returns a whole new `Timeline` object, so identity is a sound
+ * cache key: a document that is `===` to one already sorted cannot have had an
+ * element added, removed, or re-prioritised. `WeakMap` so a superseded
+ * document does not pin its entry.
+ */
+const sortedByPriority = new WeakMap<
+  Timeline,
+  [string, Timeline[string]][]
+>();
+
+function prioritySorted(timeline: Timeline): [string, Timeline[string]][] {
+  const cached = sortedByPriority.get(timeline);
+  if (cached != null) {
+    return cached;
+  }
+  const sorted = Object.entries(timeline).sort(
+    ([, a], [, b]) => a.priority - b.priority,
+  );
+  sortedByPriority.set(timeline, sorted);
+  return sorted;
+}
+
 export function renderTimelineAtTime(
   ctx: CanvasRenderingContext2D,
   timeline: Timeline,
@@ -39,10 +64,7 @@ export function renderTimelineAtTime(
   ctx.fillStyle = backgroundColor;
   ctx.fillRect(0, 0, width, height);
 
-  // TODO: sorting on every render is inefficient, should be optimized
-  const prioritySortedTimeline = Object.entries(timeline).sort(
-    ([, a], [, b]) => a.priority - b.priority,
-  );
+  const prioritySortedTimeline = prioritySorted(timeline);
 
   // One cache for the whole frame, discarded with it. The matrices it holds are
   // resolved at `timeInMs`, so reusing it across frames would draw the previous

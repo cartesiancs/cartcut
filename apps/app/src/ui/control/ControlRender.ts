@@ -70,9 +70,23 @@ export class ControlRender extends LitElement {
 
   renderTime: number[] = [];
 
+  /** Non-null only while an export is running. See `cancelExport`. */
+  exportController: AbortController | null = null;
+
   constructor() {
     super();
     this.hasUpdatedOnce = false;
+  }
+
+  /**
+   * Stop the running export.
+   *
+   * The progress modal's only button used to be `Close`, which hid the dialog
+   * and left the frame loop running to completion against a pipe the user had
+   * stopped watching.
+   */
+  cancelExport() {
+    this.exportController?.abort();
   }
 
   private get settings(): ExportSettings {
@@ -448,32 +462,72 @@ export class ControlRender extends LitElement {
         videoDestination,
       };
 
-      requestIPCVideoExport(
-        useTimelineStore.getState().timeline,
-        elementRenderers,
-        options,
-        (currentFrame, totalFrames) => {
-          const progressTo100 = (currentFrame / totalFrames) * 100;
-          this.renderTime.push(Date.now());
+      // Resolved once, outside the loop. These were four full-document
+      // `querySelector` calls plus a Bootstrap `Modal.show()` on every one of
+      // 3600 frames; with PNG gone that was a real share of the frame budget.
+      const progressBar = document.querySelector("#progress");
+      const remainingTime = document.querySelector("#remainingTime");
+      rendererModal.progressModal.show();
 
-          document.querySelector("#progress").style.width = `${progressTo100}%`;
-          document.querySelector("#progress").innerHTML = `${Math.round(
-            progressTo100,
-          )}%`;
-          rendererModal.progressModal.show();
+      const controller = new AbortController();
+      this.exportController = controller;
 
-          // TODO: Show proper ffmpeg progress
-          if (this.renderTime.length > 2) {
-            this.renderTime.shift();
-            const rm = (this.renderTime[1] - this.renderTime[0]) / 100;
-            document.querySelector(
-              "#remainingTime",
-            ).innerHTML = `${formatSeconds(
-              Math.round(rm * (100 - progressTo100)),
-            )} left`;
-          }
-        },
-      );
+      let lastPaintAt = 0;
+      let lastSample: { at: number; frame: number } | null = null;
+      let msPerFrameEma = 0;
+
+      try {
+        await requestIPCVideoExport(
+          useTimelineStore.getState().timeline,
+          elementRenderers,
+          options,
+          (currentFrame, totalFrames) => {
+            const now = Date.now();
+            const isLast = currentFrame === totalFrames - 1;
+            // ~10 Hz. The eye cannot read faster and the DOM writes below
+            // invalidate layout.
+            if (now - lastPaintAt < 100 && !isLast) {
+              return;
+            }
+            lastPaintAt = now;
+
+            const progressTo100 = (currentFrame / totalFrames) * 100;
+            progressBar.style.width = `${progressTo100}%`;
+            progressBar.innerHTML = `${Math.round(progressTo100)}%`;
+
+            // An EMA over the throttled samples, rather than the difference
+            // between the last two frames, which was far too noisy to read.
+            if (lastSample != null && currentFrame > lastSample.frame) {
+              const perFrame =
+                (now - lastSample.at) / (currentFrame - lastSample.frame);
+              msPerFrameEma =
+                msPerFrameEma === 0
+                  ? perFrame
+                  : msPerFrameEma * 0.8 + perFrame * 0.2;
+              const framesLeft = totalFrames - currentFrame;
+              remainingTime.innerHTML = `${formatSeconds(
+                Math.round((msPerFrameEma * framesLeft) / 1000),
+              )} left`;
+            }
+            lastSample = { at: now, frame: currentFrame };
+          },
+          controller.signal,
+        );
+      } catch (error) {
+        // Un-awaited, this was an unhandled rejection and the modal froze at
+        // whatever percent it had reached.
+        rendererModal.progressModal.hide();
+        if ((error as Error)?.name !== "AbortError") {
+          document.querySelector("toast-box")?.showToast({
+            message: `Export failed: ${(error as Error)?.message ?? error}`,
+            delay: "6000",
+          });
+        }
+      } finally {
+        if (this.exportController === controller) {
+          this.exportController = null;
+        }
+      }
     } else {
       this.requestHttpRender();
     }

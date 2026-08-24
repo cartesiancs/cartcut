@@ -17,6 +17,17 @@ export class VideoFilterPipeline {
   private framebufferTexture: WebGLTexture;
   private framebuffer: WebGLFramebuffer;
 
+  /**
+   * The size both ping-pong textures are currently allocated at.
+   *
+   * Tracked on the pipeline rather than per texture because `swapTextures`
+   * rotates which handle plays which role — tagging one of them would follow
+   * the role, not the allocation. Both are always at canvas size, so one
+   * number describes both.
+   */
+  private allocatedWidth = 0;
+  private allocatedHeight = 0;
+
   constructor(private gl: WebGLRenderingContext) {
     this.filters = {
       normal: new Normal(gl),
@@ -44,22 +55,19 @@ export class VideoFilterPipeline {
       return;
     }
 
-    this.gl.canvas.width = videoMeta.object.videoWidth;
-    this.gl.canvas.height = videoMeta.object.videoHeight;
+    const frameWidth = videoMeta.object.videoWidth;
+    const frameHeight = videoMeta.object.videoHeight;
 
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.framebufferTexture);
-    this.gl.texImage2D(
-      this.gl.TEXTURE_2D,
-      0,
-      this.gl.RGBA,
-      this.gl.canvas.width,
-      this.gl.canvas.height,
-      0,
-      this.gl.RGBA,
-      this.gl.UNSIGNED_BYTE,
-      null,
-    );
-    this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+    // Assigning a canvas dimension reallocates and clears the drawing buffer
+    // even when the value is identical, so this ran per frame for no reason.
+    if (this.gl.canvas.width !== frameWidth) {
+      this.gl.canvas.width = frameWidth;
+    }
+    if (this.gl.canvas.height !== frameHeight) {
+      this.gl.canvas.height = frameHeight;
+    }
+
+    this.allocateTextures(frameWidth, frameHeight);
 
     const normal = this.filters["normal"] as Normal;
 
@@ -112,6 +120,41 @@ export class VideoFilterPipeline {
       videoElement.width,
       videoElement.height,
     );
+  }
+
+  /**
+   * Size both ping-pong textures, reallocating only when the frame size moves.
+   *
+   * This was an unconditional `texImage2D(..., null)` on every frame — an
+   * 8.29 MB VRAM allocation per frame at 1080p, discarded immediately.
+   *
+   * Both are sized, not just the current framebuffer target: `swapTextures`
+   * will make the other one the target on the next pass, and a target that is
+   * still at the previous frame's dimensions renders a torn result.
+   */
+  private allocateTextures(width: number, height: number): void {
+    if (this.allocatedWidth === width && this.allocatedHeight === height) {
+      return;
+    }
+
+    for (const texture of [this.framebufferTexture, this.srcTexture]) {
+      this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+      this.gl.texImage2D(
+        this.gl.TEXTURE_2D,
+        0,
+        this.gl.RGBA,
+        width,
+        height,
+        0,
+        this.gl.RGBA,
+        this.gl.UNSIGNED_BYTE,
+        null,
+      );
+    }
+    this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+
+    this.allocatedWidth = width;
+    this.allocatedHeight = height;
   }
 
   swapTextures(): void {

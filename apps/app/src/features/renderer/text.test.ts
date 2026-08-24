@@ -140,3 +140,62 @@ describe("renderText", () => {
     expect(pixel(canvas, 100, 100)).toMatchObject({ r: 0, g: 0, b: 0 });
   });
 });
+
+/**
+ * The wrap is cached, because `measureText`-per-word was running on every
+ * frame for every caption even though nothing it reads depends on the cursor.
+ * These pin the cache key: anything that changes the layout must miss it.
+ */
+describe("renderText wrap caching", () => {
+  const wrapping = (overrides = {}) =>
+    textElement({
+      location: { x: 0, y: 0 },
+      width: 200,
+      height: 30,
+      fontsize: 20,
+      text: "alpha bravo charlie delta echo foxtrot golf hotel",
+      textcolor: "#ffffff",
+      ...overrides,
+    });
+
+  it("draws identically when the same text is rendered twice", () => {
+    const first = scene(300, 300, "#000000");
+    renderText(first.ctx, "t", wrapping(), 0);
+    const second = scene(300, 300, "#000000");
+    renderText(second.ctx, "t", wrapping(), 1000);
+
+    expect(inkBounds(second.canvas)).toEqual(inkBounds(first.canvas));
+  });
+
+  it("re-wraps when the box width changes", () => {
+    const narrow = scene(300, 300, "#000000");
+    renderText(narrow.ctx, "t", wrapping({ width: 100 }), 0);
+    const wide = scene(300, 300, "#000000");
+    renderText(wide.ctx, "t", wrapping({ width: 280 }), 0);
+
+    // A narrower box takes more lines, so the ink reaches further down.
+    expect(inkBounds(narrow.canvas).maxY).toBeGreaterThan(
+      inkBounds(wide.canvas).maxY,
+    );
+  });
+
+  it("re-wraps when the font size changes", () => {
+    const small = scene(300, 300, "#000000");
+    renderText(small.ctx, "t", wrapping({ fontsize: 12 }), 0);
+    const large = scene(300, 300, "#000000");
+    renderText(large.ctx, "t", wrapping({ fontsize: 28 }), 0);
+
+    expect(inkBounds(large.canvas).count).not.toBe(
+      inkBounds(small.canvas).count,
+    );
+  });
+
+  it("re-wraps when the text itself changes", () => {
+    const a = scene(300, 300, "#000000");
+    renderText(a.ctx, "t", wrapping({ text: "one two" }), 0);
+    const b = scene(300, 300, "#000000");
+    renderText(b.ctx, "t", wrapping({ text: "completely different words" }), 0);
+
+    expect(inkBounds(b.canvas).count).not.toBe(inkBounds(a.canvas).count);
+  });
+});

@@ -32,6 +32,17 @@ export class ModalList extends LitElement {
     window.electronAPI.req.app.restart();
   }
 
+  /**
+   * Dismissing the progress dialog used to hide it and leave the frame loop
+   * running to completion. It now stops the export as well.
+   */
+  _handleClickCancelRender() {
+    const control = document.querySelector(
+      "control-ui-render",
+    ) as (HTMLElement & { cancelExport?: () => void }) | null;
+    control?.cancelExport?.();
+  }
+
   render() {
     return html`
       <dds-modal
@@ -89,7 +100,8 @@ export class ModalList extends LitElement {
           button-color="btn-light"
           button-text-color="text-dark"
           is-dismiss="true"
-          >Close</dds-modal-button
+          @click=${this._handleClickCancelRender}
+          >Cancel</dds-modal-button
         >
       </dds-modal>
 
