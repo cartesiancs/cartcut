@@ -13,21 +13,17 @@ export class ControlText extends LitElement {
   @property()
   controlPanel: IControlPanelStore = controlPanelStore.getInitialState();
 
-  @property()
-  activePanel = this.controlPanel.active;
-
   createRenderRoot() {
-    controlPanelStore.subscribe((state) => {
-      this.activePanel = state.active;
-    });
-
     return this;
   }
 
+  /**
+   * Opening is idempotent: the store dedupes on the panel name and focuses the
+   * tab, so hammering a utility button shows the panel rather than stacking a
+   * new tab per click.
+   */
   _handleClickPanel(name) {
-    console.log(name);
-
-    this.controlPanel.updatePanel([...this.activePanel, name]);
+    this.controlPanel.openPanel(name);
   }
 
   _handleClickOverlayRecord() {

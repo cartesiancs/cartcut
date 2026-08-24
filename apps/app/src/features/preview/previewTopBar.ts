@@ -192,17 +192,98 @@ export class PreviewTopBar extends LitElement {
 
   _handleClickPanelButton(panel) {
     this.controlPanel.setActivePanel(panel);
-    console.log("A", panel);
   }
 
-  _handleClickRemovePanelButton(panel) {
-    const filter = this.activePanel.filter((item) => {
-      return item != panel;
-    }) as any;
-    this.controlPanel.updatePanel(filter);
-    this.controlPanel.setActivePanel("");
+  /**
+   * The close icon lives inside the tab button, so without stopping the click
+   * here it bubbles straight into `_handleClickPanelButton` and re-focuses the
+   * panel that was just closed — the preview never comes back. `closePanel`
+   * owns the fallback to the preview.
+   */
+  _handleClickRemovePanelButton(event: Event, panel) {
+    event.stopPropagation();
+    this.controlPanel.closePanel(panel);
+  }
 
-    console.log("A", panel);
+  /** Whether the tab strip is scrolled away from its left / right edge. */
+  @property()
+  tabOverflowStart = false;
+
+  @property()
+  tabOverflowEnd = false;
+
+  private tabResizeObserver: ResizeObserver | null = null;
+
+  private get tabScroller(): HTMLElement | null {
+    return this.querySelector(".preview-tab-scroll");
+  }
+
+  /**
+   * The fades are the only sign that the strip scrolls, so they have to track
+   * both content changes (a re-render lands here) and width changes (the
+   * preview splitter, which never re-renders this component).
+   */
+  protected updated(): void {
+    const scroller = this.tabScroller;
+    if (!scroller) {
+      return;
+    }
+
+    if (!this.tabResizeObserver) {
+      this.tabResizeObserver = new ResizeObserver(() =>
+        this._syncTabOverflow(),
+      );
+      this.tabResizeObserver.observe(scroller);
+    }
+
+    this._syncTabOverflow();
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.tabResizeObserver?.disconnect();
+    this.tabResizeObserver = null;
+  }
+
+  private _syncTabOverflow() {
+    const scroller = this.tabScroller;
+    if (!scroller) {
+      return;
+    }
+
+    // Sub-pixel layout leaves a fraction of scroll room on a strip that already
+    // fits, so a whole pixel is the threshold for "there is more over there".
+    // Writing the same booleans back is a no-op for Lit, which is what keeps
+    // updated() -> sync -> updated() from looping.
+    const maxScroll = scroller.scrollWidth - scroller.clientWidth;
+    this.tabOverflowStart = scroller.scrollLeft > 1;
+    this.tabOverflowEnd = scroller.scrollLeft < maxScroll - 1;
+  }
+
+  _handleTabScroll() {
+    this._syncTabOverflow();
+  }
+
+  /**
+   * A plain mouse only produces deltaY, and the strip scrolls on X alone —
+   * without this the tabs it hides would be unreachable outside a trackpad.
+   */
+  _handleTabWheel(event: WheelEvent) {
+    const scroller = event.currentTarget as HTMLElement;
+    if (scroller.scrollWidth <= scroller.clientWidth) {
+      return;
+    }
+
+    const delta =
+      Math.abs(event.deltaX) > Math.abs(event.deltaY)
+        ? event.deltaX
+        : event.deltaY;
+    if (delta == 0) {
+      return;
+    }
+
+    event.preventDefault();
+    scroller.scrollLeft += delta;
   }
 
   render() {
@@ -216,7 +297,7 @@ export class PreviewTopBar extends LitElement {
         ${item}
         <span
           class="material-symbols-outlined icon-xs"
-          @click=${() => this._handleClickRemovePanelButton(item)}
+          @click=${(e: Event) => this._handleClickRemovePanelButton(e, item)}
         >
           close
         </span>
@@ -245,6 +326,77 @@ export class PreviewTopBar extends LitElement {
           display: flex;
           align-items: center;
           gap: 0.25rem;
+          white-space: nowrap;
+        }
+
+        /* min-width: 0 is what lets the strip shrink past its content width;
+           without it the flex item stays intrinsically sized and shoves the
+           tools on the right off the end of the bar. */
+        .preview-tab-bar {
+          flex: 1 1 auto;
+          min-width: 0;
+        }
+
+        .preview-tool-bar {
+          flex: 0 0 auto;
+        }
+
+        .preview-tab-scroll {
+          display: flex;
+          flex-direction: row;
+          align-items: center;
+          gap: 0.5rem;
+          min-width: 0;
+          overflow-x: auto;
+          overflow-y: hidden;
+          /* No scrollbar anywhere: the edge fades are the affordance. */
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+
+        .preview-tab-scroll::-webkit-scrollbar {
+          display: none;
+        }
+
+        .preview-tab-scroll > * {
+          flex: 0 0 auto;
+        }
+
+        /* A mask rather than an overlaid gradient, so the fade holds over the
+           bar's background whatever that background becomes. */
+        .preview-tab-scroll.fade-start {
+          -webkit-mask-image: linear-gradient(
+            to right,
+            transparent 0,
+            #000 1.5rem
+          );
+          mask-image: linear-gradient(to right, transparent 0, #000 1.5rem);
+        }
+
+        .preview-tab-scroll.fade-end {
+          -webkit-mask-image: linear-gradient(
+            to left,
+            transparent 0,
+            #000 1.5rem
+          );
+          mask-image: linear-gradient(to left, transparent 0, #000 1.5rem);
+        }
+
+        .preview-tab-scroll.fade-start.fade-end {
+          -webkit-mask-image: linear-gradient(
+            to right,
+            transparent 0,
+            #000 1.5rem,
+            #000 calc(100% - 1.5rem),
+            transparent 100%
+          );
+          mask-image: linear-gradient(
+            to right,
+            transparent 0,
+            #000 1.5rem,
+            #000 calc(100% - 1.5rem),
+            transparent 100%
+          );
         }
 
         /*
@@ -304,7 +456,9 @@ export class PreviewTopBar extends LitElement {
       </style>
 
       <div class="timeline-cursor-buttons bg-darker">
-        <div class="d-flex col gap-2 justify-content-start p-1">
+        <div class="d-flex gap-2 justify-content-start p-1 preview-tab-bar">
+          <!-- Pinned outside the scroller: the way back to the preview must
+               never be the thing that scrolled out of view. -->
           <button
             @click=${() => this._handleClickPanelButton("")}
             class="btn btn-xxs ${this.nowActivePanel == ""
@@ -314,9 +468,17 @@ export class PreviewTopBar extends LitElement {
             preview
           </button>
 
-          ${activePanelMap}
+          <div
+            class="preview-tab-scroll ${this.tabOverflowStart
+              ? "fade-start"
+              : ""} ${this.tabOverflowEnd ? "fade-end" : ""}"
+            @scroll=${this._handleTabScroll}
+            @wheel=${this._handleTabWheel}
+          >
+            ${activePanelMap}
+          </div>
         </div>
-        <div class="d-flex col gap-2 justify-content-end p-1">
+        <div class="d-flex gap-2 justify-content-end p-1 preview-tool-bar">
           <button
             @click=${() => this._handleClickButton("pointer")}
             class="btn btn-xxs ${this.control.cursorType == "pointer"
