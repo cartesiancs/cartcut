@@ -138,8 +138,11 @@ export function hitZoneOf(
   return "none";
 }
 
+/** The eight resize grips, as against the body, the knob and a miss. */
+export type StretchZone = Exclude<HitZone, "position" | "rotation" | "none">;
+
 /** Whether a zone is one of the eight resize grips. */
-export function isStretchZone(zone: HitZone): boolean {
+export function isStretchZone(zone: HitZone): zone is StretchZone {
   return zone.startsWith("stretch");
 }
 

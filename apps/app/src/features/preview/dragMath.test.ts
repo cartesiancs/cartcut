@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { angleStep, movedLocation, normalizeDegrees, type Rect } from "./dragMath";
+import {
+  angleStep,
+  movedLocation,
+  normalizeDegrees,
+  rotatedDocument,
+  type Rect,
+} from "./dragMath";
 import { applyPoint, IDENTITY, localMatrixOf } from "../timeline/transform";
 
 /**
@@ -198,5 +204,44 @@ describe("normalizeDegrees", () => {
 
   it("is zero for a non-finite angle", () => {
     expect(normalizeDegrees(NaN)).toBe(0);
+  });
+});
+
+/**
+ * Absolute, like `resizeMath.resizedDocument` — `GestureCommit` re-applies
+ * against the live document on every mousemove, so a write that adjusted the
+ * angle instead of setting it would spin the element on a stationary pointer.
+ */
+describe("rotatedDocument", () => {
+  const doc = (rotation: number) =>
+    ({
+      elements: { a: { filetype: "shape", rotation, width: 10, height: 10 } },
+      tracks: [],
+    }) as any;
+
+  it("does not move the element when the pointer holds still", () => {
+    let next: any = doc(0);
+    for (let i = 0; i < 50; i++) {
+      next = rotatedDocument(next, "a", 37);
+    }
+    expect(next.elements.a.rotation).toBe(37);
+  });
+
+  it("declines by identity when the angle is already set", () => {
+    const before = doc(37);
+    expect(rotatedDocument(before, "a", 37)).toBe(before);
+  });
+
+  it("declines by identity for an element that is not there", () => {
+    const before = doc(0);
+    expect(rotatedDocument(before, "missing", 37)).toBe(before);
+  });
+
+  it("leaves every other field alone and does not mutate its input", () => {
+    const before = doc(0);
+    const snapshot = JSON.parse(JSON.stringify(before));
+    const after = rotatedDocument(before, "a", 90);
+    expect(after.elements.a).toMatchObject({ filetype: "shape", width: 10 });
+    expect(before).toEqual(snapshot);
   });
 });

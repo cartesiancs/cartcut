@@ -24,7 +24,9 @@ import {
 } from "../renderer/timeline";
 import { isVisualTimelineElement } from "../../@types/timeline";
 import { applyElementTransform } from "../renderer/element";
-import { hitZoneOf, type HitZone } from "./hitTest";
+import { hitZoneOf, isStretchZone, type HitZone } from "./hitTest";
+import { constrainsAspect, resizedDocument, resizedRect } from "./resizeMath";
+import { GestureCommit } from "../option/gestureCommit";
 import {
   applyPoint,
   applyVector,
@@ -35,7 +37,12 @@ import {
   worldBoundsOf,
   worldMatrixOf,
 } from "../timeline/transform";
-import { angleStep, movedLocation, normalizeDegrees } from "./dragMath";
+import {
+  angleStep,
+  movedLocation,
+  normalizeDegrees,
+  rotatedDocument,
+} from "./dragMath";
 import { isElementVisibleAtTime } from "../element/time";
 import { renderControlOutline } from "../renderer/controlOutline";
 import {
@@ -77,6 +84,16 @@ export class PreviewCanvas extends LitElement {
    * group jumps to the group's offset the moment a handle is touched.
    */
   elementOriginLocal: { x: number; y: number; w: number; h: number };
+  /**
+   * The element's **static** `location` field at drag start.
+   *
+   * `elementOriginLocal` resolves the position track, so for an animated element
+   * it is where the clip is *drawn*; this is the field a resize actually writes.
+   * Captured together with it by `captureDragOrigin`, and always in step, so
+   * that the resize write can stay absolute — see `resizeMath.resizedDocument`,
+   * whose header covers the runaway this pair exists to prevent.
+   */
+  elementOriginLocation: { x: number; y: number };
   /**
    * The element's world-space axis-aligned box at drag start.
    *
@@ -127,6 +144,22 @@ export class PreviewCanvas extends LitElement {
   isEditText: boolean;
   nowShapeId: string;
   isRotation: boolean;
+
+  /**
+   * Collapses a resize or a rotate into one undo step.
+   *
+   * Neither used to record any. Both branches assigned straight into the
+   * store's own element object and called `patchTimeline`, which pushes no
+   * history — so a shape dragged to the wrong size could not be taken back, and
+   * because history entries share their nested objects, the in-place write
+   * edited the past as well.
+   *
+   * `idleMs: null` because a canvas drag always ends in a mouseup. The idle
+   * timer exists for a value typed into a spinner, which does not; here it
+   * would end the gesture whenever the user paused a third of a second to aim,
+   * and the next mousemove would open a second one — one drag, two undo steps.
+   */
+  private gesture = new GestureCommit({ idleMs: null });
 
   /** Viewport panning (middle-drag, alt-drag, or a drag off empty space). */
   isPanning = false;
@@ -180,6 +213,7 @@ export class PreviewCanvas extends LitElement {
     this.mouseOrigin = { x: 0, y: 0 };
     this.elementOrigin = { x: 0, y: 0, w: 0, h: 0 };
     this.elementOriginLocal = { x: 0, y: 0, w: 0, h: 0 };
+    this.elementOriginLocation = { x: 0, y: 0 };
     this.elementOriginBounds = { x: 0, y: 0, w: 0, h: 0 };
     this.rotationPivot = { x: 0, y: 0 };
     this.rotationStartDeg = 0;
@@ -279,6 +313,9 @@ export class PreviewCanvas extends LitElement {
     window.removeEventListener("mouseup", this.boundMouseUp);
     window.removeEventListener("keydown", this.boundKeydown);
     this.canvas?.removeEventListener("wheel", this.boundWheel);
+    // A drag interrupted by the panel closing still commits what it did, rather
+    // than leaving a previewed document that no checkpoint ever recorded.
+    this.gesture.flush();
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     if (this.drawRequest) {
@@ -803,20 +840,20 @@ export class PreviewCanvas extends LitElement {
     });
   }
 
-  getVectorMagnitude(x, y) {
-    const magnitude = Math.sqrt(x * x + y * y);
-    return x < 0 || y < 0 ? -magnitude : magnitude;
-  }
-
-  getIntersection({ m, a1, b1, a2, b2 }) {
-    const m1 = m;
-    const m2 = -m;
-    const rx = (m1 * a1 - m2 * a2 + b2 - b1) / (m1 - m2);
-    const ry = m1 * (rx - a1) + b1;
-
-    return {
-      x: rx,
-      y: ry,
+  /**
+   * Freeze where the element is, as a drag is about to start.
+   *
+   * Both halves together, always: the drawn rect the pointer is measured
+   * against, and the static field a resize writes. They are the same point only
+   * when the element carries no position animation, and capturing one without
+   * the other is what would let the resize write mix the two spaces.
+   */
+  private captureDragOrigin(elementId: string) {
+    this.elementOriginLocal = this.localRectOf(elementId);
+    const location = this.timeline[elementId]?.location;
+    this.elementOriginLocation = {
+      x: location?.x ?? 0,
+      y: location?.y ?? 0,
     };
   }
 
@@ -1065,7 +1102,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
-          this.elementOriginLocal = this.localRectOf(elementId);
+          this.captureDragOrigin(elementId);
           this.elementOriginBounds = worldBoundsOf(
             this.timeline,
             elementId,
@@ -1085,7 +1122,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
-          this.elementOriginLocal = this.localRectOf(elementId);
+          this.captureDragOrigin(elementId);
           // The centre through the same matrix the renderer draws with — not
           // the drawn corner plus half the unrotated size, which is a point in
           // no space at all and made the angle snap on grab.
@@ -1116,7 +1153,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
-          this.elementOriginLocal = this.localRectOf(elementId);
+          this.captureDragOrigin(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1131,7 +1168,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
-          this.elementOriginLocal = this.localRectOf(elementId);
+          this.captureDragOrigin(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1146,7 +1183,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
-          this.elementOriginLocal = this.localRectOf(elementId);
+          this.captureDragOrigin(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1161,7 +1198,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
-          this.elementOriginLocal = this.localRectOf(elementId);
+          this.captureDragOrigin(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1176,7 +1213,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
-          this.elementOriginLocal = this.localRectOf(elementId);
+          this.captureDragOrigin(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1191,7 +1228,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
-          this.elementOriginLocal = this.localRectOf(elementId);
+          this.captureDragOrigin(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1206,7 +1243,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
-          this.elementOriginLocal = this.localRectOf(elementId);
+          this.captureDragOrigin(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1221,7 +1258,7 @@ export class PreviewCanvas extends LitElement {
             y: my,
           };
           this.elementOrigin = { x: x, y: y, w: w, h: h };
-          this.elementOriginLocal = this.localRectOf(elementId);
+          this.captureDragOrigin(elementId);
           clearTempStatus();
           isStretchTemp = true;
           isMoveTemp = false;
@@ -1286,7 +1323,7 @@ export class PreviewCanvas extends LitElement {
     this._handleMouseMove(e);
   }
 
-  _handleMouseMove(e) {
+  _handleMouseMove(e: MouseEvent) {
     const world = this.toWorld(e);
     const mx = world.x;
     const my = world.y;
@@ -1488,12 +1525,21 @@ export class PreviewCanvas extends LitElement {
           pointerDeg,
         );
         this.rotationPrevPointerDeg = pointerDeg;
-        activeElement.rotation = normalizeDegrees(this.rotationStartDeg);
+
+        // Written through the gesture rather than assigned onto
+        // `activeElement`. The in-place version only reached the screen because
+        // the stretch block below — which also runs during a rotate, since
+        // mousedown sets `isStretch` for the knob — ended in a `patchTimeline`
+        // that happened to publish it.
+        const rotation = normalizeDegrees(this.rotationStartDeg);
+        const elementId = this.activeElementId;
+        this.gesture.apply((doc) => rotatedDocument(doc, elementId, rotation));
       }
     }
 
-    if (this.isStretch) {
-      const minSize = 10;
+    // `isStretch` is also true while the rotation knob is held — mousedown sets
+    // both — so the zone, not the flag, decides whether this is a resize.
+    if (this.isStretch && isStretchZone(this.moveType)) {
       const dx = mx - this.mouseOrigin.x;
       const dy = my - this.mouseOrigin.y;
 
@@ -1502,197 +1548,35 @@ export class PreviewCanvas extends LitElement {
       // the delta into those axes in one step — it removes the element's own
       // rotation, as the hand-rolled cos/sin here used to, and also every
       // rotation and scale contributed by groups above it, which nothing did.
-      //
-      // For an unparented, unscaled clip this reduces to exactly the old
-      // formula, so its drag behaviour is unchanged to the bit.
       const localDelta = applyVector(
         invert(worldMatrixOf(this.timeline, this.activeElementId, this.timelineCursor)),
         { x: dx, y: dy },
       );
-      const localDx = localDelta.x;
-      const localDy = localDelta.y;
 
-      // Everything below is in the parent's frame, where `location` lives.
+      const constrain = constrainsAspect(
+        activeElement.filetype,
+        e.shiftKey === true,
+      );
+
       const origin = this.elementOriginLocal;
-      const location = activeElement.location;
-      const filetype = activeElement.filetype;
+      const next = resizedRect({
+        origin,
+        zone: this.moveType,
+        localDx: localDelta.x,
+        localDy: localDelta.y,
+        constrain,
+        minSize: 10,
+      });
 
-      // Which kinds resize freely instead of holding their aspect ratio.
-      //
-      // Text always has: a caption's box is a text-wrapping width, not a
-      // picture. A group is the other one, and for the same reason — its
-      // `width`/`height` are not a size to draw but an invisible frame, and the
-      // frame's job is to sit where the user wants the pivot. Locking it to the
-      // proportions of whatever happened to be selected when it was made would
-      // stop it doing that job.
-      const freeAspect = filetype == "text" || filetype == "group";
-
-      const moveE = () => {
-        if (origin.w + localDx <= minSize) return false;
-        const width = origin.w + localDx;
-        const ratio = activeElement.ratio;
-        activeElement.width = width;
-
-        if (freeAspect) {
-          return false;
-        }
-        activeElement.height = width / ratio;
-        activeElement.location.y =
-          origin.y - (width / ratio - origin.h) / 2;
-      };
-
-      const moveW = () => {
-        if (origin.w - localDx <= minSize) return false;
-        const width = origin.w - localDx;
-        const ratio = activeElement.ratio;
-
-        activeElement.width = width;
-        activeElement.location.x = origin.x + localDx;
-
-        if (freeAspect) {
-          return false;
-        }
-        activeElement.height = width / ratio;
-        activeElement.location.y =
-          origin.y - (width / ratio - origin.h) / 2;
-      };
-
-      const moveN = () => {
-        if (origin.h - localDy <= minSize) return false;
-        const height = origin.h - localDy;
-        const ratio = activeElement.ratio;
-
-        activeElement.height = height;
-        activeElement.location.y = origin.y + localDy;
-
-        if (freeAspect) {
-          return false;
-        }
-        activeElement.width = height * ratio;
-        activeElement.location.x =
-          origin.x - (height * ratio - origin.w) / 2;
-      };
-
-      const moveS = () => {
-        if (origin.h + localDy <= minSize) return false;
-        const height = origin.h + localDy;
-        const ratio = activeElement.ratio;
-        activeElement.height = height;
-
-        if (freeAspect) {
-          return false;
-        }
-        activeElement.width = height * ratio;
-        activeElement.location.x =
-          origin.x - (height * ratio - origin.w) / 2;
-      };
-
-      const moveNW = () => {
-        if (freeAspect) {
-          moveN();
-          moveW();
-        } else {
-          const ratio = activeElement.ratio;
-          const intr = this.getIntersection({
-            m: 1,
-            a1: origin.x,
-            b1: origin.y,
-            a2: origin.x + localDx,
-            b2: origin.y + localDy,
-          });
-
-          activeElement.width =
-            origin.w + (origin.x - intr.x);
-          activeElement.height =
-            (origin.w + (origin.x - intr.x)) / ratio;
-          activeElement.location.y =
-            origin.y +
-            (origin.h - activeElement.height);
-
-          activeElement.location.x = intr.x;
-        }
-      };
-
-      const moveSW = () => {
-        if (freeAspect) {
-          moveS();
-          moveW();
-        } else {
-          const ratio = activeElement.ratio;
-          const intr = this.getIntersection({
-            m: -1,
-            a1: origin.x,
-            b1: origin.h,
-            a2: origin.x + localDx,
-            b2: origin.h + localDy,
-          });
-
-          activeElement.height = intr.y;
-          activeElement.width = intr.y * ratio;
-          activeElement.location.x =
-            origin.x - (intr.y * ratio - origin.w);
-        }
-      };
-
-      const moveSE = () => {
-        if (freeAspect) {
-          moveS();
-          moveE();
-        } else {
-          const ratio = activeElement.ratio;
-          const intr = this.getIntersection({
-            m: 1,
-            a1: origin.w,
-            b1: origin.h,
-            a2: origin.w + localDx,
-            b2: origin.h + localDy,
-          });
-
-          activeElement.height = intr.y;
-          activeElement.width = intr.y * ratio;
-        }
-      };
-
-      const moveNE = () => {
-        if (freeAspect) {
-          moveN();
-          moveE();
-        } else {
-          const ratio = activeElement.ratio;
-          const intr = this.getIntersection({
-            m: -1,
-            a1: origin.w,
-            b1: origin.y,
-            a2: origin.w + localDx,
-            b2: origin.y + localDy,
-          });
-
-          activeElement.width = intr.x;
-          activeElement.height = intr.x / ratio;
-          activeElement.location.y =
-            origin.y - (intr.x / ratio - origin.h);
-        }
-      };
-
-      if (this.moveType == "stretchE") {
-        moveE();
-      } else if (this.moveType == "stretchW") {
-        moveW();
-      } else if (this.moveType == "stretchN") {
-        moveN();
-      } else if (this.moveType == "stretchS") {
-        moveS();
-      } else if (this.moveType == "stretchNW") {
-        moveNW();
-      } else if (this.moveType == "stretchSW") {
-        moveSW();
-      } else if (this.moveType == "stretchSE") {
-        moveSE();
-      } else if (this.moveType == "stretchNE") {
-        moveNE();
+      if (next != null) {
+        const elementId = this.activeElementId;
+        const commit = {
+          originLocal: origin,
+          originLocation: this.elementOriginLocation,
+          next,
+        };
+        this.gesture.apply((doc) => resizedDocument(doc, elementId, commit));
       }
-
-      this.timelineState.patchTimeline(this.timeline);
     }
   }
 
@@ -1711,17 +1595,31 @@ export class PreviewCanvas extends LitElement {
       return;
     }
 
-    try {
-      // Where the element ended up on screen, which for an animated element is
-      // its previewed keyframe rather than `location`. Reading `location` here
-      // is what wrote the un-animated position into the keyframe and made the
-      // element jump by `animated − static` the moment the drag finished.
-      const settled = displayPosition(
-        this.timeline[this.activeElementId],
-        this.timelineCursor,
-      );
-      this.addAnimationPoint(settled.x, settled.y);
-    } catch (error) {}
+    // Only a move writes a position keyframe. Doing it after a resize or a
+    // rotate bakes the element's current position into the track at the cursor
+    // — a keyframe the gesture never asked for — and now that those two commit
+    // through `GestureCommit`, a second undo entry for the same drag. Guarded
+    // on `isMove` rather than `!isStretch`, because `isStretch` is true while
+    // the rotation knob is held.
+    if (this.isMove) {
+      try {
+        // Where the element ended up on screen, which for an animated element is
+        // its previewed keyframe rather than `location`. Reading `location` here
+        // is what wrote the un-animated position into the keyframe and made the
+        // element jump by `animated − static` the moment the drag finished.
+        const settled = displayPosition(
+          this.timeline[this.activeElementId],
+          this.timelineCursor,
+        );
+        this.addAnimationPoint(settled.x, settled.y);
+      } catch (error) {}
+    }
+
+    // Settle the resize/rotate gesture here rather than leaving it to the
+    // window listener `GestureCommit` arms for itself, so its single entry is
+    // ordered after anything this handler wrote. `flush` is idempotent, so that
+    // listener firing straight afterwards is a no-op.
+    this.gesture.flush();
 
     this.isMove = false;
     this.isStretch = false;
@@ -1828,7 +1726,7 @@ export class PreviewCanvas extends LitElement {
           this.activeElementId = elementId;
 
           this.elementOrigin = { x: x, y: y, w: w, h: h };
-          this.elementOriginLocal = this.localRectOf(elementId);
+          this.captureDragOrigin(elementId);
           this.isEditText = true;
           this.drawCanvas(this.canvas);
         } else {

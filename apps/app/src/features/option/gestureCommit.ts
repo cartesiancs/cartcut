@@ -21,6 +21,18 @@ import type { TimelineDocument } from "../timeline/tracks";
 /** How long a gesture may pause before it counts as finished. */
 export const GESTURE_IDLE_MS = 350;
 
+export type GestureCommitOptions = {
+  /**
+   * How long a pause ends the gesture, or `null` for "only a mouseup does".
+   *
+   * The idle timer is there for a value typed into a spinner, which never
+   * produces a mouseup. A canvas drag always does — and pausing mid-drag to aim
+   * is normal, so the timer would cut one resize into two undo entries the
+   * moment the user stopped to think.
+   */
+  idleMs?: number | null;
+};
+
 export class GestureCommit {
   /** The document as it stood when the gesture opened, for `cancel`. */
   private base: TimelineDocument | null = null;
@@ -28,7 +40,12 @@ export class GestureCommit {
   /** Whether any step actually changed the document. */
   private changed = false;
   private timer = 0;
+  private readonly idleMs: number | null;
   private readonly flushBound = () => this.flush();
+
+  constructor(options: GestureCommitOptions = {}) {
+    this.idleMs = options.idleMs === undefined ? GESTURE_IDLE_MS : options.idleMs;
+  }
 
   /**
    * Fold one more change into the current gesture.
@@ -60,7 +77,9 @@ export class GestureCommit {
     store.previewDocument(next);
 
     window.clearTimeout(this.timer);
-    this.timer = window.setTimeout(this.flushBound, GESTURE_IDLE_MS);
+    if (this.idleMs != null) {
+      this.timer = window.setTimeout(this.flushBound, this.idleMs);
+    }
   }
 
   /** End the gesture, recording a single undo step if anything changed. */

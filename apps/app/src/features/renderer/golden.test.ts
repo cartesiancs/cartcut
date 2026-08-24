@@ -87,7 +87,11 @@ function timeline(): Timeline {
       location: { x: 90, y: 90 },
       width: 60,
       height: 60,
+      // Both axes, or `renderShape` scales y by the fixture's default
+      // `oHeight: 100` and the triangle squashes. A shape drawn at its authored
+      // size states both.
       oWidth: 60,
+      oHeight: 60,
       rotation: 30,
       option: { fillColor: "#ffcc00" },
       shape: [

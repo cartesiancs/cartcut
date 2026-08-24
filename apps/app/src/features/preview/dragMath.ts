@@ -22,6 +22,7 @@
  */
 
 import { applyVector, invert, type Mat, type Point } from "../timeline/transform";
+import type { TimelineDocument } from "../timeline/tracks";
 
 /** An axis-aligned rectangle, in whatever space the caller is working in. */
 export type Rect = { x: number; y: number; w: number; h: number };
@@ -113,4 +114,30 @@ export function normalizeDegrees(deg: number): number {
   }
   const wrapped = deg % 360;
   return wrapped < 0 ? wrapped + 360 : wrapped;
+}
+
+/**
+ * The document a rotate gesture has reached, or the input when it changed
+ * nothing.
+ *
+ * Absolute, like every other write `GestureCommit` drives: it re-applies
+ * against the *live* document on each mousemove, so a write that adjusted the
+ * angle rather than setting it would spin the element on a stationary pointer.
+ * The accumulation belongs one level up, in the `angleStep` sum the caller
+ * keeps — that one is driven by real pointer movement, and is why grabbing the
+ * knob off-centre costs nothing.
+ */
+export function rotatedDocument(
+  doc: TimelineDocument,
+  elementId: string,
+  rotation: number,
+): TimelineDocument {
+  const current: any = doc.elements[elementId];
+  if (current == null || current.rotation === rotation) {
+    return doc;
+  }
+  return {
+    ...doc,
+    elements: { ...doc.elements, [elementId]: { ...current, rotation } },
+  };
 }

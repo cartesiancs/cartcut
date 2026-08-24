@@ -72,6 +72,15 @@ type TimelinePlaced = {
 type Visual = {
   width: number;
   height: number;
+  /**
+   * The source file's native aspect, recorded once at import.
+   *
+   * **Not** the element's current proportions, and not what a constrained
+   * resize holds: nothing recomputes this after `width` or `height` change, and
+   * the sidebar's size fields write the two independently. A resize takes its
+   * ratio from the box as it stood at mousedown — see `preview/resizeMath.ts`,
+   * whose header covers what reading this field here used to do.
+   */
   ratio: number;
   opacity: number;
   rotation: number;

@@ -153,6 +153,42 @@ describe("GestureCommit", () => {
     expect((store().timeline.a as any).opacity).toBe(42);
   });
 
+  /**
+   * A canvas drag always ends in a mouseup, and pausing mid-drag to aim is
+   * normal — so for the preview's resize and rotate the idle timer would cut
+   * one gesture into two undo entries the moment the user stopped to think.
+   */
+  it("waits for the mouseup when the idle timer is disabled", () => {
+    const gesture = new GestureCommit({ idleMs: null });
+    const before = store().history.timelineHistory.length;
+
+    bump(gesture, 42);
+    vi.advanceTimersByTime(GESTURE_IDLE_MS * 10);
+    expect(store().history.timelineHistory.length).toBe(before);
+
+    bump(gesture, 43);
+    win.fire("mouseup");
+    expect(store().history.timelineHistory.length).toBe(before + 1);
+    expect((store().timeline.a as any).opacity).toBe(43);
+  });
+
+  /**
+   * `previewCanvas._handleMouseUp` flushes explicitly so its entry is ordered
+   * after anything else that handler wrote; the listener `GestureCommit` arms
+   * for itself then fires straight afterwards.
+   */
+  it("records one entry when flushed twice", () => {
+    const gesture = new GestureCommit({ idleMs: null });
+    const before = store().history.timelineHistory.length;
+
+    bump(gesture, 42);
+    gesture.flush();
+    gesture.flush();
+    win.fire("mouseup");
+
+    expect(store().history.timelineHistory.length).toBe(before + 1);
+  });
+
   it("records nothing when the gesture changed nothing", () => {
     // The pure ops decline by identity, and `withCheckpoint` cannot detect that
     // on its own — it rebuilds the document it compares against on every call.
