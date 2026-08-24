@@ -15,7 +15,13 @@ export type Container = (typeof CONTAINERS)[number];
 export const VIDEO_CODECS = ["h264", "h265", "vp9", "prores"] as const;
 export type VideoCodec = (typeof VIDEO_CODECS)[number];
 
-export const AUDIO_CODECS = ["aac", "mp3", "opus", "vorbis", "pcm_s16le"] as const;
+export const AUDIO_CODECS = [
+  "aac",
+  "mp3",
+  "opus",
+  "vorbis",
+  "pcm_s16le",
+] as const;
 export type AudioCodec = (typeof AUDIO_CODECS)[number];
 
 export const ENCODE_PRESETS = [
@@ -64,17 +70,19 @@ export const CODEC_CONTAINERS: Record<VideoCodec, readonly Container[]> = {
 };
 
 /** The inverse of `CODEC_CONTAINERS`, kept explicit so the UI can read it directly. */
-export const CONTAINER_VIDEO_CODECS: Record<Container, readonly VideoCodec[]> = {
-  mp4: ["h264", "h265"],
-  mov: ["h264", "h265", "prores"],
-  webm: ["vp9"],
-};
+export const CONTAINER_VIDEO_CODECS: Record<Container, readonly VideoCodec[]> =
+  {
+    mp4: ["h264", "h265"],
+    mov: ["h264", "h265", "prores"],
+    webm: ["vp9"],
+  };
 
-export const CONTAINER_AUDIO_CODECS: Record<Container, readonly AudioCodec[]> = {
-  mp4: ["aac", "mp3"],
-  mov: ["aac", "pcm_s16le"],
-  webm: ["opus", "vorbis"],
-};
+export const CONTAINER_AUDIO_CODECS: Record<Container, readonly AudioCodec[]> =
+  {
+    mp4: ["aac", "mp3"],
+    mov: ["aac", "pcm_s16le"],
+    webm: ["opus", "vorbis"],
+  };
 
 /** libopus refuses anything but its own rate list, so 48k is all we offer there. */
 export const AUDIO_SAMPLE_RATES: Record<AudioCodec, readonly number[]> = {
@@ -313,5 +321,5 @@ export function describeExportSettings(settings: ExportSettings): string {
       : `${audio} ${settings.audioBitrate}k`,
   );
 
-  return parts.join(" · ");
+  return parts.join(" ");
 }
