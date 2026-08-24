@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   canShowFilmstrip,
+  canShowFrameGrid,
   clipLabel,
   defaultColors,
   drawDropTarget,
@@ -941,5 +942,257 @@ describe("keyframe diamonds", () => {
         { colors: defaultColors, range: RANGE },
       ),
     ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------- frame grid
+
+/**
+ * A zoom and frame rate chosen to make the lattice land on whole pixels:
+ * `framePx = msToPxSigned(1000 / 10, 2) = 10`. Frame `n` sits at `x = 10n`, so
+ * every assertion below can name a column instead of computing one.
+ */
+const GRID_RANGE = 2;
+const GRID_FPS = 10;
+const GRID_CELL_PX = 10;
+
+/** Dark, so the translucent white lattice actually changes a pixel. */
+const DARK = "#000000";
+
+function gridPaint(
+  d: TimelineDocument,
+  over: Partial<Parameters<typeof drawTimeline>[1]> = {},
+) {
+  const hScroll = (over.hScroll as number) ?? 0;
+  const { canvas, ctx } = scene(W, H);
+  const layout = layoutTimeline({
+    doc: d,
+    range: GRID_RANGE,
+    hScroll,
+    vScroll: 0,
+    viewportW: W,
+    viewportH: H,
+    topOffset: 0,
+  });
+
+  drawTimeline(ctx, {
+    layout,
+    doc: d,
+    range: GRID_RANGE,
+    hScroll,
+    viewportW: W,
+    viewportH: H,
+    selection: [],
+    playheadMs: -1000,
+    projectEndMs: 100_000,
+    colors: defaultColors,
+    fps: GRID_FPS,
+    frameGrid: true,
+    ...over,
+  });
+
+  return { canvas, ctx, layout };
+}
+
+/**
+ * Low in the row, below the label.
+ *
+ * The label's halo is `rgba(0,0,0,0.85)` and it sits across the top ~16px, so a
+ * probe up there reads a grid line darkened by however much glyph happens to be
+ * over it — 20 instead of 33, and not uniformly.
+ */
+const ROW_Y = 30;
+
+/**
+ * Whether the lattice painted this column.
+ *
+ * `rgba(255,255,255,0.13)` over a black clip is exactly 33 grey. The bare clip
+ * is 0, also grey; the row background is `#1e1f25`, which is *not* grey. Testing
+ * for "grey and lit" separates all three without a magic range.
+ */
+function isGridInk(canvas: any, x: number): boolean {
+  const { r, g, b } = pixel(canvas, x, ROW_Y);
+  return r === g && g === b && r > 10;
+}
+
+describe("canShowFrameGrid", () => {
+  it("accepts picture and nothing else", () => {
+    expect(canShowFrameGrid(videoElement())).toBe(true);
+    expect(canShowFrameGrid(imageElement())).toBe(true);
+    expect(canShowFrameGrid(audioElement())).toBe(false);
+    expect(canShowFrameGrid(textElement())).toBe(false);
+  });
+});
+
+describe("drawTimeline — frame grid", () => {
+  const picture = (over: Record<string, any> = {}) =>
+    imageElement({
+      trackId: "v1",
+      startTime: 0,
+      duration: 2000,
+      timelineOptions: { color: DARK },
+      ...over,
+    });
+
+  it("is absent unless asked for", () => {
+    const { canvas } = gridPaint(doc({ a: picture() }), { frameGrid: false });
+    for (const x of [10, 20, 30]) {
+      expect(isGridInk(canvas, x)).toBe(false);
+    }
+  });
+
+  it("rules the clip off at every frame", () => {
+    const { canvas } = gridPaint(doc({ a: picture() }));
+    for (const x of [10, 20, 30, 100, 190]) {
+      expect(isGridInk(canvas, x)).toBe(true);
+    }
+    for (const x of [5, 15, 25, 105, 195]) {
+      expect(isGridInk(canvas, x)).toBe(false);
+    }
+  });
+
+  it("draws no line on the clip's own left edge", () => {
+    // The clip body already makes that boundary; a line there doubles it.
+    const { canvas } = gridPaint(doc({ a: picture() }));
+    expect(isGridInk(canvas, 0)).toBe(false);
+  });
+
+  it("stops at the clip's right edge", () => {
+    // Clip runs 0..2000ms, so x 0..200. Beyond that is row background.
+    const { canvas } = gridPaint(doc({ a: picture() }));
+    for (const x of [210, 220, 300]) {
+      expect(isGridInk(canvas, x)).toBe(false);
+    }
+  });
+
+  it("leaves audio and text clips alone", () => {
+    const { canvas } = gridPaint(
+      doc({
+        a: audioElement({
+          trackId: "v1",
+          startTime: 0,
+          duration: 2000,
+          timelineOptions: { color: DARK },
+        }),
+      }),
+    );
+    for (const x of [10, 20, 30]) {
+      expect(isGridInk(canvas, x)).toBe(false);
+    }
+
+    const text = gridPaint(
+      doc({
+        a: textElement({
+          trackId: "v1",
+          startTime: 0,
+          duration: 2000,
+          timelineOptions: { color: DARK },
+        }),
+      }),
+    );
+    for (const x of [10, 20, 30]) {
+      expect(isGridInk(text.canvas, x)).toBe(false);
+    }
+  });
+
+  it("runs on one lattice across clips that do not share a phase", () => {
+    // The second clip starts mid-frame. Its lines must still belong to the
+    // global grid, or the two clips would show visibly different rulings.
+    const { canvas } = gridPaint(
+      doc({
+        a: picture({ duration: 1000 }),
+        b: picture({ startTime: 1550, duration: 1000 }),
+      }),
+    );
+    for (const x of [160, 170, 180]) {
+      expect(isGridInk(canvas, x)).toBe(true);
+    }
+    for (const x of [165, 175, 185]) {
+      expect(isGridInk(canvas, x)).toBe(false);
+    }
+  });
+
+  it("moves with the scroll", () => {
+    const hScroll = 5;
+    const { canvas } = gridPaint(
+      doc({ a: picture({ startTime: 0, duration: 4000 }) }),
+      { hScroll },
+    );
+    for (const x of [10 - hScroll, 20 - hScroll, 30 - hScroll]) {
+      expect(isGridInk(canvas, x)).toBe(true);
+    }
+    for (const x of [10, 20, 30]) {
+      expect(isGridInk(canvas, x)).toBe(false);
+    }
+  });
+
+  it("sits over the filmstrip rather than under it", () => {
+    // Buried beneath the frames it would be invisible, which is the one place
+    // it most needs to be seen.
+    const { canvas } = gridPaint(doc({ a: picture() }), {
+      provider: solidProvider("#ff0000"),
+    });
+    expect(pixel(canvas, 15, ROW_Y)).toMatchObject({ r: 255, g: 0, b: 0 });
+    const online = pixel(canvas, 20, ROW_Y);
+    expect(online.g).toBeGreaterThan(0);
+  });
+
+  it("sits under the selection border", () => {
+    // Selection is the stronger signal and its frame must stay unbroken.
+    const { canvas } = gridPaint(doc({ a: picture() }), { selection: ["a"] });
+    expect(pixel(canvas, 20, 0)).toMatchObject({ r: 255, g: 255, b: 255 });
+  });
+
+  it("costs only what is on screen", () => {
+    // A ten-minute clip at this zoom is 60,000px wide; without the viewport
+    // clip that would be 6,000 lines for a 400px canvas.
+    const { ctx } = scene(W, H);
+    const d = doc({ a: picture({ duration: 600_000 }) });
+    const layout = layoutTimeline({
+      doc: d,
+      range: GRID_RANGE,
+      hScroll: 0,
+      vScroll: 0,
+      viewportW: W,
+      viewportH: H,
+      topOffset: 0,
+    });
+
+    let fills = 0;
+    const real = ctx.fillRect.bind(ctx);
+    ctx.fillRect = ((...args: any[]) => {
+      fills++;
+      return (real as any)(...args);
+    }) as any;
+
+    drawTimeline(ctx, {
+      layout,
+      doc: d,
+      range: GRID_RANGE,
+      hScroll: 0,
+      viewportW: W,
+      viewportH: H,
+      selection: [],
+      playheadMs: -1000,
+      projectEndMs: 100_000,
+      colors: defaultColors,
+      fps: GRID_FPS,
+      frameGrid: true,
+    });
+
+    expect(fills).toBeLessThan(W / GRID_CELL_PX + 20);
+  });
+
+  it("falls back to the default frame rate rather than throwing", () => {
+    const { canvas } = gridPaint(doc({ a: picture() }), { fps: undefined });
+    // 60fps at range 2 is 0.333px per frame — far too dense to read, but it
+    // must not crash or paint garbage outside the clip.
+    expect(isGridInk(canvas, 300)).toBe(false);
+  });
+
+  it("draws nothing on a sliver of a clip", () => {
+    const { canvas } = gridPaint(doc({ a: picture({ duration: 5 }) }));
+    expect(isGridInk(canvas, 0)).toBe(false);
+    expect(isGridInk(canvas, 1)).toBe(false);
   });
 });

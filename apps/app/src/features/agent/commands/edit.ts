@@ -13,6 +13,12 @@
  * politeness: an agent that has just read `list_clips` knows where things are,
  * not how far they should travel, and asking it to subtract is asking it to be
  * wrong occasionally.
+ *
+ * Those absolute times are snapped to frames, exactly as the mouse's are. An
+ * agent asking for 1988ms is not asking for something the timeline can express
+ * — nothing renders between frames — and letting it through would mean the one
+ * path that bypasses the grid is the automated one, quietly reintroducing the
+ * off-grid clips the rest of the feature exists to eliminate.
  */
 
 import { v4 as uuidv4 } from "uuid";
@@ -28,6 +34,8 @@ import {
   type TimeRange,
 } from "../../timeline/clipOps";
 import { spanOf } from "../../timeline/geometry";
+import { normalizeFps, snapMsToFrame } from "../../timeline/frames";
+import { renderOptionStore } from "../../../states/renderOptionStore";
 import { trackById, type TimelineDocument } from "../../timeline/tracks";
 import { ensureUndoBaseline } from "../checkpoint";
 import { registerCommands } from "../registry";
@@ -123,12 +131,31 @@ function currentDoc(): TimelineDocument {
   return useTimelineStore.getState().getDocument();
 }
 
+/** The project frame rate — the same field the exporter samples with. */
+function projectFps(): number {
+  return normalizeFps(renderOptionStore.getState().options?.fps);
+}
+
+/** An absolute timeline time, moved onto the frame grid. */
+function onFrame(ms: number): number {
+  return snapMsToFrame(ms, projectFps());
+}
+
+/** What `commit` returns for an edit that turned out to be a no-op. */
+function declined(reason: string): EditResult {
+  return { ok: false, reason, created: [], removed: [], changed: [] };
+}
+
 registerCommands({
   split_clip: (params: { elementId: string; atMs: number[] }) => {
     const doc = currentDoc();
     requireElement(doc, params.elementId);
 
-    const cuts = [...new Set(params.atMs ?? [])].sort((a, b) => b - a);
+    // Snapped before deduplicating: two requested times inside the same frame
+    // are one cut, and `splitClip` would decline the second anyway.
+    const cuts = [...new Set((params.atMs ?? []).map(onFrame))].sort(
+      (a, b) => b - a,
+    );
     if (cuts.length === 0) {
       throw new Error("split_clip needs at least one time in `atMs`.");
     }
@@ -157,8 +184,14 @@ registerCommands({
     const span = spanOf(element);
     const ripple = params.ripple !== false;
 
+    // The edges these ranges leave behind are clip edges like any other.
+    const ranges = (params.ranges ?? []).map((range) => ({
+      startMs: onFrame(range.startMs),
+      endMs: onFrame(range.endMs),
+    }));
+
     const result = commit(
-      (d) => removeRanges(d, params.elementId, params.ranges ?? [], ripple, uuidv4),
+      (d) => removeRanges(d, params.elementId, ranges, ripple, uuidv4),
       `None of those ranges overlap the clip, which spans ${Math.round(span.start)}–${Math.round(span.end)}ms.`,
     );
 
@@ -182,8 +215,8 @@ registerCommands({
     // applied in one transform so a two-sided trim is one undo step; the end
     // delta is computed first because trimming the start moves the end.
     const startDelta =
-      params.startMs != null ? params.startMs - span.start : 0;
-    const endDelta = params.endMs != null ? params.endMs - span.end : 0;
+      params.startMs != null ? onFrame(params.startMs) - span.start : 0;
+    const endDelta = params.endMs != null ? onFrame(params.endMs) - span.end : 0;
 
     return commit(
       (d) => {
@@ -215,13 +248,20 @@ registerCommands({
       requireElement(doc, id);
     }
 
-    let deltaMs = params.deltaMs ?? 0;
-    if (params.toMs != null) {
-      // `toMs` places the *earliest* clip of the selection and carries the
-      // rest along, so a multi-clip move keeps the shape the agent read.
-      const anchor = Math.min(...ids.map((id) => spanOf(doc.elements[id]).start));
-      deltaMs = params.toMs - anchor;
+    if (params.toMs == null && params.deltaMs == null && params.trackId == null) {
+      throw new Error("move_clips needs `toMs`, `deltaMs`, or a different `trackId`.");
     }
+
+    // `toMs` places the *earliest* clip of the selection and carries the rest
+    // along, so a multi-clip move keeps the shape the agent read. Either way it
+    // is that anchor that lands on a frame; the others keep their offsets.
+    const anchor = Math.min(...ids.map((id) => spanOf(doc.elements[id]).start));
+    const requested =
+      params.toMs != null ? params.toMs : anchor + (params.deltaMs ?? 0);
+    const deltaMs =
+      params.toMs != null || params.deltaMs != null
+        ? onFrame(Math.max(0, requested)) - anchor
+        : 0;
 
     let deltaTrackIndex = 0;
     if (params.trackId != null) {
@@ -236,7 +276,13 @@ registerCommands({
     }
 
     if (deltaMs === 0 && deltaTrackIndex === 0) {
-      throw new Error("move_clips needs `toMs`, `deltaMs`, or a different `trackId`.");
+      // Reported rather than thrown: the parameters were well formed, the move
+      // just rounded to nothing. `moveClips` builds a fresh document even for a
+      // zero delta, so without this an undo step would be recorded for an edit
+      // that changed nothing.
+      return declined(
+        "That move is smaller than one frame, so the clips are already there.",
+      );
     }
 
     return commit(

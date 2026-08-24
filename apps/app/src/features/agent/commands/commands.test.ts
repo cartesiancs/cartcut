@@ -395,3 +395,87 @@ describe("undo and redo", () => {
     expect(currentSpans()).toHaveLength(2);
   });
 });
+
+describe("agent edits land on frames", () => {
+  /**
+   * The mouse and the agent go through different adapters onto the same pure
+   * ops. If only the mouse quantized, the automated path would be the one that
+   * reintroduced off-grid clips — the exact thing frame editing removes.
+   */
+  const FPS = 60;
+  const frame = (n: number) => (n / FPS) * 1000;
+  const onGrid = (ms: number) =>
+    Math.abs(ms - (Math.round((ms * FPS) / 1000) / FPS) * 1000) < 1e-6;
+
+  beforeEach(() => {
+    renderOptionStore.getState().updateOptions({
+      ...renderOptionStore.getState().options,
+      fps: FPS,
+    });
+  });
+
+  it("snaps a move to an absolute time", async () => {
+    seed({ a: videoElement({ trackId: "v1", startTime: 0, duration: 4000 }) });
+    // 1988ms is not a 60fps instant; nothing renders there.
+    const result = await run("move_clips", { elementIds: ["a"], toMs: 1988 });
+    expect(result.ok).toBe(true);
+    expect(onGrid(currentSpans()[0].start)).toBe(true);
+  });
+
+  it("snaps a relative move", async () => {
+    seed({ a: videoElement({ trackId: "v1", startTime: 0, duration: 4000 }) });
+    await run("move_clips", { elementIds: ["a"], deltaMs: 137 });
+    expect(onGrid(currentSpans()[0].start)).toBe(true);
+  });
+
+  it("reports a sub-frame move instead of recording an undo step", async () => {
+    seed({
+      a: videoElement({ trackId: "v1", startTime: frame(60), duration: 4000 }),
+    });
+    const before = historyLength();
+    const result = await run("move_clips", {
+      elementIds: ["a"],
+      deltaMs: 0.2,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/smaller than one frame/);
+    expect(historyLength()).toBe(before);
+  });
+
+  it("still refuses a move with no destination at all", async () => {
+    seed({ a: videoElement({ trackId: "v1", startTime: 0, duration: 4000 }) });
+    await expect(run("move_clips", { elementIds: ["a"] })).rejects.toThrow(
+      /needs `toMs`/,
+    );
+  });
+
+  it("snaps both edges of a trim", async () => {
+    seed({ a: videoElement({ trackId: "v1", startTime: 0, duration: 4000 }) });
+    await run("trim_clip", { elementId: "a", startMs: 511, endMs: 3222 });
+    const span = currentSpans()[0];
+    expect(onGrid(span.start)).toBe(true);
+    expect(onGrid(span.end)).toBe(true);
+  });
+
+  it("snaps a cut, so both halves start on frames", async () => {
+    seed({ a: videoElement({ trackId: "v1", startTime: 0, duration: 4000 }) });
+    await run("split_clip", { elementId: "a", atMs: [1988] });
+    const spans = currentSpans();
+    expect(spans).toHaveLength(2);
+    for (const span of spans) {
+      expect(onGrid(span.start)).toBe(true);
+    }
+    // And the two halves still touch exactly.
+    expect(spans[1].start).toBe(spans[0].end);
+  });
+
+  it("treats two cuts inside one frame as one cut", async () => {
+    seed({ a: videoElement({ trackId: "v1", startTime: 0, duration: 4000 }) });
+    const result = await run("split_clip", {
+      elementId: "a",
+      atMs: [2000, 2001],
+    });
+    expect(result.ok).toBe(true);
+    expect(currentSpans()).toHaveLength(2);
+  });
+});

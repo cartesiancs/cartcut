@@ -89,14 +89,14 @@ const template: any = [
       //         nodeIntegration: true,
       //         contextIsolation: false,
       //       },
-      //       indexFile: "./app/page/about.html",
+      //       indexFile: "apps/app/page/about.html",
       //     });
       //   },
       // },
       {
         label: "Credit",
         click: async () => {
-          const indexFile = "app/page/credit.html";
+          const indexFile = "apps/app/page/credit.html";
 
           let mainWindow = new BrowserWindow({
             width: 600,
@@ -124,7 +124,7 @@ const template: any = [
             webPreferences: {
               preload: path.join(__dirname, "../preload.js"),
             },
-            indexFile: "./app/page/setting.html",
+            indexFile: "apps/app/page/setting.html",
           });
         },
       },

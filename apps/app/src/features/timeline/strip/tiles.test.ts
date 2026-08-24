@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
-  TILE_QUANTA_MS,
+  TILE_QUANTA_FRAMES,
   chooseQuantum,
+  chooseQuantumFrames,
   planFilmstrip,
   tileKey,
   type FilmstripInput,
 } from "./tiles";
+import { frameToMs, msToFrame } from "../frames";
+import { MAX_RANGE } from "../zoom";
 
 const RANGE = 0.9; // 45px per second
 
@@ -32,26 +35,71 @@ describe("chooseQuantum", () => {
   it("picks the largest rung that fits within one tile", () => {
     // Never coarser than the tile spacing: a coarser quantum rounds adjacent
     // tiles onto the same instant and the strip stops advancing.
-    expect(chooseQuantum(250)).toBe(250);
-    expect(chooseQuantum(499)).toBe(250);
-    expect(chooseQuantum(1500)).toBe(1000);
-    expect(chooseQuantum(2000)).toBe(2000);
+    expect(chooseQuantumFrames(frameToMs(4, 60), 60)).toBe(4);
+    expect(chooseQuantumFrames(frameToMs(7, 60), 60)).toBe(4);
+    expect(chooseQuantumFrames(frameToMs(8, 60), 60)).toBe(8);
+  });
+
+  it("goes down to a single frame", () => {
+    // The point of the change. A tile at maximum zoom spans ~24ms, and the old
+    // floor of 250ms drew the same picture across fifteen frames of timeline.
+    expect(chooseQuantumFrames(frameToMs(1, 60), 60)).toBe(1);
+    expect(chooseQuantumFrames(24, 60)).toBe(1);
+    expect(chooseQuantum(24, 60)).toBeCloseTo(frameToMs(1, 60), 9);
   });
 
   it("falls back to the finest rung when even that is too coarse", () => {
-    expect(chooseQuantum(100)).toBe(TILE_QUANTA_MS[0]);
-    expect(chooseQuantum(0)).toBe(TILE_QUANTA_MS[0]);
+    expect(chooseQuantumFrames(1, 60)).toBe(TILE_QUANTA_FRAMES[0]);
+    expect(chooseQuantumFrames(0, 60)).toBe(TILE_QUANTA_FRAMES[0]);
   });
 
   it("saturates at the largest rung for very wide tiles", () => {
-    expect(chooseQuantum(10_000_000)).toBe(
-      TILE_QUANTA_MS[TILE_QUANTA_MS.length - 1],
+    expect(chooseQuantumFrames(10_000_000, 60)).toBe(
+      TILE_QUANTA_FRAMES[TILE_QUANTA_FRAMES.length - 1],
     );
   });
 
   it("is a ladder, so nearby scales share a rung", () => {
     // This is what keeps cache keys stable through a zoom gesture.
-    expect(chooseQuantum(1100)).toBe(chooseQuantum(1900));
+    expect(chooseQuantumFrames(1100, 60)).toBe(chooseQuantumFrames(1900, 60));
+  });
+
+  it("measures its finest rung in frames at every rate", () => {
+    for (const fps of [24, 25, 30, 60]) {
+      expect(chooseQuantum(frameToMs(1, fps), fps)).toBeCloseTo(
+        frameToMs(1, fps),
+        9,
+      );
+    }
+  });
+});
+
+describe("filmstrip at frame-editing zoom", () => {
+  /** One tile is ~71px, which at this zoom is under two frames of timeline. */
+  const zoomed = () => planFilmstrip(input({ range: MAX_RANGE, clipW: 600 }));
+
+  it("gives neighbouring tiles different frames", () => {
+    // Before the quantum ladder was measured in frames, all of these collapsed
+    // onto the same 250ms instant and the strip showed one picture repeatedly.
+    const plan = zoomed();
+    expect(plan.tiles.length).toBeGreaterThan(4);
+    const sources = plan.tiles.map((tile) => tile.sourceMs);
+    expect(new Set(sources).size).toBe(sources.length);
+  });
+
+  it("addresses whole frames", () => {
+    for (const tile of zoomed().tiles) {
+      expect(tile.sourceMs).toBeCloseTo(
+        frameToMs(msToFrame(tile.sourceMs, 60), 60),
+        9,
+      );
+    }
+  });
+
+  it("still holds one rung through a small zoom nudge", () => {
+    const at = (range: number) =>
+      planFilmstrip(input({ range, clipW: 600 })).quantum;
+    expect(at(MAX_RANGE)).toBe(at(MAX_RANGE * 0.97));
   });
 });
 

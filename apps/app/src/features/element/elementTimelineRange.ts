@@ -1,6 +1,7 @@
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
+import { rangeFromSlider, sliderFromRange } from "../timeline/zoom";
 
 @customElement("element-timeline-range")
 export class ElementTimelineRange extends LitElement {
@@ -18,10 +19,9 @@ export class ElementTimelineRange extends LitElement {
       this.timelineRange = state.range;
       this.timelineCursor = state.cursor;
 
-      const x = -Math.log(10 / state.range - 1);
       const input: any = document.querySelector("#timelineRange");
       if (!input) return;
-      input.value = x;
+      input.value = sliderFromRange(state.range);
       this.syncFill(input);
     });
 
@@ -55,11 +55,11 @@ export class ElementTimelineRange extends LitElement {
         <input
           ref="range"
           type="range"
-          min="-8"
-          max="5"
-          step="0.01"
+          min="0"
+          max="1"
+          step="0.0005"
           id="timelineRange"
-          value="-2"
+          value="0.571"
           @change=${this.updateRange}
           @input=${this.updateRange}
         />
@@ -92,10 +92,10 @@ export class ElementTimelineRange extends LitElement {
     const elementControlComponent = document.querySelector("element-control");
     elementControlComponent.changeTimelineRange();
 
-    const x = parseFloat(e.target.value);
-    const rx = (1 / (1 + Math.pow(Math.E, -x))) * 10;
-    this.timelineState.setRange(rx);
-
-    //this.timelineState.setRange(parseFloat(e.target.value));
+    // The track is plain `[0, 1]` now and `zoom.ts` owns the curve. It used to
+    // be a logit window pushed through a sigmoid, which capped the range at 10
+    // however far the slider travelled — and at 10 a 60fps frame is 8.3px wide,
+    // too narrow to edit a cut against.
+    this.timelineState.setRange(rangeFromSlider(parseFloat(e.target.value)));
   }
 }

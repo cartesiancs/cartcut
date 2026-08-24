@@ -23,7 +23,14 @@ import {
   trimClipEnd,
   trimClipStart,
 } from "../timeline/clipOps";
-import { pxToMsSigned, spanLength } from "../timeline/geometry";
+import {
+  normalizeFps,
+  shouldShowFrameGrid,
+  snapMsToFrame,
+  stepCursorByFrames,
+} from "../timeline/frames";
+import { clampRange } from "../timeline/zoom";
+import { resolveMove, resolveTrim } from "../timeline/dragResolve";
 import {
   TRACK_PITCH,
   hitTest,
@@ -36,7 +43,6 @@ import {
   DRAG,
   idleDrag,
   reduceDrag,
-  trackDeltaFor,
   type DragState,
   type PointerEv,
 } from "../timeline/dragMachine";
@@ -50,7 +56,6 @@ import {
   createAudioPeakProvider,
   type AudioPeakProvider,
 } from "../timeline/strip/audioPeaks";
-import { collectSnapPoints, snapSpan } from "../timeline/snapping";
 import {
   appendTrackOfKind,
   type TimelineDocument,
@@ -65,9 +70,6 @@ import {
 import { parentOf, withDescendants } from "../timeline/hierarchy";
 import { AssetController } from "../../controllers/asset";
 import { isTypingEvent } from "../../utils/typingTarget";
-
-/** How close, in px, an edge must come before it snaps. */
-const SNAP_TOLERANCE_PX = 10;
 
 /**
  * The timeline canvas.
@@ -101,6 +103,14 @@ export class elementTimelineCanvas extends LitElement {
    */
   private pendingDoc: TimelineDocument | null = null;
   private snapGuideMs: number | null = null;
+  /**
+   * Whether the frame lattice is currently drawn.
+   *
+   * The only state the hysteresis needs: `shouldShowFrameGrid` stays a pure
+   * function by being handed its own previous answer, so the grid cannot strobe
+   * while the zoom slider crosses the threshold.
+   */
+  private frameGridOn = false;
   private layout: TimelineLayout = { rows: [], clips: [], totalHeight: 0 };
   private clipboard: Record<string, TimelineElement> = {};
   private canvasVerticalScroll = 0;
@@ -309,6 +319,15 @@ export class elementTimelineCanvas extends LitElement {
       viewportH: height,
     });
 
+    const fps = this.projectFps();
+    // Recomputed each paint, carrying its own previous answer so the threshold
+    // has hysteresis and the lattice cannot flicker mid zoom-drag.
+    this.frameGridOn = shouldShowFrameGrid(
+      this.timelineRange,
+      fps,
+      this.frameGridOn,
+    );
+
     drawTimeline(ctx, {
       layout: this.layout,
       doc,
@@ -316,6 +335,8 @@ export class elementTimelineCanvas extends LitElement {
       hScroll: this.timelineScroll,
       viewportW: width,
       viewportH: height,
+      fps,
+      frameGrid: this.frameGridOn,
       // Selecting a group outlines its contents too. A group's bar sits on its
       // own row, often far from the clips it holds, so without this there is no
       // way to see what is in one — and the outline is drawn by the painter
@@ -345,6 +366,28 @@ export class elementTimelineCanvas extends LitElement {
     useTimelineStore.getState().withCheckpoint(fn);
   }
 
+  /**
+   * The project's frame rate.
+   *
+   * One source, `renderOptionStore.options.fps` — the same field
+   * `features/export/renderTimeline.ts` samples the timeline with. The component
+   * already subscribes to that store and repaints on any change, so making fps
+   * editable later needs nothing here.
+   */
+  private projectFps(): number {
+    return normalizeFps(this.renderOption?.fps);
+  }
+
+  /** Move the playhead by whole frames, without accumulating error. */
+  private stepCursor(deltaFrames: number) {
+    if (this.control.cursorType !== "pointer") {
+      return;
+    }
+    this.timelineState.setCursor(
+      stepCursorByFrames(this.timelineCursor, deltaFrames, this.projectFps()),
+    );
+  }
+
   private copySelected() {
     const doc = this.currentDoc();
     const copied: Record<string, TimelineElement> = {};
@@ -366,13 +409,16 @@ export class elementTimelineCanvas extends LitElement {
    * put it on a brand-new row every time.
    */
   private splitSelected() {
-    const at = this.timelineCursor;
+    // The playhead is already frame-aligned when it was scrubbed or stepped,
+    // but it also tracks wall-clock time during playback — so a cut taken while
+    // playing would otherwise land between frames.
+    const at = snapMsToFrame(this.timelineCursor, this.projectFps());
     this.commit((doc) => splitAtPlayhead(doc, this.targetId, at, uuidv4));
   }
 
   /** Paste at the playhead, keeping the copied group's internal spacing. */
   private pasteClipboard() {
-    const at = this.timelineCursor;
+    const at = snapMsToFrame(this.timelineCursor, this.projectFps());
     this.commit((doc) => pasteClips(doc, this.clipboard, at, uuidv4));
   }
 
@@ -514,9 +560,15 @@ export class elementTimelineCanvas extends LitElement {
   /**
    * Apply the drag machine's verdict to the document.
    *
-   * The machine decides *what kind* of gesture is happening; this turns the
-   * current offsets into a candidate document. Recomputed from `dragBase` every
-   * frame rather than compounded, so the clip tracks the pointer exactly.
+   * The machine decides *what kind* of gesture is happening, `dragResolve`
+   * decides *where it lands*, and this turns that answer into a candidate
+   * document. Recomputed from `dragBase` every frame rather than compounded, so
+   * the clip tracks the pointer exactly.
+   *
+   * The arithmetic that used to live here — snapping, rounding, the no-op guard
+   * — moved into `features/timeline/dragResolve.ts` so it could be tested. It
+   * was the last real decision in the timeline that a suite could not reach,
+   * and frame quantization is not something to add to untested code.
    */
   private applyDrag() {
     const base = this.dragBase;
@@ -525,7 +577,7 @@ export class elementTimelineCanvas extends LitElement {
       return;
     }
 
-    const deltaMs = pxToMsSigned(drag.dxPx, this.timelineRange);
+    const fps = this.projectFps();
     this.snapGuideMs = null;
     this.dropTrackId = null;
 
@@ -535,57 +587,53 @@ export class elementTimelineCanvas extends LitElement {
       // Trimming acts on the grabbed clip alone; dragging one edge of a
       // multi-selection has no obvious meaning for the rest. `clipOps` clamps
       // the edge at the neighbouring clip rather than letting it overlap.
-      const trimMs = Math.round(deltaMs);
-      next =
-        drag.phase === "trimStart"
-          ? trimClipStart(base, drag.hit.elementId, trimMs)
-          : trimClipEnd(base, drag.hit.elementId, trimMs);
-    } else {
-      const primary = base.elements[drag.hit.elementId];
-      if (!primary) {
+      const plan = resolveTrim({
+        base,
+        elementId: drag.hit.elementId,
+        edge: drag.phase === "trimStart" ? "start" : "end",
+        dxPx: drag.dxPx,
+        range: this.timelineRange,
+        fps,
+      });
+      if (plan.kind === "none") {
+        this.drawCanvas();
         return;
       }
-
-      // Snap the grabbed clip, then move the whole selection by however much
-      // actually got applied, so a multi-clip drag keeps its shape.
-      const desired = Math.max(0, primary.startTime + deltaMs);
-      const snapped = snapSpan(
-        desired,
-        spanLength(primary),
-        collectSnapPoints(base, {
-          excludeIds: this.dragIds,
-          playheadMs: this.timelineCursor,
-        }),
-        this.timelineRange,
-        SNAP_TOLERANCE_PX,
-        primary.trackId,
-      );
-
-      const trackDelta = drag.free
-        ? trackDeltaFor(drag.dyPx, TRACK_PITCH)
-        : 0;
-
-      this.snapGuideMs = snapped.hit?.ms ?? null;
-
-      // Round once, here, where pixels finally become a time. A fractional
-      // delta leaves clips at 1988.888ms and, worse, a drag meant to be purely
-      // vertical still nudges the clip along its track by a sub-pixel amount
-      // — enough to break the exact adjacency a split just produced.
-      const appliedMs = Math.round(snapped.startMs - primary.startTime);
+      next =
+        drag.phase === "trimStart"
+          ? trimClipStart(base, drag.hit.elementId, plan.trimMs)
+          : trimClipEnd(base, drag.hit.elementId, plan.trimMs);
+    } else {
+      // The grabbed clip is resolved, and the whole selection then moves by
+      // however much it actually travelled, so a multi-clip drag keeps its
+      // shape.
+      const plan = resolveMove({
+        base,
+        primaryId: drag.hit.elementId,
+        dragIds: this.dragIds,
+        dxPx: drag.dxPx,
+        dyPx: drag.dyPx,
+        free: drag.free,
+        range: this.timelineRange,
+        fps,
+        playheadMs: this.timelineCursor,
+        trackPitch: TRACK_PITCH,
+      });
 
       // A gesture that moves nothing must produce nothing. `moveClips` builds a
       // fresh document even for a zero delta, so `next !== base` held and a
       // press-and-hold with a steady hand committed an undo step that appears
       // to do nothing — and, if a neighbour's edge happened to lie within the
       // snap tolerance, silently relocated the clip the user never dragged.
-      if (appliedMs === 0 && trackDelta === 0) {
+      if (plan.kind === "none") {
         this.drawCanvas();
         return;
       }
 
-      next = moveClips(base, this.dragIds, appliedMs, trackDelta);
+      this.snapGuideMs = plan.snapGuideMs;
+      next = moveClips(base, this.dragIds, plan.appliedMs, plan.trackDelta);
 
-      if (trackDelta !== 0 && next !== base) {
+      if (plan.trackDelta !== 0 && next !== base) {
         this.dropTrackId = next.elements[drag.hit.elementId]?.trackId ?? null;
       }
     }
@@ -683,9 +731,11 @@ export class elementTimelineCanvas extends LitElement {
   _handleMouseWheel(e) {
     if (e.ctrlKey) {
       e.preventDefault();
+      // Proportional to the current range, so the wheel magnifies by a
+      // constant ratio per notch — the same curve the slider now uses.
       const dx = parseFloat(e.deltaY) * (this.timelineRange / 75);
-      const next = this.timelineRange - dx;
-      if (e.deltaY < 0 ? next < 5 : next > -8) {
+      const next = clampRange(this.timelineRange - dx);
+      if (next !== this.timelineRange) {
         this.timelineState.setRange(next);
       }
       return;
@@ -786,10 +836,13 @@ export class elementTimelineCanvas extends LitElement {
     }
     e.preventDefault();
 
+    // On a frame boundary like every other edit, so a dropped clip is already
+    // aligned with whatever it is being cut against.
     const atMs = Math.max(
       0,
-      Math.round(
+      snapMsToFrame(
         timeAtX((e as any).offsetX, this.timelineRange, this.timelineScroll),
+        this.projectFps(),
       ),
     );
 
@@ -838,14 +891,10 @@ export class elementTimelineCanvas extends LitElement {
         this.moveSelectionByTrack(1);
         return;
       case "ArrowRight":
-        if (this.control.cursorType === "pointer") {
-          this.timelineState.increaseCursor(1000 / 60);
-        }
+        this.stepCursor(1);
         return;
       case "ArrowLeft":
-        if (this.control.cursorType === "pointer") {
-          this.timelineState.decreaseCursor(1000 / 60);
-        }
+        this.stepCursor(-1);
         return;
       case "Backspace":
       case "Delete":

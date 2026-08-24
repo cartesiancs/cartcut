@@ -17,6 +17,7 @@ import type {
   VideoElementType,
 } from "../../@types/timeline";
 import { isDynamicElement, spanStart, speedOf } from "./geometry";
+import { normalizeFps, planFrameGrid } from "./frames";
 import { xAtTime, type ClipRect, type TimelineLayout } from "./layout";
 import type { TimelineDocument } from "./tracks";
 import { nullTileProvider, type TileProvider } from "./strip/provider";
@@ -43,6 +44,8 @@ export type ThemeColors = {
   keyframeMerged: string;
   /** Plate behind the diamonds, so they read over a bright filmstrip. */
   keyframeLane: string;
+  /** The per-frame lattice, drawn only when a frame is wide enough to see. */
+  frameGrid: string;
 };
 
 export const defaultColors: ThemeColors = {
@@ -60,6 +63,10 @@ export const defaultColors: ThemeColors = {
   keyframe: "#d7dce3",
   keyframeMerged: "#ffffff",
   keyframeLane: "rgba(0, 0, 0, 0.35)",
+  // Faint on purpose. At the zoom where it appears there is a line every seven
+  // pixels, and anything stronger reads as hatching rather than as a grid —
+  // it has to divide the picture without competing with it.
+  frameGrid: "rgba(255, 255, 255, 0.13)",
 };
 
 export type DrawOptions = {
@@ -74,6 +81,16 @@ export type DrawOptions = {
   projectEndMs: number;
   /** Time to mark with a guide line while a drag is snapping, if any. */
   snapGuideMs?: number | null;
+  /** Project frame rate, from `renderOptionStore.options.fps`. */
+  fps?: number;
+  /**
+   * Draw the per-frame lattice on video and image clips.
+   *
+   * The caller decides, because the decision carries hysteresis — see
+   * `frames.shouldShowFrameGrid`. Off by default, so nothing that does not ask
+   * for it changes.
+   */
+  frameGrid?: boolean;
   provider?: TileProvider;
   peaks?: PeakProvider;
   colors?: ThemeColors;
@@ -154,6 +171,65 @@ export function canShowFilmstrip(
   return element.filetype === "video" || element.filetype === "image";
 }
 
+/**
+ * Clip types the frame lattice belongs on.
+ *
+ * Picture only. A frame boundary is a statement about which image is on screen,
+ * and audio has no such thing — its samples run at 48kHz, so a 60fps lattice
+ * over a waveform would be drawing a grid the content does not have. Text and
+ * shapes are continuous for the same reason.
+ *
+ * Kept separate from `canShowFilmstrip` despite matching it today, because the
+ * two answer different questions and only one of them is about frames.
+ */
+export function canShowFrameGrid(
+  element: TimelineElement,
+): element is VideoElementType | ImageElementType {
+  return element.filetype === "video" || element.filetype === "image";
+}
+
+/**
+ * Rule the clip off into frames.
+ *
+ * The lattice is planned in absolute time and merely *clipped* to this rect,
+ * never anchored to it — so the lines of two clips lying side by side belong to
+ * one grid and read as continuous. Anchoring to `rect.x` would restart the
+ * pattern at every cut and turn the grid into per-clip stripes.
+ */
+export function drawFrameGrid(
+  ctx: CanvasRenderingContext2D,
+  rect: ClipRect,
+  opts: {
+    range: number;
+    hScroll: number;
+    fps: number;
+    viewportW: number;
+    colors: ThemeColors;
+  },
+): void {
+  const xs = planFrameGrid({
+    range: opts.range,
+    hScroll: opts.hScroll,
+    // Half a pixel in from the left edge: a clip that starts on a frame — which
+    // after this change is all of them — would otherwise draw a line directly
+    // over the boundary its own body already makes.
+    x0: Math.max(rect.x + 0.5, 0),
+    // Clipped to the viewport as well as to the clip, so a clip that runs for
+    // ten minutes costs only the part of it anyone can see.
+    x1: Math.min(rect.x + rect.w, opts.viewportW),
+    fps: opts.fps,
+  });
+
+  if (xs.length === 0) {
+    return;
+  }
+
+  ctx.fillStyle = opts.colors.frameGrid;
+  for (const x of xs) {
+    ctx.fillRect(x, rect.y, 1, rect.h);
+  }
+}
+
 export function drawClip(
   ctx: CanvasRenderingContext2D,
   rect: ClipRect,
@@ -165,6 +241,9 @@ export function drawClip(
     colors: ThemeColors;
     range: number;
     viewportW: number;
+    hScroll: number;
+    fps: number;
+    frameGrid: boolean;
   },
 ) {
   const color = element.timelineOptions?.color ?? "#4a4b57";
@@ -185,6 +264,21 @@ export function drawClip(
     drawFilmstrip(ctx, rect, element, opts.provider, {
       range: opts.range,
       viewportW: opts.viewportW,
+      fps: opts.fps,
+    });
+  }
+
+  // Over the filmstrip, under everything that carries information. Buried
+  // beneath the frames it is invisible, which defeats the point; painted over
+  // the waveform, the keyframes or the label it would obscure data to show a
+  // ruler. Commercial editors put frame separators in exactly this layer.
+  if (opts.frameGrid && canShowFrameGrid(element) && rect.w > 2) {
+    drawFrameGrid(ctx, rect, {
+      range: opts.range,
+      hScroll: opts.hScroll,
+      fps: opts.fps,
+      viewportW: opts.viewportW,
+      colors: opts.colors,
     });
   }
 
@@ -257,7 +351,7 @@ function drawFilmstrip(
   rect: ClipRect,
   element: VideoElementType | ImageElementType,
   provider: TileProvider,
-  opts: { range: number; viewportW: number },
+  opts: { range: number; viewportW: number; fps: number },
 ) {
   // A video knows its source pixels; an image only has its on-screen box, which
   // is the same shape unless it has been stretched.
@@ -280,6 +374,7 @@ function drawFilmstrip(
     speed: speedOf(element),
     sourceAspect: aspect,
     range: opts.range,
+    fps: opts.fps,
     viewportX0: 0,
     viewportX1: opts.viewportW,
   });
@@ -463,6 +558,11 @@ export function drawTimeline(
       colors,
       range: opts.range,
       viewportW: opts.viewportW,
+      // The lattice is anchored in absolute time, and `rect.x` has already had
+      // the scroll folded into it — so the scroll has to travel separately.
+      hScroll: opts.hScroll,
+      fps: normalizeFps(opts.fps),
+      frameGrid: opts.frameGrid === true,
     });
   }
 

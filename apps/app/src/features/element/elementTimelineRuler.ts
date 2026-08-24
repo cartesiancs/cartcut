@@ -4,6 +4,13 @@ import { LitElement, html } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { IUIStore, uiStore } from "../../states/uiStore";
+import {
+  IRenderOptionStore,
+  renderOptionStore,
+} from "../../states/renderOptionStore";
+import { msToPxSigned, pxToMsSigned } from "../timeline/geometry";
+import { normalizeFps, snapMsToFrame } from "../timeline/frames";
+import { planRulerTicks } from "../timeline/rulerTicks";
 
 @customElement("element-timeline-ruler")
 export class ElementTimelineRuler extends LitElement {
@@ -12,7 +19,6 @@ export class ElementTimelineRuler extends LitElement {
   mousemoveEventHandler: any;
   mouseTimeout: any;
   rulerType: string;
-  timeMagnification: number;
   resizeInterval: string | number | undefined;
   width: any;
   height: number | undefined;
@@ -21,7 +27,6 @@ export class ElementTimelineRuler extends LitElement {
     this.mousemoveEventHandler = undefined;
     this.mouseTimeout = undefined;
     this.rulerType = "sec";
-    this.timeMagnification = (0.9 / 4) * 1.1111111111;
     this.addEventListener("mousedown", this.handleMousedown);
     document.addEventListener("mouseup", this.handleMouseup.bind(this));
   }
@@ -39,6 +44,12 @@ export class ElementTimelineRuler extends LitElement {
   timelineCursor = this.timelineState.cursor;
 
   @property({ attribute: false })
+  renderOptionStore: IRenderOptionStore = renderOptionStore.getInitialState();
+
+  @property({ attribute: false })
+  renderOption = this.renderOptionStore.options;
+
+  @property({ attribute: false })
   uiState: IUIStore = uiStore.getInitialState();
 
   @property({ attribute: false })
@@ -49,15 +60,16 @@ export class ElementTimelineRuler extends LitElement {
       this.timelineScroll = state.scroll;
       this.timelineCursor = state.cursor;
       this.timelineRange = state.range;
-
-      const timeMagnification = this.timelineRange / 4;
-      this.timeMagnification = timeMagnification * 1.1111111111;
-
       this.drawRuler();
     });
 
     uiStore.subscribe((state) => {
       this.resize = state.resize;
+    });
+
+    renderOptionStore.subscribe((state) => {
+      this.renderOption = state.options;
+      this.drawRuler();
     });
 
     return this;
@@ -111,52 +123,24 @@ export class ElementTimelineRuler extends LitElement {
     super.disconnectedCallback();
   }
 
+  /**
+   * The project's frame rate, from the one store that holds it.
+   */
+  private projectFps(): number {
+    return normalizeFps(this.renderOption?.fps);
+  }
+
+  /**
+   * Private copies of the px/ms conversion used to live here, rounding and
+   * clamping in ways the clip canvas did not. They are gone: both now call the
+   * shared `geometry` functions, so the ruler and the clips beneath it cannot
+   * disagree about where a time is.
+   */
   private millisecondsToPx(ms) {
-    const timelineRange = this.timelineRange;
-    const timeMagnification = timelineRange / 4;
-    const convertPixel = (ms / 5) * timeMagnification;
-    const result = Number(convertPixel.toFixed(0));
-    if (result <= 0) {
-      return 0;
-    }
-
-    return result;
+    return msToPxSigned(ms, this.timelineRange);
   }
 
-  private formatSecondsToTime(seconds: any): any {
-    const totalSeconds = parseInt(seconds, 10);
-    if (isNaN(totalSeconds) || totalSeconds < 0) {
-      return "Invalid input";
-    }
 
-    const minutes: any = Math.floor(totalSeconds / 60);
-    const remainingSeconds: any = totalSeconds % 60;
-
-    if (minutes === 0) {
-      return `${remainingSeconds}s`;
-    }
-
-    return `${minutes}m ${remainingSeconds}s`;
-  }
-
-  private formatMinutesToHourMinute(minutesInput: any): string {
-    const totalMinutes = parseInt(minutesInput, 10);
-
-    if (isNaN(totalMinutes) || totalMinutes < 0) {
-      return "Invalid input";
-    }
-
-    const hours = Math.floor(totalMinutes / 60);
-    const remainingMinutes = totalMinutes % 60;
-
-    const formattedMinutes = String(remainingMinutes).padStart(2, "0");
-
-    if (totalMinutes === 0 || totalMinutes <= 60) {
-      return `${totalMinutes}m`;
-    }
-
-    return `${hours}h ${formattedMinutes}m`;
-  }
 
   drawCursorHead() {
     const ctx: any = this.canvas.getContext("2d");
@@ -194,87 +178,31 @@ export class ElementTimelineRuler extends LitElement {
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.scale(dpr, dpr);
 
-    let range = 1;
-    let unitSplit = 1;
-    let unit = "s";
+    const plan = planRulerTicks({
+      range: this.timelineRange,
+      hScroll: this.timelineScroll,
+      width: this.width,
+      fps: this.projectFps(),
+    });
 
-    if (this.timeMagnification >= 0.5) {
-      range = 1;
-      unitSplit = 1;
-      unit = "s";
-    } else if (this.timeMagnification < 0.5 && this.timeMagnification >= 0.1) {
-      range = 5;
-      unitSplit = 1;
-      unit = "s";
-    } else if (this.timeMagnification < 0.1 && this.timeMagnification >= 0.01) {
-      range = 60;
-      unitSplit = 60;
-      unit = "m";
-    } else if (
-      this.timeMagnification < 0.01 &&
-      this.timeMagnification >= 0.001
-    ) {
-      range = 60 * 5;
-      unitSplit = 60;
-      unit = "m";
-    } else {
-      range = 60 * 60;
-      unitSplit = 60 * 60;
-      unit = "h";
-    }
+    ctx.strokeStyle = "#e3e3e3";
+    ctx.lineWidth = 1;
+    ctx.font = "300 12px serif";
 
-    let startPoint =
-      -this.timelineScroll % (180 * this.timeMagnification * range); //18 * 10 * 3
-    let startNumber = Math.floor(
-      this.timelineScroll / (180 * this.timeMagnification * range),
-    );
-
-    let term = 18 * this.timeMagnification;
-    let maxCount = Number(this.width / term) + term;
-
-    for (let count = 0; count < maxCount; count++) {
-      if (count % range > 0) {
-        continue;
-      }
-
-      let point = term * count + startPoint;
-
-      let startX = point;
-      let startY = 15;
-      let endX = point;
-      let endY = 20;
-
+    for (const tick of plan.ticks) {
       ctx.beginPath();
-
-      if (count % (10 * range) == 0) {
-        startY = 10;
-        ctx.strokeStyle = "#e3e3e3";
-        ctx.font = "300 12px serif";
-        ctx.font;
-        if (unit == "s") {
-          const text = this.formatSecondsToTime(
-            (Number(count / 10) + startNumber * range) / unitSplit,
-          );
-          ctx.strokeText(`${text}`, startX - term / 2, 10);
-        } else if (unit == "m") {
-          const text = this.formatMinutesToHourMinute(
-            (Number(count / 10) + startNumber * range) / unitSplit,
-          );
-
-          ctx.strokeText(`${text}`, startX - term / 2, 10);
-        } else {
-          const text = `${
-            (Number(count / 10) + startNumber * range) / unitSplit
-          }${unit}`;
-          ctx.strokeText(`${text}`, startX - term / 2, 10);
-        }
-      } else {
-        ctx.strokeStyle = "#e3e3e3";
-      }
-      ctx.moveTo(startX, startY);
-      ctx.lineTo(endX, endY);
-      ctx.lineWidth = 1;
+      // Labelled ticks are taller, as they always were.
+      ctx.moveTo(tick.x, tick.major ? 10 : 15);
+      ctx.lineTo(tick.x, 20);
       ctx.stroke();
+
+      if (tick.label != null) {
+        // Just right of its own tick. The old ruler drew the text half a tick
+        // to the *left*, which only lined up because every tick was the same
+        // width; with a ladder that runs from one frame to a day it would drift
+        // away from the mark it names.
+        ctx.strokeText(tick.label, tick.x + 3, 10);
+      }
     }
 
     this.drawCursorHead();
@@ -283,12 +211,6 @@ export class ElementTimelineRuler extends LitElement {
   addTickNumber(licount) {
     // let addedli = '<li></li>'.repeat(licount)
     // this.querySelector("ul").innerHTML = addedli
-  }
-
-  updateRulerSpace(timeMagnification) {
-    // const timeMagnification = timelineRange / 4;
-    // this.timeMagnification = timeMagnification * 1.1111111111;
-    // this.drawRuler();
   }
 
   // updateRulerLength(e) {
@@ -330,10 +252,7 @@ export class ElementTimelineRuler extends LitElement {
   }
 
   pxToMilliseconds(px) {
-    const timelineRange = this.timelineRange;
-    const timeMagnification = timelineRange / 4;
-    const convertMs = (px * 5) / timeMagnification;
-    return Number(convertMs.toFixed(0));
+    return pxToMsSigned(px, this.timelineRange);
   }
 
   handleMousemove(e) {
@@ -341,9 +260,18 @@ export class ElementTimelineRuler extends LitElement {
     const elementControl = document.querySelector("element-control");
     const cursorDom = document.querySelector("element-timeline-cursor");
 
+    // Scrubbing lands on a frame, so the frame the preview shows is the frame
+    // the exporter will write. Playback is left alone — `elementControl.step`
+    // drives the cursor from the wall clock, and quantizing there would fight
+    // the drift tolerance in `playback.ts`.
     this.timelineState.setCursor(
-      this.pxToMilliseconds(
-        e.pageX + this.timelineScroll - this.resize.timelineVertical.leftOption,
+      snapMsToFrame(
+        this.pxToMilliseconds(
+          e.pageX +
+            this.timelineScroll -
+            this.resize.timelineVertical.leftOption,
+        ),
+        this.projectFps(),
       ),
     );
 
