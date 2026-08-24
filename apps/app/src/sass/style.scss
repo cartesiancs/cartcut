@@ -145,6 +145,55 @@ element-timeline-scroll {
   background-color: transparent;
 }
 
+// Timeline zoom slider. Sized like the zoom control in a conventional NLE:
+// a hairline track with a small round head, not the wide pill the other
+// sliders use. `--range-fill` is kept in sync with the value by
+// elementTimelineRange.ts so the travelled part of the track reads as filled.
+element-timeline-range {
+  input[type="range"] {
+    appearance: none;
+    width: 100px;
+    max-width: 100%;
+    height: 0.75rem;
+    background: transparent;
+    outline: none;
+
+    &::-webkit-slider-runnable-track {
+      height: 3px;
+      border-radius: 999px;
+      border: none;
+      box-shadow: none;
+      background: linear-gradient(
+        to right,
+        #6c757d 0 var(--range-fill, 50%),
+        #2c3035 var(--range-fill, 50%) 100%
+      );
+    }
+
+    &::-webkit-slider-thumb {
+      appearance: none;
+      height: 0.65rem;
+      width: 0.65rem;
+      // Centres the head on the 3px track.
+      margin-top: calc((3px - 0.65rem) / 2);
+      border: none;
+      border-radius: 50%;
+      background: #cdd2d8;
+      box-shadow: none;
+      transition: background 0.12s ease;
+
+      &:hover {
+        background: #ffffff;
+      }
+
+      &:active {
+        background: #ffffff;
+        box-shadow: 0 0 0 3px rgba(205, 210, 216, 0.18);
+      }
+    }
+  }
+}
+
 .top-bar {
   height: 34px;
   background-color: #0f1012;

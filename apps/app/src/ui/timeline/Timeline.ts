@@ -105,14 +105,29 @@ export class Timeline extends LitElement {
       return;
     }
 
-    if (event.keyCode == 32) {
-      //event.preventDefault();
-      // Space
-      if (this.isPlay) {
-        this.stop();
-      } else {
-        this.play();
-      }
+    // `event.code`, not the deprecated `keyCode`, to match the rest of the
+    // app's shortcuts.
+    if (event.code !== "Space") {
+      return;
+    }
+
+    // Space is also a button's own activation key: the browser fires a click on
+    // the *keyup* for whichever button still holds focus from the last mouse
+    // click. So after using the ⟳ reset button, one press started playback here
+    // and then re-ran the reset a moment later — the playhead snapped back to 0
+    // and playback stopped. Cancelling the default suppresses that activation
+    // (and the page scroll) and leaves this handler alone in charge of the key.
+    event.preventDefault();
+
+    // A held key repeats, and each repeat would flip play/stop again.
+    if (event.repeat) {
+      return;
+    }
+
+    if (this.isPlay) {
+      this.stop();
+    } else {
+      this.play();
     }
   }
 
