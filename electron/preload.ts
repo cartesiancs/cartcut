@@ -11,7 +11,8 @@ const request = {
   dialog: {
     openDirectory: () => ipcRenderer.invoke("dialog:openDirectory"),
     openFile: (extension) => ipcRenderer.invoke("dialog:openFile", extension),
-    exportVideo: () => ipcRenderer.invoke("dialog:exportVideo"),
+    exportVideo: (container?: string) =>
+      ipcRenderer.invoke("dialog:exportVideo", container),
   },
   store: {
     set: (key, value) => ipcRenderer.invoke("store:set", key, value),

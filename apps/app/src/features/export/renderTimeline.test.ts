@@ -5,6 +5,7 @@ import type { RenderOptions } from "../../states/renderOptionStore";
 import type { ILoadedAssetStore } from "../asset/loadedAssetStore";
 import type { TimelineRenderers } from "../renderer/timeline";
 import { imageElement, shapeElement, audioElement } from "../renderer/testing";
+import { DEFAULT_EXPORT_SETTINGS } from "./settings";
 
 /**
  * The export canvas is created through `document`, and encoded through
@@ -36,6 +37,7 @@ const options: RenderOptions = {
   fps: 10,
   duration: 2,
   backgroundColor: "#101020",
+  exportSettings: DEFAULT_EXPORT_SETTINGS,
 };
 
 /** Renderers that fill the element's local box. */

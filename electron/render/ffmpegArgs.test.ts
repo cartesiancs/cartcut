@@ -13,6 +13,11 @@ import {
   videoElement,
 } from "../../apps/app/src/features/renderer/testing";
 
+/**
+ * The pre-`exportSettings` shape. Kept exactly as it was on purpose: the
+ * HTTP/offscreen path still builds this, so every assertion made against it here
+ * doubles as the back-compatibility guarantee.
+ */
 const options = {
   videoDuration: 10,
   videoBitrate: 4000,
@@ -214,12 +219,32 @@ describe("buildFFmpegArgs", () => {
     ]);
   });
 
+  it("clocks the PNG pipe at the project's frame rate", () => {
+    // renderTimeline emits frames at options.fps, so the pipe has to agree or
+    // the export comes out time-stretched.
+    const args = buildFFmpegArgs({ ...options, fps: 30 }, {});
+    expect(args[args.indexOf("-r") + 1]).toBe("30");
+  });
+
   it("substitutes a silent track when nothing is audible", () => {
     const args = buildFFmpegArgs(options, { i: imageElement({}) });
     const filters = filterComplexOf(args);
     expect(filters[0]).toContain("anullsrc");
     expect(filters[0]).toContain("d=10");
     expect(filters).toContain("[silent]aresample=async=1[aout]");
+  });
+
+  it("shapes the silence like the audio settings that were chosen", () => {
+    const args = buildFFmpegArgs(
+      {
+        ...options,
+        exportSettings: { sampleRate: 48000, channels: 1 },
+      },
+      { i: imageElement({}) },
+    );
+    const silence = filterComplexOf(args)[0];
+    expect(silence).toContain("sample_rate=48000");
+    expect(silence).toContain("channel_layout=mono");
   });
 
   it("places a single clip's source window on the command line", () => {
@@ -315,5 +340,73 @@ describe("buildFFmpegArgs", () => {
     const args = buildFFmpegArgs(options, {});
     expect(args[args.indexOf("-b:v") + 1]).toBe("4000k");
     expect(args[args.lastIndexOf("-t") + 1]).toBe("10");
+    // A legacy options object means bitrate mode, not the UI's CRF default.
+    expect(args).not.toContain("-crf");
+    expect(args[args.indexOf("-c:v") + 1]).toBe("libx264");
+  });
+
+  it("encodes at constant quality when the settings ask for it", () => {
+    const args = buildFFmpegArgs(
+      { ...options, exportSettings: { qualityMode: "crf", crf: 23 } },
+      {},
+    );
+    expect(args[args.indexOf("-crf") + 1]).toBe("23");
+    expect(args).not.toContain("-b:v");
+    expect(args[args.length - 1]).toBe("/tmp/out.mp4");
+  });
+
+  it("builds a webm the VP9 and Opus encoders will accept", () => {
+    const args = buildFFmpegArgs(
+      {
+        ...options,
+        videoDestination: "/tmp/out.webm",
+        exportSettings: {
+          videoCodec: "vp9",
+          container: "webm",
+          qualityMode: "crf",
+          audioCodec: "opus",
+        },
+      },
+      {},
+    );
+    expect(args[args.indexOf("-c:v") + 1]).toBe("libvpx-vp9");
+    expect(args[args.indexOf("-c:a") + 1]).toBe("libopus");
+    expect(args[args.indexOf("-b:v") + 1]).toBe("0");
+    expect(args).not.toContain("-preset");
+    expect(args).not.toContain("-movflags");
+    expect(args.slice(-3)).toEqual(["-f", "webm", "/tmp/out.webm"]);
+  });
+
+  it("builds a ProRes mov with a profile instead of rate control", () => {
+    const args = buildFFmpegArgs(
+      {
+        ...options,
+        videoDestination: "/tmp/out.mov",
+        exportSettings: { videoCodec: "prores", proresProfile: 3 },
+      },
+      {},
+    );
+    expect(args[args.indexOf("-c:v") + 1]).toBe("prores_ks");
+    expect(args[args.indexOf("-profile:v") + 1]).toBe("3");
+    expect(args[args.indexOf("-pix_fmt") + 1]).toBe("yuv422p10le");
+    expect(args).not.toContain("-crf");
+    expect(args).not.toContain("-b:v");
+    expect(args.slice(-3)).toEqual(["-f", "mov", "/tmp/out.mov"]);
+  });
+
+  it("keeps the destination last whatever the settings", () => {
+    const variants: any[] = [
+      options,
+      { ...options, exportSettings: { qualityMode: "crf" } },
+      { ...options, exportSettings: { videoCodec: "h265" } },
+      { ...options, exportSettings: { videoCodec: "vp9" } },
+      { ...options, exportSettings: { videoCodec: "prores" } },
+    ];
+    for (const variant of variants) {
+      const args = buildFFmpegArgs(variant, {
+        a: audioElement({ localpath: "/song.mp3" }),
+      });
+      expect(args[args.length - 1]).toBe(variant.videoDestination);
+    }
   });
 });

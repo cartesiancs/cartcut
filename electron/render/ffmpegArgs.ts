@@ -22,6 +22,14 @@
  *     sync with every second.
  */
 
+import {
+  type ExportSettings,
+  audioOutputArgs,
+  containerOutputArgs,
+  resolveExportSettings,
+  videoOutputArgs,
+} from "./exportSettings";
+
 /** One audible clip, reduced to what FFmpeg needs. */
 export type AudioInput = {
   localpath: string;
@@ -37,8 +45,13 @@ export type AudioInput = {
 
 export type RenderOptions = {
   videoDuration: number;
+  /** Legacy mirror of `exportSettings.videoBitrate`; see `resolveExportSettings`. */
   videoBitrate: number;
   videoDestination: string;
+  /** Absent on the HTTP/offscreen path, which still builds the flat shape. */
+  exportSettings?: Partial<ExportSettings>;
+  /** Absent on the legacy path, where the PNG pipe rate falls back to 60. */
+  fps?: number;
 };
 
 function speedOf(element: any): number {
@@ -136,7 +149,23 @@ export function buildFFmpegArgs(
   const filterComplex: string[] = [];
   const mapAudio: string[] = [];
 
-  args.push("-f", "image2pipe", "-vcodec", "png", "-r", "60", "-i", "pipe:0");
+  const settings = resolveExportSettings(options);
+
+  // `renderTimeline` already produces frames at `options.fps`, so a literal 60
+  // here would time-stretch the output whenever the project runs at any other
+  // rate. Legacy callers carry no fps and keep the old behaviour.
+  const inputFps = Number(options.fps) > 0 ? Number(options.fps) : 60;
+
+  args.push(
+    "-f",
+    "image2pipe",
+    "-vcodec",
+    "png",
+    "-r",
+    `${inputFps}`,
+    "-i",
+    "pipe:0",
+  );
 
   const inputs = collectAudioInputs(timeline);
 
@@ -152,8 +181,11 @@ export function buildFFmpegArgs(
   });
 
   if (mapAudio.length === 0) {
+    // The silence has to match the shape the encoder was asked for, or the
+    // resampler quietly undoes the chosen rate and layout.
+    const layout = settings.channels === 1 ? "mono" : "stereo";
     filterComplex.push(
-      `anullsrc=channel_layout=stereo:sample_rate=44100:d=${options.videoDuration}[silent]`,
+      `anullsrc=channel_layout=${layout}:sample_rate=${settings.sampleRate}:d=${options.videoDuration}[silent]`,
     );
     mapAudio.push(`[silent]`);
   }
@@ -170,19 +202,11 @@ export function buildFFmpegArgs(
 
   args.push("-filter_complex", filterComplex.join(";"));
   args.push("-map", "[vout]", "-map", "[aout]");
-  args.push(
-    "-c:a",
-    "aac",
-    "-c:v",
-    "libx264",
-    "-t",
-    `${options.videoDuration}`,
-    "-b:v",
-    `${options.videoBitrate}k`,
-    "-pix_fmt",
-    "yuv420p",
-    options.videoDestination,
-  );
+  args.push(...videoOutputArgs(settings));
+  args.push(...audioOutputArgs(settings));
+  args.push("-t", `${options.videoDuration}`);
+  args.push(...containerOutputArgs(settings));
+  args.push(options.videoDestination);
 
   return args;
 }

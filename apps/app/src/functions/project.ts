@@ -4,6 +4,7 @@ import { rendererModal } from "../utils/modal";
 import { uiStore } from "../states/uiStore";
 import { renderOptionStore } from "../states/renderOptionStore";
 import { SCHEMA_VERSION } from "../features/timeline/tracks";
+import { normalizeExportSettings } from "../features/export/settings";
 
 const arrayBufferToBase64 = (buffer) => {
   var binary = "";
@@ -115,6 +116,10 @@ const project = {
                 fps: 60,
                 duration: options.videoDuration,
                 backgroundColor: options.backgroundColor,
+                // Passed explicitly rather than omitted: omitting means "keep
+                // what is in the store", which would leak the previous
+                // project's settings into a project saved before they existed.
+                exportSettings: normalizeExportSettings(options.exportSettings),
               });
             });
         });
@@ -148,6 +153,7 @@ const project = {
         w: previewSizeW,
         h: previewSizeH,
       },
+      exportSettings: renderOptionState.exportSettings,
     };
 
     // `project.json` is what tells a future version which format this is; a

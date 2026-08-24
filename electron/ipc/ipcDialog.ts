@@ -30,14 +30,20 @@ export const ipcDialog = {
     }
   },
 
-  exportVideo: async () => {
+  // `ipcMain.handle` puts the event first, so the container arrives second —
+  // same shape as `openFile` above.
+  exportVideo: async (event, container: string = "mp4") => {
+    const extension = ["mp4", "mov", "webm"].includes(container)
+      ? container
+      : "mp4";
+
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
       title: "Export the File Path to save",
       buttonLabel: "Export",
       filters: [
         {
           name: "Export Video",
-          extensions: ["mp4"],
+          extensions: [extension],
         },
       ],
       properties: [],
