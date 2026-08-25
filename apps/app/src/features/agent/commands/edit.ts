@@ -22,10 +22,10 @@
  */
 
 import { v4 as uuidv4 } from "uuid";
-import { useTimelineStore } from "../../../states/timelineStore";
 import {
   deleteClips,
   moveClips,
+  pasteClips,
   removeRanges,
   rippleDelete,
   splitClip,
@@ -34,117 +34,13 @@ import {
   type TimeRange,
 } from "../../timeline/clipOps";
 import { spanOf } from "../../timeline/geometry";
-import { normalizeFps, snapMsToFrame } from "../../timeline/frames";
-import { renderOptionStore } from "../../../states/renderOptionStore";
-import { trackById, type TimelineDocument } from "../../timeline/tracks";
-import { ensureUndoBaseline } from "../checkpoint";
+import { withDescendants } from "../../timeline/hierarchy";
+import { MAX_SPEED, MIN_SPEED, setClipSpeed } from "../../timeline/speedOps";
+import { trackById } from "../../timeline/tracks";
+import type { TimelineElement } from "../../../@types/timeline";
+import { commit, declined } from "../commit";
+import { currentDoc, onFrame, requireElement } from "../context";
 import { registerCommands } from "../registry";
-import { clipRow } from "../serialize";
-
-type EditResult = {
-  ok: boolean;
-  reason?: string;
-  created: string[];
-  removed: string[];
-  changed: string[];
-  clips?: unknown[];
-};
-
-/**
- * Run a pure transform, record one undo step, and report what moved.
- *
- * The diff is computed here rather than by the ops because `withCheckpoint`
- * deliberately tells its caller nothing: it signals "declined" by identity and
- * otherwise just swaps the document. An agent needs more than that — it has to
- * know which ids exist now — but it must not be handed the whole timeline to
- * find out, so the answer is a list of ids plus rows for what was created.
- */
-function commit(
-  fn: (doc: TimelineDocument) => TimelineDocument,
-  declineReason: string,
-): EditResult {
-  const store = useTimelineStore.getState();
-  const before = store.getDocument();
-
-  // Probe before committing anything. `withCheckpoint` would tell us the same
-  // thing by identity, but `ensureUndoBaseline` has to run *first* to be any
-  // use — and recording a baseline for an edit that then declines would leave
-  // a history entry behind for an edit that never happened, breaking the rule
-  // that a declined edit costs the user nothing. The ops are pure, so asking
-  // twice is safe; the ids minted by the discarded run are simply not used.
-  if (fn(before) === before) {
-    return {
-      ok: false,
-      reason: declineReason,
-      created: [],
-      removed: [],
-      changed: [],
-    };
-  }
-
-  ensureUndoBaseline();
-  useTimelineStore.getState().withCheckpoint(fn);
-
-  const after = useTimelineStore.getState().getDocument();
-
-  const created: string[] = [];
-  const removed: string[] = [];
-  const changed: string[] = [];
-
-  for (const id of Object.keys(after.elements)) {
-    if (before.elements[id] == null) {
-      created.push(id);
-    } else if (before.elements[id] !== after.elements[id]) {
-      changed.push(id);
-    }
-  }
-  for (const id of Object.keys(before.elements)) {
-    if (after.elements[id] == null) {
-      removed.push(id);
-    }
-  }
-
-  const names = new Map(after.tracks.map((t) => [t.id, t.name]));
-
-  return {
-    ok: true,
-    created,
-    removed,
-    changed,
-    clips: created.map((id) =>
-      clipRow(id, after.elements[id], names.get(after.elements[id].trackId)),
-    ),
-  };
-}
-
-function requireElement(doc: TimelineDocument, elementId: string) {
-  const element = doc.elements[elementId];
-  if (element == null) {
-    throw new Error(
-      `No clip with id "${elementId}". Use list_clips to see current ids.`,
-    );
-  }
-  return element;
-}
-
-function currentDoc(): TimelineDocument {
-  return useTimelineStore.getState().getDocument();
-}
-
-/** The project frame rate — the same field the exporter samples with. */
-function projectFps(): number {
-  return normalizeFps(renderOptionStore.getState().options?.fps);
-}
-
-/** An absolute timeline time, moved onto the frame grid. */
-function onFrame(ms: number): number {
-  return snapMsToFrame(ms, projectFps());
-}
-
-/** What `commit` returns for an edit that turned out to be a no-op. */
-function declined(reason: string): EditResult {
-  return { ok: false, reason, created: [], removed: [], changed: [] };
-}
 
 registerCommands({
   split_clip: (params: { elementId: string; atMs: number[] }) => {
@@ -320,6 +216,98 @@ registerCommands({
         return next;
       },
       "Those clips are already gone.",
+    );
+  },
+
+  duplicate_clips: (params: {
+    elementIds: string[];
+    toMs?: number;
+    deltaMs?: number;
+    repeat?: number;
+  }) => {
+    const doc = currentDoc();
+    const ids = params.elementIds ?? [];
+    if (ids.length === 0) {
+      throw new Error("duplicate_clips needs at least one id in `elementIds`.");
+    }
+    for (const id of ids) {
+      requireElement(doc, id);
+    }
+
+    // A group's children come along whether or not the caller listed them.
+    // `pasteClips` remaps `parentId` across a paste, so the copies re-parent to
+    // the *copied* group — but only for clips that are in the same paste. Leave
+    // a child behind and it stays bound to the original group.
+    const withChildren = withDescendants(doc.elements, ids);
+    const picked: Record<string, TimelineElement> = {};
+    for (const id of withChildren) {
+      picked[id] = doc.elements[id];
+    }
+
+    const spans = withChildren.map((id) => spanOf(doc.elements[id]));
+    const selectionStart = Math.min(...spans.map((s) => s.start));
+    const selectionEnd = Math.max(...spans.map((s) => s.end));
+    const selectionLength = selectionEnd - selectionStart;
+
+    const repeat = Math.max(1, Math.min(50, Math.floor(params.repeat ?? 1)));
+    // Default: butt the first copy up against the end of what was copied, which
+    // is what "duplicate this" means when no destination is given.
+    const first = params.toMs != null ? Math.max(0, params.toMs) : selectionEnd;
+    const step = params.deltaMs ?? selectionLength;
+
+    return commit((d) => {
+      let next = d;
+      for (let index = 0; index < repeat; index++) {
+        next = pasteClips(next, picked, onFrame(first + step * index), uuidv4);
+      }
+      return next;
+    }, "There was no room to place the copies.");
+  },
+
+  set_clip_speed: (params: {
+    elementIds: string[];
+    speed: number;
+    ripple?: boolean;
+  }) => {
+    const doc = currentDoc();
+    const ids = params.elementIds ?? [];
+    if (ids.length === 0) {
+      throw new Error("set_clip_speed needs at least one id in `elementIds`.");
+    }
+
+    const wrongType = ids
+      .map((id) => requireElement(doc, id))
+      .filter((element) => element.filetype !== "video" && element.filetype !== "audio");
+
+    if (wrongType.length > 0) {
+      throw new Error(
+        `Only video and audio clips have a playback speed; got ${wrongType
+          .map((element) => element.filetype)
+          .join(", ")}.`,
+      );
+    }
+
+    if (
+      typeof params.speed !== "number" ||
+      params.speed < MIN_SPEED ||
+      params.speed > MAX_SPEED
+    ) {
+      throw new Error(
+        `speed must be between ${MIN_SPEED} and ${MAX_SPEED} (got ${params.speed}).`,
+      );
+    }
+
+    const ripple = params.ripple !== false;
+
+    return commit(
+      (d) =>
+        ids.reduce(
+          (next, id) => setClipSpeed(next, id, params.speed, { ripple }),
+          d,
+        ),
+      ripple
+        ? "Those clips are already at that speed."
+        : "Those clips are already at that speed, or the new length would overlap the next clip. Pass ripple:true to push it along.",
     );
   },
 });

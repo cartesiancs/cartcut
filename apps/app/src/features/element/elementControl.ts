@@ -15,6 +15,7 @@ import {
   createTextElement,
   type TextElementOptions,
 } from "./textElement";
+import { fitToPreview } from "./mediaElement";
 
 @customElement("element-control")
 export class ElementControl extends LitElement {
@@ -264,24 +265,18 @@ export class ElementControl extends LitElement {
     this.timeline = document.querySelector("element-timeline").timeline;
   }
 
+  /**
+   * Delegates to `mediaElement.fitToPreview`.
+   *
+   * The arithmetic moved there when `add_media` needed it: an image added by
+   * the agent and the same image added by a click have to come out the same
+   * size, and two copies of this calculation is how that stops being true.
+   * The store lookup it used to do lives there too — the preview canvas is a
+   * viewport, so its backing store is the visible area in device pixels rather
+   * than the project resolution, and the resolution has to come from the store.
+   */
   fitElementSizeOnPreview(width, height) {
-    // The preview canvas is a viewport now — its backing store is the visible
-    // area in device pixels, not the project resolution. Read the resolution
-    // from the store instead.
-    const previewSize = renderOptionStore.getState().options.previewSize;
-    let preview = {
-      w: Number(previewSize.w),
-      h: Number(previewSize.h),
-    };
-
-    let originRatio = width / height;
-    let resizeHeight = height < preview.h ? height : preview.h;
-    let resizeWidth = resizeHeight * originRatio;
-
-    return {
-      width: resizeWidth,
-      height: resizeHeight,
-    };
+    return fitToPreview(width, height);
   }
 
   /**

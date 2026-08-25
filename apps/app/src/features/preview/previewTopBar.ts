@@ -17,6 +17,7 @@ import {
   renderOptionStore,
 } from "../../states/renderOptionStore";
 import { ZOOM_STEP } from "./viewport";
+import { createShapeElement, shapePoints } from "../element/shapeElement";
 
 /** 100% is the fit scale, so it doubles as the "fit" preset. */
 const ZOOM_PRESETS = [25, 50, 100, 200, 400, 800];
@@ -100,40 +101,12 @@ export class PreviewTopBar extends LitElement {
   createShape(shape) {
     const elementId = uuidv4();
 
-    const width = 100;
-    const height = 100;
+    // Shape construction lives in `element/shapeElement.ts` so the agent's
+    // `add_shape` and this button produce the same element. The pen tool's own
+    // freehand path (`previewCanvas.createShape`) is a different thing and
+    // stays where it is.
+    const element = createShapeElement({ shape });
 
-    this.timeline[elementId] = {
-      key: elementId,
-      // Both are supplied by `placeNewElement` below, which picks the track and
-      // derives the paint rank from it.
-      trackId: "",
-      priority: 0,
-      blob: "",
-      startTime: 0,
-      duration: 1000,
-      opacity: 100,
-      location: { x: 0, y: 0 },
-      rotation: 0,
-      width: width,
-      height: height,
-      oWidth: width,
-      oHeight: height,
-      ratio: width / height,
-      filetype: "shape",
-      localpath: "SHAPE",
-      shape: shape,
-      option: {
-        fillColor: "#ffffff",
-      },
-      animation: emptyAnimation("shape"),
-      timelineOptions: {
-        color: "rgb(59, 143, 179)",
-      },
-    };
-
-    const element = this.timeline[elementId];
-    delete this.timeline[elementId];
     this.timelineState.withCheckpoint((doc) =>
       placeNewElement(
         doc,
@@ -149,41 +122,15 @@ export class PreviewTopBar extends LitElement {
   }
 
   createSquare() {
-    const shape = [
-      [0, 0],
-      [0, 100],
-      [100, 100],
-      [100, 0],
-    ];
-
-    return this.createShape(shape);
+    return this.createShape(shapePoints("rectangle"));
   }
 
   createTriangle() {
-    const shape = [
-      [50, 0],
-      [0, 100],
-      [100, 100],
-    ];
-
-    return this.createShape(shape);
+    return this.createShape(shapePoints("triangle"));
   }
 
   createCircle() {
-    const shape: number[][] = [];
-    const centerX = 50;
-    const centerY = 50;
-    const radius = 50;
-    const numSegments = 50;
-
-    for (let i = 0; i < numSegments; i++) {
-      const angle = (2 * Math.PI * i) / numSegments;
-      const x = centerX + radius * Math.cos(angle);
-      const y = centerY + radius * Math.sin(angle);
-      shape.push([x, y]);
-    }
-
-    return this.createShape(shape);
+    return this.createShape(shapePoints("ellipse"));
   }
 
   _handleClickButton(type) {

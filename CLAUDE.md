@@ -72,13 +72,27 @@ step, as the user's own mouse.
 
 ```
 electron/mcp/server.ts      transport, sessions, auth
-electron/mcp/tools.ts       the 17 tools Claude Code sees
+electron/mcp/tools.ts       barrel: assembles the 36 tools Claude Code sees
+electron/mcp/tools/define.ts  the erased Registrar, shared zod fragments
+electron/mcp/tools/*.ts     one module per family (read, cut, media, tracks, …)
 electron/mcp/bridge.ts      main -> renderer request/response
 electron/mcp/transcribe.ts  speech-to-text, cached on disk
+apps/app/src/features/agent/commit.ts      run a pure op, record one undo step
+apps/app/src/features/agent/context.ts     document/element/frame-grid lookups
 apps/app/src/features/agent/serialize.ts   whitelist projections
 apps/app/src/features/agent/commands/      the commands themselves
 apps/app/src/features/caption/timing.ts    source ms -> timeline ms for captions
 ```
+
+`tools.ts` must stay a barrel — do **not** turn it into `tools/index.ts`. Both
+resolve for `import … from "./tools"`, and nothing cleans `main/`, so a stale
+`main/mcp/tools.js` would shadow `main/mcp/tools/index.js` and silently ship an
+old tool list.
+
+Every mutating command goes through `commit(fn, declineReason)`, which probes
+the pure op first and records no history at all when it declines by identity.
+`electron/mcp/tools/tools.test.ts` pins the tool names, so adding one is a
+one-line diff a reviewer sees.
 
 Two constraints shape every tool:
 
@@ -109,8 +123,16 @@ returning the input by identity — as well as the happy one.
 - Undo history stores post-edit snapshots only, and nothing checkpoints on
   load, so the first edit after opening a project is not undoable. The agent
   works around this in `features/agent/checkpoint.ts`; the app itself does not.
-- Video filters (`chromakey`, `blur`, `radialblur`) apply in the WebGL preview
-  but **not** in the FFmpeg export, whose video branch is `[0:v]null[vout]`.
+- Video filters (`chromakey`, `blur`, `radialblur`) apply in the WebGL preview.
+  They were believed not to reach the FFmpeg export, on the strength of its
+  `[0:v]null[vout]` video branch — but that reading looks wrong for the v2 path:
+  input 0 is `-f rawvideo -i pipe:0`, i.e. frames the *renderer* drew, and
+  `ControlRender` hands the exporter `renderVideoWithWait`, which runs
+  `VideoFilterPipeline` whenever `filter.enable` is set. So `null` is a
+  pass-through of already-filtered frames rather than a discard. The stale note
+  does still hold for `electron/render/renderMain.ts`, the legacy `RENDER` ipc
+  path, which nothing in the renderer calls any more. Traced through the source,
+  not yet confirmed by running an export — do that before relying on it.
 - Transitions do not exist in the data model; the transition tab is an empty
   panel.
 - Cross-component calls are frequently `document.querySelector("element-…")`

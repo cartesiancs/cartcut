@@ -29,6 +29,12 @@ import "./read";
 import "./edit";
 import "./text";
 import "./meta";
+import "./clip";
+import "./media";
+import "./tracks";
+import "./appearance";
+import "./animation";
+import "./groups";
 
 /** Invoke a command the way the bridge does. */
 async function run(name: string, params: any = {}) {

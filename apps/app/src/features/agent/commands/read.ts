@@ -16,7 +16,12 @@ import {
   spanEnd,
   spanStart,
 } from "../../timeline/geometry";
-import type { TimelineElement } from "../../../@types/timeline";
+import {
+  animatableProperties,
+  type AnimatableProperty,
+  type TimelineElement,
+} from "../../../@types/timeline";
+import { lanesOf } from "../../animation/keyframes";
 import { captionToTimeline } from "../../caption/timing";
 import {
   clipDetail,
@@ -227,6 +232,95 @@ registerCommands({
         startMs: Math.round(spanStart(element)),
         endMs: Math.round(spanEnd(element)),
       },
+    };
+  },
+
+  /**
+   * The authored keyframes on one property, in absolute timeline ms.
+   *
+   * Never the baked samples: `animation[property].ax` holds up to
+   * `MAX_BAKED_SAMPLES` (36,000) values per lane, and one lane is enough to
+   * blow the 25k-token output cap on its own. `get_clip` already reports counts
+   * and times; this is for when the curve itself has to be edited.
+   */
+  get_keyframes: (params: {
+    elementId: string;
+    property: AnimatableProperty;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const element = requireElement(params.elementId);
+    const available = animatableProperties(element);
+
+    if (!available.includes(params.property)) {
+      throw new Error(
+        available.length === 0
+          ? `A ${element.filetype} clip carries no animation.`
+          : `A ${element.filetype} clip cannot animate "${params.property}". It supports: ${available.join(", ")}.`,
+      );
+    }
+
+    const track = (element as any).animation?.[params.property] ?? {};
+    const start = spanStart(element);
+
+    // Times go back out absolute, matching every other tool. They are stored
+    // relative to the clip's start; `commands/animation.ts` owns that seam.
+    const lanes: Record<string, unknown> = {};
+    for (const lane of lanesOf(params.property)) {
+      const list = Array.isArray(track[lane]) ? track[lane] : [];
+      const page = paginate(list, params.offset ?? 0, params.limit ?? 100);
+      lanes[lane] = {
+        count: page.total,
+        truncated: page.truncated,
+        keyframes: page.items.map((keyframe: any) => ({
+          atMs: Math.round(start + (keyframe?.p?.[0] ?? 0)),
+          value: keyframe?.p?.[1],
+          type: keyframe?.type,
+          cs: keyframe?.cs,
+          ce: keyframe?.ce,
+        })),
+      };
+    }
+
+    return {
+      elementId: params.elementId,
+      property: params.property,
+      active: track.isActivate === true,
+      clipSpan: {
+        startMs: Math.round(start),
+        endMs: Math.round(spanEnd(element)),
+      },
+      lanes,
+      ...(params.property === "scale"
+        ? { note: "Scale is in tenths: 10 is unscaled, 12 is 120%." }
+        : {}),
+    };
+  },
+
+  /**
+   * What the user has selected.
+   *
+   * Selection lives on the timeline canvas component rather than in a store —
+   * the same DOM reach `select_clips` makes, for the same reason.
+   */
+  get_selection: () => {
+    const timelineCanvas: any = document.querySelector("element-timeline-canvas");
+    if (timelineCanvas == null) {
+      return { ok: false, reason: "The timeline canvas is not mounted." };
+    }
+
+    const document_ = doc();
+    const ids: string[] = (timelineCanvas.targetId ?? []).filter(
+      (id: string) => document_.elements[id] != null,
+    );
+    const names = new Map(document_.tracks.map((t) => [t.id, t.name]));
+
+    return {
+      ok: true,
+      selected: ids,
+      clips: ids.map((id) =>
+        clipRow(id, document_.elements[id], names.get(document_.elements[id].trackId)),
+      ),
     };
   },
 

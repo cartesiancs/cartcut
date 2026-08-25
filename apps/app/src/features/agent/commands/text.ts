@@ -15,12 +15,10 @@ import { v4 as uuidv4 } from "uuid";
 import { useTimelineStore } from "../../../states/timelineStore";
 import { renderOptionStore } from "../../../states/renderOptionStore";
 import { placeNewElement } from "../../timeline/placement";
-import { setIn } from "../../../utils/immutable";
-import type { TimelineDocument } from "../../timeline/tracks";
-import type { TimelineElement } from "../../../@types/timeline";
 import { createTextElement } from "../../element/textElement";
 import { captionToTimeline } from "../../caption/timing";
 import { ensureUndoBaseline } from "../checkpoint";
+import { currentDoc } from "../context";
 import { registerCommands } from "../registry";
 import { clipRow } from "../serialize";
 
@@ -55,58 +53,6 @@ function defaultLayout(style: SubtitleStyle) {
     locationX: style.locationX ?? 0,
     locationY: style.locationY ?? h - bottomPadding - fontsize,
   };
-}
-
-function currentDoc(): TimelineDocument {
-  return useTimelineStore.getState().getDocument();
-}
-
-/** Property paths `update_clip` will write, by element type. */
-const WRITABLE: Record<string, string[][]> = {
-  common: [
-    ["location", "x"],
-    ["location", "y"],
-    ["width"],
-    ["height"],
-    ["opacity"],
-    ["rotation"],
-  ],
-  text: [
-    ["text"],
-    ["textcolor"],
-    ["fontsize"],
-    ["letterSpacing"],
-    ["options", "align"],
-    ["options", "isBold"],
-    ["options", "isItalic"],
-    ["options", "outline", "enable"],
-    ["options", "outline", "size"],
-    ["options", "outline", "color"],
-    ["background", "enable"],
-    ["background", "color"],
-  ],
-};
-
-function writablePaths(element: TimelineElement): string[][] {
-  const common = element.filetype === "audio" ? [] : WRITABLE.common;
-  return [...common, ...(WRITABLE[element.filetype] ?? [])];
-}
-
-/** `{a: {b: 1}}` -> `[[["a","b"], 1]]`, so a nested patch becomes path writes. */
-function flatten(
-  patch: Record<string, any>,
-  prefix: string[] = [],
-): Array<[string[], unknown]> {
-  const out: Array<[string[], unknown]> = [];
-  for (const [key, value] of Object.entries(patch)) {
-    const path = [...prefix, key];
-    if (value != null && typeof value === "object" && !Array.isArray(value)) {
-      out.push(...flatten(value, path));
-    } else {
-      out.push([path, value]);
-    }
-  }
-  return out;
 }
 
 registerCommands({
@@ -242,61 +188,6 @@ registerCommands({
       ok: true,
       created: [elementId],
       clips: [clipRow(elementId, created, names.get(created.trackId))],
-    };
-  },
-
-  update_clip: (params: { elementId: string; patch: Record<string, any> }) => {
-    const doc = currentDoc();
-    const element = doc.elements[params.elementId];
-    if (element == null) {
-      throw new Error(
-        `No clip with id "${params.elementId}". Use list_clips to see current ids.`,
-      );
-    }
-
-    const allowed = writablePaths(element);
-    const writes = flatten(params.patch ?? {});
-    if (writes.length === 0) {
-      throw new Error("update_clip needs a non-empty `patch`.");
-    }
-
-    // Whitelisted rather than filtered: `startTime`, `duration` and `trim` are
-    // coupled by invariants that `geometry.ts` enforces and a blind write would
-    // break, so timing changes belong to trim_clip and move_clips, not here.
-    const rejected = writes
-      .map(([path]) => path.join("."))
-      .filter(
-        (name) => !allowed.some((path) => path.join(".") === name),
-      );
-
-    if (rejected.length > 0) {
-      throw new Error(
-        `update_clip cannot write ${rejected.join(", ")} on a ${element.filetype} clip. ` +
-          `Writable: ${allowed.map((p) => p.join(".")).join(", ")}. ` +
-          `Use trim_clip or move_clips to change timing.`,
-      );
-    }
-
-    ensureUndoBaseline();
-    useTimelineStore.getState().withCheckpoint((d) => {
-      let updated: TimelineElement = d.elements[params.elementId];
-      for (const [path, value] of writes) {
-        updated = setIn(updated, path, value);
-      }
-      return {
-        ...d,
-        elements: { ...d.elements, [params.elementId]: updated },
-      };
-    });
-
-    const after = useTimelineStore.getState().getDocument();
-    const names = new Map(after.tracks.map((t) => [t.id, t.name]));
-    const current = after.elements[params.elementId];
-
-    return {
-      ok: true,
-      changed: writes.map(([path]) => path.join(".")),
-      clip: clipRow(params.elementId, current, names.get(current.trackId)),
     };
   },
 });

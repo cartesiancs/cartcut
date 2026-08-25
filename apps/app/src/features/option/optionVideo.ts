@@ -4,7 +4,8 @@ import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { LocaleController } from "../../controllers/locale";
 import { VideoElementType } from "../../@types/timeline";
 import { KeyframeController } from "../../controllers/keyframe";
-import { addKeyframe, setTrackActive } from "../animation/keyframeOps";
+import { addKeyframe } from "../animation/keyframeOps";
+import { applyPreset, type PresetName } from "../animation/presets";
 import { setIn } from "../../utils/immutable";
 import { GestureCommit } from "./gestureCommit";
 
@@ -177,7 +178,7 @@ export class OptionVideo extends LitElement {
           type="button"
           class="btn btn-sm mt-2 w-100 bg-dark text-light"
           @click=${() =>
-            this.handleClickAddAnimatePreset(0, 0, 250, 100, "opacity")}
+            this.handleClickAddAnimatePreset("fade_in")}
         >
           Fade In
         </button>
@@ -186,7 +187,7 @@ export class OptionVideo extends LitElement {
           type="button"
           class="btn btn-sm mt-2 w-100 bg-dark text-light"
           @click=${() =>
-            this.handleClickAddAnimatePreset(0, 10, 250, 12, "scale")}
+            this.handleClickAddAnimatePreset("zoom_in")}
         >
           Zoom In
         </button>
@@ -335,14 +336,11 @@ export class OptionVideo extends LitElement {
    * history. Undoing a preset was impossible, and the in-place write reached
    * back into every history entry that shared the element.
    */
-  handleClickAddAnimatePreset(ax, ay, bx, by, type) {
+  handleClickAddAnimatePreset(preset: PresetName) {
     const elementId = this.elementId;
-    useTimelineStore.getState().withCheckpoint((doc) => {
-      let next = setTrackActive(doc, elementId, type, true);
-      next = addKeyframe(next, elementId, type, "x", ax, ay);
-      next = addKeyframe(next, elementId, type, "x", bx, by);
-      return next;
-    });
+    useTimelineStore
+      .getState()
+      .withCheckpoint((doc) => applyPreset(doc, elementId, preset, 250));
 
     this.requestUpdate();
   }

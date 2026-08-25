@@ -1,0 +1,137 @@
+/**
+ * The scaffolding every tool module shares.
+ *
+ * Two constraints shape this file, and both are load-bearing.
+ *
+ * **`registerTool`'s generics must stay erased.** `McpServer.registerTool`
+ * infers the argument type of the handler from the zod shape, through the SDK's
+ * zod-3/zod-4 compatibility layer. That inference is pathological here: a
+ * *single* call costs about ten seconds of `tsc` and reports TS2589, and
+ * seventeen of them exhaust the compiler's heap outright. Measured, not guessed
+ * — erasing it takes the file from an out-of-memory crash to roughly a second.
+ *
+ * Nothing is lost at runtime: zod still validates every call, and the schema
+ * the agent sees is unchanged. What goes away is a compile-time echo of a
+ * guarantee that is enforced at the boundary anyway.
+ *
+ * The cast now lives in exactly one place instead of being a convention that
+ * every tool module has to remember. A module receives `Registrar` as a
+ * parameter type and *cannot* reintroduce the inference by accident.
+ *
+ * Two rules for anyone adding a tool module:
+ *
+ *  - Never annotate a handler parameter, and never let a `z.infer` reach a
+ *    handler signature.
+ *  - Avoid `z.discriminatedUnion` and deep `z.union` in tool shapes — that is
+ *    the other known TS2589 generator on this path. Prefer a flat object with
+ *    optional fields, and validate the combination in the handler.
+ */
+
+import { z } from "zod";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+/** Tool results go back as compact JSON text: no indentation to pay for. */
+export function json(value: unknown) {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(value) }],
+  };
+}
+
+export function failure(error: unknown) {
+  return {
+    isError: true,
+    content: [
+      {
+        type: "text" as const,
+        text: error instanceof Error ? error.message : String(error),
+      },
+    ],
+  };
+}
+
+/**
+ * Wrap a handler so a thrown error reaches the agent as text it can act on.
+ *
+ * Untyped on purpose — see the header. zod has already validated by the time a
+ * handler runs, so an inferred type would be describing a guarantee that is
+ * enforced elsewhere.
+ */
+export function tool(run: (args: any) => Promise<unknown> | unknown) {
+  return async (args: any) => {
+    try {
+      return json(await run(args));
+    } catch (error) {
+      return failure(error);
+    }
+  };
+}
+
+export const readOnly = { readOnlyHint: true, openWorldHint: false } as const;
+export const mutating = { readOnlyHint: false, openWorldHint: false } as const;
+export const destructive = {
+  readOnlyHint: false,
+  openWorldHint: false,
+  destructiveHint: true,
+} as const;
+
+export type ToolShape = Record<string, z.ZodTypeAny>;
+
+export type ToolConfig = {
+  title?: string;
+  description?: string;
+  inputSchema?: ToolShape;
+  annotations?: Record<string, boolean>;
+};
+
+export type Registrar = (
+  name: string,
+  config: ToolConfig,
+  handler: (args: any) => Promise<unknown>,
+) => void;
+
+/** The one place the generics are erased. */
+export function defineRegistrar(server: McpServer): Registrar {
+  return server.registerTool.bind(server) as unknown as Registrar;
+}
+
+// ------------------------------------------------------------ shared shapes
+
+export const timeRange = z.object({
+  startMs: z.number().describe("Start of the range, in timeline milliseconds."),
+  endMs: z.number().describe("End of the range, exclusive."),
+});
+
+export const subtitleStyle = z
+  .object({
+    fontsize: z.number().optional(),
+    textcolor: z.string().optional().describe('Hex, e.g. "#ffffff".'),
+    align: z.enum(["left", "center", "right"]).optional(),
+    background: z.boolean().optional().describe("Draw a box behind the text."),
+    locationX: z.number().optional(),
+    locationY: z.number().optional(),
+    width: z.number().optional(),
+    height: z.number().optional(),
+  })
+  .optional()
+  .describe(
+    "Omit for a lower-third caption sized to the project's own resolution.",
+  );
+
+/** Every element type the timeline can hold, for filters and enums. */
+export const FILETYPES = [
+  "video",
+  "image",
+  "gif",
+  "shape",
+  "text",
+  "audio",
+  "group",
+] as const;
+
+/** The properties that carry a keyframe track. */
+export const ANIMATABLE = [
+  "position",
+  "opacity",
+  "scale",
+  "rotation",
+] as const;

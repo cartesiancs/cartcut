@@ -28,10 +28,32 @@ import {
   sourceDurationOf,
   speedOf,
 } from "../timeline/geometry";
+import { describeFilter } from "../renderer/filter/params";
 import type { TimelineDocument, TimelineTrack } from "../timeline/tracks";
 
 /** Longest text echoed back in a list row. Full text comes from `get_clip`. */
 export const TEXT_PREVIEW_CHARS = 80;
+
+/**
+ * Most keyframe times `get_clip` will list for one lane.
+ *
+ * This used to be unbounded, and was safe only by accident: the sole producer
+ * was a mouse gesture, so a lane held a handful of points. `add_keyframes` can
+ * author one per frame, and a three-minute clip at 60fps is 10,800 of them —
+ * enough to blow the 25k-token cap through a single `get_clip`. `count` stays
+ * exact so the truncation is visible rather than silent, and `get_keyframes`
+ * pages properly when the curve itself is what matters.
+ */
+export const MAX_KEYFRAME_TIMES = 100;
+
+/**
+ * Most group children `get_clip` will name.
+ *
+ * A group's membership is worth reporting — it is otherwise only discoverable
+ * by scanning every clip's `parentId` — but a group over a hundred clips is a
+ * list, not a fact.
+ */
+export const MAX_GROUP_CHILDREN = 50;
 
 /** Times are integer milliseconds everywhere in the agent surface. */
 function ms(value: number): number {
@@ -93,6 +115,12 @@ export function clipRow(
   }
   row.trackId = element.trackId;
 
+  // Only when set. Group membership is otherwise invisible in a list, which
+  // makes `set_clip_parent` and `ungroup` guesswork.
+  if (element.parentId != null) {
+    row.parentId = element.parentId;
+  }
+
   if (isDynamicElement(element)) {
     row.src = basename(element.localpath);
     row.trim = {
@@ -125,6 +153,14 @@ export function clipRow(
     case "image":
     case "gif": {
       row.src = basename(element.localpath);
+      break;
+    }
+    case "shape": {
+      row.fillColor = element.option?.fillColor;
+      break;
+    }
+    case "group": {
+      row.name = element.name;
       break;
     }
     default:
@@ -192,9 +228,32 @@ export function clipDetail(
     detail.rotation = (element as any).rotation;
   }
 
+  if (element.filetype === "shape") {
+    detail.fillColor = element.option?.fillColor;
+    detail.oWidth = element.oWidth;
+    detail.oHeight = element.oHeight;
+    // The point list itself is never sent — `previewCanvas.addShapePoint` grows
+    // it without bound, and `serialize.test.ts` pins its absence.
+    detail.shapePointCount = Array.isArray(element.shape) ? element.shape.length : 0;
+  }
+
+  if (element.filetype === "group") {
+    detail.name = element.name;
+  }
+
+  if (element.filetype === "audio") {
+    // `clipRow` reports speed only when it is not 1, so an agent reading a
+    // detail view cannot tell "normal speed" from "not applicable".
+    detail.speed = speedOf(element);
+  }
+
   if (element.filetype === "video") {
-    detail.filters = element.filter?.list ?? [];
+    // Structured, not the raw `k=v:k=v` strings: an agent that has to parse
+    // "r=0:g=255:b=0:f=0.4" to change the threshold will re-emit it wrong.
+    detail.filters = (element.filter?.list ?? []).map(describeFilter);
     detail.filtersEnabled = element.filter?.enable === true;
+    detail.speed = speedOf(element);
+    detail.codec = element.codec;
     // What the clip *sounds like now*, not what its file holds: a detached
     // clip is silent here, and its sound is reported by the audio element that
     // took it. Reporting the raw `isExistAudio` would have the agent counting
@@ -216,9 +275,18 @@ export function clipDetail(
         if (!Array.isArray(list)) {
           continue;
         }
+        // `count` stays exact while `times` is capped: a truncated list that
+        // did not say so would read as "that is every keyframe", and an agent
+        // editing around the ones it cannot see is the same failure
+        // `paginate`'s `truncated` flag exists to prevent.
         lanes[lane] = {
           count: list.length,
-          times: list.map((keyframe: any) => ms(keyframe?.p?.[0] ?? 0)),
+          times: list
+            .slice(0, MAX_KEYFRAME_TIMES)
+            .map((keyframe: any) => ms(keyframe?.p?.[0] ?? 0)),
+          ...(list.length > MAX_KEYFRAME_TIMES
+            ? { truncated: true, note: "Use get_keyframes to page through them." }
+            : {}),
         };
       }
       return { property, active: track.isActivate === true, lanes };

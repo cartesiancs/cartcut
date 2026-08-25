@@ -18,8 +18,14 @@ import { getCommand, commandNames } from "./registry";
  * guarantees by being installed last. */
 import "./commands/read";
 import "./commands/edit";
+import "./commands/clip";
 import "./commands/text";
 import "./commands/meta";
+import "./commands/media";
+import "./commands/tracks";
+import "./commands/appearance";
+import "./commands/animation";
+import "./commands/groups";
 
 let installed = false;
 
