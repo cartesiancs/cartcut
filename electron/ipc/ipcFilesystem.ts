@@ -1,6 +1,9 @@
 import fs from "fs";
 import * as fsp from "fs/promises";
 import fse from "fs-extra";
+import path from "path";
+import { randomUUID } from "crypto";
+import { app } from "electron";
 
 export const ipcFilesystem = {
   getDirectory: async (event, dir) => {
@@ -86,6 +89,38 @@ export const ipcFilesystem = {
       return true;
     } catch (err) {
       return false;
+    }
+  },
+
+  /**
+   * Write a renderer-generated asset — a rasterised title, say — and hand back
+   * where it landed.
+   *
+   * Neither existing option would do. `writeFile` above calls the *callback*
+   * form of `fs.writeFile` and returns before it runs, so `await` resolves
+   * ahead of the bytes reaching disk and a failure is reported as success;
+   * pointing an element at a path that comes back from it races the write.
+   * `ipcStream.saveBufferToTempFile` is correct but writes into
+   * `app.getPath("temp")`, and a `.ngt` stores only paths — so a rasterised
+   * title would quietly turn into an empty clip the first time the OS swept
+   * its temp directory, with `renderImage` drawing nothing and saying nothing.
+   *
+   * `userData/generated/` survives that, and survives a reboot. It does not
+   * survive the project being carried to another machine, but no media in this
+   * app does — everything is referenced by absolute path.
+   */
+  saveGeneratedAsset: async (event, buffer, ext = "png") => {
+    try {
+      const safeExt = String(ext).replace(/[^a-z0-9]/gi, "") || "png";
+      const dir = path.join(app.getPath("userData"), "generated");
+      await fsp.mkdir(dir, { recursive: true });
+
+      const filePath = path.join(dir, `${randomUUID()}.${safeExt}`);
+      await fsp.writeFile(filePath, Buffer.from(buffer));
+
+      return { status: true, path: filePath };
+    } catch (error) {
+      return { status: false, error: String(error) };
     }
   },
 };

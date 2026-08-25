@@ -121,6 +121,10 @@ ipcMain.handle("filesystem:readFile", ipcFilesystem.readFile);
 ipcMain.handle("filesystem:removeDirectory", ipcFilesystem.removeDirectory);
 ipcMain.handle("filesystem:removeFile", ipcFilesystem.removeFile);
 ipcMain.handle("filesystem:existFile", ipcFilesystem.existFile);
+ipcMain.handle(
+  "filesystem:saveGeneratedAsset",
+  ipcFilesystem.saveGeneratedAsset,
+);
 
 ipcMain.handle("store:set", ipcStore.set);
 ipcMain.handle("store:get", ipcStore.get);

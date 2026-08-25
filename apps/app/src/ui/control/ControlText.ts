@@ -8,6 +8,7 @@ import {
   type TextPreset,
 } from "../../features/font/textPresets";
 import { renderOptionStore } from "../../states/renderOptionStore";
+import { withAlpha as rgba } from "../../features/text/style";
 import type { TextElementOptions } from "../../features/element/textElement";
 
 /**
@@ -117,6 +118,11 @@ export class ControlText extends LitElement {
         : undefined,
       backgroundEnable: style.background != null,
       backgroundColor: style.background?.color ?? "#000000",
+      shadow: style.shadow ? { enable: true, ...style.shadow } : undefined,
+      glow: style.glow ? { enable: true, ...style.glow } : undefined,
+      fill: style.gradient
+        ? { type: "gradient" as const, ...style.gradient }
+        : undefined,
     };
 
     const elementControlComponent = document.querySelector("element-control");
@@ -173,7 +179,40 @@ export class ControlText extends LitElement {
       );
       rules.push("paint-order: stroke fill");
     }
-    if (style.background) {
+    // Shadow and glow both become `text-shadow`, which takes the same four
+    // parameters the canvas does — offset, blur, colour — so the tile is a
+    // direct restatement rather than an approximation. Both are scaled by the
+    // same ratio as the type, keeping the tile proportional to the result.
+    const shadows: string[] = [];
+    if (style.glow) {
+      const blur = (style.glow.size * scale).toFixed(2);
+      shadows.push(`0 0 ${blur}px ${rgba(style.glow.color, style.glow.opacity)}`);
+    }
+    if (style.shadow) {
+      const x = (style.shadow.offsetX * scale).toFixed(2);
+      const y = (style.shadow.offsetY * scale).toFixed(2);
+      const blur = (style.shadow.blur * scale).toFixed(2);
+      shadows.push(
+        `${x}px ${y}px ${blur}px ${rgba(style.shadow.color, style.shadow.opacity)}`,
+      );
+    }
+    if (shadows.length > 0) {
+      rules.push(`text-shadow: ${shadows.join(", ")}`);
+    }
+
+    if (style.gradient) {
+      // The CSS way to put a gradient inside glyphs: paint it as the element's
+      // background and clip it to the text. `color: transparent` is what lets
+      // the clipped background show through.
+      rules.push(
+        `background-image: linear-gradient(${style.gradient.angle + 90}deg, ${
+          style.gradient.from
+        }, ${style.gradient.to})`,
+      );
+      rules.push("-webkit-background-clip: text");
+      rules.push("background-clip: text");
+      rules.push("color: transparent");
+    } else if (style.background) {
       rules.push(`background-color: ${style.background.color}`);
     }
 

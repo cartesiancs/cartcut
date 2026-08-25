@@ -51,6 +51,8 @@ const request = {
       ipcRenderer.invoke("filesystem:existFile", filepath),
     removeFile: (filepath) =>
       ipcRenderer.invoke("filesystem:removeFile", filepath),
+    saveGeneratedAsset: (buffer, ext) =>
+      ipcRenderer.invoke("filesystem:saveGeneratedAsset", buffer, ext),
   },
   progressBar: {
     test: () => ipcRenderer.send("PROGRESSBARTEST"),

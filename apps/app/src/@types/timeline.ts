@@ -186,6 +186,59 @@ export type VideoElementType = TimelinePlaced &
     };
   };
 
+/**
+ * A drop shadow cast by the glyphs.
+ *
+ * `offsetX`/`offsetY`/`blur` are in **element space**, not device pixels. The
+ * canvas API's own shadow properties are device-space and untouched by the
+ * transform, so `renderer/shadow.ts` converts these through the current matrix
+ * — which is what keeps a shadow identical in a zoomed preview and in the
+ * export, and what makes it rotate and scale with the clip.
+ */
+export type TextShadow = {
+  enable: boolean;
+  offsetX: number;
+  offsetY: number;
+  blur: number;
+  color: string;
+  /** 0-100. Folded into the shadow colour rather than `globalAlpha`. */
+  opacity: number;
+};
+
+/** A shadow with no offset — the same machinery, spread evenly. */
+export type TextGlow = {
+  enable: boolean;
+  /** Blur radius in element space. */
+  size: number;
+  color: string;
+  opacity: number;
+};
+
+/**
+ * How the glyph interiors are painted.
+ *
+ * A union rather than a flat object with an `enable` flag, because the fields
+ * a gradient needs are meaningless for a solid fill — flattening it produces
+ * elements carrying a `from`/`to` pair that nothing reads and that drifts out
+ * of sync with the colour actually shown.
+ *
+ * MCP tool schemas must **not** mirror this union — `mcp/tools/define.ts`
+ * forbids `z.discriminatedUnion` in tool shapes. Tools take flat optional
+ * fields and assemble the union in the handler.
+ */
+export type TextFill =
+  | { type: "solid" }
+  | { type: "gradient"; from: string; to: string; angle: number };
+
+/**
+ * Text.
+ *
+ * Everything from `options.shadow` down is **optional on purpose**. Projects
+ * written before text effects existed have none of it, and `.ngt` load runs no
+ * migration — `features/text/style.ts#resolveTextStyle` supplies the defaults,
+ * and every default means "off", so an old project renders exactly as it did.
+ * Read style through that resolver rather than reaching in with `?.` chains.
+ */
 export type TextElementType = TimelinePlaced &
   Visual &
   Animatable & {
@@ -206,12 +259,28 @@ export type TextElementType = TimelinePlaced &
         enable: boolean;
         size: number;
         color: string;
+        /** 0-100. Absent on elements written before text effects. */
+        opacity?: number;
       };
+      shadow?: TextShadow;
+      glow?: TextGlow;
+      textTransform?: "none" | "uppercase" | "lowercase";
     };
     background: {
       enable: boolean;
       color: string;
+      opacity?: number;
+      /** Box padding around each line. Was the hard-coded 12 in `text.ts`. */
+      padding?: number;
+      /** Corner radius of the box. */
+      radius?: number;
     };
+    fill?: TextFill;
+    /**
+     * 0-100, applied to the glyphs alone. Distinct from `Visual.opacity`, which
+     * fades the whole element — background box, shadow and all.
+     */
+    textOpacity?: number;
     widthInner: number;
   };
 

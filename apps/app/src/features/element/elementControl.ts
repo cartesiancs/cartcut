@@ -16,6 +16,7 @@ import {
   type TextElementOptions,
 } from "./textElement";
 import { fitToPreview } from "./mediaElement";
+import { setIn } from "../../utils/immutable";
 
 @customElement("element-control")
 export class ElementControl extends LitElement {
@@ -742,30 +743,67 @@ export class ElementControl extends LitElement {
     //this.timeline[elementId].text = inputValue;
   }
 
+  /**
+   * Write text properties immutably, as one undo step.
+   *
+   * These four used to do `this.timeline[id].x = v` followed by
+   * `patchTimeline`. `this.timeline` is the object the store handed out, and
+   * `pushHistory` snapshots the element map by reference — so mutating an
+   * element in place reached backwards and rewrote it inside every history
+   * entry that still shared it. Undo would step back to a "previous" state
+   * that already carried the new colour.
+   *
+   * `withCheckpoint` + `setIn` clones root-to-leaf instead, which is what every
+   * op in `features/timeline/` and every agent command already does.
+   */
+  private commitTextFields(
+    elementId: string,
+    fields: Array<{ path: string[]; value: unknown }>,
+  ) {
+    this.timelineState.withCheckpoint((doc) => {
+      if (doc.elements[elementId]?.filetype !== "text") {
+        return doc;
+      }
+      let next = doc;
+      for (const field of fields) {
+        next = setIn(next, ["elements", elementId, ...field.path], field.value);
+      }
+      return next;
+    });
+  }
+
   changeTextValue({ elementId, value }) {
-    this.timeline[elementId].text = value;
-    this.timelineState.patchTimeline(this.timeline);
+    this.commitTextFields(elementId, [{ path: ["text"], value }]);
   }
 
   changeTextColor({ elementId, color }) {
-    this.timeline[elementId].textcolor = color;
-    this.timelineState.patchTimeline(this.timeline);
+    this.commitTextFields(elementId, [{ path: ["textcolor"], value: color }]);
   }
 
   changeTextSize({ elementId, size }) {
-    try {
-      this.timeline[elementId].fontsize = Number(size);
-      this.timeline[elementId].height = Number(size) + 16;
-      this.timelineState.patchTimeline(this.timeline);
-    } catch (error) {
-      console.log(error);
+    const fontsize = Number(size);
+    if (!Number.isFinite(fontsize)) {
+      return;
     }
+
+    this.commitTextFields(elementId, [
+      { path: ["fontsize"], value: fontsize },
+      // The line advance has always tracked the font size here. Kept so that
+      // resizing text does not silently overlap its own wrapped lines.
+      { path: ["height"], value: fontsize + 16 },
+    ]);
   }
 
   changeTextFont({ elementId, fontPath, fontType, fontName }) {
-    this.timeline[elementId].fontpath = fontPath;
-    this.timeline[elementId].fontname = fontName;
-    this.timelineState.patchTimeline(this.timeline);
+    // `fontType` used to be accepted and dropped, leaving `fonttype` describing
+    // whatever font was set before this one. `fontFaces.ts` reads it for the
+    // `@font-face` `format()`, and the agent's `set_text_font` writes all three
+    // together for exactly this reason.
+    this.commitTextFields(elementId, [
+      { path: ["fontpath"], value: fontPath },
+      { path: ["fontname"], value: fontName },
+      ...(fontType ? [{ path: ["fonttype"], value: fontType }] : []),
+    ]);
   }
 
   changeTimelineRange() {

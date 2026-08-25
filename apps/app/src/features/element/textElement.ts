@@ -13,7 +13,12 @@
  */
 
 import { emptyAnimation } from "../animation/keyframes";
-import type { TextElementType } from "../../@types/timeline";
+import type {
+  TextElementType,
+  TextFill,
+  TextGlow,
+  TextShadow,
+} from "../../@types/timeline";
 
 export type TextElementOptions = {
   text?: string;
@@ -44,6 +49,17 @@ export type TextElementOptions = {
   /** `enable` defaults to false, so passing a size alone does not turn it on. */
   outline?: { enable?: boolean; size?: number; color?: string };
   backgroundColor?: string;
+
+  /**
+   * Text effects. Omitted means the element carries no such block at all
+   * rather than a disabled one — `features/text/style.ts#resolveTextStyle`
+   * reads absence as "off", so a plain caption stays as small in the `.ngt`
+   * and in every undo snapshot as it was before effects existed.
+   */
+  shadow?: TextShadow;
+  glow?: TextGlow;
+  fill?: TextFill;
+  textOpacity?: number;
 };
 
 export function createTextElement({
@@ -66,6 +82,10 @@ export function createTextElement({
   isItalic = false,
   outline,
   backgroundColor = "#000000",
+  shadow,
+  glow,
+  fill,
+  textOpacity,
 }: TextElementOptions): TextElementType {
   return {
     startTime: startTime,
@@ -87,11 +107,19 @@ export function createTextElement({
         size: outline?.size ?? 1,
         color: outline?.color ?? "#000000",
       },
+      // Spread rather than defaulted: an element that uses no shadow carries no
+      // `shadow` key, which `resolveTextStyle` reads as "off". Writing a
+      // disabled block instead would add six fields to every caption, in the
+      // project file and in all fifty undo snapshots.
+      ...(shadow ? { shadow } : {}),
+      ...(glow ? { glow } : {}),
     },
     background: {
       enable: backgroundEnable,
       color: backgroundColor,
     },
+    ...(fill ? { fill } : {}),
+    ...(textOpacity != null ? { textOpacity } : {}),
     location: { x: locationX, y: locationY },
     rotation: 0,
     localpath: "/TEXTELEMENT",

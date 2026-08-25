@@ -6,10 +6,11 @@
  *
  * **Only properties `renderer/text.ts` actually draws.** A preset is a bag of
  * fields that already have a rendering implementation — `textcolor`,
- * `letterSpacing`, `isBold`/`isItalic`/`align`, `outline`, `background`, and a
- * size multiplier. Nothing here invents a `shadow` or a `lineHeight`, because
- * the panel tile is a CSS re-statement of the same values and a property the
- * canvas ignores would make the tile lie about the result.
+ * `letterSpacing`, `isBold`/`isItalic`/`align`, `outline`, `background`,
+ * `shadow`, `glow`, a gradient fill, and a size multiplier. Nothing here
+ * invents a property the canvas ignores, such as a line height, because the
+ * panel tile is a CSS re-statement of these same values and an unrendered one
+ * would make the tile lie about the result.
  *
  * **The filename stem is the family name.** `parseFontPath` derives it, the
  * element stores it in `fontname`, and `renderText` puts it straight into
@@ -32,6 +33,12 @@ export type PresetStyle = {
   outline?: { size: number; color: string };
   /** Solid band behind each line, `background.color` on the element. */
   background?: { color: string };
+  /** Drop shadow, in element-space px — see `@types/timeline#TextShadow`. */
+  shadow?: { offsetX: number; offsetY: number; blur: number; color: string; opacity: number };
+  /** Even halo around the glyphs. */
+  glow?: { size: number; color: string; opacity: number };
+  /** Gradient glyph fill. Omitted means the flat `textcolor`. */
+  gradient?: { from: string; to: string; angle: number };
   letterSpacing?: number;
   isBold?: boolean;
   isItalic?: boolean;
@@ -67,6 +74,7 @@ const WHITE = "#ffffff";
 const INK = "#111111";
 const ACCENT = "#ffd93d";
 const HOT = "#ff4d6d";
+const NEON = "#4dfff0";
 
 /**
  * The style archetypes, named so the manifest below reads as an assignment
@@ -81,6 +89,19 @@ const RECIPES = {
   hot: { textcolor: WHITE, background: { color: HOT } },
   tracked: { textcolor: WHITE, letterSpacing: 8, align: "center" },
   softItalic: { textcolor: "#f2efe9", isItalic: true },
+  shadowed: {
+    textcolor: WHITE,
+    shadow: { offsetX: 4, offsetY: 6, blur: 14, color: "#000000", opacity: 65 },
+  },
+  neon: {
+    textcolor: NEON,
+    glow: { size: 20, color: NEON, opacity: 90 },
+  },
+  gradient: {
+    textcolor: WHITE,
+    gradient: { from: "#ffd93d", to: "#ff4d6d", angle: 90 },
+    outline: { size: 3, color: "#000000" },
+  },
 } as const satisfies Record<string, PresetStyle>;
 
 type RecipeName = keyof typeof RECIPES;
@@ -111,6 +132,9 @@ const RECIPE_LABEL: Record<RecipeName, string> = {
   hot: "Pink Box",
   tracked: "Tracked",
   softItalic: "Italic",
+  shadowed: "Drop Shadow",
+  neon: "Neon Glow",
+  gradient: "Gradient",
 };
 
 /**
@@ -123,7 +147,7 @@ const MANIFEST: readonly ManifestEntry[] = [
   {
     file: "Roboto-Bold.ttf",
     display: "Roboto",
-    recipes: ["clean", "outline", "boxed"],
+    recipes: ["clean", "shadowed", "boxed"],
   },
   {
     file: "OpenSans-SemiBold.ttf",
@@ -133,18 +157,18 @@ const MANIFEST: readonly ManifestEntry[] = [
   {
     file: "Inter-Bold.ttf",
     display: "Inter",
-    recipes: ["clean", "outline", "tracked"],
+    recipes: ["clean", "shadowed", "tracked"],
   },
   {
     file: "Poppins-SemiBold.ttf",
     display: "Poppins",
-    recipes: ["clean", "invert", "pop"],
+    recipes: ["clean", "gradient", "pop"],
   },
   {
     file: "Montserrat-ExtraBold.ttf",
     display: "Montserrat",
     sizeScale: 1.05,
-    recipes: ["outline", "tracked", "hot"],
+    recipes: ["outline", "gradient", "hot"],
   },
   {
     file: "Raleway-SemiBold.ttf",
@@ -154,7 +178,7 @@ const MANIFEST: readonly ManifestEntry[] = [
   {
     file: "Nunito-Bold.ttf",
     display: "Nunito",
-    recipes: ["clean", "boxed", "pop"],
+    recipes: ["clean", "shadowed", "pop"],
   },
 
   // Condensed and display — titles and thumbnails.
@@ -168,13 +192,13 @@ const MANIFEST: readonly ManifestEntry[] = [
     file: "BebasNeue-Regular.ttf",
     display: "Bebas Neue",
     sizeScale: 1.25,
-    recipes: ["clean", "tracked", "pop"],
+    recipes: ["neon", "tracked", "pop"],
   },
   {
     file: "Anton-Regular.ttf",
     display: "Anton",
     sizeScale: 1.2,
-    recipes: ["outline", "pop", "hot"],
+    recipes: ["outline", "gradient", "hot"],
   },
   {
     file: "ArchivoBlack-Regular.ttf",
@@ -187,7 +211,7 @@ const MANIFEST: readonly ManifestEntry[] = [
   {
     file: "PlayfairDisplay-Bold.ttf",
     display: "Playfair Display",
-    recipes: ["clean", "tracked", "invert"],
+    recipes: ["clean", "shadowed", "invert"],
   },
   {
     file: "Merriweather-Bold.ttf",
@@ -197,7 +221,7 @@ const MANIFEST: readonly ManifestEntry[] = [
   {
     file: "Lora-Bold.ttf",
     display: "Lora",
-    recipes: ["clean", "softItalic", "invert"],
+    recipes: ["clean", "softItalic", "shadowed"],
   },
   {
     file: "AbrilFatface-Regular.ttf",
@@ -211,12 +235,12 @@ const MANIFEST: readonly ManifestEntry[] = [
     file: "Pacifico-Regular.ttf",
     display: "Pacifico",
     sizeScale: 0.95,
-    recipes: ["clean", "outline", "pop"],
+    recipes: ["neon", "outline", "pop"],
   },
   {
     file: "Lobster-Regular.ttf",
     display: "Lobster",
-    recipes: ["clean", "boxed", "hot"],
+    recipes: ["clean", "gradient", "hot"],
   },
   {
     file: "Caveat-Bold.ttf",
@@ -235,7 +259,7 @@ const MANIFEST: readonly ManifestEntry[] = [
     file: "RobotoMono-Bold.ttf",
     display: "Roboto Mono",
     sizeScale: 0.9,
-    recipes: ["clean", "boxed", "tracked"],
+    recipes: ["neon", "boxed", "tracked"],
   },
 ];
 

@@ -97,11 +97,44 @@ describe("buildTextPresets", () => {
     }
   });
 
+  it("offers each of the effect recipes somewhere in the panel", () => {
+    // The effects are only discoverable if some tile shows them off.
+    const presets = buildTextPresets(allFonts());
+
+    for (const recipe of ["shadowed", "neon", "gradient"]) {
+      expect(presets.some((p) => p.id.endsWith(`/${recipe}`))).toBe(true);
+    }
+  });
+
+  it("gives every effect recipe the fields its renderer needs", () => {
+    // A `gradient` recipe with no `from`/`to`, or a `shadow` with no colour,
+    // would resolve back to a plain fill and the tile would quietly lie.
+    for (const preset of buildTextPresets(allFonts())) {
+      if (preset.id.endsWith("/shadowed")) {
+        expect(preset.style.shadow).toMatchObject({
+          blur: expect.any(Number),
+          color: expect.any(String),
+        });
+      }
+      if (preset.id.endsWith("/neon")) {
+        expect(preset.style.glow?.size).toBeGreaterThan(0);
+      }
+      if (preset.id.endsWith("/gradient")) {
+        expect(preset.style.gradient?.from).not.toBe(
+          preset.style.gradient?.to,
+        );
+      }
+    }
+  });
+
   it("only uses style properties the canvas renderer draws", () => {
     const allowed = new Set([
       "textcolor",
       "outline",
       "background",
+      "shadow",
+      "glow",
+      "gradient",
       "letterSpacing",
       "isBold",
       "isItalic",

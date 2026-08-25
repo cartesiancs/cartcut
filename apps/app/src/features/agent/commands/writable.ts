@@ -48,8 +48,32 @@ export const WRITABLE: Record<string, string[][]> = {
     ["options", "outline", "enable"],
     ["options", "outline", "size"],
     ["options", "outline", "color"],
+    ["options", "outline", "opacity"],
+    ["options", "textTransform"],
+    ["options", "shadow", "enable"],
+    ["options", "shadow", "offsetX"],
+    ["options", "shadow", "offsetY"],
+    ["options", "shadow", "blur"],
+    ["options", "shadow", "color"],
+    ["options", "shadow", "opacity"],
+    ["options", "glow", "enable"],
+    ["options", "glow", "size"],
+    ["options", "glow", "color"],
+    ["options", "glow", "opacity"],
     ["background", "enable"],
     ["background", "color"],
+    ["background", "opacity"],
+    ["background", "padding"],
+    ["background", "radius"],
+    ["textOpacity"],
+    // Leaves, not the whole object: `flatten` recurses into nested patches, so
+    // a `["fill"]` entry would never match anything it produces. A patch that
+    // sets only `fill.type` is safe because `resolveTextStyle#resolveFill`
+    // supplies default stops for a gradient missing its colours.
+    ["fill", "type"],
+    ["fill", "from"],
+    ["fill", "to"],
+    ["fill", "angle"],
   ],
   shape: [["option", "fillColor"]],
   video: [["filter", "enable"]],
@@ -67,6 +91,19 @@ export const WRITABLE: Record<string, string[][]> = {
 export const RANGES: Record<string, { min?: number; max?: number }> = {
   opacity: { min: 0, max: 100 },
   "options.outline.size": { min: 0, max: 100 },
+  "options.outline.opacity": { min: 0, max: 100 },
+  "options.shadow.offsetX": { min: -1000, max: 1000 },
+  "options.shadow.offsetY": { min: -1000, max: 1000 },
+  // Canvas throws on a negative `shadowBlur`, so this bound is not cosmetic.
+  "options.shadow.blur": { min: 0, max: 500 },
+  "options.shadow.opacity": { min: 0, max: 100 },
+  "options.glow.size": { min: 0, max: 500 },
+  "options.glow.opacity": { min: 0, max: 100 },
+  "background.opacity": { min: 0, max: 100 },
+  "background.padding": { min: 0, max: 500 },
+  "background.radius": { min: 0, max: 500 },
+  textOpacity: { min: 0, max: 100 },
+  "fill.angle": { min: 0, max: 360 },
   fontsize: { min: 1, max: 2000 },
   width: { min: 0 },
   height: { min: 0 },
@@ -75,6 +112,8 @@ export const RANGES: Record<string, { min?: number; max?: number }> = {
 /** Values that must be one of a fixed set. */
 export const ENUMS: Record<string, readonly string[]> = {
   "options.align": ["left", "center", "right"],
+  "options.textTransform": ["none", "uppercase", "lowercase"],
+  "fill.type": ["solid", "gradient"],
 };
 
 export function writablePaths(element: TimelineElement): string[][] {

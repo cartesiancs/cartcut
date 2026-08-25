@@ -94,6 +94,24 @@ export function registerTextTools(define: Registrar) {
   );
 
   define(
+    "rasterize_text",
+    {
+      title: "Rasterize text into an image clip",
+      description:
+        "Bake one or more text clips into PNG image clips with the same position, timing, rotation and " +
+        "animation — the equivalent of After Effects' \"render and replace\". Use this to freeze a title's " +
+        "appearance so it no longer depends on the font being installed, or to treat the lettering as " +
+        "artwork. The text properties are gone afterwards: a single undo restores them. Shadows and glows " +
+        "are included in the image, which is therefore slightly larger than the text box was.",
+      inputSchema: {
+        elementIds: z.array(z.string()).min(1),
+      },
+      annotations: mutating,
+    },
+    tool((args) => requestEditor("rasterize_text", args)),
+  );
+
+  define(
     "set_video_filters",
     {
       title: "Set a video clip's filter",

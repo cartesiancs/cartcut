@@ -70,6 +70,7 @@ import {
 import { parentOf, withDescendants } from "../timeline/hierarchy";
 import { canDetachAudio } from "../timeline/audio";
 import { detachAudioFrom } from "../timeline/audioOps";
+import { rasterizeTextElements } from "./rasterizeText";
 import { AssetController } from "../../controllers/asset";
 import { isTypingEvent } from "../../utils/typingTarget";
 
@@ -595,6 +596,45 @@ export class elementTimelineCanvas extends LitElement {
     return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').detachAudioFromSelected()" item-name="detach audio"> </menu-dropdown-item>`;
   }
 
+  /**
+   * Bake the selected text clips into image clips.
+   *
+   * Async, unlike every other entry on this menu: the glyphs have to be drawn
+   * and the PNG written before the document can change. The single checkpoint
+   * happens inside `rasterizeTextElements` once all of that has landed, so the
+   * whole selection is still one Cmd+Z.
+   */
+  public async rasterizeSelectedText() {
+    const ids = [...this.targetIdDuringRightClick];
+    const cursor = useTimelineStore.getState().cursor ?? 0;
+    const results = await rasterizeTextElements(ids, cursor);
+
+    const failed = results.filter((result) => !result.ok);
+    if (failed.length > 0) {
+      (document.querySelector("toast-box") as any)?.showToast({
+        message: `Could not rasterize ${failed.length} clip(s)`,
+        delay: "4000",
+      });
+    }
+
+    this.drawCanvas();
+  }
+
+  /** The "rasterize text" entry, offered only when the selection has text. */
+  private rasterizeMenuTemplate(): string {
+    const ids = this.targetIdDuringRightClick;
+    if (ids.length === 0) {
+      return "";
+    }
+
+    const doc = this.currentDoc();
+    if (!ids.some((id) => doc.elements[id]?.filetype === "text")) {
+      return "";
+    }
+
+    return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').rasterizeSelectedText()" item-name="rasterize text"> </menu-dropdown-item>`;
+  }
+
   // ----------------------------------------------------------------- drag
 
   /**
@@ -1034,6 +1074,7 @@ export class elementTimelineCanvas extends LitElement {
         <menu-dropdown-body top="${y}" left="${x}">
           ${this.animationMenuTemplate()}
           ${this.audioMenuTemplate()}
+          ${this.rasterizeMenuTemplate()}
           ${this.groupMenuTemplate()}
           <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').removeSeletedElements()" item-name="remove"> </menu-dropdown-item>
           <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').rippleDeleteSelected()" item-name="remove and close gap"> </menu-dropdown-item>

@@ -40,6 +40,7 @@ const EXPECTED = [
   "add_text",
   "update_clip",
   "set_text_font",
+  "rasterize_text",
   "set_video_filters",
   // tracks
   "add_track",

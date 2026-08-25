@@ -30,6 +30,7 @@ import {
 } from "../timeline/geometry";
 import { describeFilter } from "../renderer/filter/params";
 import type { TimelineDocument, TimelineTrack } from "../timeline/tracks";
+import { resolveTextStyle } from "../text/style";
 
 /** Longest text echoed back in a list row. Full text comes from `get_clip`. */
 export const TEXT_PREVIEW_CHARS = 80;
@@ -213,8 +214,20 @@ export function clipDetail(
     detail.fontweight = element.fontweight;
     detail.letterSpacing = element.letterSpacing;
     detail.align = element.options?.align;
+    detail.isBold = element.options?.isBold;
+    detail.isItalic = element.options?.isItalic;
     detail.outline = element.options?.outline;
     detail.background = element.background;
+    // The effect blocks are reported through the resolver rather than raw, so
+    // the agent sees the same defaults the renderer will use instead of a
+    // string of `undefined`s on any clip predating text effects. Every field
+    // is a scalar, so this cannot threaten the tool-output size cap.
+    const style = resolveTextStyle(element);
+    detail.shadow = style.shadow;
+    detail.glow = style.glow;
+    detail.fill = style.fill;
+    detail.textOpacity = style.textOpacity;
+    detail.textTransform = style.textTransform;
   }
 
   if (element.filetype !== "audio") {

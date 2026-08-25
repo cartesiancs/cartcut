@@ -124,6 +124,9 @@ export function enableIpcWrapper() {
         removeFile: async function (lang) {
           return "none";
         },
+        saveGeneratedAsset: async function () {
+          return { status: false, error: "not available in the web build" };
+        },
       },
       ai: {
         getKey: async function (lang) {
