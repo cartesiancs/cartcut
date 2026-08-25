@@ -41,9 +41,26 @@ import {
 type ToolbarButton = {
   icon: string;
   label: string;
+  /** Shortcut to append to the tooltip, written with `MOD` for Cmd/Ctrl. */
+  shortcut?: string;
   run: () => void;
   enabled: (caps: EditorCapabilities) => boolean;
 };
+
+/**
+ * How this platform spells the modifier these shortcuts actually use.
+ *
+ * `_handleKeydown` accepts `metaKey || ctrlKey`, so the same binding works
+ * either way — but a label has to pick one, and telling a Mac user "Ctrl+D"
+ * describes a key they will not press.
+ */
+const MOD = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl+";
+
+function tooltip(spec: ToolbarButton): string {
+  return spec.shortcut == null
+    ? spec.label
+    : `${spec.label} (${spec.shortcut.replace("MOD", MOD)})`;
+}
 
 /**
  * The buttons, left to right.
@@ -56,13 +73,15 @@ type ToolbarButton = {
 const BUTTONS: ToolbarButton[] = [
   {
     icon: "undo",
-    label: "실행 취소 (Ctrl+Z)",
+    label: "Undo",
+    shortcut: "MODZ",
     run: undo,
     enabled: (caps) => caps.canUndo,
   },
   {
     icon: "redo",
-    label: "다시 실행 (Ctrl+Shift+Z)",
+    label: "Redo",
+    shortcut: "MOD⇧Z",
     run: redo,
     enabled: (caps) => caps.canRedo,
   },
@@ -70,49 +89,55 @@ const BUTTONS: ToolbarButton[] = [
     // `content_cut` is the scissors, and clipboard-cut has the stronger claim
     // on it — so split and merge take the fork-and-join pair instead.
     icon: "call_split",
-    label: "분할 (Ctrl+D)",
+    label: "Split at playhead",
+    shortcut: "MODD",
     run: splitSelection,
     enabled: (caps) => caps.canSplit,
   },
   {
     icon: "call_merge",
-    label: "병합",
+    label: "Merge clips",
     run: mergeSelection,
     enabled: (caps) => caps.canMerge,
   },
   {
     icon: "content_cut",
-    label: "잘라내기 (Ctrl+X)",
+    label: "Cut",
+    shortcut: "MODX",
     run: cutSelection,
     enabled: (caps) => caps.canCut,
   },
   {
     icon: "content_copy",
-    label: "복사 (Ctrl+C)",
+    label: "Copy",
+    shortcut: "MODC",
     run: copySelection,
     enabled: (caps) => caps.canCopy,
   },
   {
     icon: "content_paste",
-    label: "붙여넣기 (Ctrl+V)",
+    label: "Paste",
+    shortcut: "MODV",
     run: pasteFromClipboard,
     enabled: (caps) => caps.canPaste,
   },
   {
     icon: "rotate_90_degrees_cw",
-    label: "90도 회전",
+    label: "Rotate 90°",
     run: () => rotateSelection(90),
     enabled: (caps) => caps.canRotate,
   },
   {
     icon: "music_off",
-    label: "오디오 분리",
+    label: "Detach audio",
     run: detachAudioFromSelection,
     enabled: (caps) => caps.canDetachAudio,
   },
   {
     icon: "delete",
-    label: "삭제 (Delete)",
+    label: "Delete",
+    // No shortcut suffix: the handler binds both Delete and Backspace, and
+    // "Delete (Delete)" is not a tooltip worth showing anyone.
     run: deleteSelection,
     enabled: (caps) => caps.canDelete,
   },
@@ -162,10 +187,13 @@ export class TimelineToolbar extends LitElement {
 
   private button(spec: ToolbarButton) {
     const enabled = spec.enabled(this.caps);
+    // The tooltip carries the shortcut; the accessible name stays the bare
+    // action, so a screen reader announces "Split at playhead" rather than
+    // spelling out a key combination after every button.
     return html`
       <button
         class="btn btn-xs2 btn-transparent timeline-toolbar-button"
-        title=${spec.label}
+        title=${tooltip(spec)}
         aria-label=${spec.label}
         ?disabled=${!enabled}
         @click=${spec.run}
