@@ -63,11 +63,13 @@ registerCommands({
     const doc = useTimelineStore.getState().getDocument();
     const known = ids.filter((id) => doc.elements[id] != null);
 
-    // Selection lives on the timeline canvas component rather than in a store,
-    // so this is a DOM reach — the same one cross-component calls make
-    // everywhere else in this codebase. Worth doing anyway: after an edit the
-    // user needs to see *which* clips the agent touched, and a redraw has to
-    // be asked for because `targetId` is a plain property, not store state.
+    // `targetId` is now an accessor onto `selectionStore`, so this write goes
+    // to the same place the canvas and the toolbar read from, and the canvas
+    // repaints on its own subscription. The DOM reach and the explicit
+    // `drawCanvas()` are kept: reaching through the element is how the rest of
+    // this codebase makes cross-component calls, and asking for the redraw
+    // costs one extra paint while guaranteeing the user sees which clips the
+    // agent touched even if the component is mid-drag.
     const timelineCanvas: any = document.querySelector(
       "element-timeline-canvas",
     );

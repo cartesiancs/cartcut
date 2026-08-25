@@ -21,9 +21,12 @@ import {
 } from "../../states/controlPanelStore";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { captionToTimeline } from "../../features/caption/timing";
+import { LocaleController } from "../../controllers/locale";
 
 @customElement("control-ui")
 export class Control extends LitElement {
+  private lc = new LocaleController(this);
+
   @property()
   timelineState: ITimelineStore = useTimelineStore.getInitialState();
 
@@ -35,6 +38,9 @@ export class Control extends LitElement {
 
   @property()
   resize = this.uiState.resize;
+
+  @property()
+  isOptionPanelActive = this.uiState.isOptionPanelActive;
 
   @property()
   isAbleResize: boolean = false;
@@ -58,6 +64,7 @@ export class Control extends LitElement {
 
     uiStore.subscribe((state) => {
       this.resize = state.resize;
+      this.isOptionPanelActive = state.isOptionPanelActive;
     });
 
     controlPanelStore.subscribe((state) => {
@@ -345,6 +352,39 @@ export class Control extends LitElement {
           id="optionTargetElement"
           value="aaaa-aaaa-aaaa-aaaa"
         />
+
+        <!--
+          Says so when there is nothing to show. Every panel hides itself in its
+          constructor and nothing shows one until a clip is selected, so the
+          column opens empty — and an empty column reads as something that
+          failed to load rather than as one waiting for a selection.
+        -->
+        <div
+          class="h-100 d-flex flex-column align-items-center justify-content-center text-center px-3 gap-2 ${this
+            .isOptionPanelActive
+            ? "d-none"
+            : ""}"
+        >
+          <!--
+            The icon-lg class hardcodes a white colour, so the grey is set
+            inline rather than with a utility class — a class would be a
+            specificity argument this has no reason to be having.
+
+            #5a6473 sits at 3.2:1 against this column's near-black background,
+            which clears the 3:1 floor for a graphic this size while staying
+            dimmer than the text below it — the icon is the quieter half of an
+            empty state, not the louder one.
+          -->
+          <span
+            class="material-symbols-outlined icon-lg"
+            style="color: #5a6473;"
+          >
+            tune
+          </span>
+          <span class="text-secondary" style="font-size: 13px;">
+            ${this.lc.t("setting.no_selection")}
+          </span>
+        </div>
 
         <option-group>
           <option-text></option-text>

@@ -43,7 +43,8 @@
     "position": "위치",
     "opacity": "불투명도",
     "audio": "오디오",
-    "volume": "볼륨"
+    "volume": "볼륨",
+    "no_selection": "아직 선택된 항목이 없습니다. 타임라인에서 클립을 선택하면 옵션이 표시됩니다."
   },
   "modal": {
     "change_language": "언어 변경",

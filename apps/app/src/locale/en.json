@@ -43,7 +43,8 @@
     "position": "Position",
     "opacity": "Opacity",
     "audio": "Audio",
-    "volume": "Volume"
+    "volume": "Volume",
+    "no_selection": "Nothing selected yet. Pick a clip on the timeline to see its options."
   },
   "modal": {
     "change_language": "Change Language",

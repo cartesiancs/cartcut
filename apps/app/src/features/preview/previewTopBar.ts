@@ -515,12 +515,13 @@ export class PreviewTopBar extends LitElement {
             <ul class="dropdown-menu">
               <li>
                 ${ZOOM_PRESETS.map(
-                  (zoom) => html`<a
-                    class="dropdown-item dropdown-item-sm"
-                    @click=${() => this._handleClickZoomPreset(zoom)}
-                  >
-                    ${zoom}%${zoom == 100 ? " (Fit)" : ""}
-                  </a>`,
+                  (zoom) =>
+                    html`<a
+                      class="dropdown-item dropdown-item-sm"
+                      @click=${() => this._handleClickZoomPreset(zoom)}
+                    >
+                      ${zoom}%${zoom == 100 ? " (Fit)" : ""}
+                    </a>`,
                 )}
               </li>
             </ul>
@@ -550,6 +551,7 @@ export class PreviewTopBar extends LitElement {
           >
             <span class="material-symbols-outlined icon-xs"> lock </span>
           </button>
+          <span></span>
         </div>
       </div>
     `;

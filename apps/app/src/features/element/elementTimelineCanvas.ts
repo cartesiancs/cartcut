@@ -10,16 +10,11 @@ import {
   IRenderOptionStore,
   renderOptionStore,
 } from "../../states/renderOptionStore";
-import {
-  animatableProperties,
-  type TimelineElement,
-} from "../../@types/timeline";
+import { animatableProperties } from "../../@types/timeline";
 import {
   deleteClips,
   moveClips,
-  pasteClips,
   rippleDelete,
-  splitAtPlayhead,
   trimClipEnd,
   trimClipStart,
 } from "../timeline/clipOps";
@@ -73,6 +68,16 @@ import { detachAudioFrom } from "../timeline/audioOps";
 import { rasterizeTextElements } from "./rasterizeText";
 import { AssetController } from "../../controllers/asset";
 import { isTypingEvent } from "../../utils/typingTarget";
+import { selectionStore } from "../../states/selectionStore";
+import {
+  copySelection,
+  cutSelection,
+  deleteSelection,
+  pasteFromClipboard,
+  redo,
+  splitSelection,
+  undo,
+} from "../editor/actions";
 
 /**
  * The timeline canvas.
@@ -86,7 +91,30 @@ import { isTypingEvent } from "../../utils/typingTarget";
  */
 @customElement("element-timeline-canvas")
 export class elementTimelineCanvas extends LitElement {
-  targetId: string[] = [];
+  /**
+   * The selection, kept in `selectionStore` and reached through here.
+   *
+   * An accessor rather than a field so every call site in this file — and the
+   * agent's `select_clips`/`get_selection`, which reach for this property
+   * through the DOM — reads and writes exactly as it did, while the value
+   * itself lives somewhere the toolbar can subscribe to. A plain field notified
+   * nobody, which is why writing it used to have to be followed by a manual
+   * `drawCanvas()`.
+   */
+  get targetId(): string[] {
+    return selectionStore.getState().ids;
+  }
+
+  set targetId(ids: string[]) {
+    selectionStore.getState().setIds(ids);
+  }
+
+  /**
+   * The selection as it stood when the context menu opened.
+   *
+   * Stays a plain field: this is a snapshot of one gesture, not the app's idea
+   * of what is selected, and nothing outside this component should see it.
+   */
   targetIdDuringRightClick: string[] = [];
 
   private dragState: DragState = idleDrag;
@@ -115,7 +143,6 @@ export class elementTimelineCanvas extends LitElement {
    */
   private frameGridOn = false;
   private layout: TimelineLayout = { rows: [], clips: [], totalHeight: 0 };
-  private clipboard: Record<string, TimelineElement> = {};
   private canvasVerticalScroll = 0;
 
   /**
@@ -268,6 +295,13 @@ export class elementTimelineCanvas extends LitElement {
       this.drawCanvas();
     });
 
+    // The selection is drawn, so a change to it has to repaint — including one
+    // made from somewhere else entirely, like the toolbar's merge narrowing the
+    // selection or the agent's `select_clips`.
+    selectionStore.subscribe(() => {
+      this.drawCanvas();
+    });
+
     uiStore.subscribe((state) => {
       this.resize = state.resize;
       this.drawCanvas();
@@ -391,45 +425,8 @@ export class elementTimelineCanvas extends LitElement {
     );
   }
 
-  private copySelected() {
-    const doc = this.currentDoc();
-    const copied: Record<string, TimelineElement> = {};
-    for (const elementId of this.targetId) {
-      const element = doc.elements[elementId];
-      if (element) {
-        copied[elementId] = structuredClone(element);
-      }
-    }
-    this.clipboard = copied;
-  }
-
   /**
-   * Cut the selected clips at the playhead.
-   *
-   * Both halves keep the original's `trackId`, so they land side by side on one
-   * row. The old implementation handed the second half a fresh
-   * `priority = max + 1`, and since a row *was* the priority-sorted index, that
-   * put it on a brand-new row every time.
-   */
-  private splitSelected() {
-    // The playhead is already frame-aligned when it was scrubbed or stepped,
-    // but it also tracks wall-clock time during playback — so a cut taken while
-    // playing would otherwise land between frames.
-    const at = snapMsToFrame(this.timelineCursor, this.projectFps());
-    this.commit((doc) => splitAtPlayhead(doc, this.targetId, at, uuidv4));
-  }
-
-  /** Paste at the playhead, keeping the copied group's internal spacing. */
-  private pasteClipboard() {
-    const at = snapMsToFrame(this.timelineCursor, this.projectFps());
-    this.commit((doc) => pasteClips(doc, this.clipboard, at, uuidv4));
-  }
-
-  private removeElements(ids: string[]) {
-    this.commit((doc) => deleteClips(doc, ids));
-  }
-
-  /**
+   * Delete and close the gap, pulling later clips on the same track backwards.
    * Delete and close the gap, pulling later clips on the same track backwards.
    *
    * Plain delete leaves the hole; this is the other half of the pair every
@@ -447,8 +444,16 @@ export class elementTimelineCanvas extends LitElement {
     });
   }
 
+  /**
+   * Remove the right-clicked clips.
+   *
+   * Acts on the context-menu snapshot rather than the live selection, so it
+   * stays here instead of calling `deleteSelection` — the menu operates on what
+   * was under the cursor when it opened.
+   */
   public removeSeletedElements() {
-    this.removeElements(this.targetIdDuringRightClick);
+    const ids = [...this.targetIdDuringRightClick];
+    this.commit((doc) => deleteClips(doc, ids));
   }
 
   // ---------------------------------------------------------------- groups
@@ -801,11 +806,34 @@ export class elementTimelineCanvas extends LitElement {
 
   // --------------------------------------------------------------- events
 
+  /**
+   * Clicking away from the timeline clears the selection.
+   *
+   * Bound to `mousedown`, which fires *before* the click a button acts on —
+   * and that ordering made the toolbar inert the moment it shipped. Pressing
+   * "split" cleared the selection on the way down, so by the time the button's
+   * own handler ran there was nothing selected and the op declined.
+   *
+   * Chrome that exists to act on the selection therefore opts out with
+   * `data-keeps-selection`. An allowlist rather than naming the toolbar here
+   * because it will not be the last such surface: anything that operates on
+   * what is selected has the same problem, and should not have to be known to
+   * this file to avoid it.
+   */
   _handleDocumentClick(e) {
-    if (e.target.id != "elementTimelineCanvasRef") {
-      this.targetId = [];
-      this.drawCanvas();
+    if (e.target?.id === "elementTimelineCanvasRef") {
+      return;
     }
+
+    if (
+      e.target instanceof Element &&
+      e.target.closest("[data-keeps-selection]") != null
+    ) {
+      return;
+    }
+
+    this.targetId = [];
+    this.drawCanvas();
   }
 
   _handleMouseWheel(e) {
@@ -978,8 +1006,7 @@ export class elementTimelineCanvas extends LitElement {
         return;
       case "Backspace":
       case "Delete":
-        this.removeElements(this.targetId);
-        this.targetId = [];
+        deleteSelection();
         return;
     }
 
@@ -987,25 +1014,38 @@ export class elementTimelineCanvas extends LitElement {
       return;
     }
 
+    // Every branch below delegates to `features/editor/actions`, which is also
+    // what the timeline toolbar calls. The shortcut and the button are the same
+    // code path by construction — there is no second implementation to drift.
+    //
+    // `preventDefault` matters here: the Electron app menu owns these same
+    // accelerators through native `undo`/`redo`/`cut`/`copy`/`paste` roles, and
+    // without this both fire. `isTypingEvent` above already let real text
+    // editing through, so nothing that wants the native behaviour reaches this.
     switch (event.code) {
       case "KeyZ":
-        this.timelineState.rollbackTimelineFromCheckPoint(
-          event.shiftKey ? 1 : -1,
-        );
+        event.preventDefault();
+        if (event.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
         return;
       case "KeyC":
-        this.copySelected();
+        event.preventDefault();
+        copySelection();
         return;
       case "KeyV":
-        this.pasteClipboard();
+        event.preventDefault();
+        pasteFromClipboard();
         return;
       case "KeyX":
-        this.copySelected();
-        this.removeElements(this.targetId);
-        this.targetId = [];
+        event.preventDefault();
+        cutSelection();
         return;
       case "KeyD":
-        this.splitSelected();
+        event.preventDefault();
+        splitSelection();
         return;
     }
   }

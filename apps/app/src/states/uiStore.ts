@@ -49,12 +49,26 @@ export interface IUIStore {
     };
   };
   topBarTitle: string;
+  /**
+   * Whether the option column has a panel to show.
+   *
+   * False until the first clip is selected, which is the state the app opens
+   * in: every panel hides itself in its constructor and nothing shows one
+   * until `optionGroup.showOption` runs. The column is drawn either way — this
+   * only decides whether it shows its panels or the "nothing selected yet"
+   * placeholder, so the layout never shifts under the user.
+   *
+   * `optionGroup` is the only writer, since it is the only thing that knows
+   * whether a panel actually made it onto the screen.
+   */
+  isOptionPanelActive: boolean;
   /** `viewportWidth` caps the headers on a narrow window; px, both of them. */
   updateTimelineVertical: (px: number, viewportWidth?: number) => void;
   setChatSidebar: (width: number) => void;
   updateVertical: (criteria: number) => void;
   updateHorizontal: (criteria: number, panel: "panel" | "preview") => void;
   setTopBarTitle: (topBarTitle: string) => void;
+  setOptionPanelActive: (isOptionPanelActive: boolean) => void;
 }
 
 export const uiStore = createStore<IUIStore>((set) => ({
@@ -74,6 +88,10 @@ export const uiStore = createStore<IUIStore>((set) => ({
     },
   },
   topBarTitle: "Cartcut",
+  isOptionPanelActive: false,
+
+  setOptionPanelActive: (isOptionPanelActive) =>
+    set(() => ({ isOptionPanelActive })),
 
   setChatSidebar: (width) =>
     set((state) => ({

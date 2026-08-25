@@ -300,8 +300,11 @@ registerCommands({
   /**
    * What the user has selected.
    *
-   * Selection lives on the timeline canvas component rather than in a store —
-   * the same DOM reach `select_clips` makes, for the same reason.
+   * Selection lives in `selectionStore`; `targetId` is the canvas's accessor
+   * onto it. Read through the component anyway, the same DOM reach
+   * `select_clips` makes — it keeps both halves of the pair symmetrical, and it
+   * answers "not mounted" rather than "nothing selected" when there is no
+   * timeline at all.
    */
   get_selection: () => {
     const timelineCanvas: any = document.querySelector("element-timeline-canvas");

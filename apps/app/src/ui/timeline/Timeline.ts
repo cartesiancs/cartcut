@@ -5,7 +5,7 @@ import { IUIStore, uiStore } from "../../states/uiStore";
 import { IKeyframeStore, keyframeStore } from "../../states/keyframeStore";
 import "../../features/element/elementTimelineScroll";
 import "../../features/element/elementTimelineBottom";
-import "../../features/gpt/aiInput";
+import "../../features/editor/timelineToolbar";
 import { isTypingEvent } from "../../utils/typingTarget";
 
 @customElement("timeline-ui")
@@ -240,7 +240,7 @@ export class Timeline extends LitElement {
           </div>
         </div>
         <div class="d-flex col col-5 gap-2">
-          <ai-input class="w-100"></ai-input>
+          <timeline-toolbar class="w-100"></timeline-toolbar>
           <div
             class="d-flex justify-content-end"
             id="keyframeEditorButtonGroup"
