@@ -22,6 +22,7 @@ const request = {
   font: {
     getLists: () => ipcRenderer.invoke("font:getLists"),
     getLocalFontLists: () => ipcRenderer.invoke("font:getLocalFontLists"),
+    getPresetFontLists: () => ipcRenderer.invoke("font:getPresetFontLists"),
   },
   project: {
     save: () => ipcRenderer.invoke("dialog:saveProject"),

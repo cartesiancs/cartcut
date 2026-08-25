@@ -1,6 +1,7 @@
 import { LitElement, PropertyValues, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
+import { ensureFontFace } from "../font/fontFaces";
 
 @customElement("option-text")
 export class OptionText extends LitElement {
@@ -38,6 +39,7 @@ export class OptionText extends LitElement {
     this.isItalic = false;
     this.updateOnce = false;
     this.selectedFont = "notosanskr";
+    this.insertPresetFontLists();
     this.insertFontLists();
     this.hide();
   }
@@ -311,6 +313,27 @@ export class OptionText extends LitElement {
     this.resetValue();
 
     this.requestUpdate();
+  }
+
+  /**
+   * The twenty bundled Google Fonts, ahead of the system fonts in the dropdown.
+   *
+   * Without this the presets in the "Text" panel would be a one-way door: a
+   * user could add a clip in Bebas Neue but not switch an existing one to it,
+   * because this list only ever showed what `get-system-fonts` found installed.
+   */
+  insertPresetFontLists() {
+    window.electronAPI.req.font.getPresetFontLists().then((result: any) => {
+      for (const font of result?.fonts ?? []) {
+        ensureFontFace(font);
+        this.fontList.unshift({
+          index: this.fontList.length + 1,
+          value: font.path,
+          name: font.name,
+        });
+      }
+      this.requestUpdate();
+    });
   }
 
   insertFontLists() {

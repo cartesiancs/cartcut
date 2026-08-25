@@ -562,56 +562,6 @@ export class ElementControl extends LitElement {
     // this.elementTimeline.addElementBar(elementId);
   }
 
-  // NOTE: 삭제 필요
-  addCustomText(font: { path: string; name: string }) {
-    const elementId = this.generateUUID();
-    const fontSize = 52;
-
-    this.timeline[elementId] = {
-      startTime: 0,
-      duration: 1000,
-      text: "TITLE",
-      textcolor: "#ffffff",
-      fontsize: fontSize,
-      fontpath: font.path,
-      fontname: font.name,
-      fontweight: "medium",
-      fonttype: "otf",
-      letterSpacing: 0,
-      opacity: 100,
-      options: {
-        isBold: false,
-        isItalic: false,
-        align: "left",
-        outline: {
-          enable: false,
-          size: 1,
-          color: "#000000",
-        },
-      },
-      background: {
-        enable: false,
-        color: "#000000",
-      },
-      location: { x: 0, y: 0 },
-      rotation: 0,
-      localpath: "/TEXTELEMENT",
-      filetype: "text",
-      height: fontSize + 16,
-      width: 500,
-      widthInner: 200,
-      animation: emptyAnimation("text"),
-      timelineOptions: {
-        color: "rgb(59, 143, 179)",
-      },
-    };
-
-    this.commitNewElement(elementId);
-
-    // this.showText(elementId);
-    // this.elementTimeline.addElementBar(elementId);
-  }
-
   addAudio(blob, path) {
     const elementId = this.generateUUID();
     const audio = document.createElement("audio");

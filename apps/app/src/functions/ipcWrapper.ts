@@ -68,6 +68,9 @@ export function enableIpcWrapper() {
         getLocalFontLists: async function (lang) {
           return "none";
         },
+        getPresetFontLists: async function () {
+          return { status: 0, fonts: [] };
+        },
       },
       project: {
         save: async function (lang) {

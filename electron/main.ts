@@ -140,6 +140,7 @@ ipcMain.handle("app:getTempPath", ipcApp.getTempPath);
 ipcMain.handle("app:getAppInfo", ipcApp.getAppInfo);
 ipcMain.handle("font:getLists", fontLib.getFontList);
 ipcMain.handle("font:getLocalFontLists", fontLib.getLocalFontList);
+ipcMain.handle("font:getPresetFontLists", fontLib.getPresetFontList);
 
 ipcMain.handle("desktopCapturer:getSources", ipcDesktopCapturer.getSources);
 ipcMain.handle("overlayRecord:show", ipcOverlayRecord.show);

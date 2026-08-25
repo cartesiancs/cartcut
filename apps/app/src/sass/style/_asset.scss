@@ -20,6 +20,65 @@
     max-height: 55px;
 }
 
+/*
+ * The "Aa" on a text-preset tile.
+ *
+ * Fixed height so sixty tiles of wildly different faces still line up in a
+ * grid — Anton and Caveat disagree about how tall a cap is by a long way. The
+ * preset's own colours arrive as an inline style; everything structural is
+ * here.
+ */
+.text-preset-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    height: 46px;
+    padding: 0 .35rem;
+    border-radius: 6px;
+    overflow: hidden;
+    line-height: 1;
+    white-space: nowrap;
+    user-select: none;
+}
+
+/* The plain "Text" tile keeps the icon, and needs no band behind it. */
+.text-preset-preview-plain {
+    color: #f8f9fa;
+}
+
+/*
+ * Two label lines, because one does not fit. "Open Sans · 화이트 박스" ellipses
+ * away to "Open S⋯" in a third of the sidebar, which loses exactly the half
+ * that distinguishes the tile from its two neighbours.
+ */
+/*
+ * These clip like `.text-ellipsis` but do not use it: that class is declared
+ * after this file in `style.scss` and carries `margin-top: .5rem`, which would
+ * win the cascade and open a gap between the two lines of one caption.
+ */
+.text-preset-name,
+.text-preset-style {
+    display: block;
+    width: 100%;
+    padding: 0 .35rem;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.text-preset-name {
+    margin-top: .35rem;
+    font-size: 11px;
+}
+
+.text-preset-style {
+    font-size: 10px;
+    font-weight: normal;
+    color: #868e96;
+}
+
 .asset-transparent {
     background-color: transparent;
     outline: 0;

@@ -27,6 +27,23 @@ export type TextElementOptions = {
   width?: number;
   startTime?: number;
   duration?: number;
+
+  /**
+   * The font, as the three fields that have to agree — see
+   * `features/font/fontFaces.ts`. A caller passing these is also responsible
+   * for having called `ensureFontFace`, or the element draws in the fallback in
+   * both the preview and the export.
+   */
+  fontpath?: string;
+  fontname?: string;
+  fonttype?: string;
+
+  letterSpacing?: number;
+  isBold?: boolean;
+  isItalic?: boolean;
+  /** `enable` defaults to false, so passing a size alone does not turn it on. */
+  outline?: { enable?: boolean; size?: number; color?: string };
+  backgroundColor?: string;
 };
 
 export function createTextElement({
@@ -41,6 +58,14 @@ export function createTextElement({
   width = 500,
   startTime = 0,
   duration = 1000,
+  fontpath = "default",
+  fontname = "notosanskr",
+  fonttype = "otf",
+  letterSpacing = 0,
+  isBold = false,
+  isItalic = false,
+  outline,
+  backgroundColor = "#000000",
 }: TextElementOptions): TextElementType {
   return {
     startTime: startTime,
@@ -48,24 +73,24 @@ export function createTextElement({
     text: text,
     textcolor: textcolor,
     fontsize: fontsize,
-    fontpath: "default",
-    fontname: "notosanskr",
+    fontpath: fontpath,
+    fontname: fontname,
     fontweight: "medium",
-    fonttype: "otf",
-    letterSpacing: 0,
+    fonttype: fonttype,
+    letterSpacing: letterSpacing,
     options: {
-      isBold: false,
-      isItalic: false,
+      isBold: isBold,
+      isItalic: isItalic,
       align: optionsAlign,
       outline: {
-        enable: false,
-        size: 1,
-        color: "#000000",
+        enable: outline?.enable ?? false,
+        size: outline?.size ?? 1,
+        color: outline?.color ?? "#000000",
       },
     },
     background: {
       enable: backgroundEnable,
-      color: "#000000",
+      color: backgroundColor,
     },
     location: { x: locationX, y: locationY },
     rotation: 0,

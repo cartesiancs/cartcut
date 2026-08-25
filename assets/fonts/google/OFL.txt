@@ -1,0 +1,53 @@
+Bundled Google Fonts
+====================
+
+Every font file in this directory comes from Google Fonts
+(https://fonts.google.com) and is distributed under the SIL Open Font License,
+Version 1.1 — with the exception noted below. The full licence text is at
+https://openfontlicense.org and in each family's page on Google Fonts.
+
+The files were fetched as TrueType instances from the Google Fonts CSS API:
+
+    curl -A "Mozilla/4.0" "https://fonts.googleapis.com/css2?family=<Family>:wght@<weight>"
+
+which serves the unsubsetted `.ttf` for the requested weight. See
+`scripts/` history or the commit that introduced this directory for the exact
+family/weight table.
+
+Files and upstream families
+---------------------------
+
+  Roboto-Bold.ttf              Roboto, weight 700               Apache-2.0
+  RobotoMono-Bold.ttf          Roboto Mono, weight 700          Apache-2.0
+  OpenSans-SemiBold.ttf        Open Sans, weight 600            OFL-1.1
+  Montserrat-ExtraBold.ttf     Montserrat, weight 800           OFL-1.1
+  Poppins-SemiBold.ttf         Poppins, weight 600              OFL-1.1
+  Inter-Bold.ttf               Inter, weight 700                OFL-1.1
+  Raleway-SemiBold.ttf         Raleway, weight 600              OFL-1.1
+  Nunito-Bold.ttf              Nunito, weight 700               OFL-1.1
+  Oswald-Bold.ttf              Oswald, weight 700               OFL-1.1
+  BebasNeue-Regular.ttf        Bebas Neue, weight 400           OFL-1.1
+  Anton-Regular.ttf            Anton, weight 400                OFL-1.1
+  ArchivoBlack-Regular.ttf     Archivo Black, weight 400        OFL-1.1
+  PlayfairDisplay-Bold.ttf     Playfair Display, weight 700     OFL-1.1
+  Merriweather-Bold.ttf        Merriweather, weight 700         OFL-1.1
+  Lora-Bold.ttf                Lora, weight 700                 OFL-1.1
+  AbrilFatface-Regular.ttf     Abril Fatface, weight 400        OFL-1.1
+  Pacifico-Regular.ttf         Pacifico, weight 400             OFL-1.1
+  Lobster-Regular.ttf          Lobster, weight 400              OFL-1.1
+  Caveat-Bold.ttf              Caveat, weight 700               OFL-1.1
+  PermanentMarker-Regular.ttf  Permanent Marker, weight 400      OFL-1.1
+
+Roboto and Roboto Mono are licensed under the Apache License 2.0
+(https://www.apache.org/licenses/LICENSE-2.0), not the OFL.
+
+Note on naming
+--------------
+
+The filename stem is load-bearing: `features/font/fontFaces.ts#parseFontPath`
+derives the CSS family name from it, and that name is what
+`features/renderer/text.ts` puts into `ctx.font`. Renaming a file here changes
+the family of every text element already using it. Add files, don't rename them.
+
+These faces cover Latin only. Korean and other non-Latin text falls back to the
+bundled `notosanskr` face, which `renderText` appends to the font stack.
