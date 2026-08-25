@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Cartcut</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        /* The window is frameless and always-on-top; nothing here should be
+           draggable or selectable, it is only shown for a few seconds. */
+        -webkit-user-select: none;
+        user-select: none;
+      }
+
+      img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 12px;
+        -webkit-user-drag: none;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Loaded from `assets/`, which ships both inside the asar and as
+         extraResources, so the path resolves in dev and in a packaged build. -->
+    <img src="../../../assets/images/splash.png" alt="" />
+  </body>
+</html>

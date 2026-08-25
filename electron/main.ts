@@ -43,6 +43,9 @@ const store = new Store();
 let resourcesPath = "";
 export let mainWindow;
 
+// How long the splash image stays up before the editor window is revealed.
+const SPLASH_DURATION_MS = 3000;
+
 log.info("App starting...");
 if (isDev) {
   resourcesPath = ".";
@@ -209,7 +212,24 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(() => {
-    mainWindow = window.createMainWindow();
+    // The editor loads hidden behind the splash and is revealed when it
+    // closes, so the first thing on screen is the splash image and not a
+    // half-painted editor.
+    const splashWindow = window.createSplashWindow();
+    splashWindow.once("ready-to-show", () => splashWindow.show());
+
+    mainWindow = window.createMainWindow({ show: false });
+
+    const revealEditor = () => {
+      if (!splashWindow.isDestroyed()) splashWindow.destroy();
+      if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    };
+
+    setTimeout(revealEditor, SPLASH_DURATION_MS);
+
     validateFFmpeg();
 
     // The MCP tools reach the timeline through this window; without it every

@@ -21,8 +21,13 @@ let mainWindow;
 const WINDOW_BACKGROUND_COLOR = "#252729";
 const WINDOW_ICON = path.join(__dirname, "..", "assets/icons/png/512x512.png");
 
+// assets/images/splash.png is 1724x1037; keep that aspect ratio so the image
+// fills the window with no letterboxing.
+const SPLASH_WIDTH = 640;
+const SPLASH_HEIGHT = Math.round((SPLASH_WIDTH * 1037) / 1724);
+
 const window = {
-  createMainWindow: () => {
+  createMainWindow: ({ show = true }: { show?: boolean } = {}) => {
     mainWindow = window.createWindow({
       width: 1400,
       height: 800,
@@ -33,6 +38,7 @@ const window = {
         preload: path.join(__dirname, "..", "preload.js"),
       },
       indexFile: "apps/app/index.html",
+      show: show,
     });
 
     autoUpdater.checkForUpdatesAndNotify();
@@ -62,11 +68,12 @@ const window = {
     return mainWindow;
   },
 
-  createWindow: ({ width, height, webPreferences, indexFile }: any) => {
+  createWindow: ({ width, height, webPreferences, indexFile, show }: any) => {
     const newWindow = new BrowserWindow({
       width: width,
       height: height,
       webPreferences: webPreferences,
+      show: show !== false,
       backgroundColor: WINDOW_BACKGROUND_COLOR,
       icon: WINDOW_ICON,
       titleBarStyle: "hidden",
@@ -86,6 +93,45 @@ const window = {
     newWindow.loadFile(indexFile);
 
     return newWindow;
+  },
+
+  // Shown for `SPLASH_DURATION_MS` (see `electron/main.ts`) while the editor
+  // window loads behind it, hidden. Nothing but the image: no frame, no
+  // background, no chrome — and floating above every other window, ours and
+  // everyone else's.
+  createSplashWindow: () => {
+    const splashWindow = new BrowserWindow({
+      width: SPLASH_WIDTH,
+      height: SPLASH_HEIGHT,
+      center: true,
+      show: false,
+      frame: false,
+      transparent: true,
+      backgroundColor: "#00000000",
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      hasShadow: true,
+      alwaysOnTop: true,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    });
+
+    // "screen-saver" is the level that also clears full-screen apps; plain
+    // `alwaysOnTop: true` only floats above normal windows.
+    splashWindow.setAlwaysOnTop(true, "screen-saver");
+    splashWindow.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+    });
+
+    splashWindow.loadFile("apps/app/page/splash.html");
+
+    return splashWindow;
   },
 
   createCreditWindow: () => {
