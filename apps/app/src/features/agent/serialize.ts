@@ -20,6 +20,7 @@ import type {
   AnimatableProperty,
 } from "../../@types/timeline";
 import { canAnimate, animatableProperties } from "../../@types/timeline";
+import { isAudibleElement } from "../timeline/audio";
 import {
   isDynamicElement,
   spanEnd,
@@ -194,7 +195,14 @@ export function clipDetail(
   if (element.filetype === "video") {
     detail.filters = element.filter?.list ?? [];
     detail.filtersEnabled = element.filter?.enable === true;
-    detail.hasAudio = element.isExistAudio;
+    // What the clip *sounds like now*, not what its file holds: a detached
+    // clip is silent here, and its sound is reported by the audio element that
+    // took it. Reporting the raw `isExistAudio` would have the agent counting
+    // the same audio twice.
+    detail.hasAudio = isAudibleElement(element);
+    if (element.audioDetached === true) {
+      detail.audioDetached = true;
+    }
     detail.origin = element.origin;
   }
 

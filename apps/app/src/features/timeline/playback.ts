@@ -24,6 +24,7 @@
 
 import type { TimelineElement } from "../../@types/timeline";
 import { isTimeInRange } from "../../utils/time";
+import { isAudibleElement } from "./audio";
 import { isDynamicElement, sourceTimeAt, spanOf, speedOf } from "./geometry";
 import type { TimelineDocument } from "./tracks";
 
@@ -173,7 +174,16 @@ export function intentFor(
 
   return {
     sourceTimeSec,
-    muted: !inWindow,
+    // Two ways to be silent, and they are not the same thing. Outside its
+    // window a clip is merely not being heard yet; a video whose audio has
+    // been detached must stay silent *inside* its window too, or the preview
+    // plays it twice — once from this handle and once from the audio clip that
+    // now owns the sound.
+    //
+    // `playing` deliberately does not follow. A silenced `<video>` still has
+    // to roll, because the picture comes off the same handle: muting it and
+    // pausing it would freeze the frame the moment its audio was detached.
+    muted: !inWindow || !isAudibleElement(element),
     playing: isPlaying && inWindow,
     rate: speedOf(element),
     inWindow,

@@ -68,6 +68,8 @@ import {
   ungroup,
 } from "../timeline/groupOps";
 import { parentOf, withDescendants } from "../timeline/hierarchy";
+import { canDetachAudio } from "../timeline/audio";
+import { detachAudioFrom } from "../timeline/audioOps";
 import { AssetController } from "../../controllers/asset";
 import { isTypingEvent } from "../../utils/typingTarget";
 
@@ -555,6 +557,44 @@ export class elementTimelineCanvas extends LitElement {
     return rows.join("\n          ");
   }
 
+  // ----------------------------------------------------------------- audio
+
+  /**
+   * Split the right-clicked clips' audio onto audio tracks of their own.
+   *
+   * One `withCheckpoint` for the whole selection, so Cmd+Z takes back the new
+   * clips, the track they landed on and the silencing of their sources
+   * together. Clips with nothing to detach are skipped inside the op, and a
+   * selection where none of them can be detached returns the document by
+   * identity — no undo step for a click that did nothing.
+   */
+  public detachAudioFromSelected() {
+    const ids = [...this.targetIdDuringRightClick];
+    this.commit((doc) => detachAudioFrom(doc, ids, uuidv4));
+    this.drawCanvas();
+  }
+
+  /**
+   * The "detach audio" entry, offered only when it would do something.
+   *
+   * `menu-dropdown-item` has no disabled state, so the choice is between
+   * showing an item that can only decline and showing none — and the group
+   * menu above already settled that question the same way.
+   */
+  private audioMenuTemplate(): string {
+    const ids = this.targetIdDuringRightClick;
+    if (ids.length === 0) {
+      return "";
+    }
+
+    const doc = this.currentDoc();
+    if (!ids.some((id) => canDetachAudio(doc.elements[id]))) {
+      return "";
+    }
+
+    return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').detachAudioFromSelected()" item-name="detach audio"> </menu-dropdown-item>`;
+  }
+
   // ----------------------------------------------------------------- drag
 
   /**
@@ -993,6 +1033,7 @@ export class elementTimelineCanvas extends LitElement {
     document.querySelector("#menuRightClick").innerHTML = `
         <menu-dropdown-body top="${y}" left="${x}">
           ${this.animationMenuTemplate()}
+          ${this.audioMenuTemplate()}
           ${this.groupMenuTemplate()}
           <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').removeSeletedElements()" item-name="remove"> </menu-dropdown-item>
           <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').rippleDeleteSelected()" item-name="remove and close gap"> </menu-dropdown-item>

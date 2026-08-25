@@ -10,8 +10,22 @@ import {
 } from "./ffmpegArgs";
 import { ffmpegWindow } from "../../apps/app/src/features/timeline/geometry";
 import {
+  audioTwinOf,
+  isAudibleElement,
+} from "../../apps/app/src/features/timeline/audio";
+import { detachAudioFrom } from "../../apps/app/src/features/timeline/audioOps";
+import {
+  SCHEMA_VERSION,
+  createTrack,
+  normalizeDocument,
+} from "../../apps/app/src/features/timeline/tracks";
+import {
   audioElement,
+  gifElement,
+  groupElement,
   imageElement,
+  shapeElement,
+  textElement,
   videoElement,
 } from "../../apps/app/src/features/renderer/testing";
 
@@ -56,6 +70,38 @@ describe("isAudible", () => {
   it("skips silent video and everything that is not a media clip", () => {
     expect(isAudible(videoElement({ isExistAudio: false }))).toBe(false);
     expect(isAudible(imageElement({}))).toBe(false);
+  });
+
+  it("skips a video whose audio has been detached", () => {
+    expect(
+      isAudible(videoElement({ isExistAudio: true, audioDetached: true })),
+    ).toBe(false);
+  });
+
+  it("agrees with the renderer's isAudibleElement on every shape", () => {
+    // The two are hand-copied across the `rootDir` boundary — see the comment
+    // on `isAudible`. If they ever disagree, the preview and the export make
+    // different sounds and nothing else would say so.
+    const cases = [
+      videoElement({ isExistAudio: true }),
+      videoElement({ isExistAudio: false }),
+      videoElement({ isExistAudio: true, audioDetached: true }),
+      videoElement({ isExistAudio: false, audioDetached: true }),
+      videoElement({ isExistAudio: true, audioDetached: false }),
+      audioElement({}),
+      imageElement({}),
+      gifElement({}),
+      shapeElement({}),
+      textElement({}),
+      groupElement({}),
+    ];
+
+    for (const element of cases) {
+      expect([element.filetype, isAudible(element)]).toEqual([
+        element.filetype,
+        isAudibleElement(element),
+      ]);
+    }
   });
 });
 
@@ -426,6 +472,182 @@ describe("buildFFmpegArgs", () => {
     });
     expect(args).not.toContain("/silent.mp4");
     expect(filterComplexOf(args)[0]).toContain("anullsrc");
+  });
+});
+
+/**
+ * Detaching audio moves a clip's sound to a second element pointing at the
+ * *same file*, and this is where that has to cost nothing.
+ *
+ * `amix` runs with its default `normalize=1`, so the output is divided by the
+ * input count. A detach that added the twin without silencing its source would
+ * not merely double that clip — it would pull down every other clip in the
+ * project. These tests pin the count, not just the shape.
+ */
+describe("a detached clip in the export graph", () => {
+  /** The video as it stands before the detach. */
+  const source = () =>
+    videoElement({
+      localpath: "/clip.mp4",
+      startTime: 2500,
+      duration: 4000,
+      speed: 1,
+      trim: { startTime: 6000, endTime: 10_000 },
+      sourceDuration: 30_000,
+      isExistAudio: true,
+    });
+
+  /** The same clip after the detach: silenced video plus its audio twin. */
+  const detached = (over = {}) => {
+    const video = { ...source(), ...over };
+    return {
+      v: { ...video, audioDetached: true },
+      a: audioTwinOf(video as any),
+    };
+  };
+
+  function amixInputs(args: string[]): number {
+    const mix = filterComplexOf(args).find((stage) => stage.includes("amix="));
+    return mix == null ? 1 : Number(/amix=inputs=(\d+)/.exec(mix)![1]);
+  }
+
+  it("mixes the same number of inputs as before the detach", () => {
+    // The whole reason `audioDetached` exists.
+    const before = buildFFmpegArgs(options, { v: source() });
+    const after = buildFFmpegArgs(options, detached());
+    expect(amixInputs(after)).toBe(amixInputs(before));
+  });
+
+  it("adds the source file exactly once", () => {
+    const args = buildFFmpegArgs(options, detached());
+    expect(args.filter((arg) => arg === "/clip.mp4")).toHaveLength(1);
+  });
+
+  it("builds exactly one audio chain", () => {
+    const args = buildFFmpegArgs(options, detached());
+    const chains = filterComplexOf(args).filter((stage) =>
+      /^\[\d+:a\]/.test(stage),
+    );
+    expect(chains).toHaveLength(1);
+  });
+
+  it("lands the sound where the video's own audio would have", () => {
+    const before = buildFFmpegArgs(options, { v: source() });
+    const after = buildFFmpegArgs(options, detached());
+
+    expect(flagsForInput(after, "/clip.mp4")).toEqual(
+      flagsForInput(before, "/clip.mp4"),
+    );
+    expect(filterComplexOf(after)[0]).toBe(filterComplexOf(before)[0]);
+  });
+
+  it("carries the clip's speed onto the twin", () => {
+    const args = buildFFmpegArgs(
+      options,
+      detached({
+        speed: 2,
+        duration: 4000,
+        trim: { startTime: 0, endTime: 4000 },
+      }),
+    );
+    expect(filterComplexOf(args)[0]).toContain("atempo=2");
+    // -t is source seconds; atempo compresses it to the 2s timeline span.
+    expect(flagsForInput(args, "/clip.mp4").t).toBe(4);
+  });
+
+  it("does not quieten the other clips in the project", () => {
+    const song = audioElement({
+      localpath: "/song.mp3",
+      startTime: 0,
+      duration: 8000,
+      trim: { startTime: 0, endTime: 8000 },
+      sourceDuration: 8000,
+    });
+
+    const before = buildFFmpegArgs(options, { v: source(), s: song });
+    const after = buildFFmpegArgs(options, { ...detached(), s: song });
+
+    expect(amixInputs(after)).toBe(2);
+    expect(amixInputs(after)).toBe(amixInputs(before));
+  });
+
+  it("moves the sound when the twin is dragged away from the picture", () => {
+    // The point of detaching: the audio can sit somewhere the video does not.
+    const clips = detached();
+    const args = buildFFmpegArgs(options, {
+      ...clips,
+      a: { ...clips.a, startTime: clips.a.startTime + 1500 },
+    });
+    expect(filterComplexOf(args)[0]).toContain("adelay=4000|4000");
+  });
+
+  it("still mixes one input when only the twin survives a delete", () => {
+    const args = buildFFmpegArgs(options, { a: detached().a });
+    expect(amixInputs(args)).toBe(1);
+    expect(filterComplexOf(args)).not.toContainEqual(
+      expect.stringContaining("anullsrc"),
+    );
+  });
+
+  /**
+   * The same claims again, but driven by the real op rather than by the
+   * fixture above.
+   *
+   * `detached()` states what this file *believes* a detached document looks
+   * like. These run `detachAudioFrom` for real and export what it produced, so
+   * a change to the op that the fixture no longer matches fails here instead
+   * of passing everywhere and being wrong in the app.
+   */
+  describe("driven by detachAudioFrom", () => {
+    function exported(over = {}) {
+      const before = normalizeDocument({
+        schemaVersion: SCHEMA_VERSION,
+        tracks: [createTrack("v1", "video", 0)],
+        elements: { v: { ...source(), trackId: "v1", ...over } },
+      });
+
+      let n = 0;
+      const after = detachAudioFrom(before, ["v"], () => `id${n++}`);
+      return {
+        before: buildFFmpegArgs(options, before.elements),
+        after: buildFFmpegArgs(options, after.elements),
+      };
+    }
+
+    it("keeps the mix at one input", () => {
+      const { before, after } = exported();
+      expect(amixInputs(after)).toBe(1);
+      expect(amixInputs(after)).toBe(amixInputs(before));
+    });
+
+    it("produces the byte-identical audio graph it had before", () => {
+      // The strongest statement available: detaching audio changes *where the
+      // sound is editable*, and nothing at all about how it is exported.
+      const { before, after } = exported();
+      expect(filterComplexOf(after)).toEqual(filterComplexOf(before));
+    });
+
+    it("keeps the graph identical for a sped-up, trimmed clip too", () => {
+      const { before, after } = exported({
+        speed: 2,
+        duration: 3000,
+        trim: { startTime: 6000, endTime: 9000 },
+      });
+      expect(filterComplexOf(after)).toEqual(filterComplexOf(before));
+      expect(flagsForInput(after, "/clip.mp4")).toEqual(
+        flagsForInput(before, "/clip.mp4"),
+      );
+    });
+
+    it("never goes silent", () => {
+      // A detach that silenced the video without placing the twin would fall
+      // through to `anullsrc` and export an empty track.
+      const { after } = exported();
+      expect(after).toContain("/clip.mp4");
+      expect(filterComplexOf(after)).not.toContainEqual(
+        expect.stringContaining("anullsrc"),
+      );
+    });
   });
 
   it("always maps both output streams and ends at the destination", () => {

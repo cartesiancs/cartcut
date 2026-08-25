@@ -16,6 +16,7 @@ import type {
   TimelineElement,
   VideoElementType,
 } from "../../@types/timeline";
+import { isAudibleElement } from "./audio";
 import { isDynamicElement, spanStart, speedOf } from "./geometry";
 import { normalizeFps, planFrameGrid } from "./frames";
 import { xAtTime, type ClipRect, type TimelineLayout } from "./layout";
@@ -155,12 +156,16 @@ export function clipLabel(element: TimelineElement): string {
   return name || element.filetype;
 }
 
-/** Clip types with a waveform worth drawing. */
+/**
+ * Clip types with a waveform worth drawing.
+ *
+ * Exactly the clips that make a sound, so a video whose audio has been
+ * detached loses its waveform band at the same moment the new audio clip gains
+ * one. That is the gesture's whole visual confirmation: the sound is drawn
+ * where it now lives, and only there.
+ */
 export function canShowWaveform(element: TimelineElement): boolean {
-  return (
-    element.filetype === "audio" ||
-    (element.filetype === "video" && element.isExistAudio === true)
-  );
+  return isAudibleElement(element);
 }
 
 /** Clip types with frames to show. A type guard so `drawFilmstrip` can rely on

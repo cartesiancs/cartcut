@@ -156,7 +156,24 @@ export type VideoElementType = TimelinePlaced &
     trim: { startTime: number; endTime: number };
     /** Full untrimmed length of the source file, in source ms. */
     sourceDuration: number;
+    /**
+     * Whether the *source file* carries an audio stream. A fact about the file,
+     * probed once at import — not a mute switch. `renderMain` also reads it to
+     * decide the input `-vcodec`, so writing it to silence a clip would change
+     * how the file is decoded.
+     */
     isExistAudio: boolean;
+    /**
+     * Whether this clip's sound has been split onto an `audio` element of its
+     * own, and so must not be heard from here as well.
+     *
+     * Absent on every clip that has never been detached, which is what lets
+     * projects written before the feature load unchanged — see
+     * `features/timeline/audio.ts`, which owns the reading of this field, and
+     * `electron/render/ffmpegArgs.ts#isAudible`, which mirrors it across the
+     * IPC boundary.
+     */
+    audioDetached?: boolean;
     codec: { video: string; audio: string };
     speed: number;
     filter: {

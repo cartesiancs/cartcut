@@ -105,13 +105,29 @@ function speedOf(element: any): number {
   return typeof speed === "number" && speed > 0 ? speed : 1;
 }
 
-/** Whether a clip contributes audio to the mix. */
+/**
+ * Whether a clip contributes audio to the mix.
+ *
+ * Hand-copied from `apps/app/src/features/timeline/audio.ts#isAudibleElement`,
+ * for the reason stated in this file's header: importing the renderer tree
+ * here would widen `rootDir` and relocate every emitted file. `ffmpegArgs.test`
+ * imports both and asserts they agree over every element shape, so the copy
+ * cannot drift without a test failing.
+ *
+ * `audioDetached` is what keeps a detach from getting louder. The mix below is
+ * `amix`, whose default `normalize=1` divides by its input count, so a video
+ * left audible alongside the audio clip that now carries its sound would both
+ * double that clip and pull down every other clip in the project.
+ */
 export function isAudible(element: any): boolean {
   if (element?.filetype === "audio") {
     return true;
   }
   if (element?.filetype === "video") {
-    return (element.isExistAudio || false) === true;
+    return (
+      (element.isExistAudio || false) === true &&
+      element.audioDetached !== true
+    );
   }
   return false;
 }

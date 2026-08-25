@@ -6,8 +6,9 @@ import {
   createTrack,
   type TimelineDocument,
 } from "../features/timeline/tracks";
-import { imageElement } from "../features/renderer/testing";
+import { imageElement, videoElement } from "../features/renderer/testing";
 import { createGroup, ungroup } from "../features/timeline/groupOps";
+import { detachAudioFrom } from "../features/timeline/audioOps";
 
 const store = () => useTimelineStore.getState();
 
@@ -336,5 +337,84 @@ describe("group edits through withCheckpoint", () => {
       elements: { a: imageElement({ trackId: "v1", parentId: "never" }) },
     });
     expect((store().timeline.a as any).parentId).toBeUndefined();
+  });
+});
+
+describe("detaching audio through withCheckpoint", () => {
+  beforeEach(reset);
+
+  /** One video with sound on the only row, already checkpointed. */
+  function seeded() {
+    store().patchDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: [createTrack("v1", "video", 0)],
+      elements: {
+        v: videoElement({
+          trackId: "v1",
+          startTime: 1000,
+          duration: 4000,
+          trim: { startTime: 0, endTime: 4000 },
+          sourceDuration: 10_000,
+          isExistAudio: true,
+        }),
+      },
+    });
+    store().checkPointTimeline();
+  }
+
+  /** The audio clip the detach added. */
+  const twinId = () =>
+    Object.keys(store().timeline).find(
+      (id) => store().timeline[id].filetype === "audio",
+    );
+
+  it("is exactly one undo step, new track included", () => {
+    seeded();
+    const before = store().history.timelineHistory.length;
+
+    let n = 0;
+    store().withCheckpoint((doc) => detachAudioFrom(doc, ["v"], () => `id${n++}`));
+
+    expect(store().history.timelineHistory).toHaveLength(before + 1);
+    expect(twinId()).toBeDefined();
+    expect(store().tracks.some((track) => track.kind === "audio")).toBe(true);
+  });
+
+  it("undoes back to exactly what was there", () => {
+    // Clip, track and the silencing of the source all belong to one gesture,
+    // so one Cmd+Z has to take back all three — a half-undone detach would
+    // leave a video that is silent for no visible reason.
+    seeded();
+    let n = 0;
+    store().withCheckpoint((doc) => detachAudioFrom(doc, ["v"], () => `id${n++}`));
+
+    store().rollbackTimelineFromCheckPoint(-1);
+
+    expect(twinId()).toBeUndefined();
+    expect(store().tracks.some((track) => track.kind === "audio")).toBe(false);
+    expect((store().timeline.v as any).audioDetached).toBeUndefined();
+  });
+
+  it("redoes back to the detached state", () => {
+    seeded();
+    let n = 0;
+    store().withCheckpoint((doc) => detachAudioFrom(doc, ["v"], () => `id${n++}`));
+    store().rollbackTimelineFromCheckPoint(-1);
+    store().rollbackTimelineFromCheckPoint(1);
+
+    expect(twinId()).toBeDefined();
+    expect((store().timeline.v as any).audioDetached).toBe(true);
+  });
+
+  it("records no step when there is nothing to detach", () => {
+    // Identity in, identity out. A menu click on a silent clip must not eat a
+    // Cmd+Z the user will want for the edit before it.
+    seeded();
+    store().withCheckpoint((doc) => detachAudioFrom(doc, ["v"], () => "a"));
+    const before = store().history.timelineHistory.length;
+
+    store().withCheckpoint((doc) => detachAudioFrom(doc, ["v"], () => "b"));
+
+    expect(store().history.timelineHistory).toHaveLength(before);
   });
 });

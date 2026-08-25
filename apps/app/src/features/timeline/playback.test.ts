@@ -124,6 +124,73 @@ describe("intentFor", () => {
   });
 });
 
+describe("a video whose audio has been detached", () => {
+  const detached = () => clip({ audioDetached: true });
+
+  it("is silent inside its own window", () => {
+    // Without this the preview plays the clip twice — once from the `<video>`
+    // handle and once from the audio clip that now owns the sound.
+    expect(intentFor(detached(), 6000, true).muted).toBe(true);
+  });
+
+  it("keeps rolling, because the picture comes off the same handle", () => {
+    // Muting and pausing are different decisions. Pausing here would freeze
+    // the frame the moment a user detached the audio.
+    const intent = intentFor(detached(), 6000, true);
+    expect(intent.playing).toBe(true);
+    expect(intent.inWindow).toBe(true);
+  });
+
+  it("still seeks to the frame the playhead asks for", () => {
+    expect(intentFor(detached(), 6000, true).sourceTimeSec).toBe(
+      intentFor(clip(), 6000, true).sourceTimeSec,
+    );
+  });
+
+  it("plays in sync with the audio clip that took its sound", () => {
+    // The twin copies `startTime`, `trim` and `speed`, so both handles are
+    // asked for the same source second at every cursor. This is the assertion
+    // that would catch a twin built from the wrong fields.
+    const video = clip({ speed: 2 });
+    const twin = audioElement({
+      startTime: video.startTime,
+      duration: video.duration,
+      trim: { ...video.trim },
+      sourceDuration: video.sourceDuration,
+      speed: video.speed,
+    });
+
+    for (const cursor of [5000, 5500, 6000, 6800]) {
+      expect(intentFor(twin, cursor, true).sourceTimeSec).toBe(
+        intentFor(video, cursor, true).sourceTimeSec,
+      );
+    }
+  });
+
+  it("silences the handle without silencing the twin", () => {
+    const video = detached();
+    const twin = audioElement({
+      startTime: video.startTime,
+      duration: video.duration,
+      trim: { ...video.trim },
+      sourceDuration: video.sourceDuration,
+    });
+
+    expect(intentFor(video, 6000, true).muted).toBe(true);
+    expect(intentFor(twin, 6000, true).muted).toBe(false);
+  });
+
+  it("stays silent when the flag is absent but the file has no audio", () => {
+    expect(intentFor(clip({ isExistAudio: false }), 6000, true).muted).toBe(
+      true,
+    );
+  });
+
+  it("leaves an ordinary video audible", () => {
+    expect(intentFor(clip(), 6000, true).muted).toBe(false);
+  });
+});
+
 describe("the drag-drift bug", () => {
   it("shows the same footage after a clip is moved", () => {
     // The bug: playback used a snapshot of the clip taken when the file

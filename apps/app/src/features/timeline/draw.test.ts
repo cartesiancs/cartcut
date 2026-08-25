@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   canShowFilmstrip,
   canShowFrameGrid,
+  canShowWaveform,
   clipLabel,
   defaultColors,
   drawDropTarget,
@@ -120,6 +121,32 @@ describe("canShowFilmstrip", () => {
   it("is false for audio and text", () => {
     expect(canShowFilmstrip(audioElement({}))).toBe(false);
     expect(canShowFilmstrip(textElement({}))).toBe(false);
+  });
+});
+
+describe("canShowWaveform", () => {
+  it("is true for the clips that make a sound", () => {
+    expect(canShowWaveform(audioElement({}))).toBe(true);
+    expect(canShowWaveform(videoElement({ isExistAudio: true }))).toBe(true);
+  });
+
+  it("is false for a video with no audio stream", () => {
+    expect(canShowWaveform(videoElement({ isExistAudio: false }))).toBe(false);
+  });
+
+  it("is false once the video's audio has been detached", () => {
+    // The trace moves to the audio clip that now carries the sound; drawing it
+    // in both places would show one audio track twice.
+    expect(
+      canShowWaveform(
+        videoElement({ isExistAudio: true, audioDetached: true }),
+      ),
+    ).toBe(false);
+  });
+
+  it("is false for clips with no sound at all", () => {
+    expect(canShowWaveform(imageElement({}))).toBe(false);
+    expect(canShowWaveform(textElement({}))).toBe(false);
   });
 });
 
@@ -432,6 +459,92 @@ describe("drawTimeline filmstrip", () => {
   });
 });
 
+describe("a detached pair drawn together", () => {
+  const buckets = 500;
+
+  function loud(): PeakData {
+    const peaks = new Float32Array(buckets * 2);
+    for (let i = 0; i < buckets; i++) {
+      peaks[i * 2] = -0.9;
+      peaks[i * 2 + 1] = 0.9;
+    }
+    return { peaks, bucketMs: 20, durationMs: buckets * 20 };
+  }
+
+  /** A silenced video on row 0 and the audio clip that took its sound on row 1. */
+  function detachedDoc(): TimelineDocument {
+    const shared = {
+      startTime: 0,
+      duration: 4000,
+      localpath: "/clip.mp4",
+      trim: { startTime: 0, endTime: 4000 },
+      sourceDuration: 10_000,
+    };
+    return normalizeDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: [createTrack("v1", "video", 0), createTrack("a1", "audio", 1)],
+      elements: {
+        v: videoElement({
+          ...shared,
+          trackId: "v1",
+          isExistAudio: true,
+          audioDetached: true,
+          timelineOptions: { color: "#000080" },
+        }),
+        a: audioElement({
+          ...shared,
+          trackId: "a1",
+          timelineOptions: { color: "#008000" },
+        }),
+      },
+    });
+  }
+
+  it("draws the waveform on the audio clip", () => {
+    const { canvas } = paint(detachedDoc(), {
+      peaks: { get: () => loud(), request: vi.fn() },
+    });
+    // Row 1, near its bottom edge: a loud signal reaches most of the way out.
+    expect(
+      pixel(canvas, 50, TRACK_PITCH + TRACK_HEIGHT - 3).r,
+    ).toBeGreaterThan(100);
+  });
+
+  it("leaves the silenced video showing its flat colour", () => {
+    // Where the 10px waveform band used to sit. Two waveforms for one audio
+    // track is what this whole flag exists to prevent.
+    const { canvas } = paint(detachedDoc(), {
+      peaks: { get: () => loud(), request: vi.fn() },
+    });
+    expect(pixel(canvas, 50, TRACK_HEIGHT - 4)).toMatchObject({
+      r: 0,
+      g: 0,
+      b: 0x80,
+    });
+  });
+
+  it("decodes the shared file once, not twice", () => {
+    // Both clips name the same mp4. The provider dedupes by path anyway, but
+    // asking twice per frame would mean the video is still claiming the sound.
+    const request = vi.fn();
+    paint(detachedDoc(), { peaks: { get: () => null, request } });
+    expect(request.mock.calls).toEqual([["/clip.mp4"]]);
+  });
+
+  it("still draws both clips", () => {
+    // The cheapest guard against the change blanking a row outright.
+    const { canvas } = paint(detachedDoc(), {
+      peaks: { get: () => null, request: vi.fn() },
+    });
+    expect(pixel(canvas, 50, 20)).toMatchObject({ r: 0, g: 0, b: 0x80 });
+    expect(pixel(canvas, 50, TRACK_PITCH + 20)).toMatchObject({
+      r: 0,
+      g: 0x80,
+      b: 0,
+    });
+  });
+});
+
 describe("drawTimeline waveform", () => {
   /** Peaks at a constant level, covering 10s of source. */
   function loudPeaks(level = 0.9): PeakData {
@@ -525,6 +638,27 @@ describe("drawTimeline waveform", () => {
       { peaks },
     );
     expect(peaks.request).toHaveBeenCalledWith("/clip.mp4");
+  });
+
+  it("stops asking once the clip's audio has been detached", () => {
+    // The waveform follows the sound. A detached clip keeps drawing its own
+    // trace *and* the new audio clip draws one, which reads as two copies of
+    // an audio track that only exists once.
+    const peaks: PeakProvider = { get: () => null, request: vi.fn() };
+    paint(
+      doc({
+        v: videoElement({
+          trackId: "v1",
+          startTime: 0,
+          duration: 4000,
+          localpath: "/clip.mp4",
+          isExistAudio: true,
+          audioDetached: true,
+        }),
+      }),
+      { peaks },
+    );
+    expect(peaks.request).not.toHaveBeenCalled();
   });
 
   it("does not ask for one for text", () => {
