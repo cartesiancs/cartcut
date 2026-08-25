@@ -26,6 +26,7 @@ import "./features/element/elementTimelineRange";
 
 import "./features/keyframe/keyframeEditor";
 import "./features/menu/menuDropdown";
+import "./features/onboarding/onboardingOverlay";
 
 
 import "./features/option/optionGroup";

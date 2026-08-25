@@ -1,0 +1,170 @@
+@import "../var";
+
+// The first-run tour. Every number here is transcribed from the Figma frames
+// `1090:2`, `1090:14`, `1099:111` and `1099:208`, whose card is 657x465 — the
+// card is drawn at those literal pixels rather than scaled to the window.
+//
+// Two deliberate departures from the file: the type is Noto Sans KR, the face
+// the rest of the editor already loads, rather than Pretendard; and the last
+// card's button spans the card's own 30px gutters (597px) instead of the
+// asymmetric 588px it was drawn at.
+
+$onboarding-card-color: #191a1d;
+$onboarding-title-color: #dcdfe5;
+$onboarding-subtitle-color: #6b6b75;
+$onboarding-accent-color: #225bec;
+$onboarding-secondary-color: #a1a1a1;
+$onboarding-gutter: 30px;
+
+// `--onboarding-fade` is set inline by the component, which also times its
+// unmount against it — so the two can never drift apart. The fallback is only
+// there for a stylesheet loaded without the component.
+@keyframes onboarding-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.onboarding-scrim {
+  position: fixed;
+  inset: 0;
+  // Above every other layer in this sheet; the highest in use is 9000.
+  z-index: 9500;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background-color: rgba(0, 0, 0, 0.72);
+  backdrop-filter: $blur-backdrop-filter;
+  -webkit-backdrop-filter: $blur-backdrop-filter;
+
+  // Runs once, on insert: the tour fades up over the editor rather than
+  // appearing on top of it. No fill mode, so the transition below takes over
+  // cleanly once the animation is done.
+  animation: onboarding-fade-in var(--onboarding-fade, 200ms) ease-out;
+  transition: opacity var(--onboarding-fade, 200ms) ease-in;
+
+  &.is-leaving {
+    opacity: 0;
+  }
+}
+
+// The card keeps its box while the step changes; only what is written on it
+// crossfades.
+.onboarding-content {
+  transition: opacity var(--onboarding-fade, 200ms) ease;
+
+  &.is-swapping {
+    opacity: 0;
+  }
+}
+
+.onboarding-card {
+  position: relative;
+  width: 657px;
+  height: 465px;
+  border-radius: 30px;
+  background-color: $onboarding-card-color;
+  font-family: "Noto Sans KR", sans-serif;
+  overflow: hidden;
+
+  // The window has no minimum size, so shrink the whole card rather than let
+  // its absolutely-positioned contents spill out of it.
+  @media (max-width: 720px), (max-height: 540px) {
+    transform: scale(0.7);
+  }
+}
+
+.onboarding-title {
+  position: absolute;
+  top: 75px;
+  left: 0;
+  right: 0;
+  margin: 0;
+
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 38px;
+  text-align: center;
+  color: $onboarding-title-color;
+}
+
+.onboarding-subtitle {
+  position: absolute;
+  top: 244px;
+  left: 0;
+  right: 0;
+  margin: 0;
+
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 24px;
+  text-align: center;
+  color: $onboarding-subtitle-color;
+}
+
+// `top` is set inline, per step: the three illustrations and the wordmark each
+// sit at their own height, and each keeps the width and height it was drawn at.
+.onboarding-art {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  -webkit-user-drag: none;
+}
+
+.onboarding-actions {
+  position: absolute;
+  left: $onboarding-gutter;
+  right: $onboarding-gutter;
+  bottom: 31px;
+
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 40px;
+}
+
+.onboarding-secondary {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 19px;
+  color: $onboarding-secondary-color;
+
+  &:hover {
+    color: #cfcfcf;
+  }
+}
+
+.onboarding-next {
+  width: 123px;
+  height: 48px;
+  border: 0;
+  border-radius: 15px;
+  background-color: $onboarding-accent-color;
+  cursor: pointer;
+
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 19px;
+  color: #ffffff;
+
+  &:hover {
+    background-color: #1a4bd0;
+  }
+}
+
+// The last card: one button across the card, inside the same gutters.
+.onboarding-next--wide {
+  width: 100%;
+}

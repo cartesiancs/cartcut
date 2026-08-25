@@ -77,6 +77,7 @@ export class App extends LitElement {
         <toast-box></toast-box>
 
         <warning-demo></warning-demo>
+        <onboarding-overlay></onboarding-overlay>
       </body>
     `;
   }

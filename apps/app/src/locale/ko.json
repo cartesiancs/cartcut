@@ -51,5 +51,15 @@
     "needs_to_restart_description": "경고: 저장되지 않은 작업물은 사라질 수 있습니다. 프로젝트를 저장했는지 확인해주세요.",
     "restart": "재시작",
     "close": "닫기"
+  },
+  "onboarding": {
+    "welcome_subtitle": "강력한 영상 편집기, 카트컷에 오신 것을 환영합니다.",
+    "free_open_source": "무료 오픈소스",
+    "ai_edit_mcp": "AI 편집과 MCP",
+    "lets_start": "시작해 볼까요",
+    "skip": "건너뛰기",
+    "prev": "이전",
+    "next": "다음",
+    "finish": "시작하기"
   }
 }

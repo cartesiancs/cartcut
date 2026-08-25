@@ -51,5 +51,15 @@
     "needs_to_restart_description": "WARNING: You may lose unsaved tasks.",
     "restart": "Restart",
     "close": "Close"
+  },
+  "onboarding": {
+    "welcome_subtitle": "welcome to cartcut. a powerful video editor.",
+    "free_open_source": "Free & Open Source",
+    "ai_edit_mcp": "AI Edit & MCP",
+    "lets_start": "Let’s start",
+    "skip": "Skip",
+    "prev": "Prev",
+    "next": "Next",
+    "finish": "Finish"
   }
 }
