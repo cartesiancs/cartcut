@@ -13,6 +13,7 @@ import {
   type TimelineDocument,
 } from "../timeline/tracks";
 import {
+  audioElement,
   imageElement,
   shapeElement,
   textElement,
@@ -75,6 +76,13 @@ describe("clipRow", () => {
     // address.
     const element = imageElement({ trackId: "v1", key: "stale-or-absent" });
     expect(clipRow("real-id", element).id).toBe("real-id");
+  });
+
+  it("reports a level only when it is not the default", () => {
+    // Same rule as `speed`: a list of a hundred clips stays compact under the
+    // tool-output cap, while a project someone has mixed is visible at a glance.
+    expect(clipRow("a", audioElement({ trackId: "v1" })).volumeDb).toBeUndefined();
+    expect(clipRow("a", audioElement({ trackId: "v1", volumeDb: -6 })).volumeDb).toBe(-6);
   });
 
   it("reports the timeline span, not the source duration, for a sped-up clip", () => {
@@ -143,6 +151,28 @@ describe("clipDetail", () => {
     // The whole point: the detail view is a rounding error next to the data.
     expect(collectNumbersDeep(detail).length).toBeLessThan(100);
     expect(collectNumbersDeep(detail).length).toBeLessThan(MAX_BAKED_SAMPLES);
+  });
+
+  it("reports the effective level even when the field is absent", () => {
+    // Through the resolver, not the raw field: a clip from a project written
+    // before the feature has no `volumeDb`, and reporting nothing would leave
+    // an agent unable to tell "unity" from "not applicable".
+    const audio = clipDetail("a", audioElement({ trackId: "v1" })) as any;
+    expect(audio.volumeDb).toBe(0);
+
+    const video = clipDetail(
+      "a",
+      videoElement({ trackId: "v1", isExistAudio: true }),
+    ) as any;
+    expect(video.volumeDb).toBe(0);
+  });
+
+  it("reports an authored level", () => {
+    const detail = clipDetail(
+      "a",
+      audioElement({ trackId: "v1", volumeDb: -6 }),
+    ) as any;
+    expect(detail.volumeDb).toBe(-6);
   });
 
   it("gives text clips their full text back", () => {

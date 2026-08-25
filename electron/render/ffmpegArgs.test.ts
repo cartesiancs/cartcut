@@ -6,11 +6,13 @@ import {
   collectAudioInputs,
   frameByteLength,
   frameFormatFor,
+  gainOf,
   isAudible,
 } from "./ffmpegArgs";
 import { ffmpegWindow } from "../../apps/app/src/features/timeline/geometry";
 import {
   audioTwinOf,
+  gainOf as gainOfElement,
   isAudibleElement,
 } from "../../apps/app/src/features/timeline/audio";
 import { detachAudioFrom } from "../../apps/app/src/features/timeline/audioOps";
@@ -105,6 +107,68 @@ describe("isAudible", () => {
   });
 });
 
+describe("gainOf", () => {
+  it("is exactly 1 for a clip nobody has touched", () => {
+    // Load-bearing: `audioFilterFor` omits its stage on `gain !== 1`, which is
+    // what keeps every command for an unmixed project byte-identical to the
+    // ones this file produced before the field existed.
+    expect(gainOf(audioElement({}))).toBe(1);
+    expect(gainOf(videoElement({}))).toBe(1);
+    expect(gainOf(audioElement({ volumeDb: 0 }))).toBe(1);
+  });
+
+  it("is exactly 0 at the floor", () => {
+    expect(gainOf(audioElement({ volumeDb: -60 }))).toBe(0);
+    expect(gainOf(audioElement({ volumeDb: -120 }))).toBe(0);
+  });
+
+  it("defaults anything it cannot read to unity", () => {
+    // The timeline crosses IPC as a bare record, so this sees whatever the
+    // renderer sent — including nothing at all, from an old project.
+    expect(gainOf(undefined)).toBe(1);
+    expect(gainOf({})).toBe(1);
+    expect(gainOf(audioElement({ volumeDb: NaN }))).toBe(1);
+    expect(gainOf(audioElement({ volumeDb: "-6" as any }))).toBe(1);
+  });
+
+  it("agrees with the renderer's gainOf on every shape", () => {
+    // The same hand-copy hazard as `isAudible`, with a worse failure mode: a
+    // divergence here means the preview and the delivered file play at
+    // different volumes, and nothing would say so until someone listened.
+    //
+    // Exact equality, not approximate — an approximate match would wave
+    // through the very drift the six-decimal rounding exists to prevent.
+    const cases = [
+      audioElement({}),
+      audioElement({ volumeDb: 0 }),
+      audioElement({ volumeDb: -6 }),
+      audioElement({ volumeDb: -13.7 }),
+      audioElement({ volumeDb: -60 }),
+      audioElement({ volumeDb: -200 }),
+      audioElement({ volumeDb: 12 }),
+      audioElement({ volumeDb: NaN }),
+      videoElement({ isExistAudio: true, volumeDb: -3 }),
+      videoElement({ isExistAudio: true }),
+      imageElement({}),
+      textElement({}),
+    ];
+
+    for (const element of cases) {
+      expect([element.filetype, gainOf(element)]).toEqual([
+        element.filetype,
+        gainOfElement(element),
+      ]);
+    }
+
+    // And across the whole range, at a resolution a fader can actually produce.
+    for (let db = -70; db <= 5; db += 0.1) {
+      const volumeDb = Number(db.toFixed(1));
+      const element = audioElement({ volumeDb });
+      expect(gainOf(element)).toBe(gainOfElement(element));
+    }
+  });
+});
+
 describe("collectAudioInputs", () => {
   it("agrees with geometry.ffmpegWindow", () => {
     // The two definitions live in separate build graphs on purpose; this is
@@ -124,6 +188,14 @@ describe("collectAudioInputs", () => {
     expect(input.ssSec).toBe(window.ssSec);
     expect(input.tSec).toBe(window.tSec);
     expect(input.delayMs).toBe(window.delayMs);
+  });
+
+  it("reads the level through the resolver", () => {
+    const [untouched] = collectAudioInputs({ a: audioElement({}) });
+    expect(untouched.gain).toBe(1);
+
+    const [mixed] = collectAudioInputs({ a: audioElement({ volumeDb: -6 }) });
+    expect(mixed.gain).toBe(0.501187);
   });
 
   it("seeks to the trim point without scaling it by speed", () => {
@@ -259,6 +331,58 @@ describe("audioFilterFor", () => {
       "audio0",
     );
     expect(filter).toContain("adelay=1501|1501");
+  });
+
+  it("emits no level stage at unity gain", () => {
+    // Every pinned string above depends on this. A project nobody has mixed
+    // must produce the exact command it produced before the field existed.
+    const filter = audioFilterFor(
+      { localpath: "/a.mp3", ssSec: 0, tSec: 1, delayMs: 0, speed: 1, gain: 1 },
+      1,
+      "audio0",
+    );
+    expect(filter).toBe("[1:a]adelay=0|0[audio0]");
+  });
+
+  it("applies the level before tempo and placement", () => {
+    // `volume` commutes with both, so this ordering is about not scaling the
+    // silence `adelay` pads with, and about the chain reading in the order the
+    // file already holds: how loud, then how fast, then where.
+    const filter = audioFilterFor(
+      {
+        localpath: "/a.mp3",
+        ssSec: 0,
+        tSec: 4,
+        delayMs: 1000,
+        speed: 2,
+        gain: 0.501187,
+      },
+      2,
+      "audio1",
+    );
+    expect(filter).toBe(
+      "[2:a]volume=0.501187,atempo=2,adelay=1000|1000[audio1]",
+    );
+  });
+
+  it("emits a hard zero for a clip turned all the way down", () => {
+    const filter = audioFilterFor(
+      { localpath: "/a.mp3", ssSec: 0, tSec: 1, delayMs: 0, speed: 1, gain: 0 },
+      1,
+      "audio0",
+    );
+    expect(filter).toBe("[1:a]volume=0,adelay=0|0[audio0]");
+  });
+
+  it("reads a missing gain as unity rather than interpolating it", () => {
+    // `volume=undefined` is not a command FFmpeg will run, so failing the
+    // whole export over an absent field would be the worse answer.
+    const filter = audioFilterFor(
+      { localpath: "/a.mp3", ssSec: 0, tSec: 1, delayMs: 0, speed: 1 } as any,
+      1,
+      "audio0",
+    );
+    expect(filter).toBe("[1:a]adelay=0|0[audio0]");
   });
 });
 
@@ -428,6 +552,55 @@ describe("buildFFmpegArgs", () => {
     expect(filterComplexOf(args)).toContain(
       "[audio0][audio1]amix=inputs=2[aout]",
     );
+  });
+
+  it("still counts a silenced clip as a mix input", () => {
+    // The trap this guards. `amix` normalises by its *declared* input count,
+    // so dropping a clip turned all the way down would shrink the divisor and
+    // make every other clip in the project louder — the user pulls one fader
+    // down and everything else jumps up. Audibility ("am I an input") and gain
+    // ("how loud") stay strictly apart, exactly as `audioDetached` requires.
+    const args = buildFFmpegArgs(options, {
+      a: audioElement({ localpath: "/a.mp3", startTime: 0, duration: 1000 }),
+      b: audioElement({
+        localpath: "/b.mp3",
+        startTime: 1000,
+        duration: 1000,
+        volumeDb: -60,
+      }),
+    });
+    const filters = filterComplexOf(args);
+    expect(filters).toContain("[2:a]volume=0,adelay=1000|1000[audio1]");
+    expect(filters).toContain("[audio0][audio1]amix=inputs=2[aout]");
+  });
+
+  it("carries an authored level into the filter graph", () => {
+    const args = buildFFmpegArgs(options, {
+      a: audioElement({
+        localpath: "/a.mp3",
+        startTime: 0,
+        duration: 1000,
+        volumeDb: -6,
+      }),
+    });
+    expect(filterComplexOf(args)).toContain(
+      "[1:a]volume=0.501187,adelay=0|0[audio0]",
+    );
+  });
+
+  it("leaves an unmixed project's command untouched", () => {
+    // The compatibility claim, asserted rather than assumed: no clip in this
+    // timeline carries a level, so nothing about the command may mention one.
+    const args = buildFFmpegArgs(options, {
+      a: audioElement({ localpath: "/a.mp3", startTime: 0, duration: 1000 }),
+      v: videoElement({
+        localpath: "/clip.mp4",
+        startTime: 0,
+        duration: 1000,
+        isExistAudio: true,
+      }),
+    });
+    expect(args.join(" ")).not.toContain("volume=");
   });
 
   it("corrects tempo for a sped-up clip", () => {

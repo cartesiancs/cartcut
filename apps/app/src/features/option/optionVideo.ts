@@ -8,6 +8,8 @@ import { addKeyframe } from "../animation/keyframeOps";
 import { applyPreset, type PresetName } from "../animation/presets";
 import { setIn } from "../../utils/immutable";
 import { GestureCommit } from "./gestureCommit";
+import { isAudibleElement } from "../timeline/audio";
+import "./controlAudioVolume";
 
 @customElement("option-video")
 export class OptionVideo extends LitElement {
@@ -134,6 +136,12 @@ export class OptionVideo extends LitElement {
         .isShow=${this.isShow}
       ></default-transform>
 
+      <audio-volume
+        class=${this.hasAudio() ? "" : "d-none"}
+        .elementId=${this.elementId}
+        .isShow=${this.isShow && this.hasAudio()}
+      ></audio-volume>
+
       <button
         type="button"
         class="btn btn-sm mb-2 ${this.enableFilter
@@ -220,6 +228,18 @@ export class OptionVideo extends LitElement {
 
   isExistElement(elementId) {
     return this.timeline.hasOwnProperty(elementId);
+  }
+
+  /**
+   * Whether this clip has a level worth setting.
+   *
+   * Reuses `isAudibleElement` rather than re-deriving
+   * `isExistAudio && !audioDetached`, which would make a fourth place that has
+   * to agree with it — and gets the detached case right for free: once the
+   * sound belongs to the twin clip, a fader here would do nothing.
+   */
+  private hasAudio(): boolean {
+    return isAudibleElement(this.timeline?.[this.elementId]);
   }
 
   setElementId({ elementId }) {

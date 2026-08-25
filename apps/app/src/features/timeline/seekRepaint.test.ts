@@ -40,6 +40,7 @@ function seekableVideo(over: Partial<MediaHandle> = {}) {
   const handle = {
     currentTime: 0,
     muted: false,
+    volume: 1,
     playbackRate: 1,
     paused: true,
     /** What `drawImage` would actually sample right now. */
@@ -276,6 +277,7 @@ describe("whenSeeksLand", () => {
     const plain: MediaHandle = {
       currentTime: 0,
       muted: false,
+      volume: 1,
       playbackRate: 1,
       paused: true,
       play() {},

@@ -17,8 +17,14 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { detachAudio, detachAudioFrom } from "./audioOps";
-import { AUDIO_CLIP_COLOR, audioTwinOf, canDetachAudio, isAudibleElement } from "./audio";
+import { detachAudio, detachAudioFrom, setVolumeDb } from "./audioOps";
+import {
+  AUDIO_CLIP_COLOR,
+  audioTwinOf,
+  canDetachAudio,
+  isAudibleElement,
+  volumeDbOf,
+} from "./audio";
 import { moveClips, splitClip, trimClipEnd, trimClipStart } from "./clipOps";
 import { assertTrimInvariant, spanOf } from "./geometry";
 import {
@@ -420,5 +426,106 @@ describe("a detached clip is an ordinary clip", () => {
     const after = moveClips(next, [twinId], 500);
     expect((after.elements.v as any).startTime).toBe(5000);
     expect((after.elements[twinId] as any).startTime).toBe(5500);
+  });
+});
+
+/**
+ * Setting a level, and — mostly — refusing to.
+ *
+ * The decline paths get the bulk of the attention because of how this op is
+ * driven. `number-input` dispatches on every mousemove, so one scrub of the
+ * fader calls this hundreds of times, and `GestureCommit` decides whether the
+ * gesture is worth an undo step purely by whether the document came back by
+ * identity. An op that returned a copy when nothing changed would turn "I
+ * dragged the fader and put it back" into a step the user never took.
+ */
+describe("setVolumeDb", () => {
+  const base = () =>
+    doc({
+      v: clip(),
+      a: audioElement({ trackId: "a1", startTime: 0, duration: 1000 }),
+      t: textElement({ trackId: "v1", startTime: 0, duration: 1000 }),
+    }, [createTrack("v1", "video", 0), createTrack("a1", "audio", 1)]);
+
+  it("writes the level onto an audio clip", () => {
+    const before = base();
+    const after = setVolumeDb(before, "a", -6);
+    expect(volumeDbOf(after.elements.a)).toBe(-6);
+  });
+
+  it("writes the level onto a video clip", () => {
+    const before = base();
+    const after = setVolumeDb(before, "v", -12);
+    expect(volumeDbOf(after.elements.v)).toBe(-12);
+  });
+
+  it("leaves every other clip alone", () => {
+    const before = base();
+    const after = setVolumeDb(before, "a", -6);
+    expect(after.elements.v).toBe(before.elements.v);
+    expect(after.elements.t).toBe(before.elements.t);
+  });
+
+  it("declines by identity when the clip is already at that level", () => {
+    // A scrub that wanders back across a value it already passed.
+    const before = setVolumeDb(base(), "a", -6);
+    expect(setVolumeDb(before, "a", -6)).toBe(before);
+  });
+
+  it("declines by identity when setting 0 on a clip that has no field", () => {
+    // The case a raw-field comparison would miss: no `volumeDb` *is* 0 dB, so
+    // this must not stamp a redundant `volumeDb: 0` onto every clip the user
+    // happens to click on.
+    const before = base();
+    expect((before.elements.a as any).volumeDb).toBeUndefined();
+    expect(setVolumeDb(before, "a", 0)).toBe(before);
+  });
+
+  it("clamps a level outside the range", () => {
+    // The clamp lives here rather than in the panel because `number-input`
+    // ignores `min`/`max` entirely — there is nothing stopping a drag.
+    expect(volumeDbOf(setVolumeDb(base(), "a", -200).elements.a)).toBe(-60);
+  });
+
+  it("declines when the clamp lands on the level already held", () => {
+    // Dragging up past the ceiling from an untouched clip: +12 clamps to 0,
+    // which is where the clip already sits, so nothing happened.
+    const before = base();
+    expect(setVolumeDb(before, "a", 12)).toBe(before);
+  });
+
+  it("declines a second drag past the floor", () => {
+    // Dragging below -60 and continuing to drag is one step, not one per event.
+    const atFloor = setVolumeDb(base(), "a", -60);
+    expect(setVolumeDb(atFloor, "a", -80)).toBe(atFloor);
+    expect(setVolumeDb(atFloor, "a", -1000)).toBe(atFloor);
+  });
+
+  it("declines a clip type that makes no sound", () => {
+    // A text clip with a level would be a field nothing ever reads.
+    const before = base();
+    expect(setVolumeDb(before, "t", -6)).toBe(before);
+  });
+
+  it("declines an id that is not in the document", () => {
+    const before = base();
+    expect(setVolumeDb(before, "nope", -6)).toBe(before);
+  });
+
+  it("declines a level that is not a number", () => {
+    // `parseFloat` on an empty spinner yields NaN, and clamping it would
+    // silently jump the clip to 0 dB.
+    const before = base();
+    expect(setVolumeDb(before, "a", NaN)).toBe(before);
+    expect(setVolumeDb(before, "a", Infinity)).toBe(before);
+  });
+
+  it("does not disturb the level when the sound is detached", () => {
+    // The video keeps its (now inert) level, and the twin gets a copy — so
+    // re-attaching later would not have lost what the user chose.
+    const before = setVolumeDb(base(), "v", -9);
+    const { next } = { next: detachAudio(before, "v", "tw", "t1") };
+    expect(volumeDbOf(next.elements.v)).toBe(-9);
+    expect(volumeDbOf(next.elements.tw)).toBe(-9);
   });
 });

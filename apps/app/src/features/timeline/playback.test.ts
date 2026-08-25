@@ -21,6 +21,7 @@ function fakeVideo(over: Partial<MediaHandle> = {}) {
   return {
     currentTime: 0,
     muted: false,
+    volume: 1,
     playbackRate: 1,
     paused: true,
     play() {
@@ -72,6 +73,32 @@ describe("intentFor", () => {
     expect(intentFor(clip(), 20_000, true)).toMatchObject({
       muted: true,
       playing: false,
+    });
+  });
+
+  it("reports the clip's authored level", () => {
+    expect(intentFor(clip(), 6000, true).volume).toBe(1);
+    expect(intentFor(clip({ volumeDb: -6 }), 6000, true).volume).toBe(0.501187);
+    expect(intentFor(clip({ volumeDb: -60 }), 6000, true).volume).toBe(0);
+  });
+
+  it("reports the level independently of the window", () => {
+    // Level and mute are orthogonal: `muted` is positional and flips with the
+    // playhead, the level is document state and only the user changes it.
+    const mixed = clip({ volumeDb: -6 });
+    for (const cursor of [1000, 6000, 20_000]) {
+      expect(intentFor(mixed, cursor, true).volume).toBe(0.501187);
+    }
+  });
+
+  it("reports a level for a video whose audio has been detached", () => {
+    // Silenced by `muted`, but the level is kept — the clip is still rolling
+    // for its picture, and re-attaching later must not have lost it.
+    const detached = clip({ volumeDb: -6, audioDetached: true });
+    expect(intentFor(detached, 6000, true)).toMatchObject({
+      muted: true,
+      volume: 0.501187,
+      playing: true,
     });
   });
 
@@ -281,6 +308,16 @@ describe("the audio-overlap bug", () => {
     expect(handle.muted).toBe(true);
     expect(handle.paused).toBe(true);
   });
+
+  it("leaves an orphaned handle's volume alone", () => {
+    // Muted and paused is already completely silent, and this branch has no
+    // change guard — it runs every frame — so a volume write here would cost
+    // one pointless assignment per frame per orphan, forever. The level lives
+    // in the document, so an undo re-derives it.
+    const handle = fakeVideo({ muted: false, volume: 0.5 });
+    syncPlayback(doc({}), 1000, true, { a: handle });
+    expect(handle.volume).toBe(0.5);
+  });
 });
 
 describe("applyIntent", () => {
@@ -336,8 +373,10 @@ describe("applyIntent", () => {
     // treats each assignment as a real state change.
     let rateWrites = 0;
     let muteWrites = 0;
+    let volumeWrites = 0;
     let rate = 1;
     let muted = false;
+    let volume = 1;
     const handle: MediaHandle = {
       currentTime: 3,
       paused: false,
@@ -357,6 +396,13 @@ describe("applyIntent", () => {
         muted = v;
         muteWrites++;
       },
+      get volume() {
+        return volume;
+      },
+      set volume(v: number) {
+        volume = v;
+        volumeWrites++;
+      },
     };
 
     for (let i = 0; i < 10; i++) {
@@ -364,6 +410,39 @@ describe("applyIntent", () => {
     }
     expect(rateWrites).toBe(0);
     expect(muteWrites).toBe(0);
+    // `gainOf` is rounded precisely so this stays 0: an unrounded value that
+    // varied in its last bits would write on every frame, forever.
+    expect(volumeWrites).toBe(0);
+  });
+
+  it("does not write volume when a clip leaves its window", () => {
+    // The reason the intent's volume does not depend on `inWindow`. Crossing a
+    // boundary is a `muted` change and nothing else; if the level tracked the
+    // window it would be rewritten twice on every crossing.
+    let volumeWrites = 0;
+    let volume = 0.501187;
+    const handle: MediaHandle = {
+      currentTime: 3,
+      muted: false,
+      playbackRate: 1,
+      paused: false,
+      play() {},
+      pause() {},
+      get volume() {
+        return volume;
+      },
+      set volume(v: number) {
+        volume = v;
+        volumeWrites++;
+      },
+    };
+
+    const mixed = clip({ volumeDb: -6 });
+    applyIntent(handle, intentFor(mixed, 6000, true)); // inside
+    applyIntent(handle, intentFor(mixed, 20_000, true)); // past the end
+    applyIntent(handle, intentFor(mixed, 6000, true)); // back inside
+    expect(volumeWrites).toBe(0);
+    expect(handle.volume).toBe(0.501187);
   });
 
   it("seeks before starting playback", () => {
@@ -372,6 +451,7 @@ describe("applyIntent", () => {
     const seen: string[] = [];
     const handle: MediaHandle = {
       muted: false,
+      volume: 1,
       playbackRate: 1,
       paused: true,
       get currentTime() {
@@ -399,6 +479,7 @@ describe("applyIntent", () => {
     let value = 2;
     const handle: MediaHandle = {
       muted: false,
+      volume: 1,
       playbackRate: 1,
       paused: true,
       get currentTime() {
@@ -424,6 +505,22 @@ describe("applyIntent", () => {
     expect(handle.playbackRate).toBe(2);
   });
 
+  it("sets the volume from the clip's level", () => {
+    const handle = fakeVideo();
+    applyIntent(handle, intentFor(clip({ volumeDb: -6 }), 6000, true));
+    expect(handle.volume).toBe(0.501187);
+    expect(handle.muted).toBe(false);
+  });
+
+  it("silences a clip at the floor without muting it", () => {
+    // Zero gain, not `muted`: mute is where the clip is, level is how loud it
+    // was set. Conflating them would leave nowhere to keep the user's choice.
+    const handle = fakeVideo();
+    applyIntent(handle, intentFor(clip({ volumeDb: -60 }), 6000, true));
+    expect(handle.volume).toBe(0);
+    expect(handle.muted).toBe(false);
+  });
+
   it("pauses a handle that is playing when it should not be", () => {
     const handle = fakeVideo({ paused: false });
     applyIntent(handle, intentFor(clip(), 6000, false));
@@ -435,6 +532,7 @@ describe("applyIntent", () => {
     const handle: MediaHandle = {
       currentTime: 3,
       muted: false,
+      volume: 1,
       playbackRate: 1,
       paused: false,
       play() {

@@ -42,7 +42,8 @@
     "text": "텍스트",
     "position": "위치",
     "opacity": "불투명도",
-    "audio": "오디오"
+    "audio": "오디오",
+    "volume": "볼륨"
   },
   "modal": {
     "change_language": "언어 변경",

@@ -120,6 +120,37 @@ type Animatable = OpacityAnimatable & {
   };
 };
 
+/**
+ * Clips that make a sound, and can be turned down.
+ *
+ * A mixin rather than a field repeated on `video` and `audio`, so the reasoning
+ * below lives in one place — the same way `Visual` and `Animatable` do.
+ */
+type Leveled = {
+  /**
+   * Authored output level in **decibels**, -60 … 0. Attenuation only.
+   *
+   * Absent on every clip written before the feature and on every clip the user
+   * has not touched, which is what lets old projects load unchanged — there is
+   * no migration on load. `features/timeline/audio.ts#volumeDbOf` owns the
+   * reading of it and supplies the 0 dB default.
+   *
+   * Decibels, not a linear multiplier, deliberately: this is the number the
+   * user scrubbed, stored exactly, so re-scrubbing cannot drift and so -60 can
+   * mean silence without the round trip through `-Infinity` that a stored `0`
+   * would need. The linear value `HTMLMediaElement.volume` and the FFmpeg
+   * `volume` filter want comes from `gainOf`. **Never assign this to
+   * `handle.volume`** — that line typechecks and is wrong by 20 orders of dB.
+   *
+   * The ceiling is 0 dB because `HTMLMediaElement.volume` maxes at 1.0: any
+   * boost would make the preview and the export disagree, silently.
+   *
+   * Not animatable. `canAnimate` excludes audio and `animatableProperties`
+   * returns `[]` for it, so this is a static field with no keyframe track.
+   */
+  volumeDb?: number;
+};
+
 export type ImageElementType = TimelinePlaced &
   Visual &
   Animatable & {
@@ -145,7 +176,8 @@ export type ShapeElementType = TimelinePlaced &
 
 export type VideoElementType = TimelinePlaced &
   Visual &
-  Animatable & {
+  Animatable &
+  Leveled & {
     filetype: "video";
     /**
      * Window into the *source file*, in source milliseconds — never a timeline
@@ -311,14 +343,15 @@ export type GroupElementType = TimelinePlaced &
     name: string;
   };
 
-export type AudioElementType = TimelinePlaced & {
-  filetype: "audio";
-  /** Source-file window in source ms. See `VideoElementType.trim`. */
-  trim: { startTime: number; endTime: number };
-  /** Full untrimmed length of the source file, in source ms. */
-  sourceDuration: number;
-  speed: number;
-};
+export type AudioElementType = TimelinePlaced &
+  Leveled & {
+    filetype: "audio";
+    /** Source-file window in source ms. See `VideoElementType.trim`. */
+    trim: { startTime: number; endTime: number };
+    /** Full untrimmed length of the source file, in source ms. */
+    sourceDuration: number;
+    speed: number;
+  };
 
 export type TimelineElement =
   | VideoElementType

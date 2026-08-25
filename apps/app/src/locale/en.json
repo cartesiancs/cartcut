@@ -42,7 +42,8 @@
     "text": "text",
     "position": "Position",
     "opacity": "Opacity",
-    "audio": "Audio"
+    "audio": "Audio",
+    "volume": "Volume"
   },
   "modal": {
     "change_language": "Change Language",

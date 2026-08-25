@@ -47,6 +47,11 @@ export type AudioInput = {
   delayMs: number;
   /** Playback rate; 1 means no tempo adjustment. */
   speed: number;
+  /**
+   * Linear output gain, 0..1 — a multiplier, not the element's `volumeDb`.
+   * `1` means no attenuation and emits no filter stage at all.
+   */
+  gain: number;
 };
 
 /** How the renderer serialises each frame onto stdin. */
@@ -132,6 +137,39 @@ export function isAudible(element: any): boolean {
   return false;
 }
 
+/** Below this the clip is silent outright; see the renderer twin. */
+export const MIN_VOLUME_DB = -60;
+
+/**
+ * A clip's linear output gain, 0..1.
+ *
+ * Hand-copied from `apps/app/src/features/timeline/audio.ts#gainOf`, for the
+ * reason stated in this file's header, and kept in step the same way `isAudible`
+ * is: `ffmpegArgs.test` imports both and asserts they agree — exactly, not
+ * approximately, which is what the six-decimal rounding is for.
+ *
+ * Divergence here is the worst failure mode this file has. Preview and export
+ * would play at different volumes, and nothing would say so until someone
+ * listened to a delivered file.
+ *
+ * The export emits this linear number rather than FFmpeg's `volume=-6dB` form
+ * on purpose. The dB form would have JS and FFmpeg's C each do their own
+ * conversion, so the agreement test could only compare *inputs*; and the
+ * -60 dB hard-zero would then need special-casing on both sides independently.
+ * One shared number is one decision.
+ */
+export function gainOf(element: any): number {
+  const raw = element?.volumeDb;
+  const db = typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
+  if (db <= MIN_VOLUME_DB) {
+    return 0;
+  }
+  if (db >= 0) {
+    return 1;
+  }
+  return Number((10 ** (db / 20)).toFixed(6));
+}
+
 /**
  * `atempo` only accepts a factor in [0.5, 2.0], so anything outside that has to
  * be reached by chaining. Returns the factors in application order, or an empty
@@ -160,10 +198,34 @@ export function atempoChain(speed: number): number[] {
   return factors;
 }
 
-/** Formats one clip's audio chain: tempo correction, then placement. */
+/**
+ * Formats one clip's audio chain: level, then tempo correction, then placement.
+ *
+ * `volume` is a per-sample scalar multiply, so it commutes with both `atempo`
+ * and `adelay` and the rendered samples are the same wherever it sits. It goes
+ * first because `adelay` pads with silence — scaling that padding is work spent
+ * on nothing, potentially minutes of it for a clip late in a long timeline —
+ * and because it keeps the chain reading in the order this file already holds:
+ * source-domain work before timeline placement. How loud, then how fast, then
+ * where.
+ *
+ * The stage is omitted entirely at unity, which is what makes a project nobody
+ * has touched the faders on produce the exact command it produced before this
+ * field existed.
+ */
 export function audioFilterFor(input: AudioInput, streamIndex: number, label: string): string {
-  const stages = atempoChain(input.speed).map(
-    (factor) => `atempo=${Number(factor.toFixed(6))}`,
+  const stages: string[] = [];
+  // A gain that is missing or not a number reads as unity rather than being
+  // interpolated: `volume=undefined` is not a command FFmpeg will run, and
+  // failing the whole export over an absent field is a far worse answer than
+  // playing the clip at the level it already had.
+  if (Number.isFinite(input.gain) && input.gain !== 1) {
+    stages.push(`volume=${input.gain}`);
+  }
+  stages.push(
+    ...atempoChain(input.speed).map(
+      (factor) => `atempo=${Number(factor.toFixed(6))}`,
+    ),
   );
   const delay = Math.round(input.delayMs);
   stages.push(`adelay=${delay}|${delay}`);
@@ -177,6 +239,12 @@ export function audioFilterFor(input: AudioInput, streamIndex: number, label: st
  * `-t` is in *source* seconds because `-ss` is a source seek; the timeline
  * enters only through `delayMs`. After `atempo` the stream occupies
  * `tSec / speed` seconds of output, which is the clip's timeline span.
+ *
+ * A clip turned all the way down stays in this list. Dropping it would shrink
+ * `amix=inputs=N`, and `amix` normalises by its declared input count — so
+ * pulling one fader to the bottom would make every *other* clip in the project
+ * louder. Audibility ("am I an input") and gain ("how loud") are kept strictly
+ * apart, for the same reason `audioDetached` exists.
  */
 export function collectAudioInputs(timeline: Record<string, any>): AudioInput[] {
   const inputs: AudioInput[] = [];
@@ -196,6 +264,7 @@ export function collectAudioInputs(timeline: Record<string, any>): AudioInput[] 
       tSec: element.duration / 1000,
       delayMs: Math.max(0, element.startTime),
       speed: speedOf(element),
+      gain: gainOf(element),
     });
   }
 

@@ -63,6 +63,90 @@ export function isAudibleElement(element: TimelineElement): boolean {
 }
 
 /**
+ * The quietest level that is still a level. Anything at or below it is silence.
+ *
+ * Not a linear floor: `10 ** (-60 / 20)` is 0.001, which is plainly audible on
+ * a loud source. When the user pulls the fader to the bottom they mean off, so
+ * `gainOf` returns a hard zero here rather than the arithmetic answer.
+ */
+export const MIN_VOLUME_DB = -60;
+
+/**
+ * The loudest level, and it is unity.
+ *
+ * No boost, because `HTMLMediaElement.volume` cannot exceed 1.0: the preview
+ * would cap where the export did not, and the two would disagree without ever
+ * saying so. Raising this ceiling means routing preview audio through a
+ * WebAudio `GainNode` first.
+ */
+export const MAX_VOLUME_DB = 0;
+
+/** What a clip that has never been touched plays at. */
+export const DEFAULT_VOLUME_DB = 0;
+
+/** Pin a level into the representable range. */
+export function clampVolumeDb(db: number): number {
+  if (!Number.isFinite(db)) {
+    return DEFAULT_VOLUME_DB;
+  }
+  return Math.min(Math.max(db, MIN_VOLUME_DB), MAX_VOLUME_DB);
+}
+
+/**
+ * The level this clip is authored at, in dB.
+ *
+ * Defaulted *and* clamped, so a field absent from an old project, a `null`
+ * element mid-undo, and a hand-edited `.ngt` carrying `"-6"` or `-100` all
+ * produce something the preview and the export can agree on. Reading through
+ * this rather than the raw field is what keeps "no field" and "0 dB" the same
+ * clip.
+ */
+export function volumeDbOf(
+  element: TimelineElement | null | undefined,
+): number {
+  const db = (element as { volumeDb?: unknown } | null | undefined)?.volumeDb;
+  if (typeof db !== "number") {
+    return DEFAULT_VOLUME_DB;
+  }
+  return clampVolumeDb(db);
+}
+
+/**
+ * The linear multiplier for a clip's level, 0..1.
+ *
+ * The renderer-side twin of `electron/render/ffmpegArgs.ts#gainOf`, kept in
+ * step by `ffmpegArgs.test.ts` exactly as `isAudibleElement`/`isAudible` are.
+ * If they drift, the preview and the export play at different volumes — the
+ * one class of bug that is inaudible in testing and only shows up in what was
+ * delivered.
+ *
+ * Two exact cases carry weight beyond the arithmetic:
+ *
+ *   - unity is exactly `1`, which is what lets `audioFilterFor` drop the
+ *     `volume=` stage entirely and produce, for a project nobody has touched
+ *     the faders on, byte-identical FFmpeg commands to the ones from before
+ *     this field existed;
+ *   - the floor is exactly `0`, per `MIN_VOLUME_DB`.
+ *
+ * Everything between is rounded to six decimals, and that is functional rather
+ * than cosmetic. `applyIntent` writes `handle.volume` only when the value
+ * changes, and it recomputes this every animation frame for every loaded clip;
+ * a short, stable double makes that comparison stable. It also lets the FFmpeg
+ * twin interpolate the number directly and be compared for exact equality,
+ * instead of an approximate match that would wave through a real divergence.
+ */
+export function gainOf(element: TimelineElement | null | undefined): number {
+  const db = volumeDbOf(element);
+  if (db <= MIN_VOLUME_DB) {
+    return 0;
+  }
+  if (db >= MAX_VOLUME_DB) {
+    return 1;
+  }
+  return Number((10 ** (db / 20)).toFixed(6));
+}
+
+/**
  * Whether "detach audio" has anything to do to this clip.
  *
  * Three ways to have nothing to do: it is not a video, its source file carries
@@ -112,6 +196,11 @@ export function audioTwinOf(video: VideoElementType): AudioElementType {
     trim: { startTime: video.trim.startTime, endTime: video.trim.endTime },
     sourceDuration: video.sourceDuration,
     speed: video.speed,
+    // The level the user set is a property of the sound, so it travels with it.
+    // `undefined` when the video was never touched, and `JSON.stringify` drops
+    // an undefined field — so a detached clip stays indistinguishable from an
+    // imported one in the saved project, which is the whole idea here.
+    volumeDb: video.volumeDb,
     // Audio has no picture to place; `elementControl.addAudio` writes the same
     // zeroes and marks them "NOT USING".
     location: { x: 0, y: 0 },

@@ -24,7 +24,7 @@
 
 import type { TimelineElement } from "../../@types/timeline";
 import { isTimeInRange } from "../../utils/time";
-import { isAudibleElement } from "./audio";
+import { gainOf, isAudibleElement } from "./audio";
 import { isDynamicElement, sourceTimeAt, spanOf, speedOf } from "./geometry";
 import type { TimelineDocument } from "./tracks";
 
@@ -32,6 +32,11 @@ import type { TimelineDocument } from "./tracks";
 export interface MediaHandle {
   currentTime: number;
   muted: boolean;
+  /**
+   * Linear gain, 0..1 — the unit the DOM uses, **not** the element's
+   * `volumeDb`. Convert with `audio.ts#gainOf`.
+   */
+  volume: number;
   playbackRate: number;
   readonly paused: boolean;
   play(): void;
@@ -105,6 +110,8 @@ export type PlaybackIntent = {
   /** Where the handle should be, in seconds into the source file. */
   sourceTimeSec: number;
   muted: boolean;
+  /** Linear gain for the handle, 0..1 — not the element's `volumeDb`. */
+  volume: number;
   playing: boolean;
   rate: number;
   /** Whether the playhead is inside this clip's window. */
@@ -184,6 +191,13 @@ export function intentFor(
     // to roll, because the picture comes off the same handle: muting it and
     // pausing it would freeze the frame the moment its audio was detached.
     muted: !inWindow || !isAudibleElement(element),
+    // Deliberately independent of `inWindow`, and orthogonal to `muted`.
+    // `muted` is positional — am I being heard yet — and flips as the playhead
+    // moves; the level is document state and changes only when the user edits
+    // it. Keeping them apart means crossing a clip boundary writes no volume
+    // at all, and it is why mute is not implemented as `volume = 0`: there
+    // would be nowhere to keep the level the user actually chose.
+    volume: gainOf(element),
     playing: isPlaying && inWindow,
     rate: speedOf(element),
     inWindow,
@@ -213,6 +227,11 @@ export function applyIntent(
   }
   if (handle.muted !== intent.muted) {
     handle.muted = intent.muted;
+  }
+  // `gainOf` is deterministic and pre-rounded, so at steady state this compares
+  // two identical doubles and never fires — which is the point of rounding it.
+  if (handle.volume !== intent.volume) {
+    handle.volume = intent.volume;
   }
 
   // A handle already rolling gets the generous window; one that is parked,
@@ -261,6 +280,11 @@ export function syncPlayback(
     const element = doc.elements[elementId];
 
     if (element == null) {
+      // Volume is deliberately left alone. Muted and paused is already
+      // completely silent, and this branch has no change guard — it writes
+      // every frame — so a volume assignment here would cost one pointless
+      // write per frame per orphan, forever. The level lives in the document
+      // anyway, so an undo that brings the element back re-derives it.
       handle.muted = true;
       if (!handle.paused) {
         handle.pause();

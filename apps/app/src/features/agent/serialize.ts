@@ -20,7 +20,7 @@ import type {
   AnimatableProperty,
 } from "../../@types/timeline";
 import { canAnimate, animatableProperties } from "../../@types/timeline";
-import { isAudibleElement } from "../timeline/audio";
+import { isAudibleElement, volumeDbOf } from "../timeline/audio";
 import {
   isDynamicElement,
   spanEnd,
@@ -132,6 +132,13 @@ export function clipRow(
     const speed = speedOf(element);
     if (speed !== 1) {
       row.speed = speed;
+    }
+    // Same rule as `speed`: reported only when it is not the default, so a
+    // list stays compact under the tool-output cap while a project someone has
+    // mixed is still visible at a glance.
+    const volumeDb = volumeDbOf(element);
+    if (volumeDb !== 0) {
+      row.volumeDb = volumeDb;
     }
   }
 
@@ -258,6 +265,9 @@ export function clipDetail(
     // `clipRow` reports speed only when it is not 1, so an agent reading a
     // detail view cannot tell "normal speed" from "not applicable".
     detail.speed = speedOf(element);
+    // Through the resolver, so a clip from a project written before the field
+    // existed reports its effective 0 dB rather than nothing at all.
+    detail.volumeDb = volumeDbOf(element);
   }
 
   if (element.filetype === "video") {
@@ -272,6 +282,7 @@ export function clipDetail(
     // took it. Reporting the raw `isExistAudio` would have the agent counting
     // the same audio twice.
     detail.hasAudio = isAudibleElement(element);
+    detail.volumeDb = volumeDbOf(element);
     if (element.audioDetached === true) {
       detail.audioDetached = true;
     }

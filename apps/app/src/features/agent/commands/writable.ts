@@ -76,7 +76,8 @@ export const WRITABLE: Record<string, string[][]> = {
     ["fill", "angle"],
   ],
   shape: [["option", "fillColor"]],
-  video: [["filter", "enable"]],
+  video: [["filter", "enable"], ["volumeDb"]],
+  audio: [["volumeDb"]],
   group: [["name"]],
 };
 
@@ -107,6 +108,12 @@ export const RANGES: Record<string, { min?: number; max?: number }> = {
   fontsize: { min: 1, max: 2000 },
   width: { min: 0 },
   height: { min: 0 },
+  // Attenuation only. The ceiling is 0 dB because the preview caps at unity
+  // gain, so a boost would export louder than it played — see
+  // `features/timeline/audio.ts`. Rejected rather than clamped: an agent that
+  // is told the bound learns something, where a mouse drag cannot be told
+  // anything and so is clamped in `setVolumeDb` instead.
+  volumeDb: { min: -60, max: 0 },
 };
 
 /** Values that must be one of a fixed set. */
@@ -117,7 +124,8 @@ export const ENUMS: Record<string, readonly string[]> = {
 };
 
 export function writablePaths(element: TimelineElement): string[][] {
-  // Audio has no picture, so the shared transform block does not apply to it.
+  // Audio has no picture, so the shared transform block does not apply to it —
+  // its own entry is the whole of what it can be patched with.
   const common = element.filetype === "audio" ? [] : WRITABLE.common;
   return [...common, ...(WRITABLE[element.filetype] ?? [])];
 }
