@@ -1,11 +1,11 @@
 ![banner](./.github/banner.png)
 
 <h1 align='center'>
-cartcut
+CartCut
 </h1>
 
 <p align='center'>
-Opensource alternative to capcut
+The finest AI video editor
 </p>
 
 ![plot](./.github/screenshotv1.png)

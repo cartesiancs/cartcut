@@ -87,7 +87,7 @@ export const uiStore = createStore<IUIStore>((set) => ({
       leftOption: 170,
     },
   },
-  topBarTitle: "Cartcut",
+  topBarTitle: "CartCut",
   isOptionPanelActive: false,
 
   setOptionPanelActive: (isOptionPanelActive) =>
