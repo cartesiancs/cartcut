@@ -278,7 +278,9 @@ export class AssetFile extends LitElement {
     // The gate. `draggable` is only set once the hold completes, but Chromium
     // can still begin a drag on the same frame the attribute lands, so refusing
     // here is what actually guarantees a short press never drags.
-    if (this.press.phase !== "armed" || !e.dataTransfer) {
+    this.dispatch({ type: "dragstart" });
+
+    if (this.press.phase !== "dragging" || !e.dataTransfer) {
       e.preventDefault();
       return;
     }

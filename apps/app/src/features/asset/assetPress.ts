@@ -27,7 +27,19 @@ export type PressPhase =
   /** Down, and still undecided. */
   | "pressed"
   /** The hold completed: `draggable` is on and a drag may start. */
-  | "armed";
+  | "armed"
+  /**
+   * A drag really did start.
+   *
+   * The distinction between this and `armed` is the whole reason the phase
+   * exists. Arming used to be treated as "the user wants to drag", so releasing
+   * from it added nothing — which broke clicking outright, because a relaxed
+   * click is easily slower than the 220ms hold and there is nothing about
+   * pressing and releasing on the spot that means anything but "add this".
+   * Only a drag that actually began should suppress the add, and only the
+   * browser can say when one did.
+   */
+  | "dragging";
 
 export type PressState = {
   phase: PressPhase;
@@ -47,6 +59,8 @@ export type PressEv =
   /** A clock pulse, so the hold can complete without any pointer motion. */
   | { type: "tick"; t: number }
   | { type: "up"; t: number }
+  /** The browser began a native drag. Only it knows when that happened. */
+  | { type: "dragstart" }
   /** `dragend`, `pointercancel`, the element going away. */
   | { type: "cancel" };
 
@@ -107,15 +121,29 @@ export function reducePress(
       return { state: { ...state, phase: "armed" }, effects: [{ type: "arm" }] };
     }
 
+    case "dragstart": {
+      if (state.phase !== "armed") {
+        // Refused. The caller turns this into `preventDefault`, which is what
+        // actually stops a short press from dragging — `draggable` can still
+        // be on for a frame after the attribute is written.
+        return { state, effects: [] };
+      }
+      return { state: { ...state, phase: "dragging" }, effects: [] };
+    }
+
     case "up": {
       if (state.phase === "pressed") {
         // Down and up without the hold: a click.
         return { state: idlePress, effects: [{ type: "open" }] };
       }
       if (state.phase === "armed") {
-        // Held, then released without dragging anywhere. The user changed
-        // their mind; adding at the playhead here would be the opposite of
-        // what holding still asked for.
+        // Held past the threshold, released on the spot, never dragged. Still
+        // a click — the hold completing says the tile *could* be dragged, not
+        // that it was. A native drag would have taken the pointer stream away
+        // and ended in `dragend`, so reaching here means it never started.
+        return { state: idlePress, effects: [{ type: "disarm" }, { type: "open" }] };
+      }
+      if (state.phase === "dragging") {
         return { state: idlePress, effects: [{ type: "disarm" }] };
       }
       return { state, effects: [] };
@@ -125,6 +153,8 @@ export function reducePress(
       if (state.phase === "idle") {
         return { state, effects: [] };
       }
+      // `dragend` lands here. The drop target already placed the asset where
+      // the user aimed; adding a second copy at the playhead would be wrong.
       return { state: idlePress, effects: [{ type: "disarm" }] };
     }
   }

@@ -155,9 +155,11 @@ describe("reducePress", () => {
       expect(effects).toEqual(["open"]);
     });
 
-    it("adds nothing once armed", () => {
-      // Held still, then let go without dragging anywhere. Dropping a clip at
-      // the playhead is the opposite of what holding still asked for.
+    it("is still a click when the press outlasted the hold", () => {
+      // The regression that broke clicking outright. Arming was read as "the
+      // user wants to drag", so a press slower than 220ms — which an unhurried
+      // click easily is — added nothing at all. Pressing and releasing on the
+      // spot means "add this" however long it took.
       const { state, effects } = run([
         down(0),
         { type: "tick", t: 220 },
@@ -165,7 +167,34 @@ describe("reducePress", () => {
       ]);
 
       expect(state).toEqual(idlePress);
+      expect(effects).toEqual(["arm", "disarm", "open"]);
+    });
+
+    it("is a click at any duration, as long as no drag began", () => {
+      for (const heldMs of [0, 100, 219, 220, 400, 1500, 10_000]) {
+        const { effects } = run([
+          down(0),
+          { type: "tick", t: heldMs },
+          { type: "up", t: heldMs },
+        ]);
+
+        expect(effects.filter((e) => e === "open")).toHaveLength(1);
+      }
+    });
+
+    it("adds nothing once a drag actually started", () => {
+      // The drop target has already placed the asset where the user aimed; a
+      // second copy at the playhead would be wrong.
+      const { state, effects } = run([
+        down(0),
+        { type: "tick", t: 220 },
+        { type: "dragstart" },
+        { type: "cancel" },
+      ]);
+
+      expect(state).toEqual(idlePress);
       expect(effects).toEqual(["arm", "disarm"]);
+      expect(effects).not.toContain("open");
     });
 
     it("does nothing on a stray up with no press", () => {
@@ -173,6 +202,45 @@ describe("reducePress", () => {
 
       expect(state).toBe(idlePress);
       expect(effects).toEqual([]);
+    });
+  });
+
+  describe("starting a drag", () => {
+    it("is refused until the hold completes", () => {
+      // The reducer refuses by not advancing; the component turns that into
+      // `preventDefault`. Needed because `draggable` can still be on for a
+      // frame after the attribute is written.
+      const pressed = run([down(0)]).state;
+      const next = reducePress(pressed, { type: "dragstart" });
+
+      expect(next.state).toBe(pressed);
+      expect(next.state.phase).toBe("pressed");
+    });
+
+    it("is refused when nothing is pressed at all", () => {
+      const next = reducePress(idlePress, { type: "dragstart" });
+
+      expect(next.state).toBe(idlePress);
+    });
+
+    it("is allowed once armed", () => {
+      const { state } = run([
+        down(0),
+        { type: "tick", t: 220 },
+        { type: "dragstart" },
+      ]);
+
+      expect(state.phase).toBe("dragging");
+    });
+
+    it("ignores a second dragstart while already dragging", () => {
+      const dragging = run([
+        down(0),
+        { type: "tick", t: 220 },
+        { type: "dragstart" },
+      ]).state;
+
+      expect(reducePress(dragging, { type: "dragstart" }).state).toBe(dragging);
     });
   });
 
@@ -249,11 +317,23 @@ describe("reducePress", () => {
       expect(run([down(0), { type: "up", t: 120 }]).effects).toEqual(["open"]);
     });
 
-    it("drag: down, hold, drag away, dragend — armed then disarmed, no add", () => {
+    it("slow click: down, hold past 220ms, up — still one add", () => {
+      const { effects } = run([
+        down(0),
+        { type: "tick", t: 220 },
+        { type: "up", t: 600 },
+      ]);
+
+      expect(effects).toEqual(["arm", "disarm", "open"]);
+    });
+
+    it("drag: down, hold, drag away, dragend — placed by the drop, not here", () => {
+      // The browser stops sending pointer events once a native drag begins, so
+      // the gesture ends in `dragend` with no `up` at all.
       const { state, effects } = run([
         down(0),
         { type: "tick", t: 220 },
-        { type: "move", x: 600, y: 400, t: 300 },
+        { type: "dragstart" },
         { type: "cancel" },
       ]);
 
