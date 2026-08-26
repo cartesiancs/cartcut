@@ -23,6 +23,8 @@ import {
   type TimelineRenderers,
 } from "../renderer/timeline";
 import { isVisualTimelineElement } from "../../@types/timeline";
+import { isTypingEvent } from "../../utils/typingTarget";
+import { hasEditorModifier } from "../../utils/platform";
 import { applyElementTransform } from "../renderer/element";
 import {
   canPointerTarget,
@@ -1628,6 +1630,9 @@ export class PreviewCanvas extends LitElement {
   /**
    * macOS trackpad: a pinch arrives as a wheel event with `ctrlKey`, a
    * two-finger swipe as a plain wheel event.
+   *
+   * So the `ctrlKey` test below is deliberately not `hasEditorModifier` — that
+   * one is Cmd-only on macOS, and demanding Cmd+wheel here would break pinch.
    */
   _handleWheel(e: WheelEvent) {
     e.preventDefault();
@@ -1672,13 +1677,16 @@ export class PreviewCanvas extends LitElement {
 
   /** Fit / zoom shortcuts. Ignored while the user is typing. */
   _handleKeydown(e: KeyboardEvent) {
-    if (!(e.metaKey || e.ctrlKey)) {
+    // `isTypingEvent` rather than a local tagName check, and first, matching
+    // `elementTimelineCanvas`. The check this replaces read `e.target`, which
+    // shadow DOM has already retargeted to the host — so ⌘0 typed inside
+    // `number-input`'s inner field arrived here as `<number-input>`, passed for
+    // "not a text field", and re-fit the preview under the user.
+    if (isTypingEvent(e)) {
       return;
     }
 
-    const target = e.target as HTMLElement | null;
-    const tag = target?.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) {
+    if (!hasEditorModifier(e)) {
       return;
     }
 

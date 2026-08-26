@@ -68,6 +68,7 @@ import { detachAudioFrom } from "../timeline/audioOps";
 import { rasterizeTextElements } from "./rasterizeText";
 import { AssetController } from "../../controllers/asset";
 import { isTypingEvent } from "../../utils/typingTarget";
+import { hasEditorModifier } from "../../utils/platform";
 import { selectionStore } from "../../states/selectionStore";
 import {
   copySelection,
@@ -837,6 +838,10 @@ export class elementTimelineCanvas extends LitElement {
   }
 
   _handleMouseWheel(e) {
+    // Not `hasEditorModifier`. macOS synthesises `ctrlKey` on a trackpad pinch,
+    // and Windows spells wheel-zoom Ctrl+wheel — so this one flag is the right
+    // test on both platforms. Routing it through the editor modifier would make
+    // pinch-to-zoom scroll the timeline on a Mac instead of magnifying it.
     if (e.ctrlKey) {
       e.preventDefault();
       // Proportional to the current range, so the wheel magnifies by a
@@ -987,10 +992,14 @@ export class elementTimelineCanvas extends LitElement {
       return;
     }
 
-    const mod = event.metaKey || event.ctrlKey;
+    const mod = hasEditorModifier(event);
 
-    // `event.code` and `metaKey`: the old handler used `keyCode` with a
-    // hard-coded `ctrlKey`, so none of these worked on macOS at all.
+    // `event.code` and a platform-strict modifier: the old handler used
+    // `keyCode` with a hard-coded `ctrlKey`, so none of these worked on macOS
+    // at all. It then accepted `metaKey || ctrlKey`, which worked everywhere
+    // but meant Ctrl+D on a Mac split a clip — a combination macOS spends on
+    // its own text editing. `hasEditorModifier` takes Cmd there and Ctrl here,
+    // and nothing else.
     switch (event.code) {
       case "ArrowUp":
         this.moveSelectionByTrack(-1);

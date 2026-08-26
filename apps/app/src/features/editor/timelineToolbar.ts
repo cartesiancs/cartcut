@@ -37,29 +37,25 @@ import {
   undo,
   type EditorCapabilities,
 } from "./actions";
+import { shortcutLabel, type ShortcutId } from "./shortcuts";
 
 type ToolbarButton = {
   icon: string;
   label: string;
-  /** Shortcut to append to the tooltip, written with `MOD` for Cmd/Ctrl. */
-  shortcut?: string;
+  /**
+   * The registry entry whose binding to append to the tooltip. Rendered for
+   * the platform there — ⌘ on macOS, Ctrl elsewhere — so this file no longer
+   * spells the modifier itself.
+   */
+  shortcut?: ShortcutId;
   run: () => void;
   enabled: (caps: EditorCapabilities) => boolean;
 };
 
-/**
- * How this platform spells the modifier these shortcuts actually use.
- *
- * `_handleKeydown` accepts `metaKey || ctrlKey`, so the same binding works
- * either way — but a label has to pick one, and telling a Mac user "Ctrl+D"
- * describes a key they will not press.
- */
-const MOD = navigator.userAgent.includes("Mac") ? "⌘" : "Ctrl+";
-
 function tooltip(spec: ToolbarButton): string {
   return spec.shortcut == null
     ? spec.label
-    : `${spec.label} (${spec.shortcut.replace("MOD", MOD)})`;
+    : `${spec.label} (${shortcutLabel(spec.shortcut)})`;
 }
 
 /**
@@ -74,14 +70,14 @@ const BUTTONS: ToolbarButton[] = [
   {
     icon: "undo",
     label: "Undo",
-    shortcut: "MODZ",
+    shortcut: "undo",
     run: undo,
     enabled: (caps) => caps.canUndo,
   },
   {
     icon: "redo",
     label: "Redo",
-    shortcut: "MOD⇧Z",
+    shortcut: "redo",
     run: redo,
     enabled: (caps) => caps.canRedo,
   },
@@ -90,7 +86,7 @@ const BUTTONS: ToolbarButton[] = [
     // on it — so split and merge take the fork-and-join pair instead.
     icon: "call_split",
     label: "Split at playhead",
-    shortcut: "MODD",
+    shortcut: "split",
     run: splitSelection,
     enabled: (caps) => caps.canSplit,
   },
@@ -103,21 +99,21 @@ const BUTTONS: ToolbarButton[] = [
   {
     icon: "content_cut",
     label: "Cut",
-    shortcut: "MODX",
+    shortcut: "cut",
     run: cutSelection,
     enabled: (caps) => caps.canCut,
   },
   {
     icon: "content_copy",
     label: "Copy",
-    shortcut: "MODC",
+    shortcut: "copy",
     run: copySelection,
     enabled: (caps) => caps.canCopy,
   },
   {
     icon: "content_paste",
     label: "Paste",
-    shortcut: "MODV",
+    shortcut: "paste",
     run: pasteFromClipboard,
     enabled: (caps) => caps.canPaste,
   },

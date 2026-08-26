@@ -1,10 +1,48 @@
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { LocaleController } from "../../controllers/locale";
+import {
+  shortcutLabelWithAlternates,
+  shortcutsByGroup,
+} from "../../features/editor/shortcuts";
 
 @customElement("modal-list-ui")
 export class ModalList extends LitElement {
   private lc = new LocaleController(this);
+
+  /**
+   * The `#shortKey` help table.
+   *
+   * Rendered from `features/editor/shortcuts` rather than written out here.
+   * The hardcoded version this replaces said "Control C" to Mac users, was
+   * missing undo, redo, Escape and the preview zoom bindings, and had gone
+   * stale in the way any second copy of a list eventually does.
+   */
+  private shortcutTable() {
+    return html`
+      <table class="table table-dark">
+        ${shortcutsByGroup().map(
+          ({ title, items }) => html`
+            <tbody>
+              <tr>
+                <td colspan="2" class="text-white font-weight-lg">${title}</td>
+              </tr>
+              ${items.map(
+                (spec) => html`
+                  <tr>
+                    <th scope="row">
+                      ${shortcutLabelWithAlternates(spec.id)}
+                    </th>
+                    <td class="text-secondary">${spec.description}</td>
+                  </tr>
+                `,
+              )}
+            </tbody>
+          `,
+        )}
+      </table>
+    `;
+  }
 
   createRenderRoot() {
     return this;
@@ -215,52 +253,7 @@ export class ModalList extends LitElement {
           <div class="modal-content bg-dark">
             <div class="modal-body">
               <h5 class="modal-title text-white font-weight-lg">Shortcut</h5>
-              <div class="mb-3">
-                <table class="table table-dark ">
-                  <tbody>
-                    <tr>
-                      <th scope="row">Control C</th>
-                      <td class="text-secondary">Copy Element on Timeline</td>
-                    </tr>
-                    <tr>
-                      <th scope="row">Control V</th>
-                      <td class="text-secondary">Paste Element on Timeline</td>
-                    </tr>
-                    <tr>
-                      <th scope="row">Control X</th>
-                      <td class="text-secondary">Copy & Delete on Timeline</td>
-                    </tr>
-                    <tr>
-                      <th scope="row">Control D</th>
-                      <td class="text-secondary">Split Element</td>
-                    </tr>
-                    <tr>
-                      <th scope="row">Control O</th>
-                      <td class="text-secondary">Load Project File</td>
-                    </tr>
-                    <tr>
-                      <th scope="row">Control S</th>
-                      <td class="text-secondary">Save Project File</td>
-                    </tr>
-                    <tr>
-                      <th scope="row">Backspace</th>
-                      <td class="text-secondary">Remove Element</td>
-                    </tr>
-                    <tr>
-                      <th scope="row">Space</th>
-                      <td class="text-secondary">Play & Pasue</td>
-                    </tr>
-                    <tr>
-                      <th scope="row">Left & Right Arrow</th>
-                      <td class="text-secondary">Move Next & Prev Frame</td>
-                    </tr>
-                    <tr>
-                      <th scope="row">Top & Bottom Arrow</th>
-                      <td class="text-secondary">Move Element Top or Bottom</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              <div class="mb-3">${this.shortcutTable()}</div>
             </div>
           </div>
         </div>

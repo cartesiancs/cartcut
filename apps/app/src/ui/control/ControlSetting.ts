@@ -27,7 +27,7 @@ export class ControlSetting extends LitElement {
     });
 
     window.electronAPI.req.app.getAppInfo().then((result) => {
-      this.appVersion = `Cartcut v${result.data.version}`;
+      this.appVersion = `CartCut v${result.data.version}`;
     });
 
     return this;

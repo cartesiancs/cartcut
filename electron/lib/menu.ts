@@ -30,14 +30,18 @@ const template: any = [
     submenu: [
       {
         label: "Save Project",
-        accelerator: process.platform === "darwin" ? "Cmd+S" : "Control+S",
+        // `CmdOrCtrl` resolves per platform here in the main process and
+        // reaches the renderer as IPC, never as a keydown it has to classify —
+        // so this stays correct alongside the renderer's strict Cmd-on-macOS
+        // modifier rather than competing with it.
+        accelerator: "CmdOrCtrl+S",
         click: () => {
           mainWindow.webContents.send("SHORTCUT_CONTROL_S");
         },
       },
       {
         label: "Open Project",
-        accelerator: process.platform === "darwin" ? "Cmd+O" : "Control+O",
+        accelerator: "CmdOrCtrl+O",
         click: () => {
           mainWindow.webContents.send("SHORTCUT_CONTROL_O");
         },
@@ -64,10 +68,12 @@ const template: any = [
       { role: "forceReload" },
       { role: "toggleDevTools" },
       { type: "separator" },
-      { role: "resetZoom" },
-      { role: "zoomIn" },
-      { role: "zoomOut" },
-      { type: "separator" },
+      // No `resetZoom`/`zoomIn`/`zoomOut`. Their default accelerators are
+      // exactly CmdOrCtrl+0/+/-, which is what the preview canvas binds for
+      // fit and zoom — and a renderer `preventDefault` cannot cancel a
+      // main-process menu accelerator, so both fired: the preview zoomed and
+      // the whole UI scaled with it. The editor's chrome is a fixed layout
+      // that has no use for browser page zoom, so the keys go to the preview.
       { role: "togglefullscreen" },
     ],
   },
