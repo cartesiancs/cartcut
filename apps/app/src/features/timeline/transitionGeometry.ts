@@ -79,26 +79,61 @@ export function headHandleOf(element: TimelineElement): number {
 }
 
 /**
- * The longest transition this cut can actually render, in timeline ms.
+ * The longest transition this cut can hold, in timeline ms.
  *
- * Each alignment consumes a different mix of handle and body, and getting that
- * wrong is exactly how a transition ends up showing a frozen frame:
+ * Bounded by the **clips' own lengths** and nothing else. A transition cannot
+ * reach back past the outgoing clip's start or forward past the incoming
+ * clip's end — there is no picture there at all — so those are hard limits:
  *
- *  - **center** — the window straddles the cut, so each clip supplies half from
- *    its handle and half from its own body. All four quantities bound `d/2`.
- *  - **end** — the window sits entirely before the cut. The outgoing clip plays
- *    its own body there and spends `d` of it; the incoming clip is pre-rolled
- *    and needs `d` of head. The incoming clip's *length* is irrelevant, because
- *    the window never reaches it.
- *  - **start** — the mirror image. The outgoing clip needs `d` of tail, the
- *    incoming clip spends `d` of body, and the outgoing clip's length does not
- *    matter.
+ *  - **center** — the window straddles the cut, taking `d/2` from each side,
+ *    so `d/2` is bounded by both clips' lengths.
+ *  - **end** — the window sits entirely before the cut, inside the outgoing
+ *    clip. Only its length matters.
+ *  - **start** — the mirror image.
  *
- * Returns 0 when the cut can support nothing, and `Infinity` when both sides
- * are static — callers clamp against a requested length, so infinity is a
- * meaningful answer rather than one to guard against here.
+ * Handles are deliberately **not** a limit here, and that was the bug. A
+ * freshly imported clip is trimmed to its whole source (`trim` is
+ * `0..sourceDuration`), so it has exactly zero handle on either side — which
+ * made this return 0 for the single most common edit there is: two imports
+ * dropped end to end. The transition was then refused, and the advice to try
+ * another alignment was impossible too, because all three need a handle.
+ *
+ * What happens instead is `freezeMs` below: where the source runs out the clip
+ * holds its last or first frame. That is what the renderer already does —
+ * `sourceTimeAt` extrapolates past `trim` and the media element clamps at its
+ * own bounds — so the only thing that ever prevented it was this function.
  */
 export function maxTransitionMs(
+  from: TimelineElement,
+  to: TimelineElement,
+  alignment: TransitionAlignment,
+): number {
+  const lenFrom = spanLength(from);
+  const lenTo = spanLength(to);
+
+  switch (alignment) {
+    case "end":
+      return Math.max(0, lenFrom);
+    case "start":
+      return Math.max(0, lenTo);
+    case "center":
+    default:
+      return Math.max(0, 2 * Math.min(lenFrom, lenTo));
+  }
+}
+
+/**
+ * How much of a transition here would be real footage rather than held frames.
+ *
+ * The old meaning of `maxTransitionMs`, kept because it is still worth knowing
+ * — it is what the panel reports and what decides whether a badge is marked as
+ * freezing. It just no longer decides whether a transition may exist.
+ *
+ * Each alignment draws on a different handle: a centred window needs tail from
+ * the outgoing clip *and* head from the incoming one, an `end`-aligned window
+ * needs only head, a `start`-aligned one only tail.
+ */
+export function realFootageMs(
   from: TimelineElement,
   to: TimelineElement,
   alignment: TransitionAlignment,
@@ -117,6 +152,27 @@ export function maxTransitionMs(
     default:
       return Math.max(0, 2 * Math.min(tail, head, lenFrom, lenTo));
   }
+}
+
+/**
+ * How much of a transition of `durationMs` would be held frames, in timeline ms.
+ *
+ * Zero when the handles cover it. Reported rather than prevented: a held frame
+ * across a short dissolve is barely perceptible and is what every editor does,
+ * but the user should be able to see that it is happening and trim for real
+ * footage if they care.
+ */
+export function freezeMs(
+  from: TimelineElement,
+  to: TimelineElement,
+  alignment: TransitionAlignment,
+  durationMs: number,
+): number {
+  const real = realFootageMs(from, to, alignment);
+  if (!Number.isFinite(real)) {
+    return 0;
+  }
+  return Math.max(0, durationMs - real);
 }
 
 /**
@@ -214,12 +270,16 @@ export function progressOf(
 }
 
 /**
- * The length a transition will actually get, given what the clips can supply.
+ * The length a transition will actually get.
  *
- * Returns 0 when the cut cannot support a usable transition at all, which is
- * every caller's signal to decline. Everything else clamps rather than refuses:
- * asking for two seconds where only eight hundred milliseconds exist is a
- * coherent request, and shortening it is a better answer than an error.
+ * Returns 0 only when the *clips* are too short to hold one — which is a real
+ * impossibility, not a shortage of footage. Every other case clamps: asking for
+ * two seconds across clips that are only one second long is a coherent request,
+ * and shortening it beats an error.
+ *
+ * Note what this no longer does: it does not shorten a transition to fit the
+ * available handles. Handles decide how much is real footage, not how long the
+ * transition may be — see `maxTransitionMs`.
  */
 export function resolveDuration(
   from: TimelineElement,

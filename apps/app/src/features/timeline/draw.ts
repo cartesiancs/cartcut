@@ -68,7 +68,10 @@ export type ThemeColors = {
   transitionSelected: string;
   /** Hairline that keeps a white badge off a bright filmstrip. */
   transitionOutline: string;
-  /** ...when source handles forced it shorter than the user asked for. */
+  /**
+   * ...when it is not showing the footage the user might assume: shortened to
+   * fit the clips, or holding a frozen frame where the source ran out.
+   */
   transitionClamped: string;
   /** The hint on a bare cut that a transition can go there. */
   cutAffordance: string;
@@ -722,7 +725,10 @@ function drawTransitionBadge(
   ctx.lineWidth = 1;
   ctx.strokeRect(rect.x + 0.5, top + 0.5, rect.w - 1, bottom - top - 1);
 
-  if (rect.clamped) {
+  // One warning stroke for both conditions: the transition is not showing the
+  // footage the user might assume. Which of the two it is belongs in the panel,
+  // where there is room to say so.
+  if (rect.clamped || rect.frozen) {
     ctx.strokeStyle = colors.transitionClamped;
     ctx.lineWidth = 2;
     ctx.strokeRect(rect.x + 1, top, rect.w - 2, bottom - top);

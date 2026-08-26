@@ -1380,21 +1380,11 @@ export class elementTimelineCanvas extends LitElement {
 
     const after = useTimelineStore.getState().getDocument();
     if (after.elements[id] == null) {
-      // Declined. The only reason a well-formed cut refuses is that neither
-      // clip has footage beyond it — which the alignment control can often
-      // work around, so say so rather than just failing.
-      const from = before.elements[fromId];
-      const to = before.elements[toId];
-      const canEnd =
-        from != null && to != null && maxTransitionMs(from, to, "end") > 0;
-      const canStart =
-        from != null && to != null && maxTransitionMs(from, to, "start") > 0;
-
-      this.toast(
-        canEnd || canStart
-          ? "No footage beyond this cut for a centred transition — try aligning it to one side."
-          : "Neither clip has footage beyond this cut, so a transition has nothing to blend.",
-      );
+      // A refusal now means the *clips* are too short to hold one, which is a
+      // real impossibility rather than a shortage of footage. Missing handles
+      // no longer refuse: the transition holds a frozen frame instead, which
+      // the badge marks and the panel explains.
+      this.toast("These clips are too short to hold a transition.");
       return;
     }
 

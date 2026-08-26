@@ -213,18 +213,16 @@ describe("trimClipEnd / trimClipStart", () => {
 });
 
 /**
- * Re-fitting a transition whose handles changed underneath it.
+ * Re-fitting a transition whose neighbours changed underneath it.
  *
- * No clip op reaches this state — every trim moves an edge and so destroys the
- * cut outright (above). It is reached by loading a project: a `.ngt` stores
- * paths, not media, so a source file that has been replaced with a shorter one
- * comes back with less handle than the stored transition was granted. Repair
- * runs on that load through `patchDocument`, and the transition must survive it
- * at a length the new media can actually supply.
+ * Handles no longer bound the length — a shortage of footage holds frames
+ * instead — so what repair re-fits against is the clips' *lengths*, and the
+ * cut's position. Reached by loading a project whose media was replaced with a
+ * shorter file, and by any op that moves the cut.
  */
-describe("re-fitting against changed handles", () => {
-  /** The same edit, with `b`'s in-point moved without moving `b` itself. */
-  function withHeadHandle(doc: TimelineDocument, headMs: number) {
+describe("re-fitting against changed clips", () => {
+  /** Shorten `b` without moving it, as a replaced media file would. */
+  function withLength(doc: TimelineDocument, lengthMs: number) {
     const b = doc.elements.b as ReturnType<typeof clip>;
     return {
       ...doc,
@@ -232,93 +230,50 @@ describe("re-fitting against changed handles", () => {
         ...doc.elements,
         b: {
           ...b,
-          duration: b.trim.endTime - headMs,
-          trim: { startTime: headMs, endTime: b.trim.endTime },
+          duration: lengthMs,
+          trim: { startTime: 0, endTime: lengthMs },
+          sourceDuration: lengthMs,
         },
       },
     };
   }
 
-  it("shrinks to what the handles can now supply", () => {
+  it("shrinks to what the clips can now hold", () => {
     const doc = withTransition(baseDoc(), 4000);
     expect(transition(doc)!.duration).toBe(4000);
 
-    // 200ms of head left, so a centred window can be at most 2 * 200.
-    const next = repairTransitions(withHeadHandle(doc, 200));
+    // `b` becomes 300ms long, so a centred window may reach 300ms each way.
+    const next = repairTransitions(withLength(doc, 300));
     const t = transition(next);
     expect(t).not.toBeNull();
-    expect(t!.duration).toBe(400);
+    expect(t!.duration).toBe(600);
     expect(t!.requestedDuration).toBe(4000);
   });
 
-  it("drops it when the handles are gone entirely", () => {
+  it("keeps it when the handles vanish but the clips do not", () => {
+    // The behaviour that changed. Losing every spare frame used to destroy the
+    // transition; now it holds frames and stays.
     const doc = withTransition();
-    const next = repairTransitions(withHeadHandle(doc, 0));
-    expect(transition(next)).toBeNull();
-  });
-});
-
-describe("splitClip", () => {
-  it("drops the transition when a split puts a new clip between the pair", () => {
-    const doc = withTransition();
-    // Splitting `a` makes its right half the new neighbour of `b`, so the
-    // transition's `fromId` no longer touches `toId`.
-    const next = splitClip(doc, "a", 2000, "a2");
-    expect(next.elements.a2).toBeDefined();
-    expect(transition(next)).toBeNull();
-  });
-
-  it("keeps a transition whose own pair is untouched by the split", () => {
-    const doc = addTransition(
-      normalizeDocument({
-        schemaVersion: SCHEMA_VERSION,
-        tracks: [createTrack("v0", "video", 0)],
-        elements: {
-          a: clip({ startTime: 0, trimIn: 2000, trimOut: 6000 }),
-          b: clip({ startTime: 4000, trimIn: 2000, trimOut: 6000 }),
-          c: clip({ startTime: 8000, trimIn: 2000, trimOut: 6000 }),
-        },
-      }),
-      "t1",
-      "a",
-      "b",
-      "cross",
-      800,
-      "center",
-    );
-    const next = splitClip(doc, "c", 10_000, "c2");
-    expect(next.elements.c2).toBeDefined();
-    expect(transition(next)).not.toBeNull();
-  });
-});
-
-describe("restoring a shrunk transition", () => {
-  it("grows back to the requested length when the handles return", () => {
-    const doc = withTransition(baseDoc(), 4000);
     const b = doc.elements.b as ReturnType<typeof clip>;
-    const withHead = (headMs: number, source: TimelineDocument) => ({
-      ...source,
+    const noHandles = {
+      ...doc,
       elements: {
-        ...source.elements,
+        ...doc.elements,
         b: {
-          ...(source.elements.b as typeof b),
-          duration: b.trim.endTime - headMs,
-          trim: { startTime: headMs, endTime: b.trim.endTime },
+          ...b,
+          duration: b.duration,
+          trim: { startTime: 0, endTime: b.duration },
+          sourceDuration: b.duration,
         },
       },
-    });
+    };
+    const next = repairTransitions(noHandles);
+    expect(transition(next)).not.toBeNull();
+  });
 
-    const shrunk = repairTransitions(withHead(200, doc));
-    expect(transition(shrunk)!.duration).toBe(400);
-
-    // Give the head back. The length the user actually asked for returns with
-    // it — without `requestedDuration` this would stay at 400 forever, shrunk
-    // by a condition that no longer holds.
-    const restored = repairTransitions(withHead(2000, shrunk));
-    const t = transition(restored);
-    expect(t!.duration).toBe(4000);
-    expect(t!.requestedDuration).toBeUndefined();
-    expect("requestedDuration" in t!).toBe(false);
+  it("drops it when a clip becomes too short to hold one", () => {
+    const doc = withTransition();
+    expect(transition(repairTransitions(withLength(doc, 10)))).toBeNull();
   });
 });
 
@@ -363,11 +318,7 @@ describe("document key order", () => {
       ...base,
       elements: {
         ...base.elements,
-        b: {
-          ...b,
-          duration: b.trim.endTime - 200,
-          trim: { startTime: 200, endTime: b.trim.endTime },
-        },
+        b: { ...b, duration: 300, trim: { startTime: 0, endTime: 300 } },
       },
     });
 

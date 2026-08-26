@@ -10,7 +10,7 @@ import {
   transitionAtCut,
   transitionsOnTrack,
 } from "./transitionOps";
-import { MIN_TRANSITION_MS } from "./transitionGeometry";
+import { MIN_TRANSITION_MS, freezeMs } from "./transitionGeometry";
 import {
   SCHEMA_VERSION,
   createTrack,
@@ -117,26 +117,50 @@ describe("addTransition", () => {
     expect(freeGaps(doc, "v0")).toEqual([{ start: 8000, end: Infinity }]);
   });
 
-  it("shrinks to the available handles and records what was asked for", () => {
+  it("grants the full length even with no handles at all", () => {
+    // The workflow that was broken: import two clips, drop them end to end,
+    // ask for a dissolve. Both are trimmed to their whole source, so neither
+    // has a frame to spare — and the transition holds frames rather than
+    // being refused.
     const doc = normalizeDocument({
       schemaVersion: SCHEMA_VERSION,
       tracks: [createTrack("v0", "video", 0)],
       elements: {
-        // 400ms of tail, 400ms of head.
         a: clip({
           startTime: 0,
           trimIn: 0,
           trimOut: 4000,
-          sourceDuration: 4400,
+          sourceDuration: 4000,
         }),
-        b: clip({ startTime: 4000, trimIn: 400, trimOut: 4400 }),
+        b: clip({
+          startTime: 4000,
+          trimIn: 0,
+          trimOut: 4000,
+          sourceDuration: 4000,
+        }),
       },
     });
 
-    const next = addTransition(doc, "t1", "a", "b", "cross", 2000, "center");
+    const next = addTransition(doc, "t1", "a", "b", "cross", 1000, "center");
     const t = transitionOf(next, "t1");
-    expect(t.duration).toBe(800);
-    expect(t.requestedDuration).toBe(2000);
+    expect(t.duration).toBe(1000);
+    expect(t.requestedDuration).toBeUndefined();
+  });
+
+  it("shrinks only when the clips themselves are too short", () => {
+    const doc = normalizeDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: [createTrack("v0", "video", 0)],
+      elements: {
+        a: clip({ startTime: 0, trimIn: 0, trimOut: 600 }),
+        b: clip({ startTime: 600, trimIn: 0, trimOut: 600 }),
+      },
+    });
+
+    const next = addTransition(doc, "t1", "a", "b", "cross", 5000, "center");
+    const t = transitionOf(next, "t1");
+    expect(t.duration).toBe(1200);
+    expect(t.requestedDuration).toBe(5000);
   });
 
   it("omits requestedDuration when the request was granted in full", () => {
@@ -212,23 +236,15 @@ describe("addTransition", () => {
       );
     });
 
-    it("when neither side has any handle at all", () => {
+    it("when the clips are too short to hold even the minimum", () => {
+      // The only genuine impossibility left. A shortage of *footage* is not
+      // one — that holds frames instead.
       const doc = normalizeDocument({
         schemaVersion: SCHEMA_VERSION,
         tracks: [createTrack("v0", "video", 0)],
         elements: {
-          a: clip({
-            startTime: 0,
-            trimIn: 0,
-            trimOut: 4000,
-            sourceDuration: 4000,
-          }),
-          b: clip({
-            startTime: 4000,
-            trimIn: 0,
-            trimOut: 4000,
-            sourceDuration: 4000,
-          }),
+          a: clip({ startTime: 0, trimIn: 0, trimOut: 10 }),
+          b: clip({ startTime: 10, trimIn: 0, trimOut: 10 }),
         },
       });
       expect(addTransition(doc, "t1", "a", "b", "x", 800, "center")).toBe(doc);
@@ -258,7 +274,7 @@ describe("setTransitionDuration", () => {
     expect(t.startTime).toBe(3400);
   });
 
-  it("clamps to the handles but remembers the ask", () => {
+  it("clamps to the clips' length but remembers the ask", () => {
     const doc = addTransition(
       twoClipDoc(),
       "t1",
@@ -268,11 +284,11 @@ describe("setTransitionDuration", () => {
       800,
       "center",
     );
-    // Handles allow 4000 at most (2000 each side).
-    const next = setTransitionDuration(doc, "t1", 9000);
+    // Both clips are 4000ms, so a centred window may reach 4000ms each way.
+    const next = setTransitionDuration(doc, "t1", 20_000);
     const t = transitionOf(next, "t1");
-    expect(t.duration).toBe(4000);
-    expect(t.requestedDuration).toBe(9000);
+    expect(t.duration).toBe(8000);
+    expect(t.requestedDuration).toBe(20_000);
   });
 
   it("declines when the length is unchanged", () => {
@@ -295,8 +311,11 @@ describe("setTransitionDuration", () => {
 });
 
 describe("setTransitionAlignment", () => {
-  it("re-anchors a transition the centre could not support", () => {
-    // `a` is trimmed to the last frame of its source: no tail whatsoever.
+  it("re-anchors to the side with real footage", () => {
+    // `a` is trimmed to the last frame of its source: no tail whatsoever, so a
+    // centred transition holds frames on the way out. Aligning it to the cut
+    // draws on `b`'s 3000ms head instead — which is the whole point of the
+    // control, now that neither choice is refused outright.
     const doc = normalizeDocument({
       schemaVersion: SCHEMA_VERSION,
       tracks: [createTrack("v0", "video", 0)],
@@ -311,14 +330,15 @@ describe("setTransitionAlignment", () => {
       },
     });
 
-    // Centre is impossible; end-aligned works off `b`'s 3000ms head.
-    expect(addTransition(doc, "t1", "a", "b", "x", 800, "center")).toBe(doc);
+    const centred = addTransition(doc, "t1", "a", "b", "x", 800, "center");
+    expect(freezeMs(doc.elements.a, doc.elements.b, "center", 800)).toBe(800);
+    expect(transitionOf(centred, "t1").duration).toBe(800);
 
-    const placed = addTransition(doc, "t1", "a", "b", "x", 800, "end");
-    const t = transitionOf(placed, "t1");
-    expect(t.duration).toBe(800);
-    expect(t.startTime).toBe(3200);
+    const aligned = setTransitionAlignment(centred, "t1", "end");
+    const t = transitionOf(aligned, "t1");
     expect(t.alignment).toBe("end");
+    expect(t.startTime).toBe(3200);
+    expect(freezeMs(doc.elements.a, doc.elements.b, "end", t.duration)).toBe(0);
   });
 
   it("re-resolves the length against the new alignment", () => {

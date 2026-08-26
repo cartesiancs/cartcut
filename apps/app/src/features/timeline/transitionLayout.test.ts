@@ -108,9 +108,10 @@ describe("layout", () => {
     expect(l.transitions[0].w).toBeGreaterThanOrEqual(MIN_TRANSITION_PX);
   });
 
-  it("marks a badge the handles forced shorter", () => {
-    // 400ms of handle each side, so a 4s request resolves to 800ms.
-    const tight = normalizeDocument({
+  it("marks a badge that would hold frozen frames", () => {
+    // Two untrimmed imports: no spare footage on either side, so the whole
+    // transition holds frames. It is allowed, and it is marked.
+    const untrimmed = normalizeDocument({
       schemaVersion: SCHEMA_VERSION,
       tracks: [createTrack("v0", "video", 0)],
       elements: {
@@ -118,12 +119,32 @@ describe("layout", () => {
           startTime: 0,
           trimIn: 0,
           trimOut: 4000,
-          sourceDuration: 4400,
+          sourceDuration: 4000,
         }),
-        b: clip({ startTime: 4000, trimIn: 400, trimOut: 4400 }),
+        b: clip({
+          startTime: 4000,
+          trimIn: 0,
+          trimOut: 4000,
+          sourceDuration: 4000,
+        }),
       },
     });
-    const doc = addTransition(tight, "t1", "a", "b", "cross", 4000, "center");
+    const doc = addTransition(untrimmed, "t1", "a", "b", "cross", 800, "center");
+    expect(layout(doc).transitions[0].frozen).toBe(true);
+    // The clips in `withTransition` have handles either side, so it does not.
+    expect(layout(withTransition()).transitions[0].frozen).toBe(false);
+  });
+
+  it("marks a badge the clips forced shorter", () => {
+    const shortClips = normalizeDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: [createTrack("v0", "video", 0)],
+      elements: {
+        a: clip({ startTime: 0, trimIn: 2000, trimOut: 2600 }),
+        b: clip({ startTime: 600, trimIn: 2000, trimOut: 2600 }),
+      },
+    });
+    const doc = addTransition(shortClips, "t1", "a", "b", "cross", 9000, "center");
     expect(layout(doc).transitions[0].clamped).toBe(true);
     expect(layout(withTransition()).transitions[0].clamped).toBe(false);
   });

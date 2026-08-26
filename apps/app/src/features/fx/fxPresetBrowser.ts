@@ -165,9 +165,7 @@ export class FxPresetBrowser extends LitElement {
     );
 
     if (useTimelineStore.getState().timeline[id] == null) {
-      toast(
-        "Neither clip has footage beyond that cut — try a different alignment in the panel.",
-      );
+      toast("Those clips are too short to hold a transition.");
       return;
     }
     selectionStore.getState().setIds([id]);

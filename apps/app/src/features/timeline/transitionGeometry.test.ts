@@ -5,7 +5,9 @@ import {
   cutTimeOf,
   headHandleOf,
   isAdjacent,
+  freezeMs,
   maxTransitionMs,
+  realFootageMs,
   resolveDuration,
   startTimeFor,
   tailHandleOf,
@@ -85,76 +87,48 @@ describe("tailHandleOf / headHandleOf", () => {
   });
 });
 
-describe("maxTransitionMs", () => {
-  it("centre spends half from each side, bounded by the tighter one", () => {
-    const from = clip({ trimIn: 0, trimOut: 4000, sourceDuration: 10_000 }); // tail 6000
+describe("maxTransitionMs — bounded by the clips, not by footage", () => {
+  it("lets two freshly imported clips have a transition", () => {
+    // The bug this replaced. A fresh import is trimmed to its whole source, so
+    // it has zero handle on either side — and the old rule, which bounded the
+    // length by the handles, refused the single most common edit there is:
+    // drop two clips end to end and dissolve between them.
+    const from = clip({ trimIn: 0, trimOut: 4000, sourceDuration: 4000 });
     const to = clip({
       startTime: 4000,
-      trimIn: 1000,
-      trimOut: 5000,
-      sourceDuration: 10_000,
-    }); // head 1000
+      trimIn: 0,
+      trimOut: 4000,
+      sourceDuration: 4000,
+    });
 
-    // head is the binding constraint at 1000, so d/2 <= 1000.
-    expect(maxTransitionMs(from, to, "center")).toBe(2000);
+    expect(tailHandleOf(from)).toBe(0);
+    expect(headHandleOf(to)).toBe(0);
+    expect(maxTransitionMs(from, to, "center")).toBe(8000);
+    expect(maxTransitionMs(from, to, "end")).toBe(4000);
+    expect(maxTransitionMs(from, to, "start")).toBe(4000);
   });
 
-  it("centre is also bounded by the clips' own lengths", () => {
-    // Both have generous handles but the outgoing clip is only 500ms long, so
-    // a centred window may not reach back past its start.
-    const from = clip({
-      trimIn: 3000,
-      trimOut: 3500,
-      sourceDuration: 10_000,
-    });
+  it("centre may reach half its length into each clip", () => {
+    const from = clip({ trimIn: 3000, trimOut: 3500, sourceDuration: 10_000 });
     const to = clip({
       startTime: 500,
       trimIn: 3000,
       trimOut: 7000,
       sourceDuration: 10_000,
     });
+    // The outgoing clip is only 500ms, so a centred window reaches 500ms back.
     expect(maxTransitionMs(from, to, "center")).toBe(1000);
   });
 
-  it("end-aligned needs only the incoming clip's head and the outgoing body", () => {
-    // The outgoing clip has NO tail at all — trimmed to the last frame.
-    const from = clip({ trimIn: 0, trimOut: 10_000, sourceDuration: 10_000 });
-    const to = clip({
-      startTime: 10_000,
-      trimIn: 3000,
-      trimOut: 7000,
-      sourceDuration: 10_000,
-    });
-
-    // Centre is impossible, which is exactly why the alignment control exists.
-    expect(maxTransitionMs(from, to, "center")).toBe(0);
-    // End-aligned only needs `to`'s head (3000) and `from`'s length (10000).
-    expect(maxTransitionMs(from, to, "end")).toBe(3000);
-  });
-
-  it("start-aligned needs only the outgoing clip's tail and the incoming body", () => {
-    // The incoming clip starts at the first frame of its source: no head.
+  it("an aligned window sits inside one clip, so only that one bounds it", () => {
     const from = clip({ trimIn: 0, trimOut: 4000, sourceDuration: 10_000 });
     const to = clip({
       startTime: 4000,
       trimIn: 0,
-      trimOut: 2000,
+      trimOut: 1000,
       sourceDuration: 10_000,
     });
-
-    expect(maxTransitionMs(from, to, "center")).toBe(0);
-    expect(maxTransitionMs(from, to, "end")).toBe(0);
-    // `from` has 6000 of tail, `to` is 2000 long — the body binds.
-    expect(maxTransitionMs(from, to, "start")).toBe(2000);
-  });
-
-  it("is bounded only by their lengths between two stills", () => {
-    const from = imageElement({ startTime: 0, duration: 1000 });
-    const to = imageElement({ startTime: 1000, duration: 1000 });
-    // Handles are infinite, so the clips' own bodies are the only limit: a
-    // centred window reaches 1000ms each way and consumes both of them exactly.
-    expect(maxTransitionMs(from, to, "center")).toBe(2000);
-    expect(maxTransitionMs(from, to, "end")).toBe(1000);
+    expect(maxTransitionMs(from, to, "end")).toBe(4000);
     expect(maxTransitionMs(from, to, "start")).toBe(1000);
   });
 
@@ -164,6 +138,101 @@ describe("maxTransitionMs", () => {
     for (const alignment of ["center", "end", "start"] as const) {
       expect(maxTransitionMs(from, to, alignment)).toBeGreaterThanOrEqual(0);
     }
+  });
+});
+
+describe("realFootageMs — how much is not a held frame", () => {
+  it("centre draws on both handles, bounded by the tighter one", () => {
+    const from = clip({ trimIn: 0, trimOut: 4000, sourceDuration: 10_000 });
+    const to = clip({
+      startTime: 4000,
+      trimIn: 1000,
+      trimOut: 5000,
+      sourceDuration: 10_000,
+    });
+    // head is the binding constraint at 1000, so d/2 <= 1000.
+    expect(realFootageMs(from, to, "center")).toBe(2000);
+  });
+
+  it("end-aligned needs only the incoming clip's head", () => {
+    // The outgoing clip has NO tail — trimmed to the last frame of its source.
+    const from = clip({ trimIn: 0, trimOut: 10_000, sourceDuration: 10_000 });
+    const to = clip({
+      startTime: 10_000,
+      trimIn: 3000,
+      trimOut: 7000,
+      sourceDuration: 10_000,
+    });
+
+    // Centred, every frame the outgoing clip contributes would be held...
+    expect(realFootageMs(from, to, "center")).toBe(0);
+    // ...but aligned to the cut it draws on `to`'s 3000ms head instead. This is
+    // what makes the alignment control worth having.
+    expect(realFootageMs(from, to, "end")).toBe(3000);
+  });
+
+  it("start-aligned needs only the outgoing clip's tail", () => {
+    const from = clip({ trimIn: 0, trimOut: 4000, sourceDuration: 10_000 });
+    const to = clip({
+      startTime: 4000,
+      trimIn: 0,
+      trimOut: 2000,
+      sourceDuration: 10_000,
+    });
+
+    expect(realFootageMs(from, to, "center")).toBe(0);
+    expect(realFootageMs(from, to, "end")).toBe(0);
+    expect(realFootageMs(from, to, "start")).toBe(2000);
+  });
+
+  it("is unbounded between two stills", () => {
+    // A still has no source window to run out of, so nothing is ever held.
+    const from = imageElement({ startTime: 0, duration: 1000 });
+    const to = imageElement({ startTime: 1000, duration: 1000 });
+    expect(realFootageMs(from, to, "center")).toBe(2000);
+  });
+});
+
+describe("freezeMs", () => {
+  it("is zero when the handles cover the whole transition", () => {
+    const from = clip({ trimIn: 2000, trimOut: 6000, sourceDuration: 10_000 });
+    const to = clip({
+      startTime: 4000,
+      trimIn: 2000,
+      trimOut: 6000,
+      sourceDuration: 10_000,
+    });
+    expect(freezeMs(from, to, "center", 800)).toBe(0);
+  });
+
+  it("reports the shortfall when they do not", () => {
+    // 400ms of handle each side covers 800ms of a centred transition; the rest
+    // holds a frame.
+    const from = clip({ trimIn: 0, trimOut: 4000, sourceDuration: 4400 });
+    const to = clip({
+      startTime: 4000,
+      trimIn: 400,
+      trimOut: 4400,
+      sourceDuration: 10_000,
+    });
+    expect(freezeMs(from, to, "center", 2000)).toBe(1200);
+  });
+
+  it("is the whole transition between two untrimmed imports", () => {
+    const from = clip({ trimIn: 0, trimOut: 4000, sourceDuration: 4000 });
+    const to = clip({
+      startTime: 4000,
+      trimIn: 0,
+      trimOut: 4000,
+      sourceDuration: 4000,
+    });
+    expect(freezeMs(from, to, "center", 1000)).toBe(1000);
+  });
+
+  it("is zero between two stills, whatever the length", () => {
+    const from = imageElement({ startTime: 0, duration: 5000 });
+    const to = imageElement({ startTime: 5000, duration: 5000 });
+    expect(freezeMs(from, to, "center", 4000)).toBe(0);
   });
 });
 
@@ -178,34 +247,45 @@ describe("resolveDuration", () => {
     }),
   };
 
-  it("grants the request when the handles allow it", () => {
+  it("grants the request when the clips are long enough", () => {
     expect(
       resolveDuration(roomy.from, roomy.to, DEFAULT_TRANSITION_MS, "center"),
     ).toBe(DEFAULT_TRANSITION_MS);
   });
 
-  it("shrinks rather than refusing when the handles are short", () => {
-    const from = clip({ trimIn: 0, trimOut: 4000, sourceDuration: 4400 }); // tail 400
+  it("grants it even when the handles do not cover it", () => {
+    // The frames beyond the source are held rather than refused, so the length
+    // the user asked for is the length they get.
+    const from = clip({ trimIn: 0, trimOut: 4000, sourceDuration: 4000 });
     const to = clip({
       startTime: 4000,
-      trimIn: 400,
-      trimOut: 4400,
-      sourceDuration: 10_000,
-    }); // head 400
-
-    // Asked for 2000, only 800 exists.
-    expect(resolveDuration(from, to, 2000, "center")).toBe(800);
+      trimIn: 0,
+      trimOut: 4000,
+      sourceDuration: 4000,
+    });
+    expect(resolveDuration(from, to, 1000, "center")).toBe(1000);
   });
 
-  it("returns zero when the cut cannot support even the minimum", () => {
-    const from = clip({ trimIn: 0, trimOut: 4000, sourceDuration: 4010 });
+  it("shrinks to fit clips that are too short to hold the request", () => {
+    const from = clip({ trimIn: 0, trimOut: 600, sourceDuration: 10_000 });
     const to = clip({
-      startTime: 4000,
-      trimIn: 10,
-      trimOut: 4000,
+      startTime: 600,
+      trimIn: 0,
+      trimOut: 600,
       sourceDuration: 10_000,
     });
-    // 2 * min(10, 10, ...) = 20, under MIN_TRANSITION_MS.
+    // Centred, the window may reach 600ms each way.
+    expect(resolveDuration(from, to, 5000, "center")).toBe(1200);
+  });
+
+  it("returns zero only when the clips cannot hold the minimum", () => {
+    const from = clip({ trimIn: 0, trimOut: 10, sourceDuration: 10_000 });
+    const to = clip({
+      startTime: 10,
+      trimIn: 0,
+      trimOut: 10,
+      sourceDuration: 10_000,
+    });
     expect(resolveDuration(from, to, 500, "center")).toBe(0);
   });
 

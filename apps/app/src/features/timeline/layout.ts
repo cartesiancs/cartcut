@@ -14,6 +14,7 @@
 
 import { msToPxSigned, pxToMsSigned, spanOf } from "./geometry";
 import { cutPointsOn } from "./transitionOps";
+import { freezeMs } from "./transitionGeometry";
 import { clipsOnTrack, type TimelineDocument, type TimelineTrack } from "./tracks";
 
 /** Row height in px. Fixed globally so filmstrip tiles cache at one size. */
@@ -113,6 +114,14 @@ export type TransitionRect = {
   h: number;
   /** Source handles forced it shorter than asked for; drawn as a warning. */
   clamped: boolean;
+  /**
+   * Part of it holds a frozen frame, because the source ran out.
+   *
+   * Not an error — it is what every editor does, and refusing instead was the
+   * bug that made a transition impossible between two freshly imported clips.
+   * Marked so the user can see it and trim for real footage if they care.
+   */
+  frozen: boolean;
 };
 
 /**
@@ -232,6 +241,16 @@ export function layoutTimeline(input: LayoutInput): TimelineLayout {
           clamped:
             element.requestedDuration != null &&
             element.requestedDuration > element.duration,
+          frozen: (() => {
+            const from = doc.elements[element.fromId];
+            const to = doc.elements[element.toId];
+            if (from == null || to == null) {
+              return false;
+            }
+            return (
+              freezeMs(from, to, element.alignment, element.duration) > 0
+            );
+          })(),
         });
         continue;
       }

@@ -5,17 +5,17 @@
  * `option-${filetype}`, so this tag name is fixed by the element's `filetype`
  * rather than chosen.
  *
- * The control that earns its place is **alignment**. A clip trimmed to the last
- * frame of its source has no tail, so a centred transition there resolves to
- * zero and is refused — and that is not an edge case, it is what cutting to the
- * end of a take produces. An `end`-aligned transition needs only the *incoming*
- * clip's head, which is usually there. Without this control that edit simply
- * cannot have a transition, and the timeline's toast can only say so.
+ * The control that earns its place is **alignment**. Where a clip has no
+ * footage beyond the cut, that side of the transition holds a frozen frame —
+ * and which side that is depends on the alignment. A clip trimmed to the last
+ * frame of its source has no tail, so a centred transition there freezes on the
+ * way out; an `end`-aligned one draws on the *incoming* clip's head instead,
+ * which is usually real. The tooltips report how much real footage each choice
+ * would get, so the trade is visible rather than guessed at.
  *
- * The duration field is bounded by `maxTransitionMs` for the current alignment,
- * and the panel says what the limit is rather than silently clamping — "you
- * asked for two seconds and this cut has eight hundred milliseconds of footage"
- * is information the user needs to decide whether to re-trim.
+ * The panel says when frames are being held rather than hiding it. "0.8s of
+ * this 1.2s dissolve is a held frame" is what tells the user whether to trim a
+ * neighbour back, and it is invisible in the preview on a short transition.
  */
 
 import { LitElement, html } from "lit";
@@ -33,7 +33,11 @@ import {
   setTransitionParams,
   setTransitionPreset,
 } from "../timeline/transitionOps";
-import { maxTransitionMs } from "../timeline/transitionGeometry";
+import {
+  freezeMs,
+  maxTransitionMs,
+  realFootageMs,
+} from "../timeline/transitionGeometry";
 import { defaultParamsFor, presetById, presetsOfKind } from "../fx/presetRegistry";
 import { renderParamControls } from "../fx/fxParamControls";
 import { GestureCommit } from "./gestureCommit";
@@ -126,7 +130,14 @@ export class OptionTransition extends LitElement {
     return maxTransitionMs(from, to, transition.alignment);
   }
 
-  /** What each alignment could give, so the panel can suggest a better one. */
+  /**
+   * What each alignment could give, in real footage.
+   *
+   * Every alignment can *hold* a transition now — the clips' lengths are the
+   * only hard limit. What differs is how much of it is real footage rather than
+   * a held frame, and that is what makes one alignment worth choosing over
+   * another on a cut with handles on only one side.
+   */
   private optionsWithLimits(transition: TransitionElementType) {
     const doc = useTimelineStore.getState().getDocument();
     const from = doc.elements[transition.fromId];
@@ -134,11 +145,22 @@ export class OptionTransition extends LitElement {
 
     return ALIGNMENTS.map((entry) => ({
       ...entry,
-      max:
+      real:
         from == null || to == null
           ? 0
-          : maxTransitionMs(from, to, entry.value),
+          : realFootageMs(from, to, entry.value),
     }));
+  }
+
+  /** How much of the current transition holds a frozen frame. */
+  private frozenMs(transition: TransitionElementType): number {
+    const doc = useTimelineStore.getState().getDocument();
+    const from = doc.elements[transition.fromId];
+    const to = doc.elements[transition.toId];
+    if (from == null || to == null) {
+      return 0;
+    }
+    return freezeMs(from, to, transition.alignment, transition.duration);
   }
 
   private commit(fn: (doc: any) => any) {
@@ -193,6 +215,7 @@ export class OptionTransition extends LitElement {
     const clamped =
       transition.requestedDuration != null &&
       transition.requestedDuration > transition.duration;
+    const frozen = this.frozenMs(transition);
 
     return html`
       <div class="p-2">
@@ -239,10 +262,9 @@ export class OptionTransition extends LitElement {
                 class="btn btn-sm ${transition.alignment === entry.value
                   ? "btn-primary"
                   : "btn-default"} text-light"
-                ?disabled=${entry.max <= 0}
-                title=${entry.max <= 0
-                  ? "No footage beyond the cut for this alignment"
-                  : "Up to " + Math.round(entry.max) + "ms"}
+                title=${entry.real <= 0
+                  ? "No footage beyond the cut this way — frames would be held"
+                  : Math.round(entry.real) + "ms of real footage this way"}
                 @click=${() => this.handleChangeAlignment(entry.value)}
               >
                 ${entry.label}
@@ -251,8 +273,9 @@ export class OptionTransition extends LitElement {
           )}
         </div>
         <div class="text-secondary mb-3" style="font-size: 10px;">
-          Where the transition sits relative to the cut. A clip with no footage
-          past its out-point can still take one aligned to the other side.
+          Where the transition sits relative to the cut. Where a clip has no
+          footage beyond it, that part holds a frozen frame — trim the clip back
+          first if you want real frames there.
         </div>
 
         <label class="form-label text-secondary" style="font-size: 11px;">
@@ -280,16 +303,20 @@ export class OptionTransition extends LitElement {
           />
         </div>
         <div
-          class="${clamped ? "text-warning" : "text-secondary"} mb-3"
+          class="${clamped || frozen > 0 ? "text-warning" : "text-secondary"} mb-3"
           style="font-size: 10px;"
         >
           ${clamped
             ? "Shortened to " +
               Math.round(transition.duration) +
-              "ms — this cut has only that much footage beyond it. " +
+              "ms — the clips are only that long. " +
               Math.round(transition.requestedDuration ?? 0) +
-              "ms is remembered, and returns if you trim a neighbour back."
-            : "Up to " + Math.round(finiteMax) + "ms at this cut."}
+              "ms is remembered, and returns if they get longer."
+            : frozen > 0
+              ? Math.round(frozen) +
+                "ms of this holds a frozen frame: the clips have no footage" +
+                " beyond the cut. Trim one back to blend real frames."
+              : "Up to " + Math.round(finiteMax) + "ms at this cut."}
         </div>
 
         ${preset != null && preset.params.length > 0
