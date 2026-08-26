@@ -263,6 +263,14 @@ element-timeline-range {
   background-color: $button-background-color;
 }
 
+// Bootstrap ships `.form-control`/`.form-select` with a #ced4da border, meant
+// for a light page. On these dark panels it reads as a white outline, brighter
+// than anything around it. Match the panel dividers instead.
+.form-control,
+.form-select {
+  border-color: $background-border-color;
+}
+
 .form-control:disabled,
 .form-control[readonly] {
   background-color: $button-background-color;
