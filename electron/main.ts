@@ -225,6 +225,24 @@ if (!gotTheLock) {
 
     mainWindow = window.createMainWindow({ show: false });
 
+    // A dropped file must never replace the editor.
+    //
+    // Chromium's default action for a file dropped on a page is to navigate to
+    // it, and the editor is a `file://` page, so that navigation is permitted:
+    // one drop that no handler called `preventDefault` on and the whole app is
+    // gone, replaced by a video player, with the project unsaved and no way
+    // back. The renderer guards this too; the cost of the two disagreeing is
+    // the user's work, so it is worth guarding twice.
+    //
+    // Scoped to the editor window on purpose. Bound to every `webContents` it
+    // would also stop the `<webview>` the extension browser navigates freely.
+    mainWindow.webContents.on("will-navigate", (event, url) => {
+      if (url !== mainWindow.webContents.getURL()) {
+        event.preventDefault();
+        log.warn("[nav] blocked navigation to", url);
+      }
+    });
+
     const revealEditor = () => {
       if (!splashWindow.isDestroyed()) splashWindow.destroy();
       if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) {

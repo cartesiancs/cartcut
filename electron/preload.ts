@@ -1,6 +1,21 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 const request = {
+  /**
+   * The path behind a dropped `File`.
+   *
+   * Electron removed the non-standard `File.path` in v32, and this app is on
+   * 33 — so `e.dataTransfer.files[0].path` reads `undefined` and OS file drops
+   * silently did nothing. `webUtils` only exists here, because the renderer
+   * runs with `contextIsolation: true`.
+   *
+   * Not an `invoke`, and it cannot become one: a `File` does not survive IPC.
+   * The renderer has to call this synchronously, inside the `drop` handler,
+   * with the object the event handed it.
+   */
+  webUtils: {
+    getPathForFile: (file: File) => webUtils.getPathForFile(file),
+  },
   app: {
     forceClose: () => ipcRenderer.send("app:forceClose"),
     restart: () => ipcRenderer.send("app:restart"),

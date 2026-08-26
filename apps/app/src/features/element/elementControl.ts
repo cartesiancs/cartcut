@@ -294,15 +294,6 @@ export class ElementControl extends LitElement {
    * where the user is looking rather than back at zero. Callers that already
    * know the moment — captions carrying their own timing — pass it explicitly.
    */
-  /**
-   * Where the next added element should land, set by a timeline drop.
-   *
-   * Adding is asynchronous — the asset is fetched first — so the drop cannot
-   * simply pass arguments through. It leaves this behind and the add consumes
-   * it once.
-   */
-  public dropHint: { startMs: number; trackId: string | null } | null = null;
-
   private commitNewElement(elementId: string, preferredStart?: number) {
     const element = this.timeline[elementId];
     if (element == null) {
@@ -311,21 +302,10 @@ export class ElementControl extends LitElement {
 
     delete this.timeline[elementId];
 
-    const hint = this.dropHint;
-    this.dropHint = null;
-
-    const start =
-      hint?.startMs ?? preferredStart ?? useTimelineStore.getState().cursor ?? 0;
+    const start = preferredStart ?? useTimelineStore.getState().cursor ?? 0;
 
     this.timelineState.withCheckpoint((doc) =>
-      placeNewElement(
-        doc,
-        elementId,
-        element,
-        start,
-        this.generateUUID(),
-        hint?.trackId ?? undefined,
-      ),
+      placeNewElement(doc, elementId, element, start, this.generateUUID()),
     );
 
     this.timeline = useTimelineStore.getState().timeline;

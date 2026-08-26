@@ -21,7 +21,6 @@ import {
 import {
   normalizeFps,
   shouldShowFrameGrid,
-  snapMsToFrame,
   stepCursorByFrames,
 } from "../timeline/frames";
 import { clampRange } from "../timeline/zoom";
@@ -30,7 +29,6 @@ import {
   TRACK_PITCH,
   hitTest,
   layoutTimeline,
-  timeAtX,
   trackAtY,
   type TimelineLayout,
 } from "../timeline/layout";
@@ -66,7 +64,9 @@ import { parentOf, withDescendants } from "../timeline/hierarchy";
 import { canDetachAudio } from "../timeline/audio";
 import { detachAudioFrom } from "../timeline/audioOps";
 import { rasterizeTextElements } from "./rasterizeText";
-import { AssetController } from "../../controllers/asset";
+import { ASSET_MIME, dropIntent } from "../asset/dropIntent";
+import { dropTargetAt } from "../asset/dropTarget";
+import { importDroppedFiles, importPathsAt } from "../asset/importDrop";
 import { isTypingEvent } from "../../utils/typingTarget";
 import { hasEditorModifier } from "../../utils/platform";
 import { selectionStore } from "../../states/selectionStore";
@@ -917,21 +917,46 @@ export class elementTimelineCanvas extends LitElement {
   }
 
   /**
-   * Accept an asset dragged from the browser.
+   * Canvas-local coordinates for a drag event.
    *
-   * Assets could only ever be clicked before, which added them at time zero on
-   * a brand-new row. Dropping says where and on which track, which is the whole
-   * point of having tracks.
+   * `offsetX`/`offsetY` are not on the TS `DragEvent` type and needed an `any`
+   * cast; measuring off the bounding rect matches what `handleWindowMouseMove`
+   * already does for the mouse path, so both gestures read the same numbers.
+   */
+  private dragPoint(e: DragEvent): { x: number; y: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  /**
+   * Accept a drop: an asset out of the panel, or files in from the OS.
+   *
+   * Assets could only ever be clicked before, which added them at the playhead
+   * on whatever row the chooser picked. Dropping says where and on which track,
+   * which is the whole point of having tracks — and OS files earn the same,
+   * rather than always landing at the playhead the way they used to.
    */
   _handleDragOver(e: DragEvent) {
-    if (!e.dataTransfer?.types.includes("application/x-cartcut-asset")) {
+    const intent = dropIntent(e.dataTransfer?.types);
+
+    if (intent === "ignore") {
+      // Text or a link. Clear any highlight left from a previous drag rather
+      // than leaving a row lit under something that will never drop.
+      this._handleDragLeave();
       return;
     }
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
 
-    this.dropTrackId = trackAtY(this.layout, (e as any).offsetY);
-    this.drawCanvas();
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = "copy";
+    }
+
+    const { y } = this.dragPoint(e);
+    const next = trackAtY(this.layout, y);
+    if (next !== this.dropTrackId) {
+      this.dropTrackId = next;
+      this.drawCanvas();
+    }
   }
 
   _handleDragLeave() {
@@ -942,35 +967,38 @@ export class elementTimelineCanvas extends LitElement {
   }
 
   _handleDrop(e: DragEvent) {
-    const originPath = e.dataTransfer?.getData("application/x-cartcut-asset");
-    this.dropTrackId = null;
-    if (!originPath) {
+    const intent = dropIntent(e.dataTransfer?.types);
+    this._handleDragLeave();
+
+    if (intent === "ignore") {
       return;
     }
-    e.preventDefault();
 
-    // On a frame boundary like every other edit, so a dropped clip is already
-    // aligned with whatever it is being cut against.
-    const atMs = Math.max(
-      0,
-      snapMsToFrame(
-        timeAtX((e as any).offsetX, this.timelineRange, this.timelineScroll),
-        this.projectFps(),
-      ),
+    const { x, y } = this.dragPoint(e);
+    const target = dropTargetAt(
+      this.layout,
+      x,
+      y,
+      this.timelineRange,
+      this.timelineScroll,
+      this.projectFps(),
     );
 
-    // Adding is asynchronous, so the position travels on the control rather
-    // than as an argument; `commitNewElement` consumes it once.
-    const control: any = document.querySelector("element-control");
-    if (control) {
-      control.dropHint = {
-        startMs: atMs,
-        trackId: trackAtY(this.layout, (e as any).offsetY),
-      };
+    if (intent === "asset") {
+      const originPath = e.dataTransfer?.getData(ASSET_MIME);
+      if (!originPath) {
+        return;
+      }
+      e.preventDefault();
+      void importPathsAt([originPath], target);
+      return;
     }
 
-    new AssetController().add(originPath);
-    this.drawCanvas();
+    // `preventDefault` here is also what tells the curtain's own `drop`
+    // handler — which runs after this one, on `document` — that these files
+    // are already spoken for.
+    e.preventDefault();
+    void importDroppedFiles(e.dataTransfer, target);
   }
 
   _handleContextmenu(e) {

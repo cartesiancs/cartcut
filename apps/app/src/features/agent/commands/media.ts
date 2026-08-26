@@ -15,13 +15,13 @@
 import { v4 as uuidv4 } from "uuid";
 import { assetStore } from "../../../states/assetStore";
 import { placeNewElement } from "../../timeline/placement";
-import { spanEnd } from "../../timeline/geometry";
-import { buildMediaElement, DEFAULT_STILL_MS } from "../../element/mediaElement";
+import { DEFAULT_STILL_MS } from "../../element/mediaElement";
+import { placeImported } from "../../asset/importMedia";
 import { probeMedia, type MediaProber } from "../../element/mediaProbe";
 import { createShapeElement, type ShapeKind } from "../../element/shapeElement";
 import type { TimelineDocument } from "../../timeline/tracks";
 import { commit, declined } from "../commit";
-import { currentDoc, onFrame, playheadMs, requireTrack } from "../context";
+import { currentDoc, onFrame, playheadMs, projectFps, requireTrack } from "../context";
 import { registerCommands } from "../registry";
 
 type MediaItem = {
@@ -98,43 +98,20 @@ registerCommands({
 
     const sequential = params.sequential !== false;
     const runStart = onFrame(Math.max(0, params.startMs ?? playheadMs()));
-    const createdIds: string[] = [];
 
-    const result = commit((doc) => {
-      let next = doc;
-      let cursor = runStart;
-
-      for (const { item, probe } of ready) {
-        const explicit = item.startMs != null ? onFrame(Math.max(0, item.startMs)) : null;
-        const startTime = explicit ?? (sequential ? cursor : runStart);
-
-        const element = buildMediaElement(probe, {
-          startTime,
-          durationMs: item.durationMs,
-        });
-
-        const elementId = uuidv4();
-        next = placeNewElement(
-          next,
-          elementId,
-          element,
-          startTime,
-          uuidv4(),
-          item.trackId,
-        );
-        createdIds.push(elementId);
-
-        // The next clip in a sequential run begins where this one actually
-        // ended, read back from the document rather than recomputed — a still
-        // takes its length from `durationMs`, a video from the file.
-        const placed = next.elements[elementId];
-        if (placed != null) {
-          cursor = Math.max(cursor, onFrame(spanEnd(placed)));
-        }
-      }
-
-      return next;
-    }, "Those clips could not be placed.");
+    // The same transform a mouse drop runs. CLAUDE.md's rule that an AI edit
+    // takes the user's own code path only holds if there is one path: two
+    // batch loops placing clips slightly differently is precisely the drift
+    // that rule exists to prevent.
+    const result = commit(
+      (doc) =>
+        placeImported(
+          doc,
+          { ready, skipped: [] },
+          { startMs: runStart, fps: projectFps(), newId: uuidv4, sequential },
+        ).doc,
+      "Those clips could not be placed.",
+    );
 
     return { ...result, skipped, sequential };
   },

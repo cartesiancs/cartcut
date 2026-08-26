@@ -79,6 +79,45 @@
     color: #868e96;
 }
 
+/*
+ * The "drop a file here" affordance.
+ *
+ * Two properties are load-bearing rather than cosmetic:
+ *
+ * `pointer-events: none` — this is a label, not a target. Without it, showing
+ * it mid-drag makes it the drop target for everything beneath, which is exactly
+ * how it used to swallow drops meant for the timeline.
+ *
+ * No full-area fill — it used to be an 80%-opaque sheet over the whole window.
+ * The timeline now highlights the row a drop would land on, and a sheet over
+ * the top hides the one piece of feedback that says where the file is going.
+ * An inset border frames the window without covering anything.
+ *
+ * Both used to be assigned from `render()` as inline styles alongside an
+ * `innerHTML` rewrite, so a Lit re-render mid-drag rebuilt the drop target
+ * underneath the pointer. Here they cost nothing to re-render.
+ */
+.asset-drop-curtain {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 12vh;
+    border: 2px dashed #4a5058;
+    border-radius: 8px;
+    background-color: rgba(22, 24, 26, .25);
+    pointer-events: none;
+}
+
+.asset-drop-curtain > b {
+    padding: .5rem 1rem;
+    border-radius: 8px;
+    background-color: #16181a;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, .5);
+}
+
 .asset-transparent {
     background-color: transparent;
     outline: 0;

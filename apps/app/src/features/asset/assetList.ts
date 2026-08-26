@@ -7,6 +7,14 @@ import { getLocationEnv } from "../../functions/getLocationEnv";
 import { AssetShowType } from "../../states/assetStore";
 import { AssetEntry, joinPath } from "./directoryEntries";
 import { thumbnailCache } from "./thumbnailCache";
+import { ASSET_MIME } from "./dropIntent";
+import { DRAG } from "../timeline/dragMachine";
+import {
+  idlePress,
+  reducePress,
+  type PressEv,
+  type PressState,
+} from "./assetPress";
 
 /**
  * The grid. Presentation only — `<asset-browser>` owns the directory and hands
@@ -67,6 +75,16 @@ function applyShowType(element: HTMLElement, showType: AssetShowType) {
 export class AssetFile extends LitElement {
   videoBlob: string;
 
+  /**
+   * Click or drag, decided by `assetPress.ts`.
+   *
+   * `draggable` stays off until the hold completes. Left on permanently — which
+   * is how this started — the panel cannot be scrolled by dragging it, and
+   * every slightly imprecise click becomes a drag.
+   */
+  private press: PressState = idlePress;
+  private holdTimer = 0;
+
   constructor() {
     super();
 
@@ -80,14 +98,19 @@ export class AssetFile extends LitElement {
       "asset",
     );
 
-    this.addEventListener("click", this.handleClick.bind(this));
-
-    // Dragging an asset onto the timeline lets the user choose the track and
-    // the moment. Clicking still works and drops it at the playhead.
-    this.setAttribute("draggable", "true");
-    this.addEventListener("dragstart", this.handleDragStart.bind(this));
+    this.addEventListener("pointerdown", this.handlePointerDown);
+    this.addEventListener("pointermove", this.handlePointerMove);
+    this.addEventListener("pointerup", this.handlePointerUp);
+    this.addEventListener("pointercancel", this.handleGestureEnd);
+    this.addEventListener("dragstart", this.handleDragStart);
+    this.addEventListener("dragend", this.handleGestureEnd);
 
     this.videoBlob = "";
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.clearHold();
   }
 
   @property()
@@ -185,17 +208,99 @@ export class AssetFile extends LitElement {
       >`;
   }
 
-  handleDragStart(e: DragEvent) {
-    if (!e.dataTransfer) {
-      return;
+  // ------------------------------------------------------------ press gesture
+
+  private dispatch(ev: PressEv) {
+    const { state, effects } = reducePress(this.press, ev);
+    this.press = state;
+
+    for (const effect of effects) {
+      switch (effect.type) {
+        case "arm":
+          this.setAttribute("draggable", "true");
+          break;
+        case "disarm":
+          this.clearHold();
+          this.removeAttribute("draggable");
+          break;
+        case "open":
+          this.clearHold();
+          this.handleOpen();
+          break;
+      }
     }
-    // A custom type so the timeline can tell an asset from an OS file drop,
-    // which `asset-upload-drop` already handles differently.
-    e.dataTransfer.setData("application/x-cartcut-asset", this.fullPath);
-    e.dataTransfer.effectAllowed = "copy";
   }
 
-  handleClick() {
+  private clearHold() {
+    if (this.holdTimer !== 0) {
+      window.clearTimeout(this.holdTimer);
+      this.holdTimer = 0;
+    }
+  }
+
+  private handlePointerDown = (e: PointerEvent) => {
+    // Only the primary button picks things up; right-click is the context menu
+    // and the middle button is a paste on some platforms.
+    if (e.button !== 0) {
+      return;
+    }
+
+    // A press that ended somewhere else — released off the tile, so no
+    // `pointerup` ever arrived here — can leave the attribute set even though
+    // the reducer is back to idle. `dragstart` still refuses the drag, but the
+    // browser would begin one and visibly cancel it. Every press starts clean.
+    this.removeAttribute("draggable");
+
+    this.dispatch({ type: "down", x: e.clientX, y: e.clientY, t: e.timeStamp });
+
+    // The hold has to be able to complete with the pointer perfectly still, so
+    // it cannot wait on a move event.
+    this.clearHold();
+    this.holdTimer = window.setTimeout(() => {
+      this.holdTimer = 0;
+      this.dispatch({ type: "tick", t: e.timeStamp + DRAG.LONG_PRESS_MS });
+    }, DRAG.LONG_PRESS_MS);
+  };
+
+  private handlePointerMove = (e: PointerEvent) => {
+    this.dispatch({ type: "move", x: e.clientX, y: e.clientY, t: e.timeStamp });
+  };
+
+  private handlePointerUp = (e: PointerEvent) => {
+    this.dispatch({ type: "up", t: e.timeStamp });
+  };
+
+  private handleGestureEnd = () => {
+    this.dispatch({ type: "cancel" });
+  };
+
+  private handleDragStart = (e: DragEvent) => {
+    // The gate. `draggable` is only set once the hold completes, but Chromium
+    // can still begin a drag on the same frame the attribute lands, so refusing
+    // here is what actually guarantees a short press never drags.
+    if (this.press.phase !== "armed" || !e.dataTransfer) {
+      e.preventDefault();
+      return;
+    }
+
+    // A custom type so the timeline can tell an asset from an OS file drop,
+    // which `asset-upload-drop` handles differently.
+    e.dataTransfer.setData(ASSET_MIME, this.fullPath);
+    e.dataTransfer.effectAllowed = "copy";
+
+    // The tile's own thumbnail as the ghost, rather than the whole grid cell
+    // with its label and padding.
+    const preview = this.querySelector("img");
+    if (preview instanceof HTMLImageElement && preview.complete) {
+      e.dataTransfer.setDragImage(
+        preview,
+        preview.width / 2,
+        preview.height / 2,
+      );
+    }
+  };
+
+  private handleOpen() {
     this.dispatchEvent(
       new CustomEvent("asset-open", {
         detail: { path: this.fullPath },
