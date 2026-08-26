@@ -391,8 +391,19 @@ describe("hitTest is unaffected by keyframes", () => {
 
   it("carries no marker data on the layout at all", () => {
     // Structural, not incidental: there is nothing in here for a press to hit.
+    //
+    // `transitions` and `cuts` joined the layout later and are hittable on
+    // purpose — a badge has to be clickable to be edited. The point this test
+    // makes is unchanged: keyframes added nothing here, and the assertion is
+    // still exact so that anything else appearing has to be justified.
     const l = layout(animated);
-    expect(Object.keys(l).sort()).toEqual(["clips", "rows", "totalHeight"]);
+    expect(Object.keys(l).sort()).toEqual([
+      "clips",
+      "cuts",
+      "rows",
+      "totalHeight",
+      "transitions",
+    ]);
     for (const clip of l.clips) {
       expect(Object.keys(clip).sort()).toEqual([
         "elementId",

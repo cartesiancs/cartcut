@@ -203,3 +203,85 @@ export function resolveTrim(input: ResolveTrimInput): TrimPlan {
 
   return { kind: "trim", trimMs };
 }
+
+export type ResolveTransitionResizeInput = {
+  base: TimelineDocument;
+  transitionId: string;
+  /** Which end is under the pointer. */
+  edge: "start" | "end";
+  dxPx: number;
+  range: number;
+  fps: number;
+  quantize?: boolean;
+};
+
+export type TransitionResizePlan =
+  | { kind: "none" }
+  /** The length to ask for. `setTransitionDuration` clamps it to the handles. */
+  | { kind: "duration"; durationMs: number };
+
+/**
+ * Where a transition's length handle lets go.
+ *
+ * A transition is anchored to its cut, so dragging either end changes only its
+ * *length*. Which end matters because the two grow it in opposite directions
+ * and by different amounts:
+ *
+ *  - A centred transition extends both ways at once, so moving one end by `d`
+ *    changes the duration by `2d` — otherwise the badge would appear to lag the
+ *    pointer by half.
+ *  - An `end`-aligned transition has its right edge pinned to the cut, so only
+ *    the left handle does anything, and it changes the duration one for one.
+ *  - A `start`-aligned one is the mirror image.
+ *
+ * The result is a *request*: `setTransitionDuration` re-resolves it against
+ * what the source handles can actually supply and clamps it there, recording
+ * the ask in `requestedDuration`. So dragging past the available footage stops
+ * the badge growing but is not lost — trimming a neighbour later gives it back.
+ */
+export function resolveTransitionResize(
+  input: ResolveTransitionResizeInput,
+): TransitionResizePlan {
+  const {
+    base,
+    transitionId,
+    edge,
+    dxPx,
+    range,
+    fps,
+    quantize = true,
+  } = input;
+
+  const element = base.elements[transitionId];
+  if (element == null || element.filetype !== "transition") {
+    return { kind: "none" };
+  }
+
+  // Dragging the left edge leftwards lengthens, so its sign is inverted.
+  const directed = edge === "start" ? -dxPx : dxPx;
+  const deltaMs = pxToMsSigned(directed, range);
+
+  const scale = element.alignment === "center" ? 2 : 1;
+  // An aligned transition has one edge pinned to the cut, and dragging the
+  // pinned one must do nothing rather than move the badge off its cut.
+  if (
+    (element.alignment === "end" && edge === "end") ||
+    (element.alignment === "start" && edge === "start")
+  ) {
+    return { kind: "none" };
+  }
+
+  const rawDuration = element.duration + deltaMs * scale;
+  // Quantize the length, not the delta — the same reasoning as `resolveTrim`.
+  // A duration is a difference of two frame-aligned instants, so snapping it
+  // keeps both edges on the grid wherever the cut happens to be.
+  const durationMs = quantize
+    ? snapMsToFrame(rawDuration, fps)
+    : Math.round(rawDuration);
+
+  if (Math.abs(durationMs - element.duration) < NOOP_EPSILON_MS) {
+    return { kind: "none" };
+  }
+
+  return { kind: "duration", durationMs: Math.max(0, durationMs) };
+}

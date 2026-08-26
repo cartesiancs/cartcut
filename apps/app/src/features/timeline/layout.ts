@@ -13,6 +13,7 @@
  */
 
 import { msToPxSigned, pxToMsSigned, spanOf } from "./geometry";
+import { cutPointsOn } from "./transitionOps";
 import { clipsOnTrack, type TimelineDocument, type TimelineTrack } from "./tracks";
 
 /** Row height in px. Fixed globally so filmstrip tiles cache at one size. */
@@ -23,6 +24,33 @@ export const TRACK_GAP = 4;
 export const TRACK_PITCH = TRACK_HEIGHT + TRACK_GAP;
 /** Grab width of a trim handle, shrunk on narrow clips. */
 export const TRIM_HANDLE_PX = 8;
+/**
+ * Narrowest a transition badge is drawn, so a short one stays grabbable.
+ *
+ * Wider than `MIN_CLIP_PX` because a badge has to be clicked to be edited at
+ * all, whereas a sliver of a clip can still be selected from the part of it
+ * that is visible.
+ */
+export const MIN_TRANSITION_PX = 14;
+/** Grab width of a transition's length handles. */
+export const TRANSITION_HANDLE_PX = 5;
+/** How near a bare cut has to be clicked to offer a transition, in px. */
+export const CUT_GRAB_PX = 6;
+/**
+ * Half-height of the cut affordance, and of its grab band.
+ *
+ * The affordance must **not** own the full row height, and the reason is
+ * concrete: two abutting clips are what every split produces, so a cut sits
+ * exactly where both clips' trim handles meet. A full-height grab zone there
+ * would make it impossible to trim either side of any cut in the project —
+ * losing a daily gesture to buy an occasional one.
+ *
+ * So it claims only a band across the vertical middle, and the trim handles
+ * keep the rest. One constant drives both the drawn glyph and the hit band, so
+ * the clickable area is exactly the thing the user can see — the invariant this
+ * module exists to hold.
+ */
+export const CUT_AFFORDANCE_PX = 9;
 /** Narrowest a clip is ever drawn, so a very short one stays visible. */
 export const MIN_CLIP_PX = 4;
 /**
@@ -67,10 +95,51 @@ export type ClipRect = {
   h: number;
 };
 
+/**
+ * A transition badge, straddling the cut it belongs to.
+ *
+ * Laid out here rather than drawn ad hoc because it has to be *hit* — and a
+ * badge that sits on a cut necessarily overlaps both neighbours' trim handles.
+ * Only one source of geometry can decide who wins, and `hitTest` below is it.
+ */
+export type TransitionRect = {
+  transitionId: string;
+  trackId: string;
+  fromId: string;
+  toId: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Source handles forced it shorter than asked for; drawn as a warning. */
+  clamped: boolean;
+};
+
+/**
+ * A cut with no transition on it yet — the affordance for adding one.
+ *
+ * Zero width: it is a *point*, and `hitTest` gives it a grab margin rather than
+ * the layout giving it a box. That keeps the drawn hint and the clickable area
+ * from drifting apart the way `findTarget` and `drawCanvas` once did.
+ */
+export type CutRect = {
+  trackId: string;
+  fromId: string;
+  toId: string;
+  atMs: number;
+  x: number;
+  y: number;
+  h: number;
+};
+
 export type TimelineLayout = {
   rows: TrackRow[];
   /** Only the clips that intersect the viewport. */
   clips: ClipRect[];
+  /** Transition badges, for the same viewport. */
+  transitions: TransitionRect[];
+  /** Cuts with nothing on them yet. */
+  cuts: CutRect[];
   /** Full height of all rows, ignoring scroll — for scrollbar extents. */
   totalHeight: number;
 };
@@ -82,6 +151,19 @@ export type Hit =
       elementId: string;
       trackId: string;
       zone: "body" | "trimStart" | "trimEnd";
+    }
+  | {
+      kind: "transition";
+      transitionId: string;
+      trackId: string;
+      zone: "body" | "resizeStart" | "resizeEnd";
+    }
+  | {
+      kind: "cut";
+      trackId: string;
+      fromId: string;
+      toId: string;
+      atMs: number;
     }
   | { kind: "track"; trackId: string };
 
@@ -117,6 +199,8 @@ export function layoutTimeline(input: LayoutInput): TimelineLayout {
     }));
 
   const clips: ClipRect[] = [];
+  const transitions: TransitionRect[] = [];
+  const cuts: CutRect[] = [];
 
   for (const row of rows) {
     // Rows scrolled fully out of view contribute nothing to draw or to hit.
@@ -125,6 +209,33 @@ export function layoutTimeline(input: LayoutInput): TimelineLayout {
     }
 
     for (const [elementId, element] of clipsOnTrack(doc, row.trackId)) {
+      // A transition is on the track but is not a clip on it — it straddles the
+      // cut rather than occupying a slot. Laid out separately below so that a
+      // badge and the two clips it sits between stay distinguishable to both
+      // the painter and the hit test.
+      if (element.filetype === "transition") {
+        const { start, length } = spanOf(element);
+        const x = xAtTime(start, range, hScroll);
+        const w = Math.max(MIN_TRANSITION_PX, msToPxSigned(length, range));
+        if (x + w < 0 || x > viewportW) {
+          continue;
+        }
+        transitions.push({
+          transitionId: elementId,
+          trackId: row.trackId,
+          fromId: element.fromId,
+          toId: element.toId,
+          x,
+          y: row.top,
+          w,
+          h: row.height,
+          clamped:
+            element.requestedDuration != null &&
+            element.requestedDuration > element.duration,
+        });
+        continue;
+      }
+
       const { start, length } = spanOf(element);
       const x = xAtTime(start, range, hScroll);
       const w = Math.max(MIN_CLIP_PX, msToPxSigned(length, range));
@@ -142,11 +253,34 @@ export function layoutTimeline(input: LayoutInput): TimelineLayout {
         h: row.height,
       });
     }
+
+    for (const cut of cutPointsOn(doc, row.trackId)) {
+      // Only bare cuts. One that already carries a transition has a badge, and
+      // offering to add a second there would be an offer the ops decline.
+      if (cut.transitionId != null) {
+        continue;
+      }
+      const x = xAtTime(cut.atMs, range, hScroll);
+      if (x < -CUT_GRAB_PX || x > viewportW + CUT_GRAB_PX) {
+        continue;
+      }
+      cuts.push({
+        trackId: row.trackId,
+        fromId: cut.fromId,
+        toId: cut.toId,
+        atMs: cut.atMs,
+        x,
+        y: row.top,
+        h: row.height,
+      });
+    }
   }
 
   return {
     rows,
     clips,
+    transitions,
+    cuts,
     totalHeight: topOffset + doc.tracks.length * TRACK_PITCH,
   };
 }
@@ -174,15 +308,70 @@ export function trackAtY(layout: TimelineLayout, y: number): string | null {
 /**
  * What is under the pointer.
  *
- * Clips are tested last-drawn-first so the one visually on top wins, matching
- * what the user sees. Within a clip the edges claim a handle each; the rest is
- * body.
+ * Order matters, and it is the reverse of the drawing order for one reason: a
+ * transition badge sits *on* a cut, so it necessarily overlaps the trim handles
+ * of both clips it joins. Test clips first and the trim handle always wins,
+ * which would make a badge impossible to click at any zoom. So transitions come
+ * first, then bare cuts, then clips.
+ *
+ * The cost is that the last few pixels of a clip's trim handle are shadowed by
+ * a badge. That is the right trade: the rest of the handle is still there, and
+ * the alternative is an affordance the user can see and never reach.
+ *
+ * Within each, edges claim a handle and the rest is body — the same shape the
+ * clips already had.
  */
 export function hitTest(
   layout: TimelineLayout,
   x: number,
   y: number,
 ): Hit {
+  for (let i = layout.transitions.length - 1; i >= 0; i--) {
+    const badge = layout.transitions[i];
+    if (
+      x < badge.x ||
+      x >= badge.x + badge.w ||
+      y < badge.y ||
+      y >= badge.y + badge.h
+    ) {
+      continue;
+    }
+
+    const handle = Math.min(TRANSITION_HANDLE_PX, badge.w / 3);
+    const zone =
+      x < badge.x + handle
+        ? "resizeStart"
+        : x >= badge.x + badge.w - handle
+          ? "resizeEnd"
+          : "body";
+
+    return {
+      kind: "transition",
+      transitionId: badge.transitionId,
+      trackId: badge.trackId,
+      zone,
+    };
+  }
+
+  for (const cut of layout.cuts) {
+    // A band across the middle of the row, not the whole row: the trim handles
+    // of both clips meet here, and every split makes one of these. See
+    // `CUT_AFFORDANCE_PX`.
+    if (
+      Math.abs(x - cut.x) > CUT_GRAB_PX ||
+      Math.abs(y - (cut.y + cut.h / 2)) > CUT_AFFORDANCE_PX
+    ) {
+      continue;
+    }
+    return {
+      kind: "cut",
+      trackId: cut.trackId,
+      fromId: cut.fromId,
+      toId: cut.toId,
+      atMs: cut.atMs,
+    };
+  }
+
   for (let i = layout.clips.length - 1; i >= 0; i--) {
     const clip = layout.clips[i];
     if (

@@ -6,7 +6,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { ASSET_MIME, FILES_MIME, dropIntent } from "./dropIntent";
+import {
+  ASSET_MIME,
+  FILES_MIME,
+  FX_PRESET_MIME,
+  dropIntent,
+} from "./dropIntent";
 
 describe("dropIntent", () => {
   it("reads a drag from outside the window as OS files", () => {
@@ -46,5 +51,24 @@ describe("dropIntent", () => {
     // they import this constant, and a rename that missed one would be silent.
     expect(ASSET_MIME).toBe("application/x-cartcut-asset");
     expect(FILES_MIME).toBe("Files");
+  });
+});
+
+describe("fx presets", () => {
+  it("is classified ahead of an asset or files", () => {
+    // An internal drag can list several types. The most specific one describes
+    // what is actually being dragged, and reading a less specific one first is
+    // the bug this module was written to end.
+    expect(dropIntent([FX_PRESET_MIME])).toBe("fx-preset");
+    expect(dropIntent([FX_PRESET_MIME, ASSET_MIME])).toBe("fx-preset");
+    expect(dropIntent([FX_PRESET_MIME, FILES_MIME])).toBe("fx-preset");
+    expect(dropIntent([FILES_MIME, FX_PRESET_MIME, ASSET_MIME])).toBe(
+      "fx-preset",
+    );
+  });
+
+  it("leaves the other intents alone", () => {
+    expect(dropIntent([ASSET_MIME])).toBe("asset");
+    expect(dropIntent([FILES_MIME])).toBe("os-files");
   });
 });

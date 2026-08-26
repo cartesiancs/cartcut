@@ -19,7 +19,14 @@ import type {
 import { isAudibleElement } from "./audio";
 import { isDynamicElement, spanStart, speedOf } from "./geometry";
 import { normalizeFps, planFrameGrid } from "./frames";
-import { xAtTime, type ClipRect, type TimelineLayout } from "./layout";
+import {
+  CUT_AFFORDANCE_PX,
+  xAtTime,
+  type ClipRect,
+  type CutRect,
+  type TimelineLayout,
+  type TransitionRect,
+} from "./layout";
 import type { TimelineDocument } from "./tracks";
 import { nullTileProvider, type TileProvider } from "./strip/provider";
 import { planFilmstrip } from "./strip/tiles";
@@ -47,6 +54,24 @@ export type ThemeColors = {
   keyframeLane: string;
   /** The per-frame lattice, drawn only when a frame is wide enough to see. */
   frameGrid: string;
+  /** A transition badge straddling a cut. */
+  transition: string;
+  /**
+   * The border on a *selected* badge.
+   *
+   * Dark, where every other selection border is white — because the badge
+   * itself is white, and `selection` drawn on it would be invisible. The
+   * intent is the same as everywhere else (a high-contrast ring); only the
+   * polarity flips, because the thing being ringed is the lightest object on
+   * the timeline rather than one of the darkest.
+   */
+  transitionSelected: string;
+  /** Hairline that keeps a white badge off a bright filmstrip. */
+  transitionOutline: string;
+  /** ...when source handles forced it shorter than the user asked for. */
+  transitionClamped: string;
+  /** The hint on a bare cut that a transition can go there. */
+  cutAffordance: string;
 };
 
 export const defaultColors: ThemeColors = {
@@ -68,6 +93,17 @@ export const defaultColors: ThemeColors = {
   // pixels, and anything stronger reads as hatching rather than as a grid —
   // it has to divide the picture without competing with it.
   frameGrid: "rgba(255, 255, 255, 0.13)",
+  // White, so a badge reads as a separate object over any clip colour. Clips
+  // are authored in mid-tone hues and the timeline background is nearly black,
+  // so white is the one value nothing else on the row competes with.
+  transition: "rgba(255, 255, 255, 0.92)",
+  transitionSelected: "#0f1012",
+  transitionOutline: "rgba(0, 0, 0, 0.45)",
+  // Warm, so "you asked for two seconds and the footage has eight hundred
+  // milliseconds" is visible at a glance rather than only in the panel.
+  transitionClamped: "#e8a33d",
+  // The same white, dimmed: a hint, not an object.
+  cutAffordance: "rgba(255, 255, 255, 0.5)",
 };
 
 export type DrawOptions = {
@@ -95,6 +131,24 @@ export type DrawOptions = {
   provider?: TileProvider;
   peaks?: PeakProvider;
   colors?: ThemeColors;
+  /**
+   * The bare cut under the pointer, if any.
+   *
+   * Only one is ever hinted, and only while hovered. Marking every cut would be
+   * noise: a transcript-driven edit has hundreds of them, and none of them is
+   * an invitation until the pointer is on it.
+   */
+  hoveredCut?: { trackId: string; fromId: string } | null;
+  /**
+   * Name a clip, overriding what `clipLabel` would derive.
+   *
+   * The hook exists for effects: their real name lives in a preset manifest on
+   * disk, and this module may not read it — `draw.ts` is DOM-free and drawn
+   * against a Skia canvas under `environment: "node"`. The canvas component
+   * injects a resolver that consults the registry, and everything that does not
+   * gets the id, which is at least true.
+   */
+  labelOf?: (element: TimelineElement) => string;
 };
 
 const LABEL_FONT = '12px "Noto Sans", sans-serif';
@@ -150,6 +204,14 @@ export function clipLabel(element: TimelineElement): string {
   // A group has no source file to be named after, so it carries its own name.
   if (element.filetype === "group") {
     return (element as any).name || "Group";
+  }
+  // An effect's `localpath` is the placeholder "EFFECT" — its real name lives
+  // in a preset manifest on disk, which this module must not read: `draw.ts` is
+  // DOM-free and tested against a Skia canvas under `environment: "node"`.
+  // `DrawOptions.labelOf` is the hook the canvas component uses to supply the
+  // preset's display name; the id is the honest fallback when it does not.
+  if (element.filetype === "effect") {
+    return (element as any).presetId || "Effect";
   }
   const path = element.localpath ?? "";
   const name = path.split(/[\\/]/).pop() ?? "";
@@ -249,6 +311,8 @@ export function drawClip(
     hScroll: number;
     fps: number;
     frameGrid: boolean;
+    /** Overrides the derived label; see `DrawOptions.labelOf`. */
+    labelOf?: (element: TimelineElement) => string;
   },
 ) {
   const color = element.timelineOptions?.color ?? "#4a4b57";
@@ -313,7 +377,7 @@ export function drawClip(
 
     const label = truncateText(
       ctx,
-      clipLabel(element),
+      opts.labelOf?.(element) ?? clipLabel(element),
       rect.w - LABEL_PADDING * 2,
     );
 
@@ -568,7 +632,25 @@ export function drawTimeline(
       hScroll: opts.hScroll,
       fps: normalizeFps(opts.fps),
       frameGrid: opts.frameGrid === true,
+      labelOf: opts.labelOf,
     });
+  }
+
+  // Cuts first, so a badge drawn next to one covers the hint rather than the
+  // other way round.
+  if (opts.hoveredCut != null) {
+    const hovered = opts.layout.cuts.find(
+      (cut) =>
+        cut.trackId === opts.hoveredCut!.trackId &&
+        cut.fromId === opts.hoveredCut!.fromId,
+    );
+    if (hovered != null) {
+      drawCutAffordance(ctx, hovered, colors);
+    }
+  }
+
+  for (const badge of opts.layout.transitions) {
+    drawTransitionBadge(ctx, badge, colors, selection.has(badge.transitionId));
   }
 
   // Overlays last so nothing paints over them.
@@ -587,6 +669,110 @@ export function drawTimeline(
   const playheadX = xAtTime(opts.playheadMs, opts.range, opts.hScroll);
   ctx.fillStyle = colors.playhead;
   ctx.fillRect(playheadX, 0, 2, opts.viewportH);
+}
+
+/**
+ * A transition badge: a bow-tie centred on the cut.
+ *
+ * The shape is the convention every NLE uses, and it earns its keep here rather
+ * than being decoration. A plain rectangle on a cut reads as a third, very
+ * short clip; the two triangles meeting in the middle say "these two overlap"
+ * and stay legible down to the minimum width, where a label never would.
+ */
+function drawTransitionBadge(
+  ctx: CanvasRenderingContext2D,
+  rect: TransitionRect,
+  colors: ThemeColors,
+  selected: boolean,
+) {
+  const inset = 2;
+  const top = rect.y + inset;
+  const bottom = rect.y + rect.h - inset;
+  const mid = rect.x + rect.w / 2;
+
+  ctx.save();
+
+  ctx.fillStyle = colors.transition;
+  ctx.beginPath();
+  // Left triangle, wide at the outer edge and meeting the right one at the cut.
+  ctx.moveTo(rect.x, top);
+  ctx.lineTo(mid, (top + bottom) / 2);
+  ctx.lineTo(rect.x, bottom);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(rect.x + rect.w, top);
+  ctx.lineTo(mid, (top + bottom) / 2);
+  ctx.lineTo(rect.x + rect.w, bottom);
+  ctx.closePath();
+  ctx.fill();
+
+  // A faint plate joins the two halves so a very narrow badge still reads as
+  // one object. Lighter than it was when the badge was a saturated colour —
+  // white at 0.35 over a bright filmstrip washes the whole rect out and the
+  // bow-tie stops being readable as a shape.
+  ctx.globalAlpha = 0.18;
+  ctx.fillRect(rect.x, top, rect.w, bottom - top);
+  ctx.globalAlpha = 1;
+
+  // Always outlined. A white badge over a pale frame of a filmstrip would
+  // otherwise have no edge at all.
+  ctx.strokeStyle = colors.transitionOutline;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(rect.x + 0.5, top + 0.5, rect.w - 1, bottom - top - 1);
+
+  if (rect.clamped) {
+    ctx.strokeStyle = colors.transitionClamped;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(rect.x + 1, top, rect.w - 2, bottom - top);
+  }
+
+  if (selected) {
+    // Dark, not `colors.selection` — see `ThemeColors.transitionSelected`.
+    // The usual white ring would be invisible on a white badge.
+    ctx.strokeStyle = colors.transitionSelected;
+    ctx.lineWidth = SELECTION_WIDTH;
+    ctx.strokeRect(rect.x + 1, top, rect.w - 2, bottom - top);
+  }
+
+  ctx.restore();
+}
+
+/**
+ * The hint that a bare cut will take a transition.
+ *
+ * Drawn only while the pointer is near it. A permanent marker on every cut
+ * would be noise on a transcript-driven edit with two hundred of them.
+ */
+function drawCutAffordance(
+  ctx: CanvasRenderingContext2D,
+  cut: CutRect,
+  colors: ThemeColors,
+) {
+  // The same constant `hitTest` grabs by, so what is drawn is exactly what is
+  // clickable — and, just as importantly, the trim handles above and below it
+  // stay reachable. Every split makes a cut, and losing the ability to trim at
+  // one would cost a daily gesture.
+  const size = CUT_AFFORDANCE_PX;
+  const cy = cut.y + cut.h / 2;
+
+  ctx.save();
+  ctx.fillStyle = colors.cutAffordance;
+  ctx.beginPath();
+  ctx.moveTo(cut.x - size, cy - size);
+  ctx.lineTo(cut.x, cy);
+  ctx.lineTo(cut.x - size, cy + size);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(cut.x + size, cy - size);
+  ctx.lineTo(cut.x, cy);
+  ctx.lineTo(cut.x + size, cy + size);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
 }
 
 /** Marks a row as the target of a drag. */

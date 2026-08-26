@@ -48,7 +48,17 @@ export type DragPhase =
   | "moveH"
   | "moveFree"
   | "trimStart"
-  | "trimEnd";
+  | "trimEnd"
+  /**
+   * Dragging one end of a transition badge to change its length.
+   *
+   * Two phases rather than one because the two ends grow it in opposite
+   * directions, exactly as `trimStart` and `trimEnd` do. It never moves the
+   * badge: a transition is anchored to its cut, and the cut only moves when a
+   * clip does.
+   */
+  | "transitionStart"
+  | "transitionEnd";
 
 export type DragState = {
   phase: DragPhase;
@@ -89,7 +99,9 @@ function isMoving(phase: DragPhase): boolean {
     phase === "moveH" ||
     phase === "moveFree" ||
     phase === "trimStart" ||
-    phase === "trimEnd"
+    phase === "trimEnd" ||
+    phase === "transitionStart" ||
+    phase === "transitionEnd"
   );
 }
 
@@ -100,13 +112,6 @@ export function reduceDrag(
 ): { state: DragState; effects: DragEffect[] } {
   switch (ev.type) {
     case "down": {
-      if (ev.hit.kind !== "clip") {
-        return {
-          state: idleDrag,
-          effects: [{ type: "clearSelection" }],
-        };
-      }
-
       const base: DragState = {
         ...idleDrag,
         origin: { x: ev.x, y: ev.y },
@@ -114,6 +119,41 @@ export function reduceDrag(
         hit: ev.hit,
         shift: ev.shift === true,
       };
+
+      if (ev.hit.kind === "transition") {
+        if (ev.hit.zone === "resizeStart") {
+          return {
+            state: { ...base, phase: "transitionStart" },
+            effects: [{ type: "cursor", value: "ew-resize" }],
+          };
+        }
+        if (ev.hit.zone === "resizeEnd") {
+          return {
+            state: { ...base, phase: "transitionEnd" },
+            effects: [{ type: "cursor", value: "ew-resize" }],
+          };
+        }
+        // The body selects it, so the option panel opens. There is nothing to
+        // drag: a transition cannot be moved off its cut.
+        return {
+          state: { ...base, phase: "pressed" },
+          effects: [],
+        };
+      }
+
+      // A bare cut is a click target, not a drag: pressing it adds a
+      // transition. `pressed` lets `up` distinguish that from a press that
+      // turned into something else.
+      if (ev.hit.kind === "cut") {
+        return { state: { ...base, phase: "pressed" }, effects: [] };
+      }
+
+      if (ev.hit.kind !== "clip") {
+        return {
+          state: idleDrag,
+          effects: [{ type: "clearSelection" }],
+        };
+      }
 
       if (ev.hit.zone === "trimStart" || ev.hit.zone === "trimEnd") {
         // Handles have no second meaning, so there is nothing to wait for.
@@ -143,6 +183,13 @@ export function reduceDrag(
       const dyPx = ev.y - state.origin.y;
 
       if (state.phase === "pressed") {
+        // Only a clip escalates into a slide. A transition is anchored to its
+        // cut and a bare cut is not an object at all, so both stay `pressed`
+        // until the pointer comes up — which is what makes them clicks.
+        if (state.hit.kind !== "clip") {
+          return { state: { ...state, dxPx, dyPx }, effects: [] };
+        }
+
         const moved = Math.hypot(dxPx, dyPx);
         if (moved > cfg.MOVE_CANCEL_PX) {
           // Committed to a slide. Vertical is locked from here: the gesture
@@ -167,6 +214,11 @@ export function reduceDrag(
       // here: any move past the tolerance has already turned the gesture into
       // a slide, so a state that is still `pressed` has not moved far.
       if (state.phase !== "pressed") {
+        return { state, effects: [] };
+      }
+      // Only a clip can come free of its track. Holding on a transition or a
+      // bare cut has no second meaning to unlock.
+      if (state.hit.kind !== "clip") {
         return { state, effects: [] };
       }
       if (ev.t - state.downT < cfg.LONG_PRESS_MS) {

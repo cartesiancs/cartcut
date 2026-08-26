@@ -6,6 +6,7 @@ import "./ControlExtension";
 import "./ControlRender";
 import "./ControlUtilities";
 import "./ControlFilter";
+import "./ControlFx";
 import "../../features/preview/previewTopBar";
 import "../../features/record/screenRecord";
 import "../../features/record/audioRecord";
@@ -223,6 +224,17 @@ export class Control extends LitElement {
               <button
                 class="btn-nav"
                 data-bs-toggle="pill"
+                data-bs-target="#nav-fx"
+                type="button"
+                role="tab"
+                aria-selected="false"
+              >
+                <span class="material-symbols-outlined"> auto_awesome</span>
+              </button>
+
+              <button
+                class="btn-nav"
+                data-bs-toggle="pill"
                 data-bs-target="#nav-output"
                 type="button"
                 role="tab"
@@ -259,6 +271,17 @@ export class Control extends LitElement {
                 <control-ui-util />
               </div>
 
+              <div class="tab-pane fade" id="nav-fx" role="tabpanel">
+                <control-ui-fx></control-ui-fx>
+              </div>
+
+              <!--
+                Orphaned: no sidebar button targets this pane, so control-ui-filter
+                and the gif-preset inside it are unreachable in the running app.
+                Left as it was rather than quietly adopted — the gif search is a
+                separate feature, and effects and transitions now have a tab of
+                their own.
+              -->
               <div class="tab-pane fade" id="nav-filter" role="tabpanel">
                 <control-ui-filter />
               </div>
@@ -393,6 +416,13 @@ export class Control extends LitElement {
           <option-audio></option-audio>
           <option-shape></option-shape>
           <option-groupelement></option-groupelement>
+          <!--
+            Tag names are not free here. optionGroup resolves a panel by
+            prefixing "option-" onto the element's own filetype, so these two
+            follow from the data model rather than being chosen.
+          -->
+          <option-effect></option-effect>
+          <option-transition></option-transition>
         </option-group>
       </div>
     `;

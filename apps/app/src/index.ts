@@ -36,6 +36,8 @@ import "./features/option/optionVideo";
 import "./features/option/optionAudio";
 import "./features/option/optionShape";
 import "./features/option/optionGroupElement";
+import "./features/option/optionEffect";
+import "./features/option/optionTransition";
 
 import "./features/input/inputText";
 

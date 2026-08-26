@@ -154,9 +154,13 @@ function buildTransition(
     startTime,
     duration,
     // A transition draws nothing of its own at a position, but `TimelinePlaced`
-    // requires the field and the timeline UI reads `timelineOptions.color`.
+    // requires both fields. The colour is not what the badge is painted in —
+    // `draw.ts#drawTransitionBadge` uses `ThemeColors.transition`, so a badge
+    // stays consistent across the timeline rather than varying per element —
+    // but it is kept in step with it so a future reader of the data is not
+    // told something different from what they can see.
     location: { x: 0, y: 0 },
-    timelineOptions: { color: "rgb(150, 120, 200)" },
+    timelineOptions: { color: "#ffffff" },
     presetId,
     params,
     fromId,

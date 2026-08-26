@@ -10,7 +10,10 @@ import {
   IRenderOptionStore,
   renderOptionStore,
 } from "../../states/renderOptionStore";
-import { animatableProperties } from "../../@types/timeline";
+import {
+  animatableProperties,
+  type TimelineElement,
+} from "../../@types/timeline";
 import {
   deleteClips,
   moveClips,
@@ -24,7 +27,27 @@ import {
   stepCursorByFrames,
 } from "../timeline/frames";
 import { clampRange } from "../timeline/zoom";
-import { resolveMove, resolveTrim } from "../timeline/dragResolve";
+import {
+  resolveMove,
+  resolveTransitionResize,
+  resolveTrim,
+} from "../timeline/dragResolve";
+import {
+  addTransition,
+  cutPointsOn,
+  setTransitionDuration,
+} from "../timeline/transitionOps";
+import { addEffect } from "../timeline/effectOps";
+import { DEFAULT_EFFECT_MS } from "./effectElement";
+import {
+  DEFAULT_TRANSITION_MS,
+  maxTransitionMs,
+} from "../timeline/transitionGeometry";
+import {
+  defaultParamsFor,
+  presetById,
+  presetsOfKind,
+} from "../fx/presetRegistry";
 import {
   TRACK_PITCH,
   hitTest,
@@ -39,7 +62,7 @@ import {
   type DragState,
   type PointerEv,
 } from "../timeline/dragMachine";
-import { drawDropTarget, drawTimeline } from "../timeline/draw";
+import { clipLabel, drawDropTarget, drawTimeline } from "../timeline/draw";
 import { applySurface, surfaceSpec } from "../timeline/canvasSurface";
 import {
   createVideoTileProvider,
@@ -64,7 +87,7 @@ import { parentOf, withDescendants } from "../timeline/hierarchy";
 import { canDetachAudio } from "../timeline/audio";
 import { detachAudioFrom } from "../timeline/audioOps";
 import { rasterizeTextElements } from "./rasterizeText";
-import { ASSET_MIME, dropIntent } from "../asset/dropIntent";
+import { ASSET_MIME, FX_PRESET_MIME, dropIntent } from "../asset/dropIntent";
 import { dropTargetAt } from "../asset/dropTarget";
 import { importDroppedFiles, importPathsAt } from "../asset/importDrop";
 import { isTypingEvent } from "../../utils/typingTarget";
@@ -79,6 +102,26 @@ import {
   splitSelection,
   undo,
 } from "../editor/actions";
+
+/** What a click on a bare cut reaches for first. */
+const DEFAULT_TRANSITION_PRESET = "com.cartcut.cross-dissolve";
+
+/**
+ * A clip's label, with an effect's preset name resolved.
+ *
+ * `draw.ts` derives labels from the element alone, which is right for every
+ * other type — a clip is named after its file, a title after its words. An
+ * effect's name lives in a preset manifest on disk, and the painter is DOM-free
+ * and drawn against a Skia canvas in tests, so it cannot read one. This is the
+ * hook it exposes for exactly that; the preset id is the fallback when the
+ * preset is not installed, which is at least true.
+ */
+function labelForClip(element: TimelineElement): string {
+  if (element.filetype === "effect") {
+    return presetById(element.presetId)?.name ?? clipLabel(element);
+  }
+  return clipLabel(element);
+}
 
 /**
  * The timeline canvas.
@@ -143,8 +186,22 @@ export class elementTimelineCanvas extends LitElement {
    * while the zoom slider crosses the threshold.
    */
   private frameGridOn = false;
-  private layout: TimelineLayout = { rows: [], clips: [], totalHeight: 0 };
+  private layout: TimelineLayout = {
+    rows: [],
+    clips: [],
+    transitions: [],
+    cuts: [],
+    totalHeight: 0,
+  };
   private canvasVerticalScroll = 0;
+
+  /**
+   * The bare cut under the pointer, hinted while hovered.
+   *
+   * Display-only, like `snapGuideMs`: it takes no part in hit-testing, which
+   * reads the cut rects out of `layout` directly.
+   */
+  private hoveredCut: { trackId: string; fromId: string } | null = null;
 
   /**
    * Decodes filmstrip frames in the background.
@@ -388,6 +445,12 @@ export class elementTimelineCanvas extends LitElement {
       playheadMs: this.timelineCursor,
       projectEndMs: this.renderOption.duration * 1000,
       snapGuideMs: this.snapGuideMs,
+      // Hinted only while hovered; a transcript-driven edit has hundreds of
+      // cuts and marking them all would be noise.
+      hoveredCut: this.hoveredCut,
+      // `draw.ts` is DOM-free and cannot read a preset manifest off disk, so
+      // an effect's display name is injected from here instead of derived.
+      labelOf: labelForClip,
       provider: this.tiles,
       peaks: this.peaks,
     });
@@ -659,11 +722,48 @@ export class elementTimelineCanvas extends LitElement {
   private applyDrag() {
     const base = this.dragBase;
     const drag = this.dragState;
-    if (base == null || drag.hit.kind !== "clip") {
+    if (base == null) {
       return;
     }
 
     const fps = this.projectFps();
+
+    if (
+      drag.hit.kind === "transition" &&
+      (drag.phase === "transitionStart" || drag.phase === "transitionEnd")
+    ) {
+      this.snapGuideMs = null;
+      this.dropTrackId = null;
+
+      const plan = resolveTransitionResize({
+        base,
+        transitionId: drag.hit.transitionId,
+        edge: drag.phase === "transitionStart" ? "start" : "end",
+        dxPx: drag.dxPx,
+        range: this.timelineRange,
+        fps,
+      });
+      if (plan.kind === "none") {
+        this.drawCanvas();
+        return;
+      }
+
+      // `setTransitionDuration` clamps to what the source handles can supply
+      // and records the ask, so dragging past the available footage stops the
+      // badge growing without losing what was asked for.
+      this.pendingDoc = setTransitionDuration(
+        base,
+        drag.hit.transitionId,
+        plan.durationMs,
+      );
+      this.drawCanvas();
+      return;
+    }
+
+    if (drag.hit.kind !== "clip") {
+      return;
+    }
+
     this.snapGuideMs = null;
     this.dropTrackId = null;
 
@@ -872,10 +972,33 @@ export class elementTimelineCanvas extends LitElement {
     }
 
     const hit = hitTest(this.layout, e.offsetX, e.offsetY);
+
+    // The hovered cut, if any. Only one is ever hinted and only while the
+    // pointer is on it — a transcript-driven edit has hundreds of cuts, and a
+    // permanent marker on each would be noise.
+    const nextHoveredCut =
+      hit.kind === "cut"
+        ? { trackId: hit.trackId, fromId: hit.fromId }
+        : null;
+    const hoverChanged =
+      (this.hoveredCut?.fromId ?? null) !== (nextHoveredCut?.fromId ?? null) ||
+      (this.hoveredCut?.trackId ?? null) !== (nextHoveredCut?.trackId ?? null);
+    this.hoveredCut = nextHoveredCut;
+
     if (hit.kind === "clip") {
       this.style.cursor = hit.zone === "body" ? "pointer" : "ew-resize";
+    } else if (hit.kind === "transition") {
+      this.style.cursor = hit.zone === "body" ? "pointer" : "ew-resize";
+    } else if (hit.kind === "cut") {
+      this.style.cursor = "pointer";
     } else {
       this.style.cursor = "default";
+    }
+
+    // Repaint only when the hint actually appears or disappears — this runs at
+    // pointer rate.
+    if (hoverChanged) {
+      this.drawCanvas();
     }
   }
 
@@ -895,6 +1018,19 @@ export class elementTimelineCanvas extends LitElement {
         this.targetId = [hit.elementId];
       }
       this.showSideOption(hit.elementId);
+    }
+
+    if (hit.kind === "transition") {
+      // Selecting it opens `<option-transition>`, which is the only way to
+      // change its preset or alignment. Never additive: a transition has
+      // nothing in common with a multi-clip selection, and the ops that act on
+      // one take a single id.
+      this.targetId = [hit.transitionId];
+      this.showSideOption(hit.transitionId);
+    }
+
+    if (hit.kind === "cut") {
+      this.addTransitionAtCut(hit.fromId, hit.toId);
     }
 
     this.dispatchPointer({
@@ -983,6 +1119,16 @@ export class elementTimelineCanvas extends LitElement {
       this.timelineScroll,
       this.projectFps(),
     );
+
+    if (intent === "fx-preset") {
+      const presetId = e.dataTransfer?.getData(FX_PRESET_MIME);
+      if (!presetId) {
+        return;
+      }
+      e.preventDefault();
+      this.dropFxPreset(presetId, target.startMs, x, y);
+      return;
+    }
 
     if (intent === "asset") {
       const originPath = e.dataTransfer?.getData(ASSET_MIME);
@@ -1097,6 +1243,154 @@ export class elementTimelineCanvas extends LitElement {
    */
   private moveSelectionByTrack(delta: number) {
     this.commit((doc) => moveClips(doc, this.targetId, 0, delta));
+  }
+
+  /** The app's toast, reached the way everything else in this file reaches it. */
+  private toast(message: string) {
+    (document.querySelector("toast-box") as any)?.showToast({
+      message,
+      delay: "4000",
+    });
+  }
+
+  /**
+   * A preset tile dropped onto the timeline.
+   *
+   * A transition goes to the nearest bare cut on the row under the pointer, and
+   * an effect lands where it was dropped. Dropping a transition anywhere but on
+   * a track with a cut has nothing to attach to, so it says so rather than
+   * silently doing nothing — the failure mode a drop target most easily has.
+   */
+  private dropFxPreset(
+    presetId: string,
+    startMs: number,
+    _x: number,
+    y: number,
+  ) {
+    const preset = presetById(presetId);
+    if (preset == null) {
+      this.toast("That preset is no longer installed.");
+      return;
+    }
+
+    if (preset.kind === "transition") {
+      const trackId = trackAtY(this.layout, y);
+      if (trackId == null) {
+        this.toast("Drop a transition on a track that has a cut.");
+        return;
+      }
+      const bare = cutPointsOn(this.currentDoc(), trackId).filter(
+        (cut) => cut.transitionId == null,
+      );
+      if (bare.length === 0) {
+        this.toast("No cut on that track to put a transition on.");
+        return;
+      }
+      const nearest = bare.reduce((best, cut) =>
+        Math.abs(cut.atMs - startMs) < Math.abs(best.atMs - startMs)
+          ? cut
+          : best,
+      );
+      this.addTransitionAtCut(nearest.fromId, nearest.toId, presetId);
+      return;
+    }
+
+    const id = uuidv4();
+    const trackId = uuidv4();
+    this.commit((doc) =>
+      addEffect(
+        doc,
+        id,
+        presetId,
+        Math.max(0, startMs),
+        DEFAULT_EFFECT_MS,
+        trackId,
+        defaultParamsFor(presetId),
+        {
+          blend:
+            preset.render.type === "overlay"
+              ? ((preset.render.blend as GlobalCompositeOperation) ?? "screen")
+              : undefined,
+        },
+      ),
+    );
+    this.targetId = [id];
+    this.showSideOption(id);
+    this.drawCanvas();
+  }
+
+  // ------------------------------------------------------------ transitions
+
+  /**
+   * Put a transition on the cut the user clicked.
+   *
+   * The default is a cross-dissolve, centred, half a second — the same default
+   * every NLE offers, and the one most likely to be what was wanted. Everything
+   * else is changed in `<option-transition>` afterwards.
+   *
+   * `addTransition` declines by identity when the cut cannot take one — no
+   * source handles on either side is the case that actually happens — so a
+   * refusal costs no undo step. It is worth telling the user why, because a
+   * click that appears to do nothing is otherwise indistinguishable from a
+   * missed click.
+   */
+  private addTransitionAtCut(
+    fromId: string,
+    toId: string,
+    wantPresetId?: string,
+  ) {
+    // The first installed transition preset, preferring the built-in
+    // cross-dissolve. `presetsOfKind` lists built-ins first, so this is simply
+    // the head of the list unless the user has removed them all.
+    const preset =
+      (wantPresetId != null ? presetById(wantPresetId) : null) ??
+      presetById(DEFAULT_TRANSITION_PRESET) ??
+      presetsOfKind("transition")[0];
+    if (preset == null) {
+      this.toast("No transition presets are installed.");
+      return;
+    }
+    const presetId = preset.id;
+
+    const before = this.currentDoc();
+    const id = uuidv4();
+
+    this.commit((doc) =>
+      addTransition(
+        doc,
+        id,
+        fromId,
+        toId,
+        presetId,
+        DEFAULT_TRANSITION_MS,
+        "center",
+        defaultParamsFor(presetId),
+      ),
+    );
+
+    const after = useTimelineStore.getState().getDocument();
+    if (after.elements[id] == null) {
+      // Declined. The only reason a well-formed cut refuses is that neither
+      // clip has footage beyond it — which the alignment control can often
+      // work around, so say so rather than just failing.
+      const from = before.elements[fromId];
+      const to = before.elements[toId];
+      const canEnd =
+        from != null && to != null && maxTransitionMs(from, to, "end") > 0;
+      const canStart =
+        from != null && to != null && maxTransitionMs(from, to, "start") > 0;
+
+      this.toast(
+        canEnd || canStart
+          ? "No footage beyond this cut for a centred transition — try aligning it to one side."
+          : "Neither clip has footage beyond this cut, so a transition has nothing to blend.",
+      );
+      return;
+    }
+
+    this.targetId = [id];
+    this.showSideOption(id);
+    this.drawCanvas();
   }
 
   // ------------------------------------------------------------ side panel
