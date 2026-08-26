@@ -101,6 +101,9 @@ export class FxCompositor {
   private fromTarget: RenderTarget;
   private toTarget: RenderTarget;
   private outputTarget: RenderTarget;
+  /** Ping-pong pair for multi-pass effects. See `applyEffect`. */
+  private passA: RenderTarget;
+  private passB: RenderTarget;
 
   private scratch: HTMLCanvasElement | null = null;
   private clipA: HTMLCanvasElement | null = null;
@@ -113,6 +116,8 @@ export class FxCompositor {
     this.fromTarget = new RenderTarget(gl, false);
     this.toTarget = new RenderTarget(gl, false);
     this.outputTarget = new RenderTarget(gl, true);
+    this.passA = new RenderTarget(gl, false);
+    this.passB = new RenderTarget(gl, false);
   }
 
   // ---------------------------------------------------------------- canvases
@@ -167,19 +172,28 @@ export class FxCompositor {
   // ----------------------------------------------------------------- programs
 
   /**
-   * The compiled program for a preset, built once and kept.
+   * The compiled program for one of a preset's shader files, built once.
    *
-   * Keyed by preset id, so switching a clip between presets and back does not
-   * recompile. A failed compile is cached too — retrying a broken shader every
-   * frame would spend the whole frame budget in the driver.
+   * Keyed by preset id *and* source name, because a multi-pass effect compiles
+   * several — and because two passes may name the same file with different
+   * `constants`, in which case they share one program and differ only in the
+   * uniforms written before each draw. Switching a clip between presets and
+   * back does not recompile. A failed compile is cached too: retrying a broken
+   * shader every frame would spend the whole frame budget in the driver.
    */
-  private programFor(preset: FxPreset): FxProgram | null {
-    const cached = this.programs.get(preset.id);
-    if (cached != null) {
-      return cached.ok ? cached : null;
-    }
+  private programFor(
+    preset: FxPreset,
+    sourceName?: string,
+  ): FxProgram | null {
     if (preset.render.type !== "shader") {
       return null;
+    }
+    const name = sourceName ?? preset.render.source;
+    const key = preset.id + "|" + name;
+
+    const cached = this.programs.get(key);
+    if (cached != null) {
+      return cached.ok ? cached : null;
     }
 
     const textureUniforms = (preset.render.textures ?? []).map(
@@ -187,7 +201,7 @@ export class FxCompositor {
     );
     const fragment = wrapFragmentShader({
       kind: preset.kind,
-      source: preset.sources[preset.render.source] ?? "",
+      source: preset.sources[name] ?? "",
       textureUniforms,
     });
     const vertex = vertexShaderFor(
@@ -197,10 +211,13 @@ export class FxCompositor {
         : undefined,
     );
 
+    // `original` is bound on every effect pass, not just the last: a combine
+    // step needs the untouched frame alongside what the chain produced, and
+    // that is the shape of bloom, halation and tilt-shift alike.
     const samplers =
       preset.kind === "transition"
         ? ["from", "to", ...textureUniforms]
-        : ["source", ...textureUniforms];
+        : ["source", "original", ...textureUniforms];
 
     const program = new FxProgram(this.gl, {
       vertexSource: vertex,
@@ -209,14 +226,16 @@ export class FxCompositor {
       samplers,
     });
 
-    this.programs.set(preset.id, program);
+    this.programs.set(key, program);
 
     if (!program.ok) {
       this.reportOnce(
-        preset.id,
+        key,
         "preset `" +
           preset.id +
-          "` did not compile and will render as a pass-through.\n" +
+          "` (" +
+          name +
+          ") did not compile and will render as a pass-through.\n" +
           program.log +
           "\nEntry point expected: vec4 " +
           entryPointOf(preset.kind) +
@@ -379,6 +398,7 @@ export class FxCompositor {
     width: number,
     height: number,
     overlayFrame: CanvasImageSource | null,
+    timeSeconds: number,
   ): void {
     if (active.mode === "overlay") {
       if (overlayFrame == null) {
@@ -399,35 +419,102 @@ export class FxCompositor {
       return;
     }
 
-    const program = this.programFor(preset);
-    if (program == null) {
+    if (preset.render.type !== "shader") {
       return;
     }
 
     const gl = this.gl;
     this.sizeGlCanvas(width, height);
 
-    const frame = this.uploadFrame(target.canvas);
-    if (frame == null) {
+    const original = this.uploadFrame(target.canvas);
+    if (original == null) {
       return;
     }
 
-    this.outputTarget.use(width, height, () => {
-      gl.disable(gl.DEPTH_TEST);
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
+    const intensity = Math.max(
+      0,
+      Math.min(1, active.element.intensity / 100),
+    );
 
-      program.bind(this.bindPresetTextures(preset, [frame]));
-      gl.uniform1f(
-        program.uniform("intensity"),
-        Math.max(0, Math.min(1, active.element.intensity / 100)),
-      );
-      gl.uniform2f(program.uniform("resolution"), width, height);
-      this.applyParams(program, preset, active.element.params);
-      program.draw();
-    });
+    /** One step of the chain, drawing `input` into `into`. */
+    const runPass = (
+      program: FxProgram,
+      input: WebGLTexture,
+      into: RenderTarget,
+      constants?: Record<string, number | number[]>,
+    ): void => {
+      into.use(width, height, () => {
+        gl.disable(gl.DEPTH_TEST);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        program.bind(this.bindPresetTextures(preset, [input, original]));
+        gl.uniform1f(program.uniform("intensity"), intensity);
+        gl.uniform2f(program.uniform("resolution"), width, height);
+        gl.uniform1f(program.uniform("time"), timeSeconds);
+        this.applyParams(program, preset, active.element.params);
+        // Written after the parameters so a pass constant wins where the two
+        // name the same uniform — which is the point of having both: the same
+        // blur shader takes its radius from the user and its axis from here.
+        if (constants != null) {
+          this.applyConstants(program, constants);
+        }
+        program.draw();
+      });
+    };
+
+    // Ping-pong through the declared passes, then the final `source`. Two
+    // targets are enough: a pass never reads its own output, and `original`
+    // is a texture of its own that no pass writes.
+    let input = original;
+    let next = this.passA;
+    let spare = this.passB;
+
+    for (const pass of preset.render.passes ?? []) {
+      const program = this.programFor(preset, pass.source);
+      if (program == null) {
+        // A broken step would leave the chain reading a cleared buffer, so the
+        // whole effect passes through rather than rendering something wrong.
+        return;
+      }
+      runPass(program, input, next, pass.constants);
+      input = next.texture;
+      const swap = next;
+      next = spare;
+      spare = swap;
+    }
+
+    const finalProgram = this.programFor(preset);
+    if (finalProgram == null) {
+      return;
+    }
+    runPass(finalProgram, input, this.outputTarget);
 
     this.blitTargetTo(target, this.outputTarget, width, height, "copy");
+  }
+
+  /** Per-pass uniforms from the manifest's `constants`. */
+  private applyConstants(
+    program: FxProgram,
+    constants: Record<string, number | number[]>,
+  ): void {
+    const gl = this.gl;
+    for (const [name, value] of Object.entries(constants)) {
+      const location = program.uniform(name);
+      if (location == null) {
+        // Declared but unused, so the compiler removed it. Not an error.
+        continue;
+      }
+      if (typeof value === "number") {
+        gl.uniform1f(location, value);
+      } else if (value.length === 2) {
+        gl.uniform2f(location, value[0], value[1]);
+      } else if (value.length === 3) {
+        gl.uniform3f(location, value[0], value[1], value[2]);
+      } else {
+        gl.uniform4f(location, value[0], value[1], value[2], value[3]);
+      }
+    }
   }
 
   // -------------------------------------------------------------- transitions
@@ -640,5 +727,7 @@ export class FxCompositor {
     this.fromTarget.dispose();
     this.toTarget.dispose();
     this.outputTarget.dispose();
+    this.passA.dispose();
+    this.passB.dispose();
   }
 }

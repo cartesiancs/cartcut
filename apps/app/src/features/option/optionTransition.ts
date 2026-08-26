@@ -38,7 +38,11 @@ import {
   maxTransitionMs,
   realFootageMs,
 } from "../timeline/transitionGeometry";
-import { defaultParamsFor, presetById, presetsOfKind } from "../fx/presetRegistry";
+import {
+  defaultParamsFor,
+  presetById,
+  presetsOfKind,
+} from "../fx/presetRegistry";
 import { renderParamControls } from "../fx/fxParamControls";
 import { GestureCommit } from "./gestureCommit";
 
@@ -116,7 +120,9 @@ export class OptionTransition extends LitElement {
    */
   private get transition(): TransitionElementType | null {
     const element = useTimelineStore.getState().timeline[this.elementId];
-    return element != null && element.filetype === "transition" ? element : null;
+    return element != null && element.filetype === "transition"
+      ? element
+      : null;
   }
 
   /** The longest this cut can support under the current alignment. */
@@ -146,9 +152,7 @@ export class OptionTransition extends LitElement {
     return ALIGNMENTS.map((entry) => ({
       ...entry,
       real:
-        from == null || to == null
-          ? 0
-          : realFootageMs(from, to, entry.value),
+        from == null || to == null ? 0 : realFootageMs(from, to, entry.value),
     }));
   }
 
@@ -272,11 +276,6 @@ export class OptionTransition extends LitElement {
             `,
           )}
         </div>
-        <div class="text-secondary mb-3" style="font-size: 10px;">
-          Where the transition sits relative to the cut. Where a clip has no
-          footage beyond it, that part holds a frozen frame — trim the clip back
-          first if you want real frames there.
-        </div>
 
         <label class="form-label text-secondary" style="font-size: 11px;">
           Duration
@@ -303,7 +302,9 @@ export class OptionTransition extends LitElement {
           />
         </div>
         <div
-          class="${clamped || frozen > 0 ? "text-warning" : "text-secondary"} mb-3"
+          class="${clamped || frozen > 0
+            ? "text-warning"
+            : "text-secondary"} mb-3"
           style="font-size: 10px;"
         >
           ${clamped

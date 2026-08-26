@@ -3,9 +3,13 @@
   "id": "com.cartcut.slide",
   "kind": "transition",
   "name": "Slide",
+  "category": "slide",
   "author": "Cartcut",
   "version": "1.0.0",
-  "render": { "type": "shader", "source": "shader.frag" },
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
   "params": [
     {
       "key": "direction",
@@ -14,10 +18,22 @@
       "uniform": "direction",
       "default": 0,
       "options": [
-        { "value": 0, "label": "Left" },
-        { "value": 1, "label": "Right" },
-        { "value": 2, "label": "Up" },
-        { "value": 3, "label": "Down" }
+        {
+          "value": 0,
+          "label": "Left"
+        },
+        {
+          "value": 1,
+          "label": "Right"
+        },
+        {
+          "value": 2,
+          "label": "Up"
+        },
+        {
+          "value": 3,
+          "label": "Down"
+        }
       ]
     }
   ]

@@ -3,8 +3,12 @@
   "id": "com.cartcut.cross-dissolve",
   "kind": "transition",
   "name": "Cross Dissolve",
+  "category": "dissolve",
   "author": "Cartcut",
   "version": "1.0.0",
-  "render": { "type": "shader", "source": "shader.frag" },
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
   "params": []
 }

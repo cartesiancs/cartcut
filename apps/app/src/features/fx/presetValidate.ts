@@ -32,9 +32,15 @@ import {
   entryPointOf,
   reservedUniformsFor,
 } from "./glslWrap";
-import { GLSL_TYPE_FOR_PARAM } from "./presetTypes";
+import {
+  GLSL_TYPE_FOR_PARAM,
+  MAX_PASSES,
+  categoriesFor,
+} from "./presetTypes";
 import type {
+  FxCategory,
   FxParamSpec,
+  FxPassSpec,
   FxPreset,
   FxRenderSpec,
   FxSelectOption,
@@ -365,6 +371,84 @@ function validatePrecompute(
   };
 }
 
+/**
+ * The pipeline a multi-pass effect declares.
+ *
+ * Bounded rather than open-ended: eight steps covers every optical effect we
+ * ship (the longest is bloom at four), and an unbounded list is a way for a
+ * downloaded preset to spend the whole frame budget in the driver.
+ */
+function validatePasses(
+  raw: unknown,
+  hasShader: (name: string) => boolean,
+  errors: string[],
+): FxPassSpec[] | null {
+  if (!Array.isArray(raw)) {
+    errors.push("render.passes: must be an array");
+    return null;
+  }
+  if (raw.length > MAX_PASSES) {
+    errors.push(
+      "render.passes: at most " + MAX_PASSES + " passes, got " + raw.length,
+    );
+    return null;
+  }
+
+  const passes: FxPassSpec[] = [];
+  for (const [index, entry] of raw.entries()) {
+    const at = "render.passes[" + index + "]";
+    if (!isPlainObject(entry)) {
+      errors.push(at + ": must be an object");
+      return null;
+    }
+    const { source, constants } = entry;
+    if (typeof source !== "string" || !isSafeRelativePath(source)) {
+      errors.push(at + ": `source` must be a path inside the preset");
+      return null;
+    }
+    if (!hasShader(source)) {
+      errors.push(at + ": `" + source + "` is not a shader file here");
+      return null;
+    }
+
+    const parsed: FxPassSpec = { source };
+    if (constants != null) {
+      if (!isPlainObject(constants)) {
+        errors.push(at + ": `constants` must be an object");
+        return null;
+      }
+      const out: Record<string, number | number[]> = {};
+      for (const [key, value] of Object.entries(constants)) {
+        if (!GLSL_IDENTIFIER.test(key)) {
+          errors.push(at + ": `" + key + "` is not a GLSL identifier");
+          return null;
+        }
+        if (typeof value === "number" && Number.isFinite(value)) {
+          out[key] = value;
+          continue;
+        }
+        // 2, 3 and 4 components cover vec2/vec3/vec4; anything else has no
+        // uniform setter to bind it to.
+        const isVector =
+          Array.isArray(value) &&
+          value.length >= 2 &&
+          value.length <= 4 &&
+          value.every((n) => typeof n === "number" && Number.isFinite(n));
+        if (!isVector) {
+          errors.push(
+            at + ": `" + key + "` must be a number or 2-4 numbers",
+          );
+          return null;
+        }
+        out[key] = value as number[];
+      }
+      parsed.constants = out;
+    }
+    passes.push(parsed);
+  }
+  return passes;
+}
+
 function validateRender(
   raw: unknown,
   kind: "effect" | "transition",
@@ -498,6 +582,22 @@ function validateRender(
     precompute = parsed;
   }
 
+  let passes: FxPassSpec[] | undefined;
+  if (raw.passes != null) {
+    // A transition mixes two inputs and hands back one image; there is no
+    // "previous pass output" for a second step to read, and no case that wants
+    // one. Refused rather than silently ignored.
+    if (kind === "transition") {
+      errors.push("render.passes: only an effect may declare passes");
+      return null;
+    }
+    const parsed = validatePasses(raw.passes, hasShader, errors);
+    if (parsed == null) {
+      return null;
+    }
+    passes = parsed;
+  }
+
   return {
     type: "shader",
     source,
@@ -505,6 +605,7 @@ function validateRender(
     ...(mesh != null ? { mesh } : {}),
     ...(textures.length > 0 ? { textures } : {}),
     ...(precompute != null ? { precompute } : {}),
+    ...(passes != null && passes.length > 0 ? { passes } : {}),
   };
 }
 
@@ -559,6 +660,20 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
   // Everything below needs a known kind to check against.
   if (kind !== "effect" && kind !== "transition") {
     return { ok: false, errors };
+  }
+
+  const allowedCategories = categoriesFor(kind);
+  const category = manifest.category;
+  if (
+    typeof category !== "string" ||
+    !allowedCategories.includes(category)
+  ) {
+    errors.push(
+      "category: must be one of " +
+        allowedCategories.join(", ") +
+        " for a " +
+        kind,
+    );
   }
 
   let thumbnailPath: string | null = null;
@@ -691,6 +806,7 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
       id: id as string,
       kind,
       name: name as string,
+      category: category as FxCategory,
       ...(typeof author === "string" ? { author } : {}),
       ...(typeof version === "string" ? { version } : {}),
       thumbnailPath,

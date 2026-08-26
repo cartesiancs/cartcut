@@ -6,6 +6,7 @@ import {
 import { isElementVisibleAtTime } from "../element/time";
 import { createMemo } from "../timeline/transform";
 import { renderElement } from "./element";
+import { effectTimeOf } from "./fx/effectTime";
 import { planFrame, type FramePlan } from "./fx/planFrame";
 import type { FxRuntime } from "./fx/runtime";
 import type { ElementRenderFunction } from "./type";
@@ -211,6 +212,9 @@ function paint(
             effect.mode === "overlay"
               ? fx.overlayFrameFor(elementId, effect.element, timeInMs)
               : null,
+            // Element-local and frame-snapped, so an animated effect runs the
+            // same in the preview as in the render. See `fx/effectTime.ts`.
+            effectTimeOf(effect.element, timeInMs, fx.fps),
           );
         }
         continue;

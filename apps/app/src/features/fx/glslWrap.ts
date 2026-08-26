@@ -72,8 +72,10 @@ export const RESERVED_TRANSITION_UNIFORMS = [
 /** The same, for an effect program. */
 export const RESERVED_EFFECT_UNIFORMS = [
   "source",
+  "original",
   "intensity",
   "resolution",
+  "time",
   "_uv",
   "_p",
 ] as const;
@@ -139,14 +141,25 @@ const EFFECT_PREAMBLE = [
   "precision highp float;",
   "",
   "varying vec2 _uv;",
+  "// What this pass reads: the frame beneath the effect on a single-pass",
+  "// preset, or the previous pass's output on a multi-pass one.",
   "uniform sampler2D source;",
+  "// The untouched frame, on every pass. A final combine pass needs both —",
+  "// bloom, halation and tilt-shift are all `mix(original, blurred, ...)`.",
+  "uniform sampler2D original;",
   "// 0..1, the element's `intensity` field scaled. Always present, whatever",
   "// the preset declares, so every effect can be faded without saying so.",
   "uniform float intensity;",
   "uniform vec2 resolution;",
+  "// Seconds since the effect started, snapped to the frame grid so the",
+  "// preview and the render animate identically. See `fx/effectTime.ts`.",
+  "uniform float time;",
   "",
   "vec4 getSourceColor(vec2 uv) {",
   "  return texture2D(source, uv);",
+  "}",
+  "vec4 getOriginalColor(vec2 uv) {",
+  "  return texture2D(original, uv);",
   "}",
 ].join("\n");
 

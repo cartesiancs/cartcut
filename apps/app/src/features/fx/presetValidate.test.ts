@@ -36,6 +36,7 @@ function baseManifest(over: Record<string, unknown> = {}) {
     id: "com.example.test",
     kind: "transition",
     name: "Test",
+    category: "dissolve",
     render: { type: "shader", source: "shader.frag" },
     params: [],
     ...over,
@@ -155,6 +156,7 @@ describe("render blocks", () => {
       payload(
         baseManifest({
           kind: "effect",
+          category: "texture",
           render: {
             type: "overlay",
             source: "rain.mp4",
@@ -504,7 +506,7 @@ describe("cross-checking the manifest against the shader", () => {
 
   it("wants `effect` from an effect and `transition` from a transition", () => {
     const asEffect = validatePreset(
-      payload(baseManifest({ kind: "effect" }), {
+      payload(baseManifest({ kind: "effect", category: "color" }), {
         sources: { "shader.frag": EFFECT_SOURCE },
       }),
     );
@@ -512,7 +514,7 @@ describe("cross-checking the manifest against the shader", () => {
 
     const mismatched = expectErrors(
       validatePreset(
-        payload(baseManifest({ kind: "effect" }), {
+        payload(baseManifest({ kind: "effect", category: "color" }), {
           sources: { "shader.frag": TRANSITION_SOURCE },
         }),
       ),
@@ -611,5 +613,161 @@ describe("porting a gl-transitions shader unchanged", () => {
     );
     expect(errors.join()).toContain("binds a float");
     expect(errors.join()).toContain("declares `direction` as vec2");
+  });
+});
+
+describe("multi-pass", () => {
+  const BLUR = "uniform vec2 dir;\nvec4 effect(vec2 uv){ return getSourceColor(uv); }";
+  const COMBINE = "vec4 effect(vec2 uv){ return mix(getOriginalColor(uv), getSourceColor(uv), 0.5); }";
+
+  function multiPass(passes: unknown, sources?: Record<string, string>) {
+    return payload(
+      baseManifest({
+        kind: "effect",
+        category: "blur",
+        render: { type: "shader", source: "combine.frag", passes },
+      }),
+      {
+        sources: sources ?? {
+          "combine.frag": COMBINE,
+          "blur.frag": BLUR,
+        },
+      },
+    );
+  }
+
+  it("accepts a chain and keeps its order", () => {
+    const result = validatePreset(
+      multiPass([
+        { source: "blur.frag", constants: { dir: [1, 0] } },
+        { source: "blur.frag", constants: { dir: [0, 1] } },
+      ]),
+    );
+    if (!result.ok) {
+      throw new Error(result.errors.join("\n"));
+    }
+    const render = result.preset.render;
+    if (render.type !== "shader") throw new Error("not a shader");
+    expect(render.passes).toEqual([
+      { source: "blur.frag", constants: { dir: [1, 0] } },
+      { source: "blur.frag", constants: { dir: [0, 1] } },
+    ]);
+    // `source` stays the final pass.
+    expect(render.source).toBe("combine.frag");
+  });
+
+  it("lets one shader file serve several passes", () => {
+    // The point of `constants`: a separable blur is the same code run twice on
+    // different axes, and without this it would be two near-identical files —
+    // exactly the duplication the catalogue rules forbid.
+    const result = validatePreset(
+      multiPass([
+        { source: "blur.frag", constants: { dir: [1, 0] } },
+        { source: "blur.frag", constants: { dir: [0, 1] } },
+      ]),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("accepts scalar and vector constants", () => {
+    const result = validatePreset(
+      multiPass([{ source: "blur.frag", constants: { dir: [1, 0], amount: 4 } }]),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects a constant that is not a number or 2-4 numbers", () => {
+    for (const bad of ["x", [1], [1, 2, 3, 4, 5], true, null]) {
+      const errors = expectErrors(
+        validatePreset(multiPass([{ source: "blur.frag", constants: { dir: bad } }])),
+      );
+      expect(errors.join()).toContain("must be a number or 2-4 numbers");
+    }
+  });
+
+  it("rejects a pass naming a file that is not a shader here", () => {
+    const errors = expectErrors(
+      validatePreset(multiPass([{ source: "nope.frag" }])),
+    );
+    expect(errors.join()).toContain("not a shader file here");
+  });
+
+  it("rejects a pass pointing outside the preset", () => {
+    const errors = expectErrors(
+      validatePreset(multiPass([{ source: "../../etc/passwd" }])),
+    );
+    expect(errors.join()).toContain("inside the preset");
+  });
+
+  it("bounds the pipeline length", () => {
+    const errors = expectErrors(
+      validatePreset(
+        multiPass(Array.from({ length: 9 }, () => ({ source: "blur.frag" }))),
+      ),
+    );
+    expect(errors.join()).toContain("at most 8 passes");
+  });
+
+  it("refuses passes on a transition", () => {
+    // A transition mixes two inputs and hands back one image; there is no
+    // previous-pass output for a second step to read.
+    const errors = expectErrors(
+      validatePreset(
+        payload(
+          baseManifest({
+            render: {
+              type: "shader",
+              source: "shader.frag",
+              passes: [{ source: "shader.frag" }],
+            },
+          }),
+        ),
+      ),
+    );
+    expect(errors.join()).toContain("only an effect may declare passes");
+  });
+
+  it("leaves a single-pass preset with no passes field at all", () => {
+    // Every preset written before multi-pass existed must keep taking the
+    // original code path.
+    const result = validatePreset(
+      payload(baseManifest({ kind: "effect", category: "color" }), {
+        sources: { "shader.frag": EFFECT_SOURCE },
+      }),
+    );
+    if (!result.ok) throw new Error(result.errors.join("\n"));
+    const render = result.preset.render;
+    if (render.type !== "shader") throw new Error("not a shader");
+    expect("passes" in render).toBe(false);
+  });
+});
+
+describe("category", () => {
+  it("is required", () => {
+    const { category: _dropped, ...without } = baseManifest();
+    const errors = expectErrors(validatePreset(payload(without)));
+    expect(errors.join()).toContain("category");
+  });
+
+  it("is checked against the right list for the kind", () => {
+    // `blur` is an effect category; a transition may not claim it.
+    const errors = expectErrors(
+      validatePreset(payload(baseManifest({ category: "blur" }))),
+    );
+    expect(errors.join()).toContain("for a transition");
+
+    const okAsEffect = validatePreset(
+      payload(baseManifest({ kind: "effect", category: "blur" }), {
+        sources: { "shader.frag": EFFECT_SOURCE },
+      }),
+    );
+    expect(okAsEffect.ok).toBe(true);
+  });
+
+  it("rejects one that is in neither list", () => {
+    const errors = expectErrors(
+      validatePreset(payload(baseManifest({ category: "sparkles" }))),
+    );
+    expect(errors.join()).toContain("must be one of");
   });
 });

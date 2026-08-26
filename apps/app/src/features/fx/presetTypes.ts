@@ -165,6 +165,26 @@ export type FxOverlayRender = {
   fit?: "cover" | "contain" | "stretch";
 };
 
+/**
+ * One step of a multi-pass effect.
+ *
+ * `source` reads the previous pass's output — or the untouched frame, on the
+ * first pass — and `original` is bound on every pass regardless, which is what
+ * lets a final step combine the two.
+ *
+ * `constants` exists so that one shader file can serve several passes. A
+ * separable gaussian blur is the same code run horizontally then vertically,
+ * and without per-pass constants that would mean two near-identical files —
+ * exactly the duplication the catalogue rules forbid.
+ */
+export type FxPassSpec = {
+  source: string;
+  constants?: Record<string, number | number[]>;
+};
+
+/** Longest pipeline a preset may declare. */
+export const MAX_PASSES = 8;
+
 export type FxShaderRender = {
   type: "shader";
   source: string;
@@ -172,9 +192,57 @@ export type FxShaderRender = {
   mesh?: MeshSpec;
   textures?: FxTextureSpec[];
   precompute?: PrecomputeSpec;
+  /**
+   * Steps run before `source`, which is always the final pass.
+   *
+   * Absent means a single pass, which is what every preset written before
+   * multi-pass existed declares — so they keep taking the original code path
+   * unchanged.
+   */
+  passes?: FxPassSpec[];
 };
 
 export type FxRenderSpec = FxOverlayRender | FxShaderRender;
+
+/**
+ * What a preset does, at the level a browsing user thinks in.
+ *
+ * A closed list per kind, and it is doing more work than grouping tiles. It is
+ * the skeleton of the anti-duplication rule: the catalogue is a table of
+ * (category, mechanism) cells with one preset in each, so "is this a duplicate
+ * of something we already ship?" becomes a question with a mechanical answer
+ * rather than a matter of taste.
+ */
+export const TRANSITION_CATEGORIES = [
+  "dissolve",
+  "wipe",
+  "slide",
+  "zoom",
+  "distort",
+  "pattern",
+  "3d",
+  "light",
+] as const;
+
+export const EFFECT_CATEGORIES = [
+  "color",
+  "tone",
+  "optical",
+  "blur",
+  "texture",
+  "stylize",
+  "light",
+] as const;
+
+export type TransitionCategory = (typeof TRANSITION_CATEGORIES)[number];
+export type EffectCategory = (typeof EFFECT_CATEGORIES)[number];
+export type FxCategory = TransitionCategory | EffectCategory;
+
+export function categoriesFor(
+  kind: "effect" | "transition",
+): readonly string[] {
+  return kind === "transition" ? TRANSITION_CATEGORIES : EFFECT_CATEGORIES;
+}
 
 /** A validated preset, ready to hand to the compositor. */
 export type FxPreset = {
@@ -182,6 +250,14 @@ export type FxPreset = {
   id: string;
   kind: "effect" | "transition";
   name: string;
+  /**
+   * Which section of the panel it appears under.
+   *
+   * Required. A catalogue of seventy presets in one flat grid is unusable, and
+   * an optional field would have been left off exactly by the presets that
+   * needed it most.
+   */
+  category: FxCategory;
   author?: string;
   version?: string;
   /** Absolute path to the tile image, or `null` when the preset ships none. */

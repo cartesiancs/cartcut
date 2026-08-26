@@ -3,9 +3,13 @@
   "id": "com.cartcut.film-grain",
   "kind": "effect",
   "name": "Film Grain",
+  "category": "texture",
   "author": "Cartcut",
   "version": "1.0.0",
-  "render": { "type": "shader", "source": "shader.frag" },
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
   "params": [
     {
       "key": "amount",

@@ -3,13 +3,22 @@
   "id": "com.cartcut.luma-wipe",
   "kind": "transition",
   "name": "Luma Wipe",
+  "category": "wipe",
   "author": "Cartcut",
   "version": "1.0.0",
   "render": {
     "type": "shader",
     "source": "shader.frag",
-    "textures": [{ "uniform": "lumaMask", "source": "mask.png" }],
-    "precompute": { "kind": "luma", "source": "mask.png" }
+    "textures": [
+      {
+        "uniform": "lumaMask",
+        "source": "mask.png"
+      }
+    ],
+    "precompute": {
+      "kind": "luma",
+      "source": "mask.png"
+    }
   },
   "params": [
     {

@@ -38,6 +38,7 @@ function payload(
         id: "com.example.a",
         kind: "transition",
         name: "A",
+        category: "dissolve",
         render: { type: "shader", source: "shader.frag" },
         params: [],
       },
@@ -157,6 +158,7 @@ describe("presetsOfKind", () => {
           id: "com.example.b",
           kind: "effect",
           name: "B",
+          category: "color",
           render: { type: "shader", source: "shader.frag" },
           params: [],
         },
@@ -187,6 +189,7 @@ describe("presetsOfKind", () => {
           id,
           kind: "transition",
           name,
+          category: "dissolve",
           render: { type: "shader", source: "shader.frag" },
           params: [],
         },
@@ -219,6 +222,7 @@ describe("defaultParamsFor", () => {
           id: "com.example.a",
           kind: "transition",
           name: "A",
+          category: "dissolve",
           render: { type: "shader", source: "shader.frag" },
           params: [
             {
