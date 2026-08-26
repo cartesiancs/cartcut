@@ -389,6 +389,11 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
           new Promise<void>((resolve) => {
             const element = timeline[meta.elementId] as VideoElementType;
             const video = meta.object;
+            // Deliberately NOT clamped to the trim window. Inside a transition
+            // this clip is being asked for frames past its out-point — or
+            // before its in-point — which is the whole mechanism, and
+            // `sourceTimeAt` extrapolates there correctly because it is linear.
+            // `maxTransitionMs` already guarantees the frames exist in the file.
             const want = sourceTimeAt(element, time) / 1000;
 
             video.playbackRate = speedOf(element);

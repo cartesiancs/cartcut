@@ -15,6 +15,7 @@ import log from "electron-log";
 import { shellLib } from "./lib/shell.js";
 import { electronInit } from "./lib/init.js";
 import { fontLib } from "./lib/font.js";
+import { presetLib } from "./lib/preset.js";
 import { ipcExtension } from "./ipc/ipcExtension.js";
 import { ipcStore } from "./ipc/ipcStore.js";
 import { ipcApp } from "./ipc/ipcApp.js";
@@ -145,6 +146,12 @@ ipcMain.handle("app:getAppInfo", ipcApp.getAppInfo);
 ipcMain.handle("font:getLists", fontLib.getFontList);
 ipcMain.handle("font:getLocalFontLists", fontLib.getLocalFontList);
 ipcMain.handle("font:getPresetFontLists", fontLib.getPresetFontList);
+
+// Enumeration only. `presetLib` never parses a manifest and never opens a path
+// the renderer chose — see its header for why the schema lives on the far side
+// of this boundary.
+ipcMain.handle("preset:list", presetLib.list);
+ipcMain.handle("preset:userDirectory", presetLib.userDirectory);
 
 ipcMain.handle("desktopCapturer:getSources", ipcDesktopCapturer.getSources);
 ipcMain.handle("overlayRecord:show", ipcOverlayRecord.show);

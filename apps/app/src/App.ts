@@ -1,6 +1,7 @@
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { IUIStore, uiStore } from "./states/uiStore";
+import { loadPresets } from "./features/fx/presetRegistry";
 import "./features/demo/warningDemoEnv";
 import "./features/gpt/chatSidebar";
 
@@ -20,6 +21,13 @@ export class App extends LitElement {
       this.resize = state.resize;
       this.topBarTitle = state.topBarTitle;
     });
+
+    // Effect and transition presets, read once at startup — the same shape as
+    // the font preset list. Un-awaited on purpose: nothing on screen depends on
+    // it, a project that references a preset renders as a pass-through until it
+    // arrives, and the first repaint after it lands picks it up. `loadPresets`
+    // never throws, so there is nothing here to catch.
+    void loadPresets();
 
     return this;
   }

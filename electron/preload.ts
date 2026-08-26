@@ -39,6 +39,18 @@ const request = {
     getLocalFontLists: () => ipcRenderer.invoke("font:getLocalFontLists"),
     getPresetFontLists: () => ipcRenderer.invoke("font:getPresetFontLists"),
   },
+  /**
+   * Effect and transition presets.
+   *
+   * `list` takes no arguments and there is no "read this file" call, which is
+   * deliberate: everything a preset needs is read during enumeration, so the
+   * renderer never hands the main process a path to open. See
+   * `electron/lib/preset.ts`.
+   */
+  preset: {
+    list: () => ipcRenderer.invoke("preset:list"),
+    userDirectory: () => ipcRenderer.invoke("preset:userDirectory"),
+  },
   project: {
     save: () => ipcRenderer.invoke("dialog:saveProject"),
   },

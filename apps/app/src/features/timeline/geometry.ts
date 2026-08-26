@@ -34,6 +34,24 @@ import { elementUtils } from "../../utils/element";
 /** Elements that carry a source window: video and audio. */
 export type DynamicElement = VideoElementType | AudioElementType;
 
+/**
+ * How far apart two edges may be and still count as touching, in ms.
+ *
+ * Not slop for the user's benefit — a clip dragged near another one still will
+ * not read as adjacent, because `moveClips` snaps to frames and a frame is far
+ * wider than this. It is float insurance: a sped-up clip's timeline span is
+ * `duration / speed`, so the two halves of a 1.5x split reconstruct to `offset`
+ * only to within a rounding error. Half a millisecond is under a thousandth of
+ * a frame at 60fps.
+ *
+ * Lives here rather than in `mergeOps` — where it began, as `MERGE_EPSILON_MS`
+ * — because two features now ask the same question of the same two numbers:
+ * "were these one clip a moment ago?" for a merge, and "is there a cut here?"
+ * for a transition. They must agree, or a cut that offers a transition could
+ * refuse to merge.
+ */
+export const ADJACENCY_EPSILON_MS = 0.5;
+
 /** Shortest source window a trim may leave behind, in source ms. */
 export const MIN_SOURCE_MS = 10;
 

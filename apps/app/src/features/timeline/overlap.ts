@@ -10,6 +10,11 @@
  * split produces and what re-joining two halves has to preserve.
  */
 
+// The no-overlap invariant has exactly one exception — a transition, which
+// straddles a cut by definition. `occupiesTrack` is defined next to the other
+// element guards so the repair pass can reach it without closing a cycle
+// through `tracks.ts`; its header explains the reasoning.
+import { occupiesTrack } from "../../@types/timeline";
 import { spanOf } from "./geometry";
 import { clipsOnTrack, type TimelineDocument } from "./tracks";
 
@@ -32,7 +37,7 @@ export function occupiedIntervals(
 ): Interval[] {
   const excluded = new Set(excludeIds);
   return clipsOnTrack(doc, trackId)
-    .filter(([id]) => !excluded.has(id))
+    .filter(([id, element]) => !excluded.has(id) && occupiesTrack(element))
     .map(([, element]) => {
       const { start, end } = spanOf(element);
       return { start, end };
@@ -48,7 +53,7 @@ export function findCollisions(
 ): string[] {
   const excluded = new Set(excludeIds);
   return clipsOnTrack(doc, trackId)
-    .filter(([id]) => !excluded.has(id))
+    .filter(([id, element]) => !excluded.has(id) && occupiesTrack(element))
     .filter(([, element]) => {
       const { start, end } = spanOf(element);
       return overlaps(span, { start, end });

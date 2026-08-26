@@ -5,6 +5,8 @@ import {
   renderTimelineAtTime,
   type TimelineRenderers,
 } from "../renderer/timeline";
+import { createExportFxRuntime } from "../renderer/fx/createRuntime";
+import { hasFxElements } from "../renderer/fx/planFrame";
 import { frameCount, frameTimeMs, inFlightWindow } from "./frames";
 import { createFrameProfiler } from "./profile";
 
@@ -71,6 +73,25 @@ export async function renderTimeline(
 
   const profiler = createFrameProfiler();
 
+  /**
+   * Effects and transitions for this export.
+   *
+   * Its own context and compositor, separate from the preview's: this one
+   * blocks on the GPU, because `captureFrame` reads the canvas back with
+   * `getImageData` immediately after compositing and that read must see the GL
+   * result. Sharing the preview's would also mean two frame loops writing the
+   * same drawing buffer.
+   *
+   * Built only when the timeline actually contains an effect or a transition.
+   * Creating one allocates a canvas and a WebGL context, and most exports need
+   * neither — so an export of an ordinary edit costs exactly what it did before
+   * this feature existed, down to the number of canvases it creates.
+   *
+   * `null` where there is no WebGL, and every frame then renders exactly as it
+   * did before this feature — no effects, no transitions, no crash.
+   */
+  const fx = hasFxElements(timeline) ? createExportFxRuntime(fps) : null;
+
   // Export never plays the `<audio>` handles — FFmpeg rebuilds the whole audio
   // graph from the timeline itself — so decoding them here buys nothing but
   // latency, memory, and a set of media elements nobody owns the state of.
@@ -129,6 +150,9 @@ export async function renderTimeline(
           backgroundColor,
           width,
           height,
+          undefined,
+          undefined,
+          fx,
         ),
       );
 
@@ -158,6 +182,10 @@ export async function renderTimeline(
     // Settle them before unwinding so no write is still running against a pipe
     // the caller is about to tear down.
     await Promise.allSettled(inFlight);
+    // Compiled programs, render targets and uploaded textures all belong to
+    // this export's context. An export that is cancelled halfway leaks every
+    // one of them without this.
+    fx?.compositor.dispose();
     profiler.report();
   }
 }

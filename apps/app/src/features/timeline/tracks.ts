@@ -19,8 +19,9 @@
 
 import type { Timeline, TimelineElement } from "../../@types/timeline";
 import { repairHierarchy } from "./hierarchy";
+import { repairTransitions } from "./transitionRepair";
 
-export type TrackKind = "video" | "audio" | "text" | "group";
+export type TrackKind = "video" | "audio" | "text" | "group" | "effect";
 
 export type TimelineTrack = {
   id: string;
@@ -44,6 +45,7 @@ const KIND_PREFIX: Record<TrackKind, string> = {
   audio: "A",
   text: "T",
   group: "G",
+  effect: "E",
 };
 
 /** Which kind of track a newly added element belongs on. */
@@ -60,6 +62,18 @@ export function defaultTrackKindFor(filetype: string): TrackKind {
   if (filetype === "group") {
     return "group";
   }
+  // An effect row's position in the stack is the whole point of it: an effect
+  // applies to everything painted beneath it, so dragging its track up or down
+  // is how the user chooses what it touches. Unlike a group row, this one
+  // carries real z-order meaning.
+  if (filetype === "effect") {
+    return "effect";
+  }
+  // A transition never reaches this function. It is not placed by
+  // `placeNewElement` — `transitionOps.addTransition` puts it on the track its
+  // two clips already share, because a transition that sat anywhere else would
+  // not be between them.
+  //
   // Images, GIFs and shapes are visual overlays and live on video tracks, as
   // they do in every NLE.
   return "video";
@@ -192,20 +206,26 @@ export function derivePriorities(doc: TimelineDocument): Timeline {
 }
 
 /**
- * Re-derives indices, names, priorities and parent links. Every mutation below
- * ends here.
+ * Re-derives indices, names, priorities, parent links and transitions. Every
+ * mutation below ends here.
  *
- * The hierarchy repair is imported lazily-shaped — as a plain function call, but
- * from a module that imports nothing from here at runtime — to keep the cycle
- * `tracks -> hierarchy -> tracks` type-only. `repairHierarchy` returns its input
- * by identity when no element carries a `parentId` at all, which is the case for
- * every project with no groups in it, so the cost on the common path is one pass
+ * Both repairs are imported lazily-shaped — as plain function calls, but from
+ * modules that import nothing from here at runtime — to keep the cycles
+ * `tracks -> hierarchy -> tracks` and `tracks -> transitionRepair -> tracks`
+ * type-only. Each returns its input by identity when the feature it guards is
+ * unused: no element carrying a `parentId`, no element being a transition. That
+ * is the case for most projects, so the cost on the common path is two passes
  * over the element keys.
+ *
+ * `repairTransitions` running here is what makes transitions cost nothing
+ * elsewhere. Deleting a clip, dragging one to another row, trimming one until a
+ * gap opens — every op in `clipOps.ts` already funnels through this function,
+ * so none of them needs to know transitions exist.
  */
 export function normalizeDocument(doc: TimelineDocument): TimelineDocument {
   const tracks = nameTracks(doc.tracks);
   const withTracks: TimelineDocument = { ...doc, tracks };
-  const repaired = repairHierarchy(withTracks);
+  const repaired = repairTransitions(repairHierarchy(withTracks));
   return { ...repaired, elements: derivePriorities(repaired) };
 }
 

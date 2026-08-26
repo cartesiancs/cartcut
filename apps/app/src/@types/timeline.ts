@@ -19,7 +19,9 @@ type TimelineElementType =
   | "shape"
   | "text"
   | "audio"
-  | "group";
+  | "group"
+  | "effect"
+  | "transition";
 
 type TimelinePlaced = {
   filetype: TimelineElementType;
@@ -343,6 +345,111 @@ export type GroupElementType = TimelinePlaced &
     name: string;
   };
 
+/**
+ * The value of one parameter a preset declared, keyed by the manifest's
+ * `param.key`.
+ *
+ * Deliberately loose. The manifest owns the schema — which keys exist, their
+ * types, their ranges — and `features/fx/presetValidate.ts` enforces it on the
+ * way in. Mirroring that structure in the type system here would mean this file
+ * knowing about presets, and would still not be checkable at compile time
+ * because the presets arrive from disk at runtime.
+ */
+export type FxParams = Record<
+  string,
+  number | string | boolean | number[]
+>;
+
+/**
+ * A full-frame effect: an adjustment layer.
+ *
+ * Applies to every pixel drawn *beneath* it — that is, to every element with a
+ * lower `priority` — so moving its track up or down is how the user chooses
+ * what it touches. This is the Premiere/After Effects convention and it is what
+ * makes "grade everything except the captions" expressible.
+ *
+ * `Visual` is deliberately NOT mixed in. An effect has no `width`, `height`,
+ * `location` or `rotation`: it always covers the project frame exactly, so
+ * those fields would have no value to hold — and if they existed the preview's
+ * resize handles and `hitTest` would grab them, offering the user a box to drag
+ * that means nothing.
+ *
+ * `OpacityAnimatable` is mixed in because fading an effect in and out is the
+ * one thing everybody wants, and the keyframe subsystem is keyed on
+ * `doc.elements[id]` throughout — so the curve editor, the timeline's diamond
+ * lane and the context menu all work on it for free.
+ */
+export type EffectElementType = TimelinePlaced &
+  OpacityAnimatable & {
+    filetype: "effect";
+    /**
+     * Which installed preset this is. A preset that is not installed renders as
+     * a pass-through rather than an error: the element and its `params` survive
+     * the round trip, so opening a project on a machine without the preset and
+     * saving it again loses nothing.
+     */
+    presetId: string;
+    params: FxParams;
+    /**
+     * 0-100. The effect's overall strength.
+     *
+     * A field rather than a `params` entry because it is the one parameter
+     * every effect has regardless of preset — the panel can offer it before it
+     * knows which preset is selected, and switching presets must not reset it.
+     */
+    intensity: number;
+    /**
+     * How an overlay preset's frames combine with what is beneath.
+     *
+     * Absent on shader presets, which do their own combining in GLSL. Named
+     * with the Canvas2D vocabulary because the built-in modes take the
+     * `globalCompositeOperation` fast path — see `renderer/fx/compositor.ts`.
+     */
+    blend?: GlobalCompositeOperation;
+  };
+
+/** Which end of the cut a transition is anchored to. */
+export type TransitionAlignment = "center" | "start" | "end";
+
+/**
+ * A transition between two adjacent clips on one track.
+ *
+ * The important thing this type does NOT do: it does not move, trim, or
+ * otherwise touch the two clips. `fromId` and `toId` keep their own
+ * `startTime` and `trim` exactly as they were, and this element is a window
+ * laid over the cut between them. Removing it restores the edit precisely, and
+ * undo needs no special case.
+ *
+ * That is also why it does not occupy the track — see
+ * `features/timeline/overlap.ts#occupiesTrack`. A transition straddles the cut
+ * by definition, so it overlaps both neighbours; counted as an occupant it
+ * would report a collision with the very clips it belongs to and every trim,
+ * drag and paste on that track would be refused.
+ *
+ * `fromId`/`toId` are stored rather than derived from track adjacency because
+ * the compositor and both export paths receive a bare element map with no
+ * tracks to look along — the same reason `priority` exists.
+ */
+export type TransitionElementType = TimelinePlaced & {
+  filetype: "transition";
+  presetId: string;
+  params: FxParams;
+  /** The outgoing clip. */
+  fromId: string;
+  /** The incoming clip. */
+  toId: string;
+  alignment: TransitionAlignment;
+  /**
+   * What the user asked for, when source handles forced a shorter window.
+   *
+   * Kept so the panel can say "2.0s requested, 0.8s available" instead of
+   * silently lying about the number, and so that trimming a neighbour back to
+   * free up handles can restore the original length rather than leaving the
+   * transition permanently shortened by a since-undone edit.
+   */
+  requestedDuration?: number;
+};
+
 export type AudioElementType = TimelinePlaced &
   Leveled & {
     filetype: "audio";
@@ -360,12 +467,17 @@ export type TimelineElement =
   | ShapeElementType
   | TextElementType
   | AudioElementType
-  | GroupElementType;
+  | GroupElementType
+  | EffectElementType
+  | TransitionElementType;
 
 /** Elements the compositor draws. Audio has no picture; a group draws nothing. */
 export type VisualTimelineElement = Exclude<
   TimelineElement,
-  AudioElementType | GroupElementType
+  | AudioElementType
+  | GroupElementType
+  | EffectElementType
+  | TransitionElementType
 >;
 
 export function isVisualTimelineElement(
@@ -376,7 +488,30 @@ export function isVisualTimelineElement(
   // learning they exist. Their transform still reaches their children, because
   // that is resolved by following `parentId` into the element map rather than
   // by anything the draw pass does.
-  return element.filetype !== "audio" && element.filetype !== "group";
+  //
+  // Effects and transitions are excluded for a different reason, and it matters
+  // that they are excluded HERE rather than given renderers. Both are whole-
+  // frame compositing operations: an effect reads the pixels already drawn
+  // beneath it, and a transition needs its two clips rendered to *separate*
+  // buffers before they can be mixed. Neither fits `ElementRenderFunction`,
+  // whose whole signature — `(ctx, id, element, t)`, drawing at the origin in
+  // element-local space — assumes an element paints itself onto whatever is
+  // there. `renderTimelineAtTime` handles them in dedicated passes instead.
+  //
+  // The practical payoff: `TimelineRenderers` is a mapped type over
+  // `VisualTimelineElement["filetype"]`, so leaving them out means the three
+  // renderer tables (preview, export, offscreen export) need no new entries and
+  // cannot be forgotten.
+  //
+  // This list is negative, so a filetype added later is visual by default and
+  // will fail at `renderers[element.filetype]` with an undefined call. Add the
+  // exclusion here at the same time as the type.
+  return (
+    element.filetype !== "audio" &&
+    element.filetype !== "group" &&
+    element.filetype !== "effect" &&
+    element.filetype !== "transition"
+  );
 }
 
 export function isGroupElement(
@@ -385,13 +520,52 @@ export function isGroupElement(
   return element.filetype === "group";
 }
 
+export function isEffectElement(
+  element: TimelineElement,
+): element is EffectElementType {
+  return element.filetype === "effect";
+}
+
+export function isTransitionElement(
+  element: TimelineElement,
+): element is TransitionElementType {
+  return element.filetype === "transition";
+}
+
+/**
+ * Whether this element claims a slot on its track.
+ *
+ * The one exception to "a track never holds overlapping clips", and it is
+ * defined once, here, so that it is a property of the element rather than a
+ * condition every op has to remember.
+ *
+ * A transition straddles the cut between two clips — that is what it is — so it
+ * necessarily overlaps both of them. Counted as an occupant it would report a
+ * collision with the very clips it belongs to, and every trim, drag, paste and
+ * placement on that track would be refused. It carries `startTime` and
+ * `duration` all the same, because the timeline has to lay its badge out and
+ * the repair pass has to find it.
+ *
+ * `features/timeline/overlap.ts` is the only consumer that matters:
+ * `clipsOnTrack` deliberately does NOT filter on this, because layout and
+ * repair both need to see transitions. Only occupancy arithmetic does.
+ *
+ * It lives in this module rather than in `overlap.ts` so that
+ * `transitionRepair.ts` can use it from inside `normalizeDocument` without
+ * closing a runtime cycle through `tracks.ts`.
+ */
+export function occupiesTrack(element: TimelineElement): boolean {
+  return element.filetype !== "transition";
+}
+
 /** Elements that carry an `animation` block at all. */
 export type AnimatableTimelineElement =
   | ImageElementType
   | VideoElementType
   | TextElementType
   | ShapeElementType
-  | GroupElementType;
+  | GroupElementType
+  | EffectElementType;
 
 export function canAnimate(
   element: TimelineElement,
@@ -399,6 +573,10 @@ export function canAnimate(
   // GIF and audio have no `animation` field, so offering a keyframe editor for
   // them opens a panel with nothing to edit. The old check gated on "static and
   // not text", which let GIF through and kept video out — backwards on both.
+  //
+  // A transition is absent on purpose and permanently: its progress is driven
+  // by the shader's `progress` uniform, derived from the playhead. Giving it
+  // keyframes would put a second, competing clock on the same value.
   return (
     element.filetype === "image" ||
     element.filetype === "video" ||
@@ -407,7 +585,9 @@ export function canAnimate(
     // A group exists to be animated — it has no other purpose. Including it
     // here is what gives it the curve editor, the timeline's keyframe lane and
     // the context menu, with no group-specific code in any of them.
-    element.filetype === "group"
+    element.filetype === "group" ||
+    // Opacity only — see `animatableProperties`.
+    element.filetype === "effect"
   );
 }
 
@@ -417,7 +597,15 @@ export type AnimatableProperty = "position" | "opacity" | "scale" | "rotation";
  * Which properties an element can actually animate.
  *
  * Shape is `OpacityAnimatable` only — its type carries no position, scale or
- * rotation tracks, so those keyframes would have nowhere to live.
+ * rotation tracks, so those keyframes would have nowhere to live. An effect is
+ * the same shape for a different reason: it has no position, scale or rotation
+ * at all, because it always covers the whole frame.
+ *
+ * An effect's `intensity` is deliberately not here. `AnimatableProperty` is a
+ * closed union that `keyframeOps`, the curve editor and the timeline's diamond
+ * lane all switch on, and the `animation` block is a fixed record of four
+ * named tracks — so a fifth animatable property is a change to the keyframe
+ * subsystem, not to this list. `intensity` stays static until that happens.
  */
 export function animatableProperties(
   element: TimelineElement,
@@ -425,7 +613,7 @@ export function animatableProperties(
   if (!canAnimate(element)) {
     return [];
   }
-  if (element.filetype === "shape") {
+  if (element.filetype === "shape" || element.filetype === "effect") {
     return ["opacity"];
   }
   return ["position", "opacity", "scale", "rotation"];

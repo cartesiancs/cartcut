@@ -945,7 +945,12 @@ export function siblingLane(lane: Lane): Lane {
  */
 export function emptyAnimation(filetype: string): any {
   const scalar = () => ({ isActivate: false, x: [], ax: [] });
-  if (filetype === "shape") {
+  // An effect is `OpacityAnimatable` for the same reason a shape is: its type
+  // carries no position, scale or rotation track, so those keyframes would have
+  // nowhere to live. It gets there differently, though — a shape's other
+  // properties are merely unimplemented, while an effect covers the whole frame
+  // by definition and has no position to animate.
+  if (filetype === "shape" || filetype === "effect") {
     return { opacity: scalar() };
   }
   if (

@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.luma-wipe",
+  "kind": "transition",
+  "name": "Luma Wipe",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag",
+    "textures": [{ "uniform": "lumaMask", "source": "mask.png" }],
+    "precompute": { "kind": "luma", "source": "mask.png" }
+  },
+  "params": [
+    {
+      "key": "softness",
+      "label": "Edge softness",
+      "type": "number",
+      "uniform": "softness",
+      "default": 0.1,
+      "min": 0.01,
+      "max": 0.5,
+      "step": 0.01
+    },
+    {
+      "key": "invert",
+      "label": "Invert mask",
+      "type": "bool",
+      "uniform": "invertMask",
+      "default": false
+    }
+  ]
+}

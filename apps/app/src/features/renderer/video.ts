@@ -1,25 +1,7 @@
 import type { VideoElementType } from "../../@types/timeline";
-import { isTimeInRange } from "../../utils/time";
-import { spanOf } from "../timeline/geometry";
 import { loadedAssetStore } from "../asset/loadedAssetStore";
 import { VideoFilterPipeline } from "./filter/videoPipeline";
 import type { ElementRenderFunction } from "./type";
-
-/**
- * Whether a video clip covers `timeInMs` on the timeline.
- *
- * This is `isElementVisibleAtTime` specialised to video: only text needs the
- * timeline (to resolve `parentKey`), so a clip can answer for itself. It
- * deliberately ignores `trim`, which addresses the *source file* for FFmpeg
- * seeking and says nothing about where the clip sits on the timeline.
- */
-function isVideoVisibleAtTime(
-  timeInMs: number,
-  videoElement: VideoElementType,
-): boolean {
-  const { start, end } = spanOf(videoElement);
-  return isTimeInRange(timeInMs, start, end);
-}
 
 export const renderVideoWithoutWait: ElementRenderFunction<VideoElementType> = (
   ctx,
@@ -59,16 +41,23 @@ const _renderVideo = (
     );
   }
 
-  // Draw nothing outside the clip's window. Audibility is deliberately NOT
-  // decided here: `renderTimelineAtTime` skips clips outside their window
-  // before this ever runs, so a "mute me now" branch in this file could never
-  // fire for the clip that needs it — which is why audio kept playing over a
-  // cut. `features/timeline/playback.ts` owns that, driven from the preview's
-  // draw path where every handle is visited whether it is on screen or not.
-  if (!isVideoVisibleAtTime(timelineCursor, videoElement)) {
-    return;
-  }
-
+  // There used to be a span check here, and removing it was necessary rather
+  // than tidy.
+  //
+  // It was already redundant: `renderTimelineAtTime` calls
+  // `isElementVisibleAtTime` before it calls any renderer, so a clip outside
+  // its window never reached this function. Transitions made it actively
+  // wrong. A cross-dissolve asks the outgoing clip to keep drawing *past* its
+  // out-point — that is the whole mechanism — and this check, which knew only
+  // `spanOf` and had no way to learn about the transition, answered "not
+  // visible" and drew nothing. The dissolve would have blended against black
+  // for its second half.
+  //
+  // Audibility is deliberately not decided here either, and never was: a
+  // "mute me now" branch in this file could not fire for the clip that needs
+  // it, which is why audio once kept playing over a cut.
+  // `features/timeline/playback.ts` owns that, driven from the preview's draw
+  // path where every handle is visited whether it is on screen or not.
   if (videoElement.filter.enable) {
     store.videoFilterPipeline.render(
       ctx,

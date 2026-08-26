@@ -22,10 +22,17 @@
  * this layer testable under `environment: "node"`.
  */
 
-import type { TimelineElement } from "../../@types/timeline";
+import type { Timeline, TimelineElement } from "../../@types/timeline";
 import { isTimeInRange } from "../../utils/time";
 import { gainOf, isAudibleElement } from "./audio";
-import { isDynamicElement, sourceTimeAt, spanOf, speedOf } from "./geometry";
+import {
+  isDynamicElement,
+  sourceDurationOf,
+  sourceTimeAt,
+  spanOf,
+  speedOf,
+} from "./geometry";
+import { isVisibleThroughTransition } from "./transitionWindow";
 import type { TimelineDocument } from "./tracks";
 
 /** Everything this layer touches on a `<video>` or `<audio>`. */
@@ -145,10 +152,30 @@ export const PLAYING_DRIFT_TOLERANCE_SEC = 0.25;
  */
 export const DRIFT_TOLERANCE_SEC = 0;
 
-/** Source window of a clip in seconds, for parking an out-of-window handle. */
-function sourceBoundsSec(element: TimelineElement): [number, number] {
+/**
+ * Source window of a clip in seconds, for parking an out-of-window handle.
+ *
+ * `extended` widens it to the whole source file, and is set only while a
+ * transition is holding this clip on screen. Without that the clamp would
+ * defeat the entire feature: a cross-dissolve asks the outgoing clip for frames
+ * *past* `trim.endTime`, and pinning the seek back to the trim boundary would
+ * show a frozen out-point for the length of the transition — the exact failure
+ * the handle arithmetic exists to avoid.
+ *
+ * The full source is still a real bound. `maxTransitionMs` never grants a
+ * window that runs off the end of the file, so in a well-formed document this
+ * clamp does not bite; it is here because a document also arrives from `.ngt`
+ * and from IPC, where the media may since have been replaced by a shorter file.
+ */
+function sourceBoundsSec(
+  element: TimelineElement,
+  extended: boolean,
+): [number, number] {
   if (!isDynamicElement(element)) {
     return [0, element.duration / 1000];
+  }
+  if (extended) {
+    return [0, sourceDurationOf(element) / 1000];
   }
   return [element.trim.startTime / 1000, element.trim.endTime / 1000];
 }
@@ -163,10 +190,27 @@ export function intentFor(
   element: TimelineElement,
   cursorMs: number,
   isPlaying: boolean,
+  /**
+   * The document, so a clip held on screen by a transition keeps rolling.
+   *
+   * Optional because every existing caller and every existing test passes
+   * three arguments, and a document with no transitions in it answers the same
+   * either way. `syncPlayback` always supplies it.
+   */
+  elements?: Timeline,
 ): PlaybackIntent {
   const { start, end } = spanOf(element);
-  const inWindow = isTimeInRange(cursorMs, start, end);
-  const [low, high] = sourceBoundsSec(element);
+  const ownWindow = isTimeInRange(cursorMs, start, end);
+  // Inside a transition the outgoing clip plays past its out-point and the
+  // incoming clip before its in-point. Both handles have to be rolling and
+  // positioned, or the blend mixes a frame that was never seeked.
+  const throughTransition =
+    !ownWindow &&
+    elements != null &&
+    isVisibleThroughTransition(cursorMs, elements, element);
+  const inWindow = ownWindow || throughTransition;
+
+  const [low, high] = sourceBoundsSec(element, throughTransition);
 
   const exact = isDynamicElement(element)
     ? sourceTimeAt(element, cursorMs) / 1000
@@ -292,7 +336,7 @@ export function syncPlayback(
       continue;
     }
 
-    const intent = intentFor(element, cursorMs, isPlaying);
+    const intent = intentFor(element, cursorMs, isPlaying, doc.elements);
     if (applyIntent(handle, intent, playingToleranceSec)) {
       seeks.push({ elementId, sourceTimeSec: intent.sourceTimeSec });
     }

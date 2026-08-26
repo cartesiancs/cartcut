@@ -150,4 +150,24 @@ describe("renderVideo", () => {
     renderVideoWithWait(ctx, "v", el, 100);
     expect(store.videoFilterPipeline).toBe(first);
   });
+
+  /**
+   * This renderer used to refuse to draw outside the clip's own span, which was
+   * redundant — `renderTimelineAtTime` filters before calling any renderer —
+   * and became wrong once transitions existed. A cross-dissolve asks the
+   * outgoing clip to keep drawing *past* its out-point, and the check knew only
+   * `spanOf` with no way to learn about the transition, so it drew nothing and
+   * the dissolve blended against black for its second half.
+   */
+  it("draws past the clip's own span, which a transition depends on", () => {
+    store.getElementVideo.mockReturnValue(loadedVideo());
+    const el = videoElement({ startTime: 0, duration: 1000 });
+    const { ctx, canvas } = scene(10, 10);
+
+    // Well past `spanEnd`. Deciding visibility is the compositor's job, and
+    // during a transition its answer is yes.
+    renderVideoWithoutWait(ctx, "v", el, 5000);
+
+    expect(pixel(canvas, 1, 1)).toEqual({ r: 255, g: 0, b: 0, a: 255 });
+  });
 });

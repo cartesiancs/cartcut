@@ -22,6 +22,9 @@ import {
   renderTimelineAtTime,
   type TimelineRenderers,
 } from "../renderer/timeline";
+import { previewFxRuntime } from "../renderer/fx/createRuntime";
+import { hasFxElements } from "../renderer/fx/planFrame";
+import { releaseUnusedOverlays } from "../renderer/fx/overlaySource";
 import { isVisualTimelineElement } from "../../@types/timeline";
 import { isTypingEvent } from "../../utils/typingTarget";
 import { hasEditorModifier } from "../../utils/platform";
@@ -532,6 +535,10 @@ export class PreviewCanvas extends LitElement {
         () => this.scheduleDraw(),
       );
 
+    // Handles for overlay effects that no longer exist. Without this, deleting
+    // an effect leaves a decoding `<video>` running for the rest of the session.
+    releaseUnusedOverlays(new Set(Object.keys(this.timeline)));
+
     renderTimelineAtTime(
       octx,
       this.timeline,
@@ -541,6 +548,14 @@ export class PreviewCanvas extends LitElement {
       frame.w,
       frame.h,
       { controlOutlineEnabled: false, activeElementId: "" },
+      undefined,
+      // Built only when the project actually has an effect or a transition in
+      // it — creating one allocates a WebGL context — and `null` where there is
+      // no WebGL at all. Either way the frame then draws exactly as it did
+      // before this feature existed.
+      hasFxElements(this.timeline)
+        ? previewFxRuntime(this.renderOption.fps, this.timelineControl.isPlay)
+        : null,
     );
 
     // 3. Everything, dimmed — this is what an overflowing element looks like.

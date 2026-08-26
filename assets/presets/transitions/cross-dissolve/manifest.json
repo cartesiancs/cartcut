@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.cross-dissolve",
+  "kind": "transition",
+  "name": "Cross Dissolve",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": { "type": "shader", "source": "shader.frag" },
+  "params": []
+}

@@ -16,20 +16,25 @@
  */
 
 import type { TimelineElement } from "../../@types/timeline";
-import { isDynamicElement, spanEnd, spanStart, speedOf } from "./geometry";
+import {
+  ADJACENCY_EPSILON_MS,
+  isDynamicElement,
+  spanEnd,
+  spanStart,
+  speedOf,
+} from "./geometry";
 import { normalizeDocument, type TimelineDocument } from "./tracks";
 
 /**
  * How far apart two edges may be and still count as touching, in ms.
  *
- * Not slop for the user's benefit — a clip dragged near another one still will
- * not merge, because `moveClips` snaps to frames and a frame is far wider than
- * this. It is float insurance: a sped-up clip's timeline span is
- * `duration / speed`, so the two halves of a 1.5× split reconstruct to
- * `offset` only to within a rounding error. Half a millisecond is under a
- * thousandth of a frame at 60fps.
+ * Now `geometry.ts#ADJACENCY_EPSILON_MS`, which carries the reasoning. It moved
+ * because transitions ask the same question of the same two numbers — "is there
+ * a cut here?" — and the two answers must agree, or a cut that offers a
+ * transition could refuse to merge. Re-exported under the old name so this
+ * module's own documentation keeps referring to something real.
  */
-export const MERGE_EPSILON_MS = 0.5;
+export const MERGE_EPSILON_MS = ADJACENCY_EPSILON_MS;
 
 function near(a: number, b: number): boolean {
   return Math.abs(a - b) <= MERGE_EPSILON_MS;
