@@ -7,6 +7,7 @@ import {
   presetFailures,
   presetsLoaded,
   presetsOfKind,
+  subscribePresets,
   userPresetDirectory,
 } from "./presetRegistry";
 import type { RawPresetPayload } from "./presetTypes";
@@ -255,5 +256,52 @@ describe("userPresetDirectory", () => {
   it("returns null with no bridge rather than throwing", async () => {
     delete (globalThis as any).electronAPI;
     expect(await userPresetDirectory()).toBeNull();
+  });
+});
+
+describe("subscribePresets", () => {
+  it("fires when a load completes, so the timeline can relabel", () => {
+    // The timeline paints long before `loadPresets` resolves, and an effect
+    // clip is labelled with its preset's name. Without this notification the
+    // clip showed its raw preset id until an unrelated edit repainted it.
+    const seen: number[] = [];
+    const stop = subscribePresets(() => seen.push(1));
+
+    installBridge([payload()]);
+    return loadPresets().then(() => {
+      expect(seen).toHaveLength(1);
+      stop();
+      return loadPresets().then(() => {
+        expect(seen).toHaveLength(1);
+      });
+    });
+  });
+
+  it("fires even when the load found nothing", () => {
+    // "No presets are installed" is as much a change from "not loaded yet" as
+    // finding some is, and a panel showing a spinner needs to hear it.
+    const seen: number[] = [];
+    const stop = subscribePresets(() => seen.push(1));
+    delete (globalThis as any).electronAPI;
+    return loadPresets().then(() => {
+      expect(seen).toHaveLength(1);
+      stop();
+    });
+  });
+
+  it("keeps notifying the others when one listener throws", () => {
+    const seen: string[] = [];
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const stopA = subscribePresets(() => {
+      throw new Error("bad subscriber");
+    });
+    const stopB = subscribePresets(() => seen.push("b"));
+
+    installBridge([]);
+    return loadPresets().then(() => {
+      expect(seen).toEqual(["b"]);
+      stopA();
+      stopB();
+    });
   });
 });

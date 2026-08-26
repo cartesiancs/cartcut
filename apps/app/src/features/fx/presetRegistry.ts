@@ -40,6 +40,37 @@ let failures: Array<{ id: string; dir: string; errors: string[] }> = [];
 let loaded = false;
 
 /**
+ * Notified when the set of installed presets changes.
+ *
+ * The registry is module state, not a store, and that is fine for everything
+ * that reads it in response to a click. It is not fine for the timeline: it
+ * paints once at startup, well before `loadPresets` resolves, and an effect
+ * clip's label comes from the preset's name. With nothing to tell it the
+ * presets had arrived, every effect on the timeline showed its raw preset id
+ * until some unrelated edit happened to trigger a repaint.
+ *
+ * A plain listener set rather than pulling in zustand: there is one event and
+ * no state to read from it.
+ */
+const listeners = new Set<() => void>();
+
+export function subscribePresets(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function notify(): void {
+  for (const listener of listeners) {
+    try {
+      listener();
+    } catch (error) {
+      // One bad subscriber must not stop the others from hearing about it.
+      console.error("preset: listener failed", error);
+    }
+  }
+}
+
+/**
  * The preload bridge, or `undefined` where there is none.
  *
  * Reached through `globalThis` rather than `window` on purpose. A bare `window`
@@ -117,6 +148,8 @@ export async function loadPresets(): Promise<void> {
       "preset: skipped " + failure.dir + "\n  " + failure.errors.join("\n  "),
     );
   }
+
+  notify();
 }
 
 /** Whether `loadPresets` has run. Distinguishes "none installed" from "not yet". */
@@ -186,4 +219,5 @@ export function __setPresetsForTesting(list: FxPreset[]): void {
   presets = new Map(list.map((preset) => [preset.id, preset]));
   failures = [];
   loaded = true;
+  notify();
 }

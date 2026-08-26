@@ -202,6 +202,12 @@ export class FxPresetBrowser extends LitElement {
         @click=${() => this.handleClick(preset)}
         @dragstart=${(e: DragEvent) => this.handleDragStart(e, preset)}
       >
+        <!--
+          A preset that ships no thumbnail gets a neutral grey plate. Grey
+          rather than a colour on purpose: it is a placeholder, and a tinted one
+          reads as artwork the preset chose, so the presets that do ship a real
+          thumbnail stop standing out from the ones that do not.
+        -->
         ${preset.thumbnailPath != null
           ? html`<img
               src=${"file://" + preset.thumbnailPath}
@@ -210,7 +216,7 @@ export class FxPresetBrowser extends LitElement {
             />`
           : html`<div
               style="width: 100%; aspect-ratio: 16/9; border-radius: 4px;
-                     background: linear-gradient(135deg, #3a2f52, #6a5a9a);
+                     background: #2b2c33;
                      display: flex; align-items: center; justify-content: center;"
             >
               <span class="material-symbols-outlined text-light icon-sm">

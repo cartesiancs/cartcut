@@ -47,6 +47,7 @@ import {
   defaultParamsFor,
   presetById,
   presetsOfKind,
+  subscribePresets,
 } from "../fx/presetRegistry";
 import {
   TRACK_PITCH,
@@ -357,6 +358,15 @@ export class elementTimelineCanvas extends LitElement {
     // made from somewhere else entirely, like the toolbar's merge narrowing the
     // selection or the agent's `select_clips`.
     selectionStore.subscribe(() => {
+      this.drawCanvas();
+    });
+
+    // An effect clip is labelled with its preset's *name*, which lives in the
+    // registry rather than in the document. The registry fills in
+    // asynchronously at startup, well after this canvas has already painted —
+    // so without this every effect on the timeline showed its raw preset id
+    // until some unrelated edit happened to trigger a repaint.
+    subscribePresets(() => {
       this.drawCanvas();
     });
 
