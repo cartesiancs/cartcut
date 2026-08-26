@@ -538,6 +538,19 @@ function validateRender(
       return null;
     }
     mesh = parsed;
+    // The host's vertex shader maps a screen-filling quad and nothing else. A
+    // grid or a cube handed to it draws a lattice of overlapping copies of the
+    // frame — which compiles, links and looks like a corrupt preset rather than
+    // like a missing field.
+    if (mesh.kind !== "quad" && vertex == null) {
+      errors.push(
+        "render.mesh: a `" +
+          mesh.kind +
+          "` mesh needs its own `render.vertex`, since only the preset knows" +
+          " what its geometry means",
+      );
+      return null;
+    }
   }
 
   const textures: { uniform: string; source: string }[] = [];
@@ -721,29 +734,45 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
   // "you declared `amount` but the shader never does" and seeing a preset that
   // silently ignores one of its own controls.
   if (render != null && render.type === "shader") {
-    const source = payload.sources[render.source] ?? "";
+    const sourceOf = (name: string) => payload.sources[name] ?? "";
     const entry = entryPointOf(kind);
 
-    if (!declaresEntryPoint(source, entry)) {
-      errors.push(
-        render.source + ": must define `vec4 " + entry + "(vec2 uv)`",
-      );
+    // Every fragment stage the compositor will compile, not only the last one.
+    // `programFor` wraps each pass with the same preamble and epilogue, so a
+    // pass missing the entry point is a link error at first paint rather than
+    // something the author is told about here.
+    const fragmentNames = [
+      ...(render.passes ?? []).map((pass) => pass.source),
+      render.source,
+    ];
+    // The vertex shader joins them for uniform bookkeeping but not for the
+    // entry point: a mesh preset reads its fold angle or rotation there, and
+    // GL links the two stages into one program with one set of uniforms.
+    const stageNames =
+      render.vertex != null ? [...fragmentNames, render.vertex] : fragmentNames;
+
+    for (const name of fragmentNames) {
+      if (!declaresEntryPoint(sourceOf(name), entry)) {
+        errors.push(name + ": must define `vec4 " + entry + "(vec2 uv)`");
+      }
     }
 
-    const declared = declaredUniforms(source);
+    const declared: Record<string, string> = {};
+    for (const name of stageNames) {
+      Object.assign(declared, declaredUniforms(sourceOf(name)));
+    }
 
     for (const param of params) {
       // The author declares parameter uniforms themselves — that is what keeps
       // an unmodified gl-transitions shader compiling, since the wrapper must
       // not emit a second declaration. See `glslWrap.ts`.
-      if (!declaresUniform(source, param.uniform)) {
+      if (!stageNames.some((n) => declaresUniform(sourceOf(n), param.uniform))) {
         errors.push(
-          render.source +
-            ": parameter `" +
+          "parameter `" +
             param.key +
             "` declares uniform `" +
             param.uniform +
-            "`, which the shader never declares",
+            "`, which no stage of this preset declares",
         );
         continue;
       }
@@ -755,8 +784,7 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
       const actual = declared[param.uniform];
       if (actual != null && actual !== expected) {
         errors.push(
-          render.source +
-            ": parameter `" +
+          "parameter `" +
             param.key +
             "` is `" +
             param.type +
@@ -780,17 +808,22 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
       ...reserved,
       ...params.map((param) => param.uniform),
       ...(render.textures ?? []).map((texture) => texture.uniform),
+      // A pass constant is bound by the compositor from the manifest, so a
+      // uniform only a `constants` entry feeds is covered — that is the whole
+      // point of one blur shader serving a horizontal and a vertical pass.
+      ...(render.passes ?? []).flatMap((pass) =>
+        Object.keys(pass.constants ?? {}),
+      ),
     ]);
     for (const name of Object.keys(declared)) {
       if (covered.has(name) || name.startsWith("gl_")) {
         continue;
       }
       errors.push(
-        render.source +
-          ": uniform `" +
+        "uniform `" +
           name +
-          "` is declared but no parameter or texture binds it, so it would" +
-          " read zero at run time",
+          "` is declared but no parameter, texture or pass constant binds it," +
+          " so it would read zero at run time",
       );
     }
   }

@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.radial-blur",
+  "kind": "effect",
+  "name": "Radial Blur",
+  "category": "blur",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
+  "params": [
+    {
+      "key": "amount",
+      "label": "Amount",
+      "type": "number",
+      "uniform": "amount",
+      "default": 0.15,
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.005
+    },
+    {
+      "key": "centre",
+      "label": "Centre",
+      "type": "point",
+      "uniform": "centre",
+      "default": [
+        0.5,
+        0.5
+      ],
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.01
+    },
+    {
+      "key": "mode",
+      "label": "Mode",
+      "type": "select",
+      "uniform": "mode",
+      "default": 0,
+      "options": [
+        {
+          "value": 0,
+          "label": "Zoom"
+        },
+        {
+          "value": 1,
+          "label": "Spin"
+        }
+      ]
+    }
+  ]
+}

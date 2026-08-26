@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "com.cartcut.wipe",
   "kind": "transition",
-  "name": "Wipe",
+  "name": "Linear Wipe",
   "category": "wipe",
   "author": "Cartcut",
   "version": "1.0.0",

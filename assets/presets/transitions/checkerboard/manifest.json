@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.checkerboard",
+  "kind": "transition",
+  "name": "Checkerboard",
+  "category": "pattern",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
+  "params": [
+    {
+      "key": "cells",
+      "label": "Cells across",
+      "type": "number",
+      "uniform": "cells",
+      "default": 8.0,
+      "min": 2.0,
+      "max": 40.0,
+      "step": 1.0
+    },
+    {
+      "key": "stagger",
+      "label": "Stagger",
+      "type": "number",
+      "uniform": "stagger",
+      "default": 0.5,
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.05
+    }
+  ]
+}

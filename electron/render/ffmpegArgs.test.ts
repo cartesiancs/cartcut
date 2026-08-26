@@ -8,6 +8,8 @@ import {
   frameFormatFor,
   gainOf,
   isAudible,
+  localFilePath,
+  missingInputs,
 } from "./ffmpegArgs";
 import { ffmpegWindow } from "../../apps/app/src/features/timeline/geometry";
 import {
@@ -903,5 +905,96 @@ describe("a detached clip in the export graph", () => {
       });
       expect(args[args.length - 1]).toBe(variant.videoDestination);
     }
+  });
+});
+
+describe("localFilePath", () => {
+  it("decodes a file:// URL back to a path", () => {
+    expect(localFilePath("file:///Users/me/clip.mp4")).toBe("/Users/me/clip.mp4");
+  });
+
+  it("undoes percent-encoding, which is why `fs` cannot take the URL", () => {
+    // This project's own asset folder has both: spaces and Hangul.
+    expect(localFilePath("file:///Users/me/Duty%20Calls.mp3")).toBe(
+      "/Users/me/Duty Calls.mp3",
+    );
+    expect(localFilePath("file:///Users/me/%ED%99%94%EB%A9%B4.mov")).toBe(
+      "/Users/me/화면.mov",
+    );
+  });
+
+  it("passes a plain path straight through", () => {
+    expect(localFilePath("/Users/me/clip.mp4")).toBe("/Users/me/clip.mp4");
+  });
+
+  it("hands back anything it cannot parse, so the caller calls it missing", () => {
+    // A URL naming a remote host has no local path at all, and `fileURLToPath`
+    // throws rather than inventing one.
+    const remote = "file://server/share/clip.mp4";
+    expect(localFilePath(remote)).toBe(remote);
+  });
+});
+
+describe("missingInputs", () => {
+  const present = "file:///Users/me/there.mp3";
+  const absent = "file:///Users/me/gone.mp4";
+  const exists = (path: string) => path === "/Users/me/there.mp3";
+
+  it("says nothing when every audible clip has its file", () => {
+    const timeline = {
+      a: { ...audioElement(), localpath: present },
+    } as Record<string, any>;
+    expect(missingInputs(timeline, exists)).toEqual([]);
+  });
+
+  it("names the file that is gone, as a path `fs` would accept", () => {
+    const timeline = {
+      a: { ...audioElement(), localpath: present },
+      b: { ...audioElement(), localpath: absent },
+    } as Record<string, any>;
+    expect(missingInputs(timeline, exists)).toEqual(["/Users/me/gone.mp4"]);
+  });
+
+  it("ignores clips that contribute no audio", () => {
+    // The v2 path takes video from the frame pipe, so a silent video's file is
+    // never opened by FFmpeg and its absence cannot fail the export. Reporting
+    // it would block an export that would have worked.
+    const timeline = {
+      v: { ...videoElement(), isExistAudio: false, localpath: absent },
+      i: { ...imageElement(), localpath: absent },
+      t: { ...textElement() },
+    } as Record<string, any>;
+    expect(missingInputs(timeline, exists)).toEqual([]);
+  });
+
+  it("reports a detached video's file only once it is silent no more", () => {
+    // `audioDetached` moves the sound onto its own clip, so the video stops
+    // being an input and the audio clip starts being one.
+    const detached = {
+      ...videoElement(),
+      isExistAudio: true,
+      audioDetached: true,
+      localpath: absent,
+    };
+    expect(missingInputs({ v: detached } as Record<string, any>, exists)).toEqual(
+      [],
+    );
+  });
+
+  it("lists each missing file once, however many clips use it", () => {
+    const timeline = {
+      a: { ...audioElement(), localpath: absent },
+      b: { ...audioElement(), localpath: absent },
+    } as Record<string, any>;
+    expect(missingInputs(timeline, exists)).toEqual(["/Users/me/gone.mp4"]);
+  });
+
+  it("catches an audible clip carrying no path at all", () => {
+    // FFmpeg would be handed `-i ""`, which fails the same way and reads even
+    // more mysteriously.
+    const timeline = {
+      a: { ...audioElement(), localpath: "" },
+    } as Record<string, any>;
+    expect(missingInputs(timeline, exists)).toEqual(["(no file)"]);
   });
 });

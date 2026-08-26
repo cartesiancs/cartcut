@@ -28,6 +28,8 @@
  *     sync with every second.
  */
 
+import { fileURLToPath } from "url";
+
 import {
   type ExportSettings,
   audioOutputArgs,
@@ -269,6 +271,63 @@ export function collectAudioInputs(timeline: Record<string, any>): AudioInput[] 
   }
 
   return inputs;
+}
+
+/**
+ * A clip's `localpath` as a filesystem path.
+ *
+ * The timeline stores these as `file://` URLs — that is what the renderer needs
+ * to load media — and FFmpeg happily opens either form, so the distinction
+ * never mattered until something wanted to *stat* one. `fs` does not know the
+ * `file:` protocol, and a URL also percent-encodes spaces and non-ASCII, both
+ * of which this project's own asset folder is full of.
+ */
+export function localFilePath(localpath: string): string {
+  if (!/^file:\/\//i.test(localpath)) {
+    return localpath;
+  }
+  try {
+    return fileURLToPath(localpath);
+  } catch {
+    // Malformed enough that no interpretation is safe. Handing it back
+    // unchanged means the caller reports it as missing, which it is.
+    return localpath;
+  }
+}
+
+/**
+ * Audio inputs whose files are not there, as filesystem paths.
+ *
+ * `exists` is a parameter so this stays pure and testable — the same reason
+ * every other predicate in this file takes its data rather than fetching it.
+ *
+ * Worth checking up front because of how badly the alternative fails. FFmpeg
+ * cannot open a missing input, so it exits during startup — but the renderer
+ * has already been told the session started and draws its way through the whole
+ * timeline before anything notices. What the user finally sees is "FFmpeg
+ * exited with code 1", preceded by one stack trace for every frame still in
+ * flight, because each queued `sendFrame` rejects against the closed pipe at
+ * once. None of it names the file.
+ */
+export function missingInputs(
+  timeline: Record<string, any>,
+  exists: (path: string) => boolean,
+): string[] {
+  const missing = new Set<string>();
+
+  for (const input of collectAudioInputs(timeline)) {
+    if (typeof input.localpath !== "string" || input.localpath === "") {
+      // An audible clip with no file at all. FFmpeg would be handed `-i ""`.
+      missing.add("(no file)");
+      continue;
+    }
+    const path = localFilePath(input.localpath);
+    if (!exists(path)) {
+      missing.add(path);
+    }
+  }
+
+  return [...missing];
 }
 
 /** The complete argument vector for the export process. */

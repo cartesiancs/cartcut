@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lift-gamma-gain",
+  "kind": "effect",
+  "name": "Lift Gamma Gain",
+  "category": "color",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
+  "params": [
+    {
+      "key": "lift",
+      "label": "Lift (shadows)",
+      "type": "color",
+      "uniform": "lift",
+      "default": "#78808f"
+    },
+    {
+      "key": "gamma",
+      "label": "Gamma (midtones)",
+      "type": "color",
+      "uniform": "gamma",
+      "default": "#808080"
+    },
+    {
+      "key": "gain",
+      "label": "Gain (highlights)",
+      "type": "color",
+      "uniform": "gain",
+      "default": "#8b8476"
+    }
+  ]
+}

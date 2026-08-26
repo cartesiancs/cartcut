@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.duotone",
+  "kind": "effect",
+  "name": "Duotone",
+  "category": "color",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
+  "params": [
+    {
+      "key": "dark",
+      "label": "Dark",
+      "type": "color",
+      "uniform": "dark",
+      "default": "#141a3a"
+    },
+    {
+      "key": "light",
+      "label": "Light",
+      "type": "color",
+      "uniform": "light",
+      "default": "#ffd166"
+    },
+    {
+      "key": "contrast",
+      "label": "Contrast",
+      "type": "number",
+      "uniform": "contrast",
+      "default": 1.0,
+      "min": 0.2,
+      "max": 3.0,
+      "step": 0.05
+    }
+  ]
+}

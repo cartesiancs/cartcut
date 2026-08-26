@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.pixelate",
+  "kind": "effect",
+  "name": "Pixelate",
+  "category": "stylize",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
+  "params": [
+    {
+      "key": "size",
+      "label": "Block size",
+      "type": "number",
+      "uniform": "blockSize",
+      "default": 16.0,
+      "min": 2.0,
+      "max": 160.0,
+      "step": 1.0
+    },
+    {
+      "key": "average",
+      "label": "Average the block",
+      "type": "bool",
+      "uniform": "average",
+      "default": true
+    }
+  ]
+}

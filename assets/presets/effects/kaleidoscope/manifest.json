@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.kaleidoscope",
+  "kind": "effect",
+  "name": "Kaleidoscope",
+  "category": "stylize",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
+  "params": [
+    {
+      "key": "segments",
+      "label": "Segments",
+      "type": "number",
+      "uniform": "segments",
+      "default": 6.0,
+      "min": 2.0,
+      "max": 24.0,
+      "step": 1.0
+    },
+    {
+      "key": "rotation",
+      "label": "Rotation",
+      "type": "number",
+      "uniform": "rotation",
+      "default": 0.0,
+      "min": -3.15,
+      "max": 3.15,
+      "step": 0.05
+    },
+    {
+      "key": "zoom",
+      "label": "Zoom",
+      "type": "number",
+      "uniform": "zoom",
+      "default": 1.0,
+      "min": 0.2,
+      "max": 4.0,
+      "step": 0.05
+    },
+    {
+      "key": "centre",
+      "label": "Centre",
+      "type": "point",
+      "uniform": "centre",
+      "default": [
+        0.5,
+        0.5
+      ],
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.01
+    }
+  ]
+}

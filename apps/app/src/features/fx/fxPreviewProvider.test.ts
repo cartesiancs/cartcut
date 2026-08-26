@@ -53,12 +53,15 @@ describe("progressForStep", () => {
 });
 
 describe("RESTING_STEP", () => {
-  it("is mid-transition", () => {
-    // The only place a dissolve, a wipe and a slide look different from one
-    // another — at either end every transition is just one of the two frames.
+  it("is under way but clear of the midpoint", () => {
+    // Under way, because at either end every transition is just one of the two
+    // frames and the tiles would be indistinguishable. Clear of the midpoint,
+    // because that is exactly where Dip to Colour is solid black, Flash is
+    // solid white and Card Flip is edge-on and draws nothing — three tiles that
+    // would each look like a bug.
     const p = progressForStep(RESTING_STEP);
-    expect(p).toBeGreaterThan(0.35);
-    expect(p).toBeLessThan(0.65);
+    expect(p).toBeGreaterThan(0.2);
+    expect(p).toBeLessThan(0.42);
   });
 
   it("is a real step", () => {

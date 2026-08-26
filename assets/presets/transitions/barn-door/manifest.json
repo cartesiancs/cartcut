@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.barn-door",
+  "kind": "transition",
+  "name": "Barn Door",
+  "category": "wipe",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
+  "params": [
+    {
+      "key": "vertical",
+      "label": "Vertical",
+      "type": "bool",
+      "uniform": "vertical",
+      "default": false
+    },
+    {
+      "key": "softness",
+      "label": "Edge softness",
+      "type": "number",
+      "uniform": "softness",
+      "default": 0.03,
+      "min": 0.0,
+      "max": 0.5,
+      "step": 0.01
+    }
+  ]
+}

@@ -57,11 +57,15 @@ export const PREVIEW_STEPS = 24;
 /**
  * The step shown when a tile is not hovered.
  *
- * Mid-transition, because that is the only place a dissolve, a wipe and a
- * slide look different from each other — at 0 or 1 every transition is just
- * one of the two frames.
+ * Part-way through, because at 0 or 1 every transition is just one of the two
+ * frames and they would all look identical. Not the *midpoint*, though, which
+ * is where a whole class of them is momentarily at its least informative: Dip
+ * to Colour is exactly at its dip colour there and renders solid black, Flash
+ * is blown to solid white, and Card Flip is edge-on and renders nothing at all.
+ * A third of the way in, all three show what they do, and nothing that reads
+ * well at the midpoint reads worse here.
  */
-export const RESTING_STEP = Math.floor(PREVIEW_STEPS / 2);
+export const RESTING_STEP = Math.round((PREVIEW_STEPS - 1) / 3);
 
 /**
  * Frames kept across all presets.

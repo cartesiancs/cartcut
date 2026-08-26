@@ -1,7 +1,9 @@
+import { existsSync } from "fs";
 import { unlink } from "fs/promises";
+import { basename } from "path";
 import { mainWindow } from "../main";
 import { ffmpegConfig } from "../lib/ffmpeg";
-import { RenderOptions } from "./ffmpegArgs";
+import { RenderOptions, missingInputs } from "./ffmpegArgs";
 import {
   cancelSession,
   ExportSession,
@@ -72,6 +74,25 @@ export const ipcRenderV2 = {
     if (session != null && !session.finished) {
       throw new Error("An export is already running");
     }
+
+    // Before the spawn, and `start` is awaited by the renderer, so this reaches
+    // the user as a refusal to begin rather than as a failure at the end.
+    //
+    // FFmpeg cannot open a missing input, so it exits during startup — but by
+    // then the renderer has been handed a session id and draws the entire
+    // timeline before anything notices. The report that eventually arrives is
+    // "FFmpeg exited with code 1", one stack trace per frame still in flight,
+    // and no mention of which file. See `missingInputs`.
+    const missing = missingInputs(timeline, existsSync);
+    if (missing.length > 0) {
+      const names = missing.map((path) => basename(path)).join(", ");
+      throw new Error(
+        missing.length === 1
+          ? `Cannot export: the source file ${names} is missing. Relink or remove that clip and try again.`
+          : `Cannot export: ${missing.length} source files are missing — ${names}. Relink or remove those clips and try again.`,
+      );
+    }
+
     const started = startFFmpegProcess(options, timeline);
     return {
       sessionId: started.id,

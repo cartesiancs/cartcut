@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lens-distortion",
+  "kind": "effect",
+  "name": "Lens Distortion",
+  "category": "optical",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
+  "params": [
+    {
+      "key": "k1",
+      "label": "Distortion",
+      "type": "number",
+      "uniform": "k1",
+      "default": 0.25,
+      "min": -1.0,
+      "max": 1.0,
+      "step": 0.01
+    },
+    {
+      "key": "k2",
+      "label": "Edge distortion",
+      "type": "number",
+      "uniform": "k2",
+      "default": 0.0,
+      "min": -1.0,
+      "max": 1.0,
+      "step": 0.01
+    },
+    {
+      "key": "zoom",
+      "label": "Scale",
+      "type": "number",
+      "uniform": "zoom",
+      "default": 1.0,
+      "min": 0.5,
+      "max": 2.0,
+      "step": 0.01
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.invert",
+  "kind": "effect",
+  "name": "Invert",
+  "category": "tone",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
+  "params": [
+    {
+      "key": "mode",
+      "label": "Mode",
+      "type": "select",
+      "uniform": "mode",
+      "default": 0,
+      "options": [
+        {
+          "value": 0,
+          "label": "Colour"
+        },
+        {
+          "value": 1,
+          "label": "Luminance only"
+        },
+        {
+          "value": 2,
+          "label": "Hue only"
+        }
+      ]
+    }
+  ]
+}

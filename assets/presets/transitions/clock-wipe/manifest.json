@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.clock-wipe",
+  "kind": "transition",
+  "name": "Clock Wipe",
+  "category": "wipe",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
+  "params": [
+    {
+      "key": "startAngle",
+      "label": "Start angle",
+      "type": "number",
+      "uniform": "startAngle",
+      "default": 0.0,
+      "min": -3.15,
+      "max": 3.15,
+      "step": 0.05
+    },
+    {
+      "key": "softness",
+      "label": "Edge softness",
+      "type": "number",
+      "uniform": "softness",
+      "default": 0.02,
+      "min": 0.0,
+      "max": 0.3,
+      "step": 0.01
+    }
+  ]
+}

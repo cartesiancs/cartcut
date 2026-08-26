@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.temperature",
+  "kind": "effect",
+  "name": "Temperature",
+  "category": "color",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
+  "params": [
+    {
+      "key": "temperature",
+      "label": "Temperature",
+      "type": "number",
+      "uniform": "temperature",
+      "default": 0.35,
+      "min": -1.0,
+      "max": 1.0,
+      "step": 0.01
+    },
+    {
+      "key": "tint",
+      "label": "Tint",
+      "type": "number",
+      "uniform": "tint",
+      "default": 0.0,
+      "min": -1.0,
+      "max": 1.0,
+      "step": 0.01
+    }
+  ]
+}

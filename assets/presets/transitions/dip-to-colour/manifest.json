@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "id": "com.cartcut.dip-to-black",
+  "id": "com.cartcut.dip-to-colour",
   "kind": "transition",
-  "name": "Dip to Black",
+  "name": "Dip to Colour",
   "category": "dissolve",
   "author": "Cartcut",
   "version": "1.0.0",

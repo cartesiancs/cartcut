@@ -96,14 +96,38 @@ export function gridGeometry(cols: number, rows: number): Geometry {
   };
 }
 
-/** A unit cube, for rotation transitions. Two faces carry the two clips. */
+/** How far the second face is displaced along x. See `cubeGeometry`. */
+export const CUBE_FACE_OFFSET = 4;
+
+/**
+ * Two faces, for rotation transitions.
+ *
+ * Only two are emitted: a cube turning between clips never reveals the other
+ * four, and drawing them would need four more textures nobody has.
+ *
+ * The awkward part is telling them apart. `_p` is the only attribute a preset's
+ * vertex shader gets, and two identical quads are indistinguishable inside it —
+ * so the second face is emitted **displaced by `CUBE_FACE_OFFSET` along x**, far
+ * outside the first face's range, and the vertex shader recovers both the face
+ * index and the original coordinate from it:
+ *
+ * ```glsl
+ * float face = step(2.0, _p.x);           // 0 = from, 1 = to
+ * vec2 corner = vec2(_p.x - face * 4.0, _p.y);   // back to -1..1
+ * ```
+ *
+ * Which is why these positions are *authoring* space rather than clip space: a
+ * mesh preset's vertex shader builds `gl_Position` itself, so the attribute is
+ * only ever the data it starts from.
+ */
 export function cubeGeometry(): Geometry {
-  // Only the two faces a transition shows are emitted: a cube rotating between
-  // clips never reveals the other four, and drawing them would need four more
-  // textures nobody has.
-  const positions = new Float32Array([
-    -1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1,
-  ]);
+  const face = [-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1];
+  const positions = new Float32Array(face.length * 2);
+  positions.set(face, 0);
+  for (let i = 0; i < face.length; i += 2) {
+    positions[face.length + i] = face[i] + CUBE_FACE_OFFSET;
+    positions[face.length + i + 1] = face[i + 1];
+  }
   return { positions, indices: null, needsDepth: true };
 }
 

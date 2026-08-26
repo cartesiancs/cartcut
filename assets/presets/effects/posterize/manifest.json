@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.posterize",
+  "kind": "effect",
+  "name": "Posterize",
+  "category": "tone",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
+  "params": [
+    {
+      "key": "levels",
+      "label": "Levels",
+      "type": "number",
+      "uniform": "levels",
+      "default": 6.0,
+      "min": 2.0,
+      "max": 32.0,
+      "step": 1.0
+    },
+    {
+      "key": "perceptual",
+      "label": "Perceptual steps",
+      "type": "bool",
+      "uniform": "perceptual",
+      "default": true
+    }
+  ]
+}

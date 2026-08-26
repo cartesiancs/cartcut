@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.split",
+  "kind": "transition",
+  "name": "Split",
+  "category": "slide",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
+  "params": [
+    {
+      "key": "vertical",
+      "label": "Vertical",
+      "type": "bool",
+      "uniform": "vertical",
+      "default": false
+    }
+  ]
+}

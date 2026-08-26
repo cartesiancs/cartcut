@@ -490,7 +490,108 @@ describe("cross-checking the manifest against the shader", () => {
         ),
       ),
     );
-    expect(errors.join()).toContain("which the shader never declares");
+    expect(errors.join()).toContain("no stage of this preset declares");
+  });
+
+  it("accepts a uniform only the vertex shader reads", () => {
+    // The reason the check spans stages rather than reading `render.source`
+    // alone. A mesh preset does its work in the vertex shader — a cube's
+    // `direction` chooses which way it turns, and the fragment stage has no
+    // use for it. Requiring a decorative re-declaration there was the previous
+    // behaviour, and it is exactly the kind of rule an author cannot guess.
+    const result = validatePreset(
+      payload(
+        baseManifest({
+          render: {
+            type: "shader",
+            source: "shader.frag",
+            vertex: "shader.vert",
+            mesh: { kind: "cube" },
+          },
+          params: [
+            {
+              key: "direction",
+              label: "Direction",
+              type: "number",
+              uniform: "direction",
+              default: 0,
+              min: 0,
+              max: 3,
+            },
+          ],
+        }),
+        {
+          sources: {
+            "shader.frag": TRANSITION_SOURCE,
+            "shader.vert": [
+              "attribute vec2 _p;",
+              "varying vec2 _uv;",
+              "uniform float direction;",
+              "void main() {",
+              "  gl_Position = vec4(_p * direction, 0.0, 1.0);",
+              "  _uv = _p * 0.5 + 0.5;",
+              "}",
+            ].join("\n"),
+          },
+        },
+      ),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("still refuses a vertex uniform nothing binds", () => {
+    // The reverse check has to span stages too, or widening the first one would
+    // have opened a hole: a vertex shader reading an unbound uniform gets zero
+    // and silently collapses the geometry.
+    const errors = expectErrors(
+      validatePreset(
+        payload(
+          baseManifest({
+            render: {
+              type: "shader",
+              source: "shader.frag",
+              vertex: "shader.vert",
+              mesh: { kind: "cube" },
+            },
+          }),
+          {
+            sources: {
+              "shader.frag": TRANSITION_SOURCE,
+              "shader.vert": [
+                "attribute vec2 _p;",
+                "varying vec2 _uv;",
+                "uniform float twist;",
+                "void main() {",
+                "  gl_Position = vec4(_p * twist, 0.0, 1.0);",
+                "  _uv = _p * 0.5 + 0.5;",
+                "}",
+              ].join("\n"),
+            },
+          },
+        ),
+      ),
+    );
+    expect(errors.join()).toContain("`twist`");
+  });
+
+  it("wants a vertex shader from any mesh that is not a quad", () => {
+    // The host's vertex shader maps a screen-filling quad. Handed a lattice it
+    // draws overlapping copies of the frame — which compiles and links, so
+    // nothing downstream would report it.
+    const errors = expectErrors(
+      validatePreset(
+        payload(
+          baseManifest({
+            render: {
+              type: "shader",
+              source: "shader.frag",
+              mesh: { kind: "grid", cols: 8, rows: 8 },
+            },
+          }),
+        ),
+      ),
+    );
+    expect(errors.join()).toContain("render.vertex");
   });
 
   it("rejects a shader with no entry point", () => {

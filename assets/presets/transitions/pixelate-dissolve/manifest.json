@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.pixelate-dissolve",
+  "kind": "transition",
+  "name": "Pixelate Dissolve",
+  "category": "distort",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
+  "params": [
+    {
+      "key": "blocks",
+      "label": "Coarsest blocks",
+      "type": "number",
+      "uniform": "blocks",
+      "default": 14.0,
+      "min": 2.0,
+      "max": 80.0,
+      "step": 1.0
+    }
+  ]
+}

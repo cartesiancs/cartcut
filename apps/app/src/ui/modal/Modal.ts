@@ -30,9 +30,7 @@ export class ModalList extends LitElement {
               ${items.map(
                 (spec) => html`
                   <tr>
-                    <th scope="row">
-                      ${shortcutLabelWithAlternates(spec.id)}
-                    </th>
+                    <th scope="row">${shortcutLabelWithAlternates(spec.id)}</th>
                     <td class="text-secondary">${spec.description}</td>
                   </tr>
                 `,
@@ -75,9 +73,9 @@ export class ModalList extends LitElement {
    * running to completion. It now stops the export as well.
    */
   _handleClickCancelRender() {
-    const control = document.querySelector(
-      "control-ui-render",
-    ) as (HTMLElement & { cancelExport?: () => void }) | null;
+    const control = document.querySelector("control-ui-render") as
+      | (HTMLElement & { cancelExport?: () => void })
+      | null;
     control?.cancelExport?.();
   }
 
@@ -187,10 +185,7 @@ export class ModalList extends LitElement {
         >
       </dds-modal>
 
-      <dds-modal
-        modal-id="progressError"
-        modal-title="랜더링중 문제가 발생했어요"
-      >
+      <dds-modal modal-id="progressError" modal-title="Error">
         <dds-content>
           <div class="mb-3">
             <p id="progressErrorMsg" class="text-secondary"></p>
@@ -200,7 +195,7 @@ export class ModalList extends LitElement {
           button-color="btn-light"
           button-text-color="text-dark"
           is-dismiss="true"
-          >닫기</dds-modal-button
+          >Close</dds-modal-button
         >
       </dds-modal>
 

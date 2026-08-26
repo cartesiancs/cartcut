@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.scanlines",
+  "kind": "effect",
+  "name": "Scanlines",
+  "category": "texture",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "shader",
+    "source": "shader.frag"
+  },
+  "params": [
+    {
+      "key": "lines",
+      "label": "Lines",
+      "type": "number",
+      "uniform": "lines",
+      "default": 240.0,
+      "min": 20.0,
+      "max": 1080.0,
+      "step": 10.0
+    },
+    {
+      "key": "depth",
+      "label": "Depth",
+      "type": "number",
+      "uniform": "depth",
+      "default": 0.4,
+      "min": 0.0,
+      "max": 1.0,
+      "step": 0.01
+    },
+    {
+      "key": "roll",
+      "label": "Roll speed",
+      "type": "number",
+      "uniform": "roll",
+      "default": 0.0,
+      "min": -4.0,
+      "max": 4.0,
+      "step": 0.1
+    }
+  ]
+}

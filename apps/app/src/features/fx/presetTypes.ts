@@ -119,6 +119,20 @@ export const GLSL_TYPE_FOR_PARAM: Record<FxParamType, string> = {
  * at all: a page curl needs a subdivided grid to bend, and a cube rotation
  * needs faces and a depth buffer. Declaring the mesh here rather than shipping
  * vertex data keeps the preset declarative.
+ *
+ * Anything other than `quad` means the preset must also supply `vertex`: the
+ * host's vertex shader assumes a screen-filling quad, and it is the preset that
+ * knows what its own geometry means. That shader receives one attribute,
+ * `attribute vec2 _p`, and owns writing `varying vec2 _uv`.
+ *
+ * | kind | what `_p` holds |
+ * |---|---|
+ * | `quad` | the four corners in clip space |
+ * | `grid` | a `cols`×`rows` lattice over the same -1..1 square |
+ * | `cube` | two faces, the second displaced by 4 along x — see `cubeGeometry` |
+ *
+ * `grid` and `cube` also get a depth buffer, so geometry that folds over itself
+ * occludes correctly instead of resolving by triangle order.
  */
 export type MeshSpec =
   | { kind: "quad" }

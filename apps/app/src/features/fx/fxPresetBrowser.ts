@@ -26,6 +26,7 @@ import {
   presetsOfKind,
   type FxPreset,
 } from "./presetRegistry";
+import { categoriesFor } from "./presetTypes";
 import { addEffect, setEffectPreset } from "../timeline/effectOps";
 import {
   addTransition,
@@ -53,6 +54,30 @@ import {
  * the cost for a cache they can share, since a preset id is the whole key.
  */
 const previews = createFxPreviewProvider();
+
+/**
+ * Headings for the category enum.
+ *
+ * The enum values are code identifiers and stay as they are; these are what a
+ * person reads. Anything absent falls back to the raw value, so adding a
+ * category cannot produce a blank heading.
+ */
+const CATEGORY_LABELS: Record<string, string> = {
+  dissolve: "Dissolve",
+  wipe: "Wipe",
+  slide: "Slide",
+  zoom: "Zoom",
+  distort: "Distort",
+  pattern: "Pattern",
+  "3d": "3D",
+  light: "Light",
+  color: "Colour",
+  tone: "Tone",
+  optical: "Optical",
+  blur: "Blur",
+  texture: "Texture",
+  stylize: "Stylise",
+};
 
 function toast(message: string) {
   (document.querySelector("toast-box") as any)?.showToast({
@@ -378,18 +403,92 @@ export class FxPresetBrowser extends LitElement {
     }
   }
 
+  // ---------------------------------------------------------------- filtering
+
+  /** Lower-cased search text. Empty means show everything. */
+  private query = "";
+
+  private handleSearch(e: Event) {
+    this.query = (e.target as HTMLInputElement).value.trim().toLowerCase();
+    this.requestUpdate();
+  }
+
+  /**
+   * Matched against name, category and author.
+   *
+   * Category is included so that typing "blur" finds the whole section, which
+   * is how someone who knows what they want but not what it is called will
+   * look for it.
+   */
+  // Not `matches` — `Element.matches(selectors)` already occupies that name,
+  // and overriding it with an incompatible signature is a type error.
+  private matchesQuery(preset: FxPreset): boolean {
+    if (this.query === "") {
+      return true;
+    }
+    const haystack = [
+      preset.name,
+      preset.category,
+      CATEGORY_LABELS[preset.category] ?? "",
+      preset.author ?? "",
+    ]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(this.query);
+  }
+
   render() {
-    const presets = presetsOfKind(this.kind);
+    const matching = presetsOfKind(this.kind).filter((preset) =>
+      this.matchesQuery(preset),
+    );
+
+    // Enum order, not alphabetical: the categories are arranged from the ones
+    // people reach for most to the ones they reach for rarely, and sorting the
+    // headings by name would throw that away. `presetsOfKind` has already put
+    // built-ins ahead of user presets, and filtering preserves it, so within a
+    // section that ordering still holds.
+    const sections = categoriesFor(this.kind)
+      .map((category) => ({
+        category,
+        presets: matching.filter((preset) => preset.category === category),
+      }))
+      .filter((section) => section.presets.length > 0);
+
+    const total = presetsOfKind(this.kind).length;
 
     return html`
-      <div class="row px-2">
-        ${presets.length === 0
-          ? html`<div class="text-secondary p-2" style="font-size: 11px;">
-              No ${this.kind} presets installed.
-            </div>`
-          : presets.map((preset) => this.tile(preset))}
+      <div class="px-2 pt-1">
+        <input
+          type="search"
+          class="form-control form-control-sm bg-dark text-light border-secondary"
+          style="font-size: 11px;"
+          placeholder=${"Search " + total + " " + this.kind + "s"}
+          @input=${(e: Event) => this.handleSearch(e)}
+        />
       </div>
 
+      ${total === 0
+        ? html`<div class="text-secondary p-2" style="font-size: 11px;">
+            No ${this.kind} presets installed.
+          </div>`
+        : sections.length === 0
+          ? html`<div class="text-secondary p-2" style="font-size: 11px;">
+              Nothing matches that.
+            </div>`
+          : sections.map(
+              (section) => html`
+                <div
+                  class="text-secondary px-2 pt-2"
+                  style="font-size: 10px; text-transform: uppercase;
+                         letter-spacing: 0.06em;"
+                >
+                  ${CATEGORY_LABELS[section.category] ?? section.category}
+                </div>
+                <div class="row px-2">
+                  ${section.presets.map((preset) => this.tile(preset))}
+                </div>
+              `,
+            )}
     `;
   }
 }
