@@ -9,19 +9,22 @@ import { applyPreset, type PresetName } from "../animation/presets";
 import { setIn } from "../../utils/immutable";
 import { GestureCommit } from "./gestureCommit";
 import { isAudibleElement } from "../timeline/audio";
+import {
+  filterOf,
+  isFilterEnabled,
+  setFilterEnabled,
+  setVideoFilter,
+} from "../timeline/filterOps";
+import type { FilterInput } from "../renderer/filter/params";
 import "./controlAudioVolume";
 
 @customElement("option-video")
 export class OptionVideo extends LitElement {
   elementId: string;
-  enableFilter: boolean;
-  filterList: any[];
   constructor() {
     super();
 
     this.elementId = "";
-    this.enableFilter = false;
-    this.filterList = [];
     this.hide();
   }
 
@@ -52,80 +55,76 @@ export class OptionVideo extends LitElement {
   }
 
   render() {
-    const filterListRender: any = [];
+    // Read from the store rather than from a cached copy, so the panel follows
+    // an undo, or an edit the agent made, without being told to.
+    const filter = this.filter;
+    const isChromakey = filter?.name === "chromakey";
 
-    for (let index = 0; index < this.filterList.length; index++) {
-      const element = this.filterList[index];
-      filterListRender.push(html`<div class="d-flex col-12">
-        <select
-          @change=${(e) => this.handleChangeUpdateKey(e, index)}
-          class="form-select bg-dark text-light form-select-sm"
-          aria-label="select screen"
-          style="
+    // Every field binds with `.value`, not a `value` attribute. The attribute
+    // is a *default* that lit sets once, so the controls used to show
+    // "Chroma Key" and the hardcoded defaults no matter what the clip carried.
+    const filterEditor =
+      filter == null
+        ? ""
+        : html`<div class="d-flex col-12">
+            <select
+              @change=${this.handleChangeFilterName}
+              .value=${filter.name}
+              class="form-select bg-dark text-light form-select-sm"
+              aria-label="select screen"
+              aria-event="filter_name"
+              style="
               height: fit-content;
           "
-        >
-          <option value="chromakey">Chroma Key</option>
-          <option value="blur">Blur</option>
-          <option value="radialblur">Radial Blur</option>
-        </select>
-
-        <input
-          @change=${(e) => this.handleChangeUpdateBlur(e, index)}
-          type="number"
-          class="form-control bg-default text-light ${this.filterList[index]
-            .name == "radialblur"
-            ? ""
-            : "d-none"}"
-          value="0"
-        />
-
-        <input
-          @change=${(e) => this.handleChangeUpdateBlur(e, index)}
-          type="number"
-          class="form-control bg-default text-light ${this.filterList[index]
-            .name == "blur"
-            ? ""
-            : "d-none"}"
-          value="5"
-        />
-
-        <div class="d-flex row gap-2">
-          <input
-            @change=${(e) => this.handleChangeUpdateChromakey(e, index)}
-            type="color"
-            aria-event="chromakey_color_${index}"
-            class="form-control bg-default text-light ${this.filterList[index]
-              .name == "chromakey"
-              ? ""
-              : "d-none"}"
-            value="#000000"
-          />
-
-          <div
-            class="input-group mb-3 ${this.filterList[index].name == "chromakey"
-              ? ""
-              : "d-none"}"
-          >
-            <span
-              class="input-group-text bg-default text-light"
-              id="basic-addon2"
-              >f</span
             >
+              <option value="chromakey">Chroma Key</option>
+              <option value="blur">Blur</option>
+              <option value="radialblur">Radial Blur</option>
+            </select>
+
+            <!-- One field for both blurs. They were two inputs differing only
+                 in which one carried d-none, which is how the hidden one kept
+                 whatever had last been typed into it. -->
             <input
-              @change=${(e) => this.handleChangeUpdateChromakey(e, index)}
+              @change=${this.handleChangeStrength}
               type="number"
-              aria-event="chromakey_force_${index}"
-              class="form-control bg-default text-light"
-              value="0.5"
-              step="0.01"
-              max="1"
-              max="min"
+              aria-event="filter_strength"
+              min="0"
+              step="1"
+              class="form-control bg-default text-light ${isChromakey
+                ? "d-none"
+                : ""}"
+              .value=${String(filter.strength ?? "")}
             />
-          </div>
-        </div>
-      </div>`);
-    }
+
+            <div class="d-flex row gap-2 ${isChromakey ? "" : "d-none"}">
+              <input
+                @change=${this.handleChangeChromakey}
+                type="color"
+                aria-event="chromakey_color"
+                class="form-control bg-default text-light"
+                .value=${filter.color ?? "#000000"}
+              />
+
+              <div class="input-group mb-3">
+                <span
+                  class="input-group-text bg-default text-light"
+                  id="basic-addon2"
+                  >f</span
+                >
+                <input
+                  @change=${this.handleChangeChromakey}
+                  type="number"
+                  aria-event="chromakey_force"
+                  class="form-control bg-default text-light"
+                  .value=${String(filter.threshold ?? "")}
+                  step="0.01"
+                  min="0"
+                  max="1"
+                />
+              </div>
+            </div>
+          </div>`;
 
     return html`
       <default-transform
@@ -154,14 +153,13 @@ export class OptionVideo extends LitElement {
 
       <div class="mb-4 ${this.enableFilter ? "" : "d-none"}">
         <label class="form-label text-light">Filter List</label>
-        <div class="d-flex row gap-2">${filterListRender}</div>
+        <div class="d-flex row gap-2">${filterEditor}</div>
 
         <button
           type="button"
-          class="btn btn-sm mt-2 w-100 bg-dark text-light ${this.filterList
-            .length >= 1
-            ? "d-none"
-            : ""}"
+          class="btn btn-sm mt-2 w-100 bg-dark text-light ${filter == null
+            ? ""
+            : "d-none"}"
           @click=${this.handleClickAddFilter}
         >
           Add Filter
@@ -169,10 +167,9 @@ export class OptionVideo extends LitElement {
 
         <button
           type="button"
-          class="btn btn-sm mt-2 w-100 bg-dark text-light ${this.filterList
-            .length == 1
-            ? ""
-            : "d-none"}"
+          class="btn btn-sm mt-2 w-100 bg-dark text-light ${filter == null
+            ? "d-none"
+            : ""}"
           @click=${this.handleClickRemoveFilter}
         >
           Remove Filter
@@ -243,13 +240,7 @@ export class OptionVideo extends LitElement {
   }
 
   setElementId({ elementId }) {
-    const state = useTimelineStore.getState();
-    const timeline = state.timeline as any;
-
     this.elementId = elementId;
-    this.enableFilter = timeline[this.elementId].filter.enable;
-    this.filterList = timeline[this.elementId].filter.list;
-
     this.requestUpdate();
   }
 
@@ -263,89 +254,98 @@ export class OptionVideo extends LitElement {
     );
   }
 
-  hexToRgb(hex) {
-    hex = hex.replace(/^#/, "");
+  /** Whether this clip's filters are switched on, per the store. */
+  private get enableFilter(): boolean {
+    return isFilterEnabled(useTimelineStore.getState().timeline[this.elementId]);
+  }
 
-    if (hex.length === 3) {
-      hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+  /**
+   * The filter this clip carries, structured, or `null` for none.
+   *
+   * Derived on every render rather than cached in a field. The field used to be
+   * assigned the store's own `filter.list` array, which the handlers then wrote
+   * to in place — on an object every undo entry shares, so editing a filter
+   * silently rewrote the history behind it.
+   */
+  private get filter(): FilterInput | null {
+    return filterOf(useTimelineStore.getState().timeline[this.elementId]);
+  }
+
+  /**
+   * Apply a filter edit as one undo step.
+   *
+   * No repaint call is needed and none should be added back. `preview-canvas`
+   * subscribes to the store and redraws on every change, and the WebGL pipeline
+   * reads `element.filter` per frame — so writing to the store *is* the
+   * repaint. The `preview-canvas.setChangeFilter()` these handlers used to call
+   * has not existed since the renderer was replaced, and threw every time.
+   */
+  private commitFilter(filter: FilterInput | null) {
+    const elementId = this.elementId;
+    useTimelineStore
+      .getState()
+      .withCheckpoint((doc) => setVideoFilter(doc, elementId, filter));
+
+    this.requestUpdate();
+  }
+
+  /**
+   * Switch to another kind of filter.
+   *
+   * The new filter is built from its *name alone*, so its parameters are seeded
+   * fresh. Carrying the old string across is what made this the bug it was:
+   * `value` is positional `k=v:k=v` whose keys differ per filter, so a blur's
+   * `f=5` read as a chromakey threshold keys out every pixel and the clip
+   * vanishes.
+   */
+  handleChangeFilterName(e) {
+    // A `change` that names the filter already showing is not an edit — and
+    // building a fresh one would throw away the colour and threshold beside it.
+    // A `<select>` does not fire on re-picking the same option, so this guards
+    // the programmatic path rather than a click.
+    if (e.target.value === this.filter?.name) {
+      return;
     }
-
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-
-    return { r, g, b };
+    this.commitFilter({ name: e.target.value });
   }
 
-  handleChangeUpdateKey(e, index) {
-    console.log(e.target.value);
-    this.filterList[index].name = e.target.value;
-    document.querySelector("preview-canvas").setChangeFilter();
-
-    this.requestUpdate();
+  handleChangeStrength(e) {
+    const raw = parseFloat(e.target.value);
+    if (!Number.isFinite(raw)) {
+      return;
+    }
+    // The shaders read the strength with `parseInt`, so storing 8.7 would
+    // display as 8 on the next render and never settle.
+    const strength = Math.max(0, Math.round(raw));
+    this.commitFilter({ name: this.filter?.name ?? "blur", strength });
   }
 
-  handleChangeUpdateBlur(e, index) {
-    const value = parseFloat(e.target.value);
-    const valueArray = [`f=${value}`];
-    this.filterList[index].value = valueArray.join(":");
-    document.querySelector("preview-canvas").setChangeFilter();
-
-    this.requestUpdate();
-  }
-
-  handleChangeUpdateChromakey(e, index) {
+  handleChangeChromakey() {
     const color = this.querySelector(
-      `input[aria-event='chromakey_color_${index}'`,
-    ) as any;
+      "input[aria-event='chromakey_color']",
+    ) as HTMLInputElement | null;
     const force = this.querySelector(
-      `input[aria-event='chromakey_force_${index}'`,
-    ) as any;
+      "input[aria-event='chromakey_force']",
+    ) as HTMLInputElement | null;
 
-    const rgb = this.hexToRgb(color.value);
-    const f = parseFloat(force.value);
-    console.log(f, "FFFFFFFF");
-    const valueArray = [`r=${rgb.r}`, `g=${rgb.g}`, `b=${rgb.b}`, `f=${f}`];
-    this.filterList[index].value = valueArray.join(":");
-    document.querySelector("preview-canvas").setChangeFilter();
-
-    this.requestUpdate();
+    const threshold = parseFloat(force?.value ?? "");
+    this.commitFilter({
+      name: "chromakey",
+      color: color?.value ?? "#000000",
+      // `max="1"` on the input is not enforced for a typed value, and a
+      // threshold above 1 keys out the whole frame.
+      threshold: Number.isFinite(threshold)
+        ? Math.min(1, Math.max(0, threshold))
+        : undefined,
+    });
   }
 
   handleClickAddFilter() {
-    const state = useTimelineStore.getState();
-    const element = state.timeline[this.elementId];
-    if (element.filetype !== "video") {
-      return;
-    }
-    const filterList = element.filter?.list;
-
-    filterList?.push({
-      name: "chromakey",
-      value: "r=0:g=0:b=0:r=0.5",
-    });
-
-    this.timelineState.updateTimeline(
-      this.elementId,
-      ["filter", "list"],
-      filterList,
-    );
-
-    this.filterList = filterList as any;
-
-    document.querySelector("preview-canvas").setChangeFilter();
-
-    this.requestUpdate();
+    this.commitFilter({ name: "chromakey" });
   }
 
   handleClickRemoveFilter() {
-    this.timelineState.updateTimeline(this.elementId, ["filter", "list"], []);
-
-    this.filterList = [];
-
-    document.querySelector("preview-canvas").setChangeFilter();
-
-    this.requestUpdate();
+    this.commitFilter(null);
   }
 
   /**
@@ -365,21 +365,20 @@ export class OptionVideo extends LitElement {
     this.requestUpdate();
   }
 
+  /**
+   * Switch the clip's filters on or off.
+   *
+   * Through `withCheckpoint` rather than `updateTimeline`, which records no
+   * history at all — so turning a chromakey on used to be an edit Cmd+Z could
+   * not take back. The parameters stay put underneath, which is what makes the
+   * button usable as an A/B against the original.
+   */
   handleClickEnableFilter() {
-    const state = useTimelineStore.getState();
-    const element = state.timeline[this.elementId];
-    if (element.filetype !== "video") {
-      return;
-    }
-    const enableFilter = element.filter?.enable;
-
-    this.enableFilter = !enableFilter;
-
-    this.timelineState.updateTimeline(
-      this.elementId,
-      ["filter", "enable"],
-      !enableFilter,
-    );
+    const elementId = this.elementId;
+    const enable = !this.enableFilter;
+    useTimelineStore
+      .getState()
+      .withCheckpoint((doc) => setFilterEnabled(doc, elementId, enable));
 
     this.requestUpdate();
   }

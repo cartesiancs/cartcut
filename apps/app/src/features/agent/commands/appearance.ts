@@ -7,19 +7,22 @@
  *    needs or it draws in the fallback;
  *  - a filter's parameters are a positional `k=v:k=v` string.
  *
- * They also fix a real bug on the way past. `optionVideo`'s filter handlers
- * mutate `element.filter.list[i]` **in place** — on the live store object, which
- * every undo entry shares — and then call `preview-canvas.setChangeFilter()`,
- * a method that does not exist on that component. So the UI's own filter
- * editing throws after corrupting history. These commands write immutably
- * through `withCheckpoint`, which makes the agent's path the correct one until
- * the panel is repointed at them.
+ * `set_video_filters` shares its ops with the option panel rather than
+ * reimplementing them: `setVideoFilter` and `setFilterEnabled` in
+ * `features/timeline/filterOps.ts`. That matters because the encoding is the
+ * part that is easy to get wrong — the parameter string is positional and its
+ * keys differ per filter, so a switch that keeps the old string hands the next
+ * shader values it will happily misread.
  */
 
 import { useTimelineStore } from "../../../states/timelineStore";
 import { setIn } from "../../../utils/immutable";
 import type { TimelineElement } from "../../../@types/timeline";
-import { toFilter, type FilterInput } from "../../renderer/filter/params";
+import type { FilterInput } from "../../renderer/filter/params";
+import {
+  setFilterEnabled,
+  setVideoFilter,
+} from "../../timeline/filterOps";
 import { ensureFontFace, parseFontPath } from "../../font/fontFaces";
 import { commit } from "../commit";
 import { currentDoc, requireElement } from "../context";
@@ -48,24 +51,18 @@ registerCommands({
       );
     }
 
-    // Built before the transform so a bad colour is a thrown error rather than
-    // a half-applied edit: `toFilter` validates the hex.
-    const next =
-      params.filter == null
-        ? { enable: false, list: [] }
-        : { enable: true, list: [toFilter(params.filter)] };
+    // Setting a filter turns filtering on; clearing it turns it off. The two
+    // fields are separate ops because the panel offers them as separate
+    // controls, but a tool call that says "make this green screen" means both.
+    const enable = params.filter != null;
 
     return commit(
-      (d) => ({
-        ...d,
-        elements: ids.reduce(
-          (elements, id) => ({
-            ...elements,
-            [id]: setIn(elements[id], ["filter"], next) as TimelineElement,
-          }),
-          d.elements,
+      (d) =>
+        ids.reduce(
+          (doc, id) =>
+            setFilterEnabled(setVideoFilter(doc, id, params.filter), id, enable),
+          d,
         ),
-      }),
       "Those clips already have that filter.",
     );
   },
