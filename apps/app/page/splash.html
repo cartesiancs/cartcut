@@ -29,8 +29,12 @@
     </style>
   </head>
   <body>
-    <!-- Loaded from `assets/`, which ships both inside the asar and as
-         extraResources, so the path resolves in dev and in a packaged build. -->
-    <img src="../../../assets/images/splash.png" alt="" />
+    <!-- Kept under `apps/app/`, not the top-level `assets/`. That directory is
+         an `extraResources` entry, and electron-builder excludes an
+         extraResources source from the app package itself — so in a packaged
+         build it exists only at `Contents/Resources/assets`, which no path
+         relative to this file inside the asar can reach. `apps/` is in the
+         asar, so this one resolves in dev and in a packaged build alike. -->
+    <img src="../assets/images/splash.png" alt="" />
   </body>
 </html>

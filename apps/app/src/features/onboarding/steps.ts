@@ -33,11 +33,16 @@ export interface OnboardingStep {
 
 /**
  * Paths are relative to `apps/app/index.html`, which is what the renderer
- * loads. `assets/` ships both inside the asar and as extraResources, so this
- * resolves in dev and in a packaged build alike — same reasoning as
- * `page/splash.html`.
+ * loads.
+ *
+ * These live under `apps/app/`, not the top-level `assets/`. That directory is
+ * an `extraResources` entry, and electron-builder excludes an extraResources
+ * source from the app package itself — so in a packaged build it exists only at
+ * `Contents/Resources/assets`, which nothing inside the asar can reach by a
+ * relative path. `apps/` is in the asar, so this resolves in dev and in a
+ * packaged build alike — same reasoning as `page/splash.html`.
  */
-const IMAGE_DIR = "../../assets/images";
+const IMAGE_DIR = "./assets/images";
 
 export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
   {

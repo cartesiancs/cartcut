@@ -21,7 +21,7 @@ let mainWindow;
 const WINDOW_BACKGROUND_COLOR = "#252729";
 const WINDOW_ICON = path.join(__dirname, "..", "assets/icons/png/512x512.png");
 
-// assets/images/splash.png is 1724x1037; keep that aspect ratio so the image
+// apps/app/assets/images/splash.png is 1724x1037; keep that aspect ratio so the image
 // fills the window with no letterboxing.
 const SPLASH_WIDTH = 640;
 const SPLASH_HEIGHT = Math.round((SPLASH_WIDTH * 1037) / 1724);
