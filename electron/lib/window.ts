@@ -125,8 +125,17 @@ const window = {
     // "screen-saver" is the level that also clears full-screen apps; plain
     // `alwaysOnTop: true` only floats above normal windows.
     splashWindow.setAlwaysOnTop(true, "screen-saver");
+
+    // `skipTransformProcessType` is not optional here. On macOS, asking for
+    // `visibleOnFullScreen` makes Electron call
+    // `TransformProcessType(kProcessTransformToUIElementApplication)` on the
+    // *whole process* — the app turns into an accessory and loses its Dock
+    // icon. Destroying the splash does not transform it back, so the icon
+    // stays gone for the rest of the session. Skipping the transform keeps
+    // the collection behaviour without touching the activation policy.
     splashWindow.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true,
+      skipTransformProcessType: true,
     });
 
     splashWindow.loadFile("apps/app/page/splash.html");

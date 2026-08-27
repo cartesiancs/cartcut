@@ -1,6 +1,6 @@
 {
   "name": "cartcut-app",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "Video Editor",
   "main": "main/main.js",
   "author": "cartesiancs",
