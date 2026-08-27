@@ -41,7 +41,11 @@ const window = {
       show: show,
     });
 
-    autoUpdater.checkForUpdatesAndNotify();
+    // Not `checkForUpdatesAndNotify`: that raises a native notification once
+    // the download finishes, which would land alongside the "Update ready"
+    // dialog in `lib/autoUpdater.ts`. Development is already a no-op — the
+    // updater bails on `app.isPackaged`.
+    autoUpdater.checkForUpdates();
     Menu.setApplicationMenu(menu);
 
     session.defaultSession.setDisplayMediaRequestHandler((_, callback) => {

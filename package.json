@@ -14,8 +14,9 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "bundle:prod:src": "webpack --mode=production",
-    "build:osx": "npm run bundle:prod:src && cross-env GH_TOKEN=<TOKEN> electron-builder build --mac -p always",
-    "build:win": "npm run bundle:prod:src && cross-env GH_TOKEN=<TOKEN> electron-builder build --win --x64 -p always",
+    "build:main": "tsc -p ./.tsconfig",
+    "build:osx": "npm run build:main && npm run bundle:prod:src && electron-builder build --mac --arm64 --x64 -p always",
+    "build:win": "npm run build:main && npm run bundle:prod:src && electron-builder build --win --x64 -p always",
     "build": "npm run build:osx && npm run build:win"
   },
   "repository": {
@@ -55,18 +56,15 @@
         "repo": "cartcut"
       },
       "target": [
-        "dmg"
+        "dmg",
+        "zip"
       ],
       "icon": "assets/icons/mac/icon.icns",
       "asarUnpack": "**/*.node",
       "notarize": true
     },
-    "dmg": {
-      "internetEnabled": true
-    },
+    "dmg": {},
     "win": {
-      "certificateFile": "/Users/devent.pfx",
-      "certificatePassword": "<>",
       "verifyUpdateCodeSignature": true,
       "publish": {
         "provider": "github",
@@ -88,8 +86,8 @@
       "app": "."
     },
     "files": [
-      "!src/*",
-      "!electron/*"
+      "!src/**/*",
+      "!electron/**/*"
     ],
     "publish": {
       "provider": "github",
