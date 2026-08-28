@@ -72,6 +72,44 @@ Two things about time that are easy to get wrong:
 
 `priority` is derived from track order, never authored.
 
+## The frame rate
+
+A project setting, sitting on `renderOptionStore.options` next to `previewSize`
+and `duration` — not in `TimelineDocument`, and not in `ExportSettings`. It
+decides the snap grid, the ruler, the frame grid, the zoom ceiling, the rate
+animation is baked at, which frame the preview shows, and the rate FFmpeg is
+clocked at, all of which happen long before anything is exported.
+
+Whole frames per second, 1..240, presets at 24/25/30/50/60/120. **Integers
+only** — the NTSC family is `30000/1001` and its relatives, which a `number`
+cannot name exactly, and admitting them means carrying a rational through every
+conversion in `frames.ts` and through the exporter that has to agree with it bit
+for bit.
+
+Two rules keep this straight:
+
+- **Pure ops never read the store.** `features/timeline/` and
+  `features/animation/` take `fps` (or `bakeHz`) as an argument, which is what
+  keeps them DOM-free and node-testable. Only UI components and the agent
+  commands read `renderOptionStore`.
+- **`normalizeFps` guards reads; `coerceFps` validates writes.** The first runs
+  on every draw and must never throw. The second runs once, where a value is
+  stored, and makes an unusable rate unrepresentable from then on.
+
+Changing the rate goes through `features/editor/frameRate.ts#setProjectFps`,
+which is also the only place the three consequences are sequenced: re-clamp the
+zoom (the ceiling is `zoom.ts#maxRangeForFps`), re-snap the playhead, and re-bake
+animation through `withCheckpoint`. **Clips do not move.** A rate change is a
+change of grid, not a re-cut; off-grid clips are pulled onto the new grid the
+next time they are dragged, which is what every NLE does and the only choice
+that cannot lose work.
+
+The baked animation lanes (`ax`/`ay`) are a *cache* read by nearest-sample
+lookup, so their rate has to be at least the project's — `keyframes.ts#bakeRateFor`
+is `max(BAKE_HZ, fps)`, keeping a 60Hz floor so nothing at or below 60 changes.
+Rebaking happens at exactly two moments, ingress (`patchDocument({ bakeHz })`)
+and a rate change; never on a checkpoint.
+
 ## The Claude Code bridge
 
 `electron/mcp/` runs a Streamable HTTP MCP server on `127.0.0.1:9826/mcp`,
@@ -139,7 +177,8 @@ one-frame-in-three seek defect that makes it fail against `main`.
 
 ```
 npm run test:e2e:fixtures   # download and derive the media, once
-npm run test:e2e:smoke      # ~1 min, for iterating
+npm run test:e2e:smoke      # ~1 min at 360p30, for iterating
+npm run test:e2e:smoke120   # same size at 120fps — the top of the rate band
 npm run test:e2e            # 5 min at 1080p60, 18,000 frames
 npm run test:e2e:check      # typecheck the suite on its own
 ```
@@ -161,5 +200,10 @@ npm run test:e2e:check      # typecheck the suite on its own
   not yet confirmed by running an export — do that before relying on it.
 - Transitions do not exist in the data model; the transition tab is an empty
   panel.
+- The playback loop still reads the wall clock and drives the cursor from
+  `requestAnimationFrame`; only the *value* is quantized
+  (`timeline/playbackClock.ts`). It does not drop or pace frames, so a project
+  faster than the display simply repeats cursor values, which `setCursor`
+  discards.
 - Cross-component calls are frequently `document.querySelector("element-…")`
   followed by direct property access.

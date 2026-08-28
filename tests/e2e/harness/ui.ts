@@ -116,17 +116,19 @@ export async function setBackgroundColor(page: Page, hex: string): Promise<void>
 /**
  * Set the project frame rate.
  *
- * Deliberately not a UI action: `#projectDuration` — the fps field in
- * `ControlSetting` — is rendered `disabled` with a hardcoded value of 60, so
- * there is no control to drive. The `full` profile runs at 60 and never needs
- * this; `smoke` does. Recorded here rather than hidden at the call site because
- * it is a genuine gap in the settings panel, not a shortcut the test chose.
+ * A real UI action now. It used to write the store directly, because
+ * `ControlSetting`'s fps field shipped `disabled` at a hardcoded 60 and there
+ * was no control to drive — which meant the one part of the frame-rate path the
+ * user actually touches was the one part nothing tested.
+ *
+ * The store poll stays: the assertion is not "the field accepted the text" but
+ * "the field's handler reached the store", which is the wiring under test.
  */
-export async function setFpsThroughStore(page: Page, fps: number): Promise<void> {
-  await page.evaluate((value) => {
-    const store = (globalThis as any).CARTCUT.renderOptionStore;
-    store.getState().updateOptions({ ...store.getState().options, fps: value });
-  }, fps);
+export async function setFps(page: Page, fps: number): Promise<void> {
+  await openTab(page, "#nav-home");
+  await page.locator("#projectFps").fill(String(fps));
+  await page.locator("#projectFps").dispatchEvent("change");
+
   await expect
     .poll(() => page.evaluate(() => (globalThis as any).CARTCUT.renderOptionStore.getState().options.fps))
     .toBe(fps);

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   BAKE_HZ,
   MAX_BAKED_SAMPLES,
+  bakeRateFor,
   addKeyframe,
   assertBakedInvariants,
   bakeTrack,
@@ -1102,5 +1103,98 @@ describe("shiftKeyframes", () => {
   it("declines an empty list by identity", () => {
     const list: Keyframe[] = [];
     expect(shiftKeyframes(list, 100)).toBe(list);
+  });
+});
+
+/**
+ * The baked lane is a cache read by nearest-sample lookup, so its resolution
+ * has to be at least the rate it is read at — otherwise a 120fps project sees
+ * every value twice and its animation runs at half rate.
+ */
+describe("bakeRateFor", () => {
+  it("never goes below the 60Hz floor", () => {
+    // Baking a 24fps project at 24Hz would be internally consistent and still
+    // coarser than what ships, which would move every golden snapshot.
+    for (const fps of [1, 24, 25, 30, 50, 60]) {
+      expect(bakeRateFor(fps)).toBe(BAKE_HZ);
+    }
+  });
+
+  it("follows the project once it outruns the floor", () => {
+    expect(bakeRateFor(90)).toBe(90);
+    expect(bakeRateFor(120)).toBe(120);
+    expect(bakeRateFor(240)).toBe(240);
+  });
+
+  it("guards an unusable rate", () => {
+    for (const bad of [0, -1, NaN, Infinity]) {
+      expect(bakeRateFor(bad)).toBe(BAKE_HZ);
+    }
+  });
+});
+
+describe("baking at a project's rate", () => {
+  it("puts a sample on every frame boundary the project can show", () => {
+    // The property that matters at 120fps: consecutive frames must be able to
+    // read different values.
+    for (const fps of [60, 120]) {
+      const track: Keyframe[] = [
+        { type: "cubic", p: [0, 0], cs: [0, 0], ce: [0, 0] },
+        { type: "cubic", p: [1000, 100], cs: [1000, 100], ce: [1000, 100] },
+      ] as Keyframe[];
+      const baked = bakeTrack(track, bakeRateFor(fps));
+
+      const values = new Set<number>();
+      for (let frame = 0; frame < fps; frame++) {
+        values.add(sampleBaked(baked, (frame / fps) * 1000, NaN));
+      }
+      // One distinct value per frame of the second. At the old flat 60Hz this
+      // set held 60 entries for a 120fps project.
+      expect(values.size).toBe(fps);
+    }
+  });
+
+  it("is a refinement of the 60Hz bake, not a different curve", () => {
+    const track: Keyframe[] = [
+      { type: "cubic", p: [0, 0], cs: [100, 0], ce: [200, 40] },
+      { type: "cubic", p: [1000, 100], cs: [800, 60], ce: [900, 100] },
+    ] as Keyframe[];
+
+    const coarse = bakeTrack(track, 60);
+    const fine = bakeTrack(track, 120);
+
+    expect(fine.length).toBeGreaterThan(coarse.length);
+    for (const [t] of coarse) {
+      // Every instant the 60Hz bake carried is still carried, so nothing a
+      // 60fps project reads moves when the same document is opened at 120.
+      expect(fine.some(([u]) => Math.abs(u - t) < 1e-9)).toBe(true);
+    }
+    expect(fine[0]).toEqual(coarse[0]);
+    expect(fine[fine.length - 1]).toEqual(coarse[coarse.length - 1]);
+  });
+
+  it("still covers a track longer than the sample budget, at 120Hz", () => {
+    // The budget is a file-size ceiling, not a duration; past it `bakeTrack`
+    // coarsens the step across the whole track rather than stopping partway.
+    const twentyMinutes = 20 * 60 * 1000;
+    const track: Keyframe[] = [
+      { type: "cubic", p: [0, 0], cs: [0, 0], ce: [0, 0] },
+      {
+        type: "cubic",
+        p: [twentyMinutes, 100],
+        cs: [twentyMinutes, 100],
+        ce: [twentyMinutes, 100],
+      },
+    ] as Keyframe[];
+
+    const baked = bakeTrack(track, 120);
+    expect(baked.length).toBeLessThanOrEqual(MAX_BAKED_SAMPLES);
+    expect(baked[0][0]).toBe(0);
+    expect(baked[baked.length - 1][0]).toBe(twentyMinutes);
+    assertBakedInvariants(baked);
+    // The midpoint is a solved value, not the frozen end the old clamp gave.
+    const middle = sampleBaked(baked, twentyMinutes / 2, NaN);
+    expect(middle).toBeGreaterThan(0);
+    expect(middle).toBeLessThan(100);
   });
 });

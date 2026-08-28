@@ -3,10 +3,22 @@ import {
   MAX_RANGE,
   MIN_RANGE,
   clampRange,
+  maxRangeForFps,
   rangeFromSlider,
   sliderFromRange,
 } from "./zoom";
-import { framePx } from "./frames";
+import { DEFAULT_FPS, framePx } from "./frames";
+
+/** Every rate the settings panel offers, plus the two ends of the band. */
+const RATES = [1, 24, 25, 30, 50, 60, 120, 240];
+
+/**
+ * What the ceiling has always encoded: at full zoom a frame is a target you can
+ * hit with a mouse. `zoom.ts` states it as 50px; the assertion allows the 40 the
+ * original test allowed, so it fails on a change of intent rather than on a
+ * change of taste.
+ */
+const COMFORTABLE_FRAME_PX = 40;
 
 /** The mapping this replaces, kept here to pin what must not change. */
 const legacyRange = (logit: number) => (1 / (1 + Math.E ** -logit)) * 10;
@@ -104,5 +116,112 @@ describe("the slider's static default", () => {
     // pushed anything, and `timelineStore` starts at `range: 0.9`. If they
     // disagree the thumb jumps on the first zoom.
     expect(sliderFromRange(0.9)).toBeCloseTo(0.571, 3);
+  });
+});
+
+describe("maxRangeForFps", () => {
+  it("is the 60fps ceiling at 60fps, exactly", () => {
+    // The whole parameterisation has to be a no-op for the rate every existing
+    // project runs at, or it is a silent change to everyone's timeline.
+    expect(maxRangeForFps(DEFAULT_FPS)).toBe(MAX_RANGE);
+    expect(rangeFromSlider(1, DEFAULT_FPS)).toBeCloseTo(rangeFromSlider(1), 12);
+    expect(clampRange(1e6, DEFAULT_FPS)).toBe(clampRange(1e6));
+  });
+
+  it("leaves a frame comfortably wide at every rate", () => {
+    for (const fps of RATES) {
+      expect(framePx(maxRangeForFps(fps), fps)).toBeGreaterThanOrEqual(
+        COMFORTABLE_FRAME_PX,
+      );
+    }
+  });
+
+  it("puts a frame at exactly 50px once the rate passes 60", () => {
+    for (const fps of [60, 120, 240]) {
+      expect(framePx(maxRangeForFps(fps), fps)).toBeCloseTo(50, 6);
+    }
+  });
+
+  it("never zooms less far than it used to", () => {
+    // Scaling in both directions would put a 30fps ceiling at 30 — still a
+    // 50px frame, but strictly less magnification than shipped yesterday, for
+    // no gain. The floor is the regression guard.
+    for (const fps of RATES) {
+      expect(maxRangeForFps(fps)).toBeGreaterThanOrEqual(MAX_RANGE);
+    }
+  });
+
+  it("rises with the rate, never falls", () => {
+    for (let i = 1; i < RATES.length; i++) {
+      expect(maxRangeForFps(RATES[i])).toBeGreaterThanOrEqual(
+        maxRangeForFps(RATES[i - 1]),
+      );
+    }
+  });
+
+  it("guards an unusable rate", () => {
+    for (const bad of [0, -1, NaN, Infinity]) {
+      expect(maxRangeForFps(bad)).toBe(MAX_RANGE);
+    }
+  });
+});
+
+describe("the slider mapping, at every rate", () => {
+  it("spans floor to that rate's ceiling", () => {
+    for (const fps of RATES) {
+      expect(rangeFromSlider(0, fps)).toBeCloseTo(MIN_RANGE, 12);
+      expect(rangeFromSlider(1, fps)).toBeCloseTo(maxRangeForFps(fps), 9);
+    }
+  });
+
+  it("round-trips", () => {
+    for (const fps of RATES) {
+      for (let i = 0; i <= 40; i++) {
+        const t = i / 40;
+        expect(sliderFromRange(rangeFromSlider(t, fps), fps)).toBeCloseTo(t, 9);
+      }
+    }
+  });
+
+  it("keeps a constant ratio of magnification per unit of travel", () => {
+    // The reason the curve is exponential rather than logistic; raising the
+    // ceiling must not pile the useful range into the last few percent.
+    for (const fps of RATES) {
+      const steps = 50;
+      const ratios: number[] = [];
+      for (let i = 0; i < steps; i++) {
+        ratios.push(
+          rangeFromSlider((i + 1) / steps, fps) / rangeFromSlider(i / steps, fps),
+        );
+      }
+      for (const ratio of ratios) {
+        expect(ratio).toBeCloseTo(ratios[0], 9);
+      }
+    }
+  });
+});
+
+describe("clampRange, when the project rate changes", () => {
+  it("pulls a range back under a lowered ceiling", () => {
+    // 120 -> 30 is the case that matters: the timeline was zoomed to the top of
+    // a 120fps slider and the project is now 30fps, whose slider ends at 60.
+    const zoomedIn = maxRangeForFps(120);
+    expect(clampRange(zoomedIn, 120)).toBe(zoomedIn);
+    expect(clampRange(zoomedIn, 30)).toBe(maxRangeForFps(30));
+  });
+
+  it("leaves a range that is still in bounds alone", () => {
+    for (const fps of RATES) {
+      expect(clampRange(20, fps)).toBe(20);
+    }
+  });
+
+  it("keeps the floor and the garbage handling at every rate", () => {
+    for (const fps of RATES) {
+      expect(clampRange(-1, fps)).toBe(MIN_RANGE);
+      expect(clampRange(NaN, fps)).toBe(MIN_RANGE);
+      expect(clampRange(Infinity, fps)).toBe(maxRangeForFps(fps));
+      expect(clampRange(-Infinity, fps)).toBe(MIN_RANGE);
+    }
   });
 });

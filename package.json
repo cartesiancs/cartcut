@@ -17,6 +17,7 @@
     "test:e2e:check": "tsc --noEmit -p tests/e2e/tsconfig.json",
     "test:e2e": "playwright test -c tests/e2e/playwright.config.ts --project=full",
     "test:e2e:smoke": "playwright test -c tests/e2e/playwright.config.ts --project=smoke",
+    "test:e2e:smoke120": "playwright test -c tests/e2e/playwright.config.ts --project=smoke120",
     "test:e2e:extreme": "playwright test -c tests/e2e/playwright.config.ts --project=extreme",
     "bundle:prod:src": "webpack --mode=production",
     "build:main": "tsc -p ./.tsconfig",

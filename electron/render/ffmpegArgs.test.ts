@@ -12,6 +12,9 @@ import {
   missingInputs,
 } from "./ffmpegArgs";
 import { ffmpegWindow } from "../../apps/app/src/features/timeline/geometry";
+// Reaching across the rootDir boundary is safe in a test file and nowhere else,
+// for the reason stated at the top of `exportSettings.test.ts`.
+import { frameCount } from "../../apps/app/src/features/export/frames";
 import {
   audioTwinOf,
   gainOf as gainOfElement,
@@ -996,5 +999,132 @@ describe("missingInputs", () => {
       a: { ...audioElement(), localpath: "" },
     } as Record<string, any>;
     expect(missingInputs(timeline, exists)).toEqual(["(no file)"]);
+  });
+});
+
+/**
+ * The output rate, stated rather than inherited.
+ *
+ * The command used to carry one `-r`, on the input, and let the muxer work the
+ * output rate out for itself. That happened to be right, which is not the same
+ * as being pinned — and the `-t` it shipped alongside was in seconds while the
+ * renderer counts in frames, so at some durations the two disagreed by half a
+ * frame and the last frame was cut off.
+ */
+describe("the output frame rate", () => {
+  const RATES = [24, 25, 30, 50, 60, 120];
+
+  /** The value of a flag on the output side, i.e. after `-map`. */
+  function outputFlag(args: string[], flag: string): string | undefined {
+    const from = args.indexOf("-map");
+    const at = args.indexOf(flag, from);
+    return at < 0 ? undefined : args[at + 1];
+  }
+
+  it("states the rate on both sides of the command", () => {
+    for (const fps of RATES) {
+      const args = buildFFmpegArgs({ ...rawOptions, fps }, {});
+      // Input: before `-i pipe:0`.
+      expect(args[args.indexOf("-r") + 1]).toBe(String(fps));
+      expect(args.indexOf("-r")).toBeLessThan(args.indexOf("pipe:0"));
+      // Output: after the stream mapping.
+      expect(outputFlag(args, "-r")).toBe(String(fps));
+    }
+  });
+
+  it("asks for constant frame rate, because the pipe is exactly that", () => {
+    const args = buildFFmpegArgs(rawOptions, {});
+    expect(outputFlag(args, "-fps_mode")).toBe("cfr");
+    expect(args.indexOf("-fps_mode")).toBeGreaterThan(args.indexOf("-map"));
+    expect(args.indexOf("-fps_mode")).toBeLessThan(args.length - 1);
+  });
+
+  it("states the rate on the PNG pipe too", () => {
+    for (const fps of RATES) {
+      const args = buildFFmpegArgs({ ...options, fps }, {});
+      expect(args[args.indexOf("-r") + 1]).toBe(String(fps));
+      expect(outputFlag(args, "-r")).toBe(String(fps));
+    }
+  });
+
+  it("keeps the legacy fallback for callers that carry no rate", () => {
+    const args = buildFFmpegArgs(options, {});
+    expect(args[args.indexOf("-r") + 1]).toBe("60");
+    expect(outputFlag(args, "-r")).toBe("60");
+  });
+
+  it("falls back for a rate that is not a usable number", () => {
+    for (const bad of [0, -30, NaN, undefined, null, "abc"]) {
+      const args = buildFFmpegArgs(
+        { ...rawOptions, fps: bad as unknown as number },
+        {},
+      );
+      expect(args[args.indexOf("-r") + 1]).toBe("60");
+      expect(outputFlag(args, "-r")).toBe("60");
+    }
+  });
+});
+
+/**
+ * `-t` and the renderer's frame count are the same statement about length, and
+ * they have to be derived from the same expression or the last frame is at risk.
+ */
+describe("the output duration limit", () => {
+  const durationOf = (args: string[]) =>
+    Number(args[args.lastIndexOf("-t") + 1]);
+
+  it("matches the number of frames the renderer will actually send", () => {
+    for (const fps of [24, 25, 30, 50, 60, 120]) {
+      // Durations chosen to land on both sides of the rounding.
+      for (const videoDuration of [10, 10.004, 10.009, 9.991, 0.5, 123.456]) {
+        const args = buildFFmpegArgs(
+          { ...rawOptions, fps, videoDuration },
+          {},
+        );
+        expect(durationOf(args)).toBeCloseTo(
+          frameCount({ duration: videoDuration, fps }) / fps,
+          12,
+        );
+      }
+    }
+  });
+
+  it("never cuts the final frame short", () => {
+    // The defect this replaces: 10.009s at 60fps is 601 frames, which run to
+    // 10.0167s, and `-t 10.009` truncated the last one.
+    for (const fps of [24, 30, 60, 120]) {
+      for (let i = 0; i < 200; i++) {
+        const videoDuration = 1 + i * 0.0137;
+        const args = buildFFmpegArgs(
+          { ...rawOptions, fps, videoDuration },
+          {},
+        );
+        const frames = frameCount({ duration: videoDuration, fps });
+        // The last frame starts at (frames - 1) / fps and must be inside `-t`.
+        expect(durationOf(args)).toBeGreaterThan((frames - 1) / fps);
+      }
+    }
+  });
+
+  it("leaves a whole-second project exactly where it was", () => {
+    // The overwhelmingly common case has to be untouched.
+    expect(durationOf(buildFFmpegArgs(rawOptions, {}))).toBe(10);
+    expect(durationOf(buildFFmpegArgs(options, {}))).toBe(10);
+  });
+
+  it("passes a degenerate duration through rather than inventing one", () => {
+    for (const videoDuration of [0, -1]) {
+      const args = buildFFmpegArgs({ ...rawOptions, videoDuration }, {});
+      expect(durationOf(args)).toBe(videoDuration);
+    }
+  });
+
+  it("still clamps the silent track to the project duration", () => {
+    // `anullsrc` uses `videoDuration` directly and is unaffected by the change.
+    const args = buildFFmpegArgs(
+      { ...rawOptions, videoDuration: 7 },
+      { i: imageElement({}) },
+    );
+    expect(filterComplexOf(args)[0]).toContain("d=7");
   });
 });

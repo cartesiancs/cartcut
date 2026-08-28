@@ -3,6 +3,8 @@
  *
  * The index map over a real export showed output frame N carrying source frame
  * N-1 for every ordinal where `N mod 3 === 2`, at 30fps, from a 30fps source.
+ * It runs at whatever rate the active profile uses, against that profile's own
+ * code strip, so the same question is asked at 120fps too.
  * That has two possible homes: the renderer drew the wrong frame, or the
  * encoder placed the right frame at the wrong index. This spec answers it by
  * cutting the encoder out entirely — it seeks and composites in the page, on
@@ -15,19 +17,24 @@
 
 import { test, expect } from "../harness/test";
 import { agent } from "../harness/agent";
-import { setFpsThroughStore, setResolution } from "../harness/ui";
+import { setFps, setResolution } from "../harness/ui";
 
 test("the renderer's own frames carry the index the frame loop asked for", async ({
   session,
   instruments,
+  profile,
 }, testInfo) => {
   test.setTimeout(5 * 60_000);
   const { page } = session;
-  const fps = 30;
+  // The project has to run at the rate the code strip was generated at, or
+  // "frame N shows source frame N" stops being the right question — a 30fps
+  // project reading a 120fps strip should see source frame 4N, and the
+  // mismatch would look like a seek defect rather than a profile mismatch.
+  const fps = profile.fps;
   const probeCount = 40;
 
   await setResolution(page, 640, 360);
-  await setFpsThroughStore(page, fps);
+  await setFps(page, fps);
 
   await agent(session, "add_media", {
     items: [{ path: instruments.paths.code, startMs: 0, durationMs: 20_000 }],

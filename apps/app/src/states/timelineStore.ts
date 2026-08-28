@@ -12,7 +12,10 @@ import {
   type TimelineTrack,
   type TrackKind,
 } from "../features/timeline/tracks";
-import { normalizeAnimations } from "../features/animation/keyframeOps";
+import {
+  normalizeAnimations,
+  rebakeAnimations,
+} from "../features/animation/keyframeOps";
 
 type TimelineCursorType = "pointer" | "text" | "shape" | "lockKeyboard";
 
@@ -34,6 +37,18 @@ export type HistoryEntry = {
  * ten steps is not enough history to be useful.
  */
 export const HISTORY_LIMIT = 50;
+
+/** Extra instructions for a document arriving from outside the store. */
+export type PatchOptions = {
+  /**
+   * Samples per second to re-derive baked animation lanes at.
+   *
+   * Omitted means "leave the bakes alone", which is what a caller that has no
+   * project frame rate to hand should do. The app passes
+   * `bakeRateFor(renderOptionStore.options.fps)`.
+   */
+  bakeHz?: number;
+};
 
 export interface ITimelineStore {
   timeline: Timeline;
@@ -72,7 +87,7 @@ export interface ITimelineStore {
   /** The tracks and elements as one value, for the pure timeline modules. */
   getDocument: () => TimelineDocument;
   /** Replace both, re-deriving indices, names and priorities. */
-  patchDocument: (doc: TimelineDocument) => void;
+  patchDocument: (doc: TimelineDocument, options?: PatchOptions) => void;
   /**
    * Show a document without normalising it or recording an undo step.
    *
@@ -213,7 +228,7 @@ export const useTimelineStore = createStore<ITimelineStore>((set, get) => ({
 
   getDocument: () => documentOf(get()),
 
-  patchDocument: (doc: TimelineDocument) =>
+  patchDocument: (doc: TimelineDocument, options: PatchOptions = {}) =>
     set(() => {
       // Ingress, and the only place animation blocks are validated: this is
       // what a loaded `.ngt` comes through, and projects written by older
@@ -221,7 +236,17 @@ export const useTimelineStore = createStore<ITimelineStore>((set, get) => ({
       // `normalizeDocument` would be the wrong home — it runs on every
       // checkpoint and every clip op, and re-walking keyframe arrays at pointer
       // rate to re-check data that was checked on the way in is pure cost.
-      const normalized = normalizeDocument(normalizeAnimations(doc));
+      const validated = normalizeAnimations(doc);
+      // A project saved at one frame rate and opened at another carries baked
+      // lanes at the old rate. Ingress is the cheap moment to fix that: the
+      // arrays are being walked anyway, and doing it here rather than on the
+      // first edit means no undo step and no window where the preview steps at
+      // a rate the project no longer runs at.
+      const rebaked =
+        options.bakeHz == null
+          ? validated
+          : rebakeAnimations(validated, options.bakeHz);
+      const normalized = normalizeDocument(rebaked);
       return { timeline: normalized.elements, tracks: normalized.tracks };
     }),
 
@@ -265,7 +290,13 @@ export const useTimelineStore = createStore<ITimelineStore>((set, get) => ({
           : (state.cursor / 5) * (range / 4) - state.canvasWidth / 2,
     })),
   setScroll: (scroll: number) => set(() => ({ scroll: scroll })),
-  setCursor: (cursor: number) => set(() => ({ cursor: cursor })),
+  // Guarded against a write of the value already held. Playback quantizes the
+  // cursor to the project's frame grid, so on a display faster than the project
+  // — a 120Hz panel showing a 30fps timeline — three out of every four animation
+  // frames ask for the instant that is already set. Without this, each of them
+  // wakes every subscriber to redraw a picture that cannot have changed.
+  setCursor: (cursor: number) =>
+    set((state) => (state.cursor === cursor ? {} : { cursor })),
   setCanvasWidth: (canvasWidth: number) =>
     set(() => ({ canvasWidth: canvasWidth })),
 

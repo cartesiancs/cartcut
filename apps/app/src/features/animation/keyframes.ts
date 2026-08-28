@@ -23,6 +23,7 @@
 
 import type { CubicKeyframeType, TimelineElement } from "../../@types/timeline";
 import { clampHandles } from "./handleBounds";
+import { normalizeFps } from "../timeline/frames";
 
 export type Lane = "x" | "y";
 
@@ -45,16 +46,47 @@ export type Baked = number[][];
 export type ScalarTrack = { isActivate: boolean; x: Keyframe[]; ax: Baked };
 export type VectorTrack = ScalarTrack & { y: Keyframe[]; ay: Baked };
 
-/** Samples per second the baker lays down between keyframes. */
+/**
+ * Samples per second the baker lays down between keyframes.
+ *
+ * A floor rather than the rate itself — see `bakeRateFor`.
+ */
 export const BAKE_HZ = 60;
+
+/**
+ * The rate to bake a project's curves at.
+ *
+ * The baked lane is a *cache* of the authored bezier, and `sampleBaked` reads
+ * it by snapping to the nearest entry rather than interpolating. A cache read
+ * at a finer rate than it was written at therefore does not blur, it steps: a
+ * 60Hz bake played back at 120fps hands two consecutive frames the same value,
+ * and a fade visibly runs at half the project's rate. So the rule is the one
+ * every cache obeys — resolution at least that of the consumer.
+ *
+ * The 60Hz floor is deliberate in the other direction. Baking a 24fps project
+ * at 24Hz would be internally consistent and still a regression: it is coarser
+ * than what ships today, it would move every golden snapshot in the suite, and
+ * the samples it saves are worth nothing next to the fidelity it costs when a
+ * clip is later retimed or the project's rate is raised.
+ */
+export function bakeRateFor(fps: number): number {
+  return Math.max(BAKE_HZ, normalizeFps(fps));
+}
 
 /**
  * Ceiling on a single baked lane.
  *
- * 36,000 samples is ten minutes at 60Hz. The cap exists because the baked
- * arrays are serialised verbatim into the `.ngt` project file, and because a
- * keyframe pair an hour apart would otherwise allocate a quarter of a million
- * entries for a curve nobody can see that finely.
+ * A budget in samples, not in time: the baked arrays are serialised verbatim
+ * into the `.ngt` project file, and a keyframe pair an hour apart would
+ * otherwise allocate a quarter of a million entries for a curve nobody can see
+ * that finely. 36,000 samples is ten minutes at 60Hz and five at 120.
+ *
+ * Deliberately *not* scaled by the project rate. `bakeTrack` spends the budget
+ * by coarsening its step across the whole track rather than by stopping partway
+ * (see there), so a track past the cap stays correct at any rate — it simply
+ * stops getting finer. Scaling the cap with fps would trade that for a project
+ * file that doubles in size on a setting the user changed for a different
+ * reason.
  */
 export const MAX_BAKED_SAMPLES = 36_000;
 

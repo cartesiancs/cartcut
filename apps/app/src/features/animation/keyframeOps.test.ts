@@ -7,10 +7,11 @@ import {
   normalizeAnimations,
   removeKeyframe,
   removeKeyframePaired,
+  rebakeAnimations,
   setHandles,
   setTrackActive,
 } from "./keyframeOps";
-import { bakeTrack, sampleBaked } from "./keyframes";
+import { BAKE_HZ, bakeRateFor, bakeTrack, sampleBaked } from "./keyframes";
 import {
   SCHEMA_VERSION,
   createTrack,
@@ -512,5 +513,240 @@ describe("paired lanes", () => {
     const two = doc({ a: positioned(), b: imageElement({ trackId: "v1" }) });
     const out = addKeyframePaired(two, "a", "position", "x", 500, 42);
     expect(out.elements.b).toBe(two.elements.b);
+  });
+});
+
+/**
+ * The bake rate reaches these ops as a trailing argument with a default, the
+ * same shape `addKeyframe`'s `handleMs` already had. The default is what makes
+ * this safe: every existing caller and every existing test keeps the behaviour
+ * it had, and only a caller that knows the project's frame rate asks for
+ * something else.
+ */
+describe("bakeHz", () => {
+  const base = doc({ a: animated() });
+
+  it("bakes at 60Hz when nobody says otherwise", () => {
+    const next = addKeyframe(base, "a", "opacity", "x", 500, 50);
+    expect(baked(next)).toEqual(bakeTrack(track(next), BAKE_HZ));
+  });
+
+  it("is bit-identical to the same edit before the parameter existed", () => {
+    // The regression guard. Anything that moved here would move every golden
+    // snapshot and every `.ngt` already on disk.
+    const explicit = addKeyframe(base, "a", "opacity", "x", 500, 50, 100, 60);
+    const implicit = addKeyframe(base, "a", "opacity", "x", 500, 50);
+    expect(explicit).toEqual(implicit);
+  });
+
+  it("is honoured by every op that writes a bake", () => {
+    const added = addKeyframe(base, "a", "opacity", "x", 500, 50, 100, 120);
+    expect(baked(added)).toEqual(bakeTrack(track(added), 120));
+
+    const moved = moveKeyframe(added, "a", "opacity", "x", 1, 400, 50, 120).doc;
+    expect(baked(moved)).toEqual(bakeTrack(track(moved), 120));
+
+    const handled = setHandles(
+      moved,
+      "a",
+      "opacity",
+      "x",
+      1,
+      { cs: [350, 40] },
+      120,
+    );
+    expect(baked(handled)).toEqual(bakeTrack(track(handled), 120));
+
+    const removed = removeKeyframe(handled, "a", "opacity", "x", 1, 120);
+    expect(baked(removed)).toEqual(bakeTrack(track(removed), 120));
+  });
+
+  it("reaches the seeded track when animation is switched on", () => {
+    const off = doc({
+      a: imageElement({
+        trackId: "v1",
+        animation: {
+          ...(imageElement().animation as any),
+          opacity: { isActivate: false, x: [], ax: [] },
+        } as any,
+      }),
+    });
+    const on = setTrackActive(off, "a", "opacity", true, { atMs: 0 }, 120);
+    expect(baked(on)).toEqual(bakeTrack(track(on), 120));
+  });
+
+  it("reaches both lanes of a paired add", () => {
+    const paired = doc({
+      a: imageElement({
+        trackId: "v1",
+        animation: {
+          ...(imageElement().animation as any),
+          position: {
+            isActivate: true,
+            x: keys([0, 0], [1000, 100]),
+            ax: points([0, 0], [1000, 100]),
+            y: keys([0, 0], [1000, 200]),
+            ay: points([0, 0], [1000, 200]),
+          },
+        } as any,
+      }),
+    });
+    const next = addKeyframePaired(
+      paired,
+      "a",
+      "position",
+      "x",
+      500,
+      50,
+      100,
+      120,
+    );
+    expect(baked(next, "position", "ax")).toEqual(
+      bakeTrack(track(next, "position", "x"), 120),
+    );
+    expect(baked(next, "position", "ay")).toEqual(
+      bakeTrack(track(next, "position", "y"), 120),
+    );
+  });
+});
+
+/**
+ * Changing a project's frame rate has to re-derive the caches without touching
+ * anything the user drew — and has to cost nothing when there is nothing to do,
+ * because it runs through `withCheckpoint` and a spurious undo step for a
+ * settings change is worse than no rebake at all.
+ */
+describe("rebakeAnimations", () => {
+  it("declines a document with no animation at all", () => {
+    const plain = doc({ a: audioElement({ trackId: "v1" }) });
+    expect(rebakeAnimations(plain, 120)).toBe(plain);
+  });
+
+  it("declines when the bakes already hold this rate", () => {
+    // `points(...)` builds a hand-written sample list rather than a real bake,
+    // so the fixture has to be settled at 60Hz before "already at this rate"
+    // means anything.
+    const at60 = rebakeAnimations(doc({ a: animated() }), BAKE_HZ);
+    expect(rebakeAnimations(at60, BAKE_HZ)).toBe(at60);
+
+    const at120 = rebakeAnimations(at60, 120);
+    expect(at120).not.toBe(at60);
+    expect(rebakeAnimations(at120, 120)).toBe(at120);
+  });
+
+  it("settles a hand-written bake onto the real grid", () => {
+    // Which is also what ingress does for a `.ngt` written by an older build.
+    const base = doc({ a: animated() });
+    expect(rebakeAnimations(base, BAKE_HZ)).not.toBe(base);
+    expect(baked(rebakeAnimations(base, BAKE_HZ))).toEqual(
+      bakeTrack(track(base), BAKE_HZ),
+    );
+  });
+
+  it("rewrites the baked lane when the rate changes", () => {
+    const at60 = rebakeAnimations(doc({ a: animated() }), BAKE_HZ);
+    const at120 = rebakeAnimations(at60, 120);
+    expect(baked(at120)).toEqual(bakeTrack(track(at60), 120));
+    expect(baked(at120).length).toBeGreaterThan(baked(at60).length);
+  });
+
+  it("leaves the authored keyframes exactly where they were", () => {
+    // The claim that makes a rate change non-destructive: `x` and `y` are the
+    // user's work, `ax` and `ay` are a cache of it.
+    const base = doc({ a: animated() });
+    const next = rebakeAnimations(base, 120);
+    expect(track(next)).toBe(track(base));
+  });
+
+  it("rebakes both lanes of a paired track", () => {
+    const base = doc({
+      a: imageElement({
+        trackId: "v1",
+        animation: {
+          ...(imageElement().animation as any),
+          position: {
+            isActivate: true,
+            x: keys([0, 0], [1000, 100]),
+            ax: points([0, 0], [1000, 100]),
+            y: keys([0, 0], [1000, 200]),
+            ay: points([0, 0], [1000, 200]),
+          },
+        } as any,
+      }),
+    });
+    const next = rebakeAnimations(base, 120);
+    expect(baked(next, "position", "ax")).toEqual(
+      bakeTrack(track(next, "position", "x"), 120),
+    );
+    expect(baked(next, "position", "ay")).toEqual(
+      bakeTrack(track(next, "position", "y"), 120),
+    );
+  });
+
+  it("survives a legacy track carrying only its x lane", () => {
+    // `lanesOf` describes the type; a project authored before pairing existed
+    // is what decides whether `y` is actually there.
+    const base = doc({
+      a: imageElement({
+        trackId: "v1",
+        animation: {
+          ...(imageElement().animation as any),
+          position: {
+            isActivate: true,
+            x: keys([0, 0], [1000, 100]),
+            ax: points([0, 0], [1000, 100]),
+          },
+        } as any,
+      }),
+    });
+    const next = rebakeAnimations(base, 120);
+    expect(baked(next, "position", "ax")).toEqual(
+      bakeTrack(track(next, "position", "x"), 120),
+    );
+    expect((next.elements.a as any).animation.position.y).toBeUndefined();
+  });
+
+  it("touches only the elements that carry animation", () => {
+    const base = doc({
+      a: animated(),
+      b: audioElement({ trackId: "v1" }),
+      c: shapeElement({ trackId: "v1" }),
+    });
+    const next = rebakeAnimations(base, 120);
+    expect(next.elements.b).toBe(base.elements.b);
+    expect(next.elements.c).toBe(base.elements.c);
+    expect(next.elements.a).not.toBe(base.elements.a);
+  });
+
+  it("keeps the tracks and the schema version", () => {
+    const base = doc({ a: animated() });
+    const next = rebakeAnimations(base, 120);
+    expect(next.tracks).toBe(base.tracks);
+    expect(next.schemaVersion).toBe(base.schemaVersion);
+  });
+
+  it("reads the same values at the rates the old bake could express", () => {
+    // A finer cache must not move what a 60fps project already saw: every
+    // instant the 60Hz grid carried is still carried, with the same value.
+    const at60 = rebakeAnimations(doc({ a: animated() }), BAKE_HZ);
+    const at120 = rebakeAnimations(at60, 120);
+    for (let frame = 0; frame <= 60; frame++) {
+      const t = (frame / 60) * 1000;
+      expect(sampleBaked(baked(at120), t, NaN)).toBeCloseTo(
+        sampleBaked(baked(at60), t, NaN),
+        9,
+      );
+    }
+  });
+
+  it("is a no-op for every rate under the bake floor", () => {
+    // The floor is what keeps a 24fps project from paying for a rate change it
+    // cannot see: 24, 30 and 60 all bake at 60Hz, so switching between them
+    // records no undo step at all.
+    const at60 = rebakeAnimations(doc({ a: animated() }), BAKE_HZ);
+    for (const fps of [1, 24, 25, 30, 50, 60]) {
+      expect(rebakeAnimations(at60, bakeRateFor(fps))).toBe(at60);
+    }
+    expect(rebakeAnimations(at60, bakeRateFor(120))).not.toBe(at60);
   });
 });

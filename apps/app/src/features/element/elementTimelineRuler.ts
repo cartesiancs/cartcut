@@ -261,9 +261,10 @@ export class ElementTimelineRuler extends LitElement {
     const cursorDom = document.querySelector("element-timeline-cursor");
 
     // Scrubbing lands on a frame, so the frame the preview shows is the frame
-    // the exporter will write. Playback is left alone — `elementControl.step`
-    // drives the cursor from the wall clock, and quantizing there would fight
-    // the drift tolerance in `playback.ts`.
+    // the exporter will write. `elementControl.step` does the same for playback
+    // now, through `playbackClock.ts` — with a floor rather than this round,
+    // because a clock names the frame it is inside and a scrub names the frame
+    // it is aiming at.
     this.timelineState.setCursor(
       snapMsToFrame(
         this.pxToMilliseconds(

@@ -15,6 +15,7 @@ import {
   type TimelineDocument,
 } from "./tracks";
 import { audioElement, imageElement, videoElement } from "../renderer/testing";
+import { cursorAtElapsed } from "./playbackClock";
 
 /** Stands in for a `<video>`; records everything this layer does to it. */
 function fakeVideo(over: Partial<MediaHandle> = {}) {
@@ -567,5 +568,101 @@ describe("syncPlayback", () => {
       other: imageElement({ trackId: "v1", startTime: 0, duration: 1000 }),
     });
     expect(() => syncPlayback(two, 500, true, { a })).not.toThrow();
+  });
+});
+
+/**
+ * Playback now sets the cursor to a frame boundary instead of the raw wall
+ * clock, and `elementTimelineRuler` used to carry a comment warning that
+ * quantizing there would "fight the drift tolerance in `playback.ts`".
+ *
+ * It does not, and the reason is a bound rather than an opinion: flooring moves
+ * the cursor by less than one frame, and one frame is two orders of magnitude
+ * inside `PLAYING_DRIFT_TOLERANCE_SEC`. These tests hold that, by counting the
+ * seeks a real playthrough issues with and without the quantization.
+ */
+describe("a quantized playback cursor", () => {
+  const RATES = [24, 25, 30, 50, 60, 120];
+
+  /**
+   * Play from `0` to `4000ms`, ticking at a display refresh rate that has
+   * nothing to do with the project, and count the seeks `applyIntent` performs.
+   */
+  function seeksDuringPlayback(fps: number, quantize: boolean): number {
+    const element = clip();
+    const handle = fakeVideo();
+    const tickMs = 1000 / 144;
+
+    let seeks = 0;
+    for (let tick = 0; tick * tickMs <= 9000; tick++) {
+      const elapsed = tick * tickMs;
+      const cursor = quantize ? cursorAtElapsed(elapsed, fps) : elapsed;
+      const result = applyIntent(
+        handle,
+        intentFor(element, cursor, true),
+        PLAYING_DRIFT_TOLERANCE_SEC,
+      );
+      if (result.seeked) {
+        seeks++;
+      }
+    }
+    return seeks;
+  }
+
+  it("issues no more seeks than the unquantized cursor did", () => {
+    for (const fps of RATES) {
+      expect(seeksDuringPlayback(fps, true)).toBeLessThanOrEqual(
+        seeksDuringPlayback(fps, false),
+      );
+    }
+  });
+
+  it("does not re-seek on every frame", () => {
+    // The failure mode the tolerance exists to prevent: a seek per tick is the
+    // feedback loop that made a one-frame tolerance unusable.
+    for (const fps of RATES) {
+      expect(seeksDuringPlayback(fps, true)).toBeLessThan(10);
+    }
+  });
+
+  it("keeps the quantization far inside the tolerance, at every rate", () => {
+    // The arithmetic behind the two claims above, stated on its own so a change
+    // to either constant fails here rather than somewhere subtle.
+    for (const fps of RATES) {
+      expect(1000 / fps).toBeLessThan(PLAYING_DRIFT_TOLERANCE_SEC * 1000);
+      expect(1000 / fps).toBeLessThan(PLAYING_DRIFT_TOLERANCE_SEC * 1000 * 0.2);
+    }
+  });
+
+  it("still resolves to the right source instant", () => {
+    // Quantizing the cursor must not move which part of the source is shown by
+    // more than the frame the user is looking at.
+    for (const fps of RATES) {
+      for (let tick = 0; tick < 500; tick++) {
+        const elapsed = 5000 + tick * (1000 / 144);
+        const raw = intentFor(clip(), elapsed, true).sourceTimeSec;
+        const snapped = intentFor(
+          clip(),
+          cursorAtElapsed(elapsed, fps),
+          true,
+        ).sourceTimeSec;
+        expect(Math.abs(raw - snapped)).toBeLessThan(1 / fps);
+      }
+    }
+  });
+
+  it("still enters and leaves a clip's window on the right frame", () => {
+    // Off-by-one at the boundary is what a floor could plausibly cost, so it is
+    // asserted rather than assumed.
+    for (const fps of RATES) {
+      const element = clip();
+      const enter = element.startTime;
+      expect(intentFor(element, cursorAtElapsed(enter, fps), true).inWindow).toBe(
+        true,
+      );
+      expect(
+        intentFor(element, cursorAtElapsed(enter - 1 / fps, fps), true).inWindow,
+      ).toBe(false);
+    }
   });
 });

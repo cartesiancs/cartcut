@@ -54,7 +54,7 @@ import { crop, heatmap, sideBySide, writeJson, writePng, writeText } from "../ha
 import { detectSilence, loudness, peakTimes, rmsEnvelope } from "../harness/audio";
 import {
   setProjectFolder, setDuration, setResolution, setBackgroundColor,
-  setFpsThroughStore, setExportPreset, clearSelection,
+  setFps, setExportPreset, clearSelection,
 } from "../harness/ui";
 import { buildKitchenSink } from "../scenario/kitchenSink";
 import { chooseSampleFrames } from "../scenario/sampling";
@@ -92,11 +92,7 @@ test("every editing element survives a full-length export, frame for frame", asy
     await setResolution(page, profile.width, profile.height);
     await setDuration(page, profile.durationSec);
     await setBackgroundColor(page, "#000000");
-    if (profile.fps !== 60) {
-      // `#projectDuration` (the fps field) ships `disabled` at a hardcoded 60,
-      // so there is no control to drive for any other rate.
-      await setFpsThroughStore(page, profile.fps);
-    }
+    await setFps(page, profile.fps);
     await setExportPreset(page, "medium");
 
     const options = await page.evaluate(

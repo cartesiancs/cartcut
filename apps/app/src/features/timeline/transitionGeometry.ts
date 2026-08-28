@@ -39,7 +39,7 @@ import {
   spanStart,
   speedOf,
 } from "./geometry";
-import { frameToMs, msToFrameFloor } from "./frames";
+import { frameStartMs } from "./frames";
 
 /**
  * The shortest transition worth having, in timeline ms.
@@ -232,8 +232,10 @@ export function windowOf(transition: TransitionElementType): {
  *
  * The two paths sample the timeline differently. Export walks frame indices:
  * `frameTimeMs(n, fps)` is exactly `(n / fps) * 1000`. The preview's playback
- * loop sets the cursor from the wall clock — `Date.now() - startTime` in
- * `elementControl.step` — which lands on arbitrary integer milliseconds.
+ * loop derives the cursor from the wall clock — `Date.now() - startTime` in
+ * `elementControl.step`. That cursor is floored onto the frame grid now
+ * (`playbackClock.ts`), but it reaches this function through scrubs, keyframe
+ * edits and the agent bridge as well, and not all of those are quantized.
  *
  * For everything that existed before transitions that difference was harmless:
  * sampling a keyframe 8ms off shows a marginally different frame and nobody can
@@ -242,11 +244,10 @@ export function windowOf(transition: TransitionElementType): {
  * not match what the user approved — and the discrepancy is invisible until
  * they compare the two side by side.
  *
- * Snapping here fixes it at the one place the value is derived, without
- * touching the playback cursor itself — which drives scrubbing, keyframes and
- * filmstrips, and is not this feature's to change. `frames.ts#frameToMs`
- * deliberately uses the exporter's own expression, bit for bit, so the two
- * agree exactly rather than approximately.
+ * Snapping here fixes it at the one place the value is derived, whatever the
+ * caller did or did not do first. `frames.ts#frameStartMs` is built on the
+ * exporter's own expression, bit for bit, so the two agree exactly rather than
+ * approximately.
  *
  * **Floor, not nearest.** `snapMsToFrame` rounds, which is right for its own
  * job — a dragged clip should land on the closest frame line. It is wrong here.
@@ -264,7 +265,7 @@ export function progressOf(
   if (!(transition.duration > 0)) {
     return 1;
   }
-  const snapped = frameToMs(msToFrameFloor(timeInMs, fps), fps);
+  const snapped = frameStartMs(timeInMs, fps);
   const raw = (snapped - transition.startTime) / transition.duration;
   return Math.max(0, Math.min(1, raw));
 }

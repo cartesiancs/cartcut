@@ -14,7 +14,12 @@
 
 import { describe, expect, it } from "vitest";
 import { isElementVisibleAtTime } from "../element/time";
-import { frameToMs, isFrameAligned, msToFrame } from "./frames";
+import {
+  frameToMs,
+  isFrameAligned,
+  msToFrame,
+  planFrameGrid,
+} from "./frames";
 import { resolveMove } from "./dragResolve";
 import { moveClips, splitClip, trimClipStart } from "./clipOps";
 import { spanOf } from "./geometry";
@@ -25,10 +30,12 @@ import {
   type TimelineDocument,
 } from "./tracks";
 import { TRACK_PITCH } from "./layout";
-import { MAX_RANGE } from "./zoom";
+import { MAX_RANGE, maxRangeForFps } from "./zoom";
 import { imageElement, mulberry32 } from "../renderer/testing";
+import { rebakeAnimations } from "../animation/keyframeOps";
+import { bakeRateFor } from "../animation/keyframes";
 
-const RATES = [24, 25, 30, 60];
+const RATES = [24, 25, 30, 50, 60, 120];
 
 function doc(elements: Record<string, any>): TimelineDocument {
   return normalizeDocument({
@@ -214,5 +221,119 @@ describe("the last ULP", () => {
     const frames = visibleFrames(element, fps, targetFrame + 40);
     expect(frames.length).toBe(10);
     expect(frames[0]).toBe(targetFrame);
+  });
+});
+
+/**
+ * What a frame-rate change does, and — more to the point — what it does not.
+ *
+ * A rate change is a change of grid, not a re-cut. Every clip keeps the
+ * milliseconds it was authored with, so a project edited at 60 and switched to
+ * 30 has clips off the new grid until they are next touched. That is the
+ * behaviour every NLE has, and it is the only one that cannot lose work; the
+ * alternative rewrites every boundary in the project on a settings change.
+ */
+describe("changing the project frame rate", () => {
+  it("leaves every clip exactly where it was", () => {
+    // `setProjectFps` puts one transform on the document — `rebakeAnimations` —
+    // and this is what that transform is allowed to touch. Anything that moved
+    // a `startTime`, a `duration` or a `trim` would be a re-cut the user never
+    // asked for and cannot see coming.
+    const before = doc({
+      a: imageElement({ trackId: "v1", startTime: 1000, duration: 2000 }),
+      b: imageElement({
+        trackId: "v1",
+        startTime: frameToMs(61, 60),
+        duration: 1500,
+      }),
+    });
+
+    for (const fps of RATES) {
+      const after = rebakeAnimations(before, bakeRateFor(fps));
+      for (const id of ["a", "b"]) {
+        const was = before.elements[id] as any;
+        const now = after.elements[id] as any;
+        expect(now.startTime).toBe(was.startTime);
+        expect(now.duration).toBe(was.duration);
+        expect(now.trim).toEqual(was.trim);
+        expect(spanOf(now)).toEqual(spanOf(was));
+      }
+    }
+  });
+
+  it("does not pretend a clip is aligned to a grid it was not authored on", () => {
+    // 1016.6666…ms is frame 61 at 60fps and lands mid-frame at 30 and 24.
+    const at60 = frameToMs(61, 60);
+    expect(isFrameAligned(at60, 60)).toBe(true);
+    expect(isFrameAligned(at60, 30)).toBe(false);
+    expect(isFrameAligned(at60, 24)).toBe(false);
+    // 120 is a multiple of 60, so a 60fps edit is already on its grid.
+    expect(isFrameAligned(at60, 120)).toBe(true);
+  });
+
+  it("pulls an off-grid clip onto the new grid the next time it is dragged", () => {
+    // Which is what makes the non-destructive choice liveable: the correction
+    // happens under the user's hand, where they can see it.
+    const authoredAt60 = frameToMs(61, 60);
+    const base = doc({
+      a: imageElement({
+        trackId: "v1",
+        startTime: authoredAt60,
+        duration: 2000,
+      }),
+    });
+
+    for (const fps of [24, 30, 120]) {
+      const plan = resolveMove({
+        base,
+        primaryId: "a",
+        dragIds: ["a"],
+        // A nudge of a few pixels: enough to be a real gesture, not enough to
+        // reach a neighbouring clip's edge and be captured by edge snapping.
+        dxPx: 3,
+        dyPx: 0,
+        free: false,
+        range: MAX_RANGE,
+        fps,
+        playheadMs: -1_000_000,
+        trackPitch: TRACK_PITCH,
+      });
+      if (plan.kind !== "move") {
+        continue;
+      }
+      const next = moveClips(base, ["a"], plan.appliedMs, 0);
+      expect(next).not.toBe(base);
+      expect(isFrameAligned((next.elements.a as any).startTime, fps)).toBe(true);
+    }
+  });
+
+  it("still draws a clip on every export frame it covers, at 120fps", () => {
+    const fps = 120;
+    const start = frameToMs(37, fps);
+    const element = imageElement({
+      trackId: "v1",
+      startTime: start,
+      duration: frameToMs(48, fps),
+    });
+    const frames = visibleFrames(element, fps, 200);
+    expect(frames[0]).toBe(37);
+    expect(frames.length).toBe(48);
+    expect(frames[frames.length - 1]).toBe(37 + 47);
+  });
+
+  it("keeps the frame grid drawable at the rate's own zoom ceiling", () => {
+    // The ceiling moves with the rate precisely so this stays true; a fixed 60
+    // would put a 120fps frame at 25px and a 240fps one at 12.5.
+    for (const fps of [...RATES, 240]) {
+      const grid = planFrameGrid({
+        range: maxRangeForFps(fps),
+        hScroll: 0,
+        x0: 0,
+        x1: 500,
+        fps,
+      });
+      expect(grid.length).toBeGreaterThan(1);
+      expect(grid[1] - grid[0]).toBeGreaterThanOrEqual(40);
+    }
   });
 });

@@ -330,6 +330,32 @@ export function missingInputs(
   return [...missing];
 }
 
+/**
+ * How long the output is allowed to run, in seconds.
+ *
+ * Not `videoDuration`, which is what this used to pass straight through. The
+ * renderer writes `Math.round(duration * fps)` frames — one integer count that
+ * every part of the export agrees on, derived in
+ * `apps/app/src/features/export/frames.ts#frameCount` — and when that rounds
+ * *up*, the last frame extends past `duration`. A 10.009s project at 60fps
+ * produces 601 frames, which is 10.0167s of video, and `-t 10.009` cuts the
+ * final frame off. Deriving the limit from the same count makes the two agree
+ * by construction at every rate.
+ *
+ * The expression is duplicated across the process boundary rather than
+ * imported, for the reason spelled out at the top of `exportSettings.ts`:
+ * importing from `apps/app/src` would widen this build's `rootDir` and relocate
+ * the whole compiled output. `ffmpegArgs.test.ts` imports both sides and
+ * asserts they agree.
+ */
+function outputDurationSec(videoDuration: number, fps: number): number {
+  const duration = Number(videoDuration);
+  if (!(duration > 0) || !(fps > 0)) {
+    return duration;
+  }
+  return Math.round(duration * fps) / fps;
+}
+
 /** The complete argument vector for the export process. */
 export function buildFFmpegArgs(
   options: RenderOptions,
@@ -415,7 +441,12 @@ export function buildFFmpegArgs(
   args.push("-map", "[vout]", "-map", "[aout]");
   args.push(...videoOutputArgs(settings));
   args.push(...audioOutputArgs(settings));
-  args.push("-t", `${options.videoDuration}`);
+  // State the output rate rather than letting it be inherited from the input
+  // demuxer. The pipe is exactly constant-rate — the renderer hands over one
+  // frame per `1/fps` and nothing else — so saying so leaves no room for a
+  // muxer or an encoder to pick a timebase of its own and retime the result.
+  args.push("-r", `${inputFps}`, "-fps_mode", "cfr");
+  args.push("-t", `${outputDurationSec(options.videoDuration, inputFps)}`);
   args.push(...containerOutputArgs(settings));
   args.push(options.videoDestination);
 

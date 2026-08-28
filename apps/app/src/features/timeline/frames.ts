@@ -31,6 +31,33 @@ import { msToPxSigned, pxToMsSigned } from "./geometry";
 export const DEFAULT_FPS = 60;
 
 /**
+ * The rates the settings panel offers by name.
+ *
+ * A suggestion list rather than a whitelist: `coerceFps` accepts any integer in
+ * `[MIN_FPS, MAX_FPS]`, so a project can run at 12 or 90 if someone types it.
+ *
+ * Every entry is an integer, and that is the boundary of what this module
+ * supports. The NTSC family — 23.976, 29.97, 59.94 — is really 24000/1001 and
+ * its relatives, ratios no `number` can name exactly. Admitting them would mean
+ * carrying a rational through every conversion here and through the exporter
+ * that has to agree with it bit for bit, which is a different module than this
+ * one.
+ */
+export const FPS_PRESETS = [24, 25, 30, 50, 60, 120] as const;
+
+/** Slowest rate a project may run at. One frame a second is still a project. */
+export const MIN_FPS = 1;
+
+/**
+ * Fastest rate a project may run at.
+ *
+ * Beyond this a frame is under 4ms, which is finer than the whole-millisecond
+ * `adelay` the export's audio graph places clips with, and far past what the
+ * preview's media elements can be seeked to one frame at a time.
+ */
+export const MAX_FPS = 240;
+
+/**
  * Slack for `floor`/`ceil` at a frame boundary.
  *
  * `ms * fps / 1000` does not land exactly on the integer it mathematically is:
@@ -74,6 +101,35 @@ export function normalizeFps(fps: number | null | undefined): number {
   return typeof fps === "number" && Number.isFinite(fps) && fps > 0
     ? fps
     : DEFAULT_FPS;
+}
+
+/**
+ * A frame rate on its way *into* the project, from a UI field or a file.
+ *
+ * The strict counterpart to `normalizeFps`, and the division matters. That one
+ * is a *read* guard: it runs on every draw, every drag and every seek, and its
+ * only job is to never hand the arithmetic below something it cannot use. This
+ * one is a *write* guard. It runs once, at the moment a rate is being stored,
+ * and its job is to make an unusable rate unrepresentable from then on — so no
+ * reader downstream has to wonder whether the project's fps is an integer, is
+ * positive, or is a number at all.
+ *
+ * Rounds rather than truncates: a spinner that hands back `59.999999` is a
+ * float artefact of the input element, not a request for 59fps. And only
+ * numbers and strings are read — `Number(true)` is `1`, which would quietly
+ * turn a boolean into a one-frame-per-second project.
+ */
+export function coerceFps(value: unknown): number {
+  const raw =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : NaN;
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return DEFAULT_FPS;
+  }
+  return Math.min(MAX_FPS, Math.max(MIN_FPS, Math.round(raw)));
 }
 
 /**
@@ -131,6 +187,24 @@ export function msToFrameCeil(ms: number, fps: number): number {
  */
 export function frameToMs(frame: number, fps: number): number {
   return noNegativeZero((frame / normalizeFps(fps)) * 1000);
+}
+
+/**
+ * Where the frame covering `ms` begins.
+ *
+ * The floor-snap, which answers "which frame is on screen at this instant" —
+ * as opposed to `snapMsToFrame`'s round, which answers "which frame is this
+ * instant nearest to". An edit rounds, because the user is aiming at a
+ * boundary. A clock floors, because at `t` the picture shows the frame whose
+ * interval contains `t` and the next one has not started yet.
+ *
+ * Was open-coded as `frameToMs(msToFrameFloor(t, fps), fps)` in three places
+ * that all have to agree with each other and with the exporter: the effect
+ * clock, the transition clock, and playback.
+ */
+export function frameStartMs(ms: number, fps: number): number {
+  const rate = normalizeFps(fps);
+  return frameToMs(msToFrameFloor(ms, rate), rate);
 }
 
 /**
@@ -221,7 +295,7 @@ export function snapMsToFrame(ms: number, fps: number): number {
  */
 export function frameSampleMs(ms: number, fps: number): number {
   const rate = normalizeFps(fps);
-  return frameToMs(msToFrameFloor(ms, rate), rate) + frameDurationMs(rate) / 2;
+  return frameStartMs(ms, rate) + frameDurationMs(rate) / 2;
 }
 
 /** How wide one frame is on screen at this zoom, in px. */

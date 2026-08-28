@@ -38,6 +38,7 @@ import {
   type TimelineElement,
 } from "../../@types/timeline";
 import {
+  BAKE_HZ,
   bakeTrack,
   emptyAnimation,
   mapKeyframeValues,
@@ -146,6 +147,7 @@ function reframe(
   element: TimelineElement,
   m: Mat,
   cursor: number,
+  bakeHz: number = BAKE_HZ,
 ): TimelineElement {
   const inverse = invert(m);
   const any = element as any;
@@ -185,7 +187,15 @@ function reframe(
   if (position != null && Array.isArray(position.x)) {
     next.animation = {
       ...any.animation,
-      position: reframePositionTrack(position, inverse, w, h, newW, newH),
+      position: reframePositionTrack(
+        position,
+        inverse,
+        w,
+        h,
+        newW,
+        newH,
+        bakeHz,
+      ),
     };
   }
 
@@ -212,6 +222,7 @@ function reframePositionTrack(
   oldH: number,
   newW: number,
   newH: number,
+  bakeHz: number = BAKE_HZ,
 ): any {
   const xs: Keyframe[] = Array.isArray(track.x) ? track.x : [];
   const ys: Keyframe[] = Array.isArray(track.y) ? track.y : [];
@@ -224,10 +235,10 @@ function reframePositionTrack(
     const dx = applyPoint(inverse, { x: 0, y: 0 });
     return {
       ...track,
-      x: rebake(offsetKeyframeValues(xs, dx.x)).list,
-      ax: rebake(offsetKeyframeValues(xs, dx.x)).baked,
-      y: rebake(offsetKeyframeValues(ys, dx.y)).list,
-      ay: rebake(offsetKeyframeValues(ys, dx.y)).baked,
+      x: rebake(offsetKeyframeValues(xs, dx.x), bakeHz).list,
+      ax: rebake(offsetKeyframeValues(xs, dx.x), bakeHz).baked,
+      y: rebake(offsetKeyframeValues(ys, dx.y), bakeHz).list,
+      ay: rebake(offsetKeyframeValues(ys, dx.y), bakeHz).baked,
     };
   }
 
@@ -277,14 +288,17 @@ function reframePositionTrack(
   return {
     ...track,
     x: nextX,
-    ax: bakeTrack(nextX),
+    ax: bakeTrack(nextX, bakeHz),
     y: nextY,
-    ay: bakeTrack(nextY),
+    ay: bakeTrack(nextY, bakeHz),
   };
 }
 
-function rebake(list: Keyframe[]): { list: Keyframe[]; baked: number[][] } {
-  return { list, baked: bakeTrack(list) };
+function rebake(
+  list: Keyframe[],
+  bakeHz: number = BAKE_HZ,
+): { list: Keyframe[]; baked: number[][] } {
+  return { list, baked: bakeTrack(list, bakeHz) };
 }
 
 /**
@@ -295,32 +309,44 @@ function rebake(list: Keyframe[]): { list: Keyframe[]; baked: number[][] } {
  * side, and it has to move in the same direction or a scaled group's animated
  * child would jump the moment it was released.
  */
-function divideScaleTrack(track: any, factor: number): any {
+function divideScaleTrack(
+  track: any,
+  factor: number,
+  bakeHz: number = BAKE_HZ,
+): any {
   if (track == null || !Array.isArray(track.x) || factor === 0) {
     return track;
   }
   const next = mapKeyframeValues(track.x, (value) => value / factor);
-  return { ...track, x: next, ax: bakeTrack(next) };
+  return { ...track, x: next, ax: bakeTrack(next, bakeHz) };
 }
 
 /** Multiply an opacity track by `factor` (0..1), clamped to 0..100. */
-function scaleOpacityTrack(track: any, factor: number): any {
+function scaleOpacityTrack(
+  track: any,
+  factor: number,
+  bakeHz: number = BAKE_HZ,
+): any {
   if (track == null || !Array.isArray(track.x) || factor === 1) {
     return track;
   }
   const next = mapKeyframeValues(track.x, (value) =>
     Math.max(0, Math.min(100, value * factor)),
   );
-  return { ...track, x: next, ax: bakeTrack(next) };
+  return { ...track, x: next, ax: bakeTrack(next, bakeHz) };
 }
 
 /** Add `deltaDeg` to every keyframe on a rotation track. */
-function offsetRotationTrack(track: any, deltaDeg: number): any {
+function offsetRotationTrack(
+  track: any,
+  deltaDeg: number,
+  bakeHz: number = BAKE_HZ,
+): any {
   if (track == null || !Array.isArray(track.x) || deltaDeg === 0) {
     return track;
   }
   const next = offsetKeyframeValues(track.x, deltaDeg);
-  return { ...track, x: next, ax: bakeTrack(next) };
+  return { ...track, x: next, ax: bakeTrack(next, bakeHz) };
 }
 
 // ------------------------------------------------------------- createGroup
@@ -329,6 +355,15 @@ export type CreateGroupOptions = {
   /** Shown on the group's bar. Defaults to "Group". */
   name?: string;
   color?: string;
+  /**
+   * Samples per second to re-bake compensated animation at.
+   *
+   * Grouping pushes a child's position track through a change of basis, so the
+   * baked lanes have to be rewritten; this says how finely. Defaults to
+   * `BAKE_HZ`, which is what a caller that does not know the project's frame
+   * rate should use — see `keyframes.ts#bakeRateFor` for what the app passes.
+   */
+  bakeHz?: number;
 };
 
 /**
@@ -354,6 +389,7 @@ export function createGroup(
   options: CreateGroupOptions = {},
 ): TimelineDocument {
   const elements = doc.elements;
+  const bakeHz = options.bakeHz ?? BAKE_HZ;
 
   if (groupId === "" || elements[groupId] != null) {
     return doc;
@@ -427,7 +463,7 @@ export function createGroup(
   const next: Timeline = { ...elements, [groupId]: group };
   for (const id of ids) {
     next[id] = {
-      ...(reframe(elements[id], groupMatrix, startTime) as any),
+      ...(reframe(elements[id], groupMatrix, startTime, bakeHz) as any),
       parentId: groupId,
     };
   }
@@ -455,6 +491,7 @@ export function ungroup(
   doc: TimelineDocument,
   groupId: string,
   atMs: number,
+  bakeHz: number = BAKE_HZ,
 ): TimelineDocument {
   const elements = doc.elements;
   const group = elements[groupId];
@@ -479,7 +516,12 @@ export function ungroup(
 
     // `reframe` removes an interposed transform when handed its inverse, which
     // is what adopting the group's transform into the child amounts to.
-    const promoted: any = reframe(element, invert(groupMatrix), atMs);
+    const promoted: any = reframe(
+      element,
+      invert(groupMatrix),
+      atMs,
+      bakeHz,
+    );
 
     if ("opacity" in promoted) {
       promoted.opacity = Math.max(
@@ -490,12 +532,17 @@ export function ungroup(
     if (promoted.animation != null) {
       promoted.animation = {
         ...promoted.animation,
-        scale: divideScaleTrack(promoted.animation.scale, 1 / sample.scale),
+        scale: divideScaleTrack(
+          promoted.animation.scale,
+          1 / sample.scale,
+          bakeHz,
+        ),
         rotation: offsetRotationTrack(
           promoted.animation.rotation,
           sample.rotationDeg,
+          bakeHz,
         ),
-        opacity: scaleOpacityTrack(promoted.animation.opacity, alpha),
+        opacity: scaleOpacityTrack(promoted.animation.opacity, alpha, bakeHz),
       };
     }
 
@@ -543,6 +590,7 @@ export function setParent(
   elementIds: string[],
   parentId: string | null,
   atMs: number,
+  bakeHz: number = BAKE_HZ,
 ): TimelineDocument {
   const elements = doc.elements;
   const ids = [...new Set(elementIds)].filter((id) => elements[id] != null);
@@ -591,7 +639,12 @@ export function setParent(
         : worldMatrixOf(elements, current, atMs);
 
     const interposed = multiply(targetInverse, source);
-    const moved: any = reframe(elements[id], invert(interposed), atMs);
+    const moved: any = reframe(
+      elements[id],
+      invert(interposed),
+      atMs,
+      bakeHz,
+    );
 
     if (parentId == null) {
       delete moved.parentId;
@@ -609,8 +662,9 @@ export function removeFromParent(
   doc: TimelineDocument,
   elementIds: string[],
   atMs: number,
+  bakeHz: number = BAKE_HZ,
 ): TimelineDocument {
-  return setParent(doc, elementIds, null, atMs);
+  return setParent(doc, elementIds, null, atMs, bakeHz);
 }
 
 /**

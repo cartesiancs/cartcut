@@ -2,6 +2,7 @@ import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { rangeFromSlider, sliderFromRange } from "../timeline/zoom";
+import { projectFps } from "../editor/frameRate";
 
 @customElement("element-timeline-range")
 export class ElementTimelineRange extends LitElement {
@@ -21,7 +22,7 @@ export class ElementTimelineRange extends LitElement {
 
       const input: any = document.querySelector("#timelineRange");
       if (!input) return;
-      input.value = sliderFromRange(state.range);
+      input.value = sliderFromRange(state.range, projectFps());
       this.syncFill(input);
     });
 
@@ -96,6 +97,8 @@ export class ElementTimelineRange extends LitElement {
     // be a logit window pushed through a sigmoid, which capped the range at 10
     // however far the slider travelled — and at 10 a 60fps frame is 8.3px wide,
     // too narrow to edit a cut against.
-    this.timelineState.setRange(rangeFromSlider(parseFloat(e.target.value)));
+    this.timelineState.setRange(
+      rangeFromSlider(parseFloat(e.target.value), projectFps()),
+    );
   }
 }

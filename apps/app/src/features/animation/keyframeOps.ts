@@ -22,7 +22,9 @@ import {
 } from "../../@types/timeline";
 import type { TimelineDocument } from "../timeline/tracks";
 import {
+  BAKE_HZ,
   DEFAULT_HANDLE_MS,
+  type Baked,
   addKeyframe as addToList,
   bakeTrack,
   lanesOf,
@@ -98,6 +100,7 @@ function withLane(
   property: AnimatableProperty,
   lane: Lane,
   list: Keyframe[],
+  bakeHz: number = BAKE_HZ,
 ): TimelineDocument {
   const element = doc.elements[elementId] as any;
   const animation = element.animation;
@@ -114,7 +117,7 @@ function withLane(
           [property]: {
             ...track,
             [lane]: list,
-            [bakedKeyOf(lane)]: bakeTrack(list),
+            [bakedKeyOf(lane)]: bakeTrack(list, bakeHz),
           },
         },
       },
@@ -130,6 +133,7 @@ export function addKeyframe(
   tMs: number,
   value: number,
   handleMs: number = DEFAULT_HANDLE_MS,
+  bakeHz: number = BAKE_HZ,
 ): TimelineDocument {
   const found = resolve(doc, elementId, property, lane);
   if (found == null) {
@@ -139,7 +143,7 @@ export function addKeyframe(
   if (next === found.list) {
     return doc;
   }
-  return withLane(doc, elementId, property, lane, next);
+  return withLane(doc, elementId, property, lane, next, bakeHz);
 }
 
 export function moveKeyframe(
@@ -150,6 +154,7 @@ export function moveKeyframe(
   index: number,
   tMs: number,
   value: number,
+  bakeHz: number = BAKE_HZ,
 ): { doc: TimelineDocument; index: number } {
   const found = resolve(doc, elementId, property, lane);
   if (found == null) {
@@ -160,7 +165,7 @@ export function moveKeyframe(
     return { doc, index: moved.index };
   }
   return {
-    doc: withLane(doc, elementId, property, lane, moved.list),
+    doc: withLane(doc, elementId, property, lane, moved.list, bakeHz),
     index: moved.index,
   };
 }
@@ -171,6 +176,7 @@ export function removeKeyframe(
   property: AnimatableProperty,
   lane: Lane,
   index: number,
+  bakeHz: number = BAKE_HZ,
 ): TimelineDocument {
   const found = resolve(doc, elementId, property, lane);
   if (found == null) {
@@ -180,7 +186,7 @@ export function removeKeyframe(
   if (next === found.list) {
     return doc;
   }
-  return withLane(doc, elementId, property, lane, next);
+  return withLane(doc, elementId, property, lane, next, bakeHz);
 }
 
 export function setHandles(
@@ -190,6 +196,7 @@ export function setHandles(
   lane: Lane,
   index: number,
   patch: { cs?: [number, number]; ce?: [number, number] },
+  bakeHz: number = BAKE_HZ,
 ): TimelineDocument {
   const found = resolve(doc, elementId, property, lane);
   if (found == null) {
@@ -199,7 +206,7 @@ export function setHandles(
   if (next === found.list) {
     return doc;
   }
-  return withLane(doc, elementId, property, lane, next);
+  return withLane(doc, elementId, property, lane, next, bakeHz);
 }
 
 // ------------------------------------------------------- paired lane editing
@@ -269,6 +276,7 @@ export function addKeyframePaired(
   tMs: number,
   value: number,
   handleMs: number = DEFAULT_HANDLE_MS,
+  bakeHz: number = BAKE_HZ,
 ): TimelineDocument {
   const primary = addKeyframe(
     doc,
@@ -278,6 +286,7 @@ export function addKeyframePaired(
     tMs,
     value,
     handleMs,
+    bakeHz,
   );
   if (!isPaired(doc, elementId, property)) {
     return primary;
@@ -295,7 +304,16 @@ export function addKeyframePaired(
     // No curve to preserve. The element's own static value is what the renderer
     // would have shown at that instant anyway.
     const held = staticValueOf(doc.elements[elementId], property, other);
-    return addKeyframe(primary, elementId, property, other, tMs, held, handleMs);
+    return addKeyframe(
+      primary,
+      elementId,
+      property,
+      other,
+      tMs,
+      held,
+      handleMs,
+      bakeHz,
+    );
   }
 
   const planted = plantKeyframe(sibling.list, tMs);
@@ -303,7 +321,7 @@ export function addKeyframePaired(
     // Already a keyframe there; the pair is intact.
     return primary;
   }
-  return withLane(primary, elementId, property, other, planted);
+  return withLane(primary, elementId, property, other, planted, bakeHz);
 }
 
 /**
@@ -320,9 +338,19 @@ export function moveKeyframePaired(
   index: number,
   tMs: number,
   value: number,
+  bakeHz: number = BAKE_HZ,
 ): { doc: TimelineDocument; index: number } {
   if (!isPaired(doc, elementId, property)) {
-    return moveKeyframe(doc, elementId, property, lane, index, tMs, value);
+    return moveKeyframe(
+      doc,
+      elementId,
+      property,
+      lane,
+      index,
+      tMs,
+      value,
+      bakeHz,
+    );
   }
 
   const found = resolve(doc, elementId, property, lane);
@@ -332,7 +360,16 @@ export function moveKeyframePaired(
   }
   const fromMs = original.p[0];
 
-  const primary = moveKeyframe(doc, elementId, property, lane, index, tMs, value);
+  const primary = moveKeyframe(
+    doc,
+    elementId,
+    property,
+    lane,
+    index,
+    tMs,
+    value,
+    bakeHz,
+  );
   if (primary.doc === doc) {
     // Declined — the target instant is taken, or nothing moved.
     return primary;
@@ -357,6 +394,7 @@ export function moveKeyframePaired(
     siblingIndex,
     tMs,
     sibling!.list[siblingIndex].p[1],
+    bakeHz,
   );
   if (moved.doc === primary.doc) {
     // The sibling could not follow — its target instant is occupied. Letting
@@ -375,9 +413,10 @@ export function removeKeyframePaired(
   property: AnimatableProperty,
   lane: Lane,
   index: number,
+  bakeHz: number = BAKE_HZ,
 ): TimelineDocument {
   if (!isPaired(doc, elementId, property)) {
-    return removeKeyframe(doc, elementId, property, lane, index);
+    return removeKeyframe(doc, elementId, property, lane, index, bakeHz);
   }
 
   const found = resolve(doc, elementId, property, lane);
@@ -387,7 +426,14 @@ export function removeKeyframePaired(
   }
   const atMs = original.p[0];
 
-  const primary = removeKeyframe(doc, elementId, property, lane, index);
+  const primary = removeKeyframe(
+    doc,
+    elementId,
+    property,
+    lane,
+    index,
+    bakeHz,
+  );
   if (primary === doc) {
     return doc;
   }
@@ -398,7 +444,14 @@ export function removeKeyframePaired(
   if (siblingIndex < 0) {
     return primary;
   }
-  return removeKeyframe(primary, elementId, property, other, siblingIndex);
+  return removeKeyframe(
+    primary,
+    elementId,
+    property,
+    other,
+    siblingIndex,
+    bakeHz,
+  );
 }
 
 /**
@@ -443,6 +496,7 @@ export function setTrackActive(
   property: AnimatableProperty,
   active: boolean,
   seed?: { atMs: number },
+  bakeHz: number = BAKE_HZ,
 ): TimelineDocument {
   const element = doc.elements[elementId] as any;
   if (element == null || !animatableProperties(element).includes(property)) {
@@ -472,7 +526,7 @@ export function setTrackActive(
       );
       if (seeded !== list) {
         nextTrack[lane] = seeded;
-        nextTrack[bakedKeyOf(lane)] = bakeTrack(seeded);
+        nextTrack[bakedKeyOf(lane)] = bakeTrack(seeded, bakeHz);
         changed = true;
       }
     }
@@ -509,6 +563,112 @@ export function normalizeAnimations(doc: TimelineDocument): TimelineDocument {
 
   for (const [id, element] of Object.entries(doc.elements)) {
     const next = normalizeAnimation(element);
+    elements[id] = next;
+    if (next !== element) {
+      changed = true;
+    }
+  }
+
+  return changed ? { ...doc, elements } : doc;
+}
+
+
+/**
+ * Two baked lanes hold the same samples.
+ *
+ * `rebakeAnimations` has to decide whether it changed anything, and the only
+ * honest answer comes from comparing the samples themselves — the arrays are
+ * freshly allocated every time, so reference equality would report a change on
+ * every call and cost an undo step for nothing. `Object.is` rather than `===`
+ * because a `-0` slipping into a sample is a difference worth seeing.
+ */
+function bakedEqual(previous: unknown, next: Baked): boolean {
+  if (!Array.isArray(previous) || previous.length !== next.length) {
+    return false;
+  }
+  for (let i = 0; i < next.length; i++) {
+    const a = previous[i];
+    const b = next[i];
+    if (!Array.isArray(a) || a.length !== b.length) {
+      return false;
+    }
+    for (let j = 0; j < b.length; j++) {
+      if (!Object.is(a[j], b[j])) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/** Rebake one element's lanes, or hand it back untouched. */
+function rebakeElement(element: TimelineElement, hz: number): TimelineElement {
+  const animation = (element as any).animation;
+  if (animation == null || typeof animation !== "object") {
+    return element;
+  }
+
+  let nextAnimation: any = null;
+
+  for (const property of animatableProperties(element)) {
+    const track = animation[property];
+    if (track == null || typeof track !== "object") {
+      continue;
+    }
+
+    let nextTrack: any = null;
+    for (const lane of lanesOf(property)) {
+      // A paired property's `y` may be absent on a document authored before
+      // pairing existed, and `lanesOf` describes the type rather than the data.
+      if (!Array.isArray(track[lane])) {
+        continue;
+      }
+      const baked = bakeTrack(track[lane] as Keyframe[], hz);
+      if (bakedEqual(track[bakedKeyOf(lane)], baked)) {
+        continue;
+      }
+      nextTrack ??= { ...track };
+      nextTrack[bakedKeyOf(lane)] = baked;
+    }
+
+    if (nextTrack != null) {
+      nextAnimation ??= { ...animation };
+      nextAnimation[property] = nextTrack;
+    }
+  }
+
+  return nextAnimation == null
+    ? element
+    : ({ ...element, animation: nextAnimation } as TimelineElement);
+}
+
+/**
+ * Re-derive every baked lane at a new sample rate.
+ *
+ * The baked arrays are a cache of the authored curves, so this touches `ax` and
+ * `ay` and never `x` or `y` — nothing the user drew moves. What changes is how
+ * finely the renderer can read it, which is why the project's frame rate is
+ * what decides the rate (`keyframes.ts#bakeRateFor`).
+ *
+ * Declines by identity, like every op here, and that is what makes it safe to
+ * call from the fps setter: a project with no animation, or one already baked
+ * at this rate, produces no undo step at all.
+ *
+ * Deliberately *not* called from `normalizeDocument`. Walking every keyframe
+ * array on every checkpoint to re-derive data that was written correctly when
+ * it entered is the cost `normalizeAnimations` already declined to pay. The two
+ * moments a rebake is actually needed are ingress — where `patchDocument` runs
+ * it — and the instant the project's frame rate changes.
+ */
+export function rebakeAnimations(
+  doc: TimelineDocument,
+  hz: number,
+): TimelineDocument {
+  let changed = false;
+  const elements: Record<string, TimelineElement> = {};
+
+  for (const [id, element] of Object.entries(doc.elements)) {
+    const next = rebakeElement(element, hz);
     elements[id] = next;
     if (next !== element) {
       changed = true;

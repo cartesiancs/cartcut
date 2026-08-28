@@ -33,7 +33,7 @@ export function frameCount(profile) {
 }
 
 /** Even, because most encoders reject odd dimensions. */
-function even(n) {
+export function even(n) {
   const r = Math.round(n);
   return r % 2 === 0 ? r : r + 1;
 }

@@ -47,7 +47,7 @@
  *    `n` advance once per output frame.
  */
 
-import { regionsFor, frameCount, SWATCH_COLORS, TICKER_SHIFT_PX, TICKER_BLOCK_PX } from "./geometry.mjs";
+import { even, regionsFor, frameCount, SWATCH_COLORS, TICKER_SHIFT_PX, TICKER_BLOCK_PX } from "./geometry.mjs";
 
 /** Colour tags are explicit here so the app's decode of these is unambiguous. */
 const BT709 = [
@@ -213,8 +213,11 @@ export const SYNC_PERIOD_SEC = 2;
  * timeline elements were placed.
  */
 export function syncJobs(profile, videoOut, audioOut) {
-  const flashW = Math.max(64, Math.round(profile.width / 6));
-  const flashH = Math.max(64, Math.round(profile.height / 6));
+  // Through `even`: a sixth of 640 is 106.67, and libx264 refuses an odd width
+  // outright. Every other instrument already goes through it; this one was
+  // missed, and only a profile whose frame is not a multiple of twelve shows it.
+  const flashW = even(Math.max(64, profile.width / 6));
+  const flashH = even(Math.max(64, profile.height / 6));
   const framePeriod = SYNC_PERIOD_SEC * profile.fps;
 
   return [

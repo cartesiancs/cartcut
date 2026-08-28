@@ -330,11 +330,12 @@ rather than a bare `Set`.
   and the suite deliberately does *not* pin decode flags, so adding correct
   tagging later will not break it. The `swatch` canary verifies the round trip
   empirically instead.
-- **The fps field has no working control.** `#projectDuration` in
-  `ControlSetting` renders `disabled` with a hardcoded 60, so a project cannot
-  be set to any other frame rate through the UI. The suite reaches
-  `renderOptionStore` for non-60 profiles and says so at the call site
-  (`harness/ui.ts#setFpsThroughStore`).
+- ~~**The fps field has no working control.**~~ *Fixed.* The field is
+  `#projectFps` now, live, with a preset list and a custom range, and the frame
+  rate is written to and read from `renderOptions.json` — it used to be dropped
+  on save and replaced by a literal 60 on load. Every profile drives it through
+  the panel (`harness/ui.ts#setFps`), and `project-roundtrip.spec.ts` reopens a
+  saved project to check the rate survived.
 - **`effect` and `transition` have no agent commands at all**, and are missing
   from `define.ts`'s `FILETYPES`, so the read tools cannot even filter for them.
   Two of the nine element types are invisible to the automation surface. The

@@ -7,6 +7,8 @@ import {
 import { LocaleController } from "../../controllers/locale";
 import { selectProjectFolder } from "../../features/asset/assetBrowser";
 import "../../components/input/input";
+import { FPS_PRESETS } from "../../features/timeline/frames";
+import { setProjectFps } from "../../features/editor/frameRate";
 
 @customElement("control-ui-setting")
 export class ControlSetting extends LitElement {
@@ -66,6 +68,23 @@ export class ControlSetting extends LitElement {
 
     this.renderOption.duration = minute * 60 + second;
     this.renderOptionStore.updateOptions(this.renderOption);
+  }
+
+  /**
+   * The project frame rate.
+   *
+   * Not the mutate-then-`updateOptions` shape the fields above use, because a
+   * rate change is not only a store write — the zoom ceiling, the playhead and
+   * the baked animation lanes all move with it, and `setProjectFps` is where
+   * that sequence lives.
+   *
+   * The coerced value is written back into the field on purpose. `0`, `500` and
+   * `29.97` are all things a number input will hand over, and all three become
+   * something else; leaving the box showing the rejected entry would read as
+   * "the setting did not take".
+   */
+  _handleUpdateFps(e) {
+    e.target.value = String(setProjectFps(Number(e.target.value)));
   }
 
   _handleClickChangeLang() {
@@ -143,16 +162,20 @@ export class ControlSetting extends LitElement {
       <label class="form-label text-light">${this.lc.t("setting.frame")}</label>
       <div class="input-group mb-3">
         <input
-          id="projectDuration"
+          id="projectFps"
           type="number"
           class="form-control bg-default text-light"
-          placeholder=""
-          value="60"
-          disabled
+          list="projectFpsPresets"
+          min="1"
+          max="240"
+          step="1"
+          .value=${String(this.renderOption.fps)}
+          @change=${this._handleUpdateFps}
         />
-        <span class="input-group-text bg-default text-light" id="basic-addon2"
-          >fps</span
-        >
+        <datalist id="projectFpsPresets">
+          ${FPS_PRESETS.map((fps) => html`<option value=${fps}></option>`)}
+        </datalist>
+        <span class="input-group-text bg-default text-light">fps</span>
       </div>
 
       <label class="form-label text-light">Background</label>

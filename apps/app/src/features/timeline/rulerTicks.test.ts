@@ -12,7 +12,7 @@ import { msToPxSigned } from "./geometry";
 import { frameDurationMs } from "./frames";
 import { MAX_RANGE, MIN_RANGE } from "./zoom";
 
-const RATES = [24, 25, 30, 50, 60];
+const RATES = [24, 25, 30, 50, 60, 120];
 /** Every zoom the slider can reach, sampled densely enough to catch a gap. */
 const ZOOMS = Array.from({ length: 120 }, (_, i) =>
   MIN_RANGE * Math.exp((Math.log(MAX_RANGE / MIN_RANGE) * i) / 119),
@@ -222,5 +222,79 @@ describe("planRulerTicks", () => {
     expect(
       planRulerTicks({ range: 0.9, hScroll: 0, width: 0, fps: 60 }).ticks,
     ).toEqual([]);
+  });
+});
+
+/**
+ * The frame rungs are cut off at a second, and which rungs survive therefore
+ * depends on the rate. That is the whole reason `tickLadder` takes an `fps`,
+ * and it is the part most likely to be broken by a well-meaning tidy-up.
+ */
+describe("the frame rungs, rate by rate", () => {
+  const frameRungsOf = (fps: number) =>
+    tickLadder(fps).filter((ms) => ms < 1000);
+
+  it("keeps all six rungs at 120fps, where thirty frames is a quarter second", () => {
+    const rungs = frameRungsOf(120);
+    expect(rungs.length).toBe(6);
+    expect(rungs).toEqual(
+      [1, 2, 5, 10, 15, 30].map((n) => frameDurationMs(120) * n),
+    );
+    expect(rungs[rungs.length - 1]).toBeCloseTo(250, 9);
+  });
+
+  it("drops the thirty-frame rung at 30fps, where it would be a whole second", () => {
+    const rungs = frameRungsOf(30);
+    expect(rungs.length).toBe(5);
+    expect(rungs).toEqual(
+      [1, 2, 5, 10, 15].map((n) => frameDurationMs(30) * n),
+    );
+  });
+
+  it("drops the last two at 24fps", () => {
+    // Fifteen frames is 625ms, thirty is 1,250 — above the one-second rung and
+    // the reason the cut-off exists at all.
+    expect(frameRungsOf(24).length).toBe(5);
+    expect(frameRungsOf(25).length).toBe(5);
+  });
+
+  it("offers a finer tick the faster the project runs", () => {
+    for (let i = 1; i < RATES.length; i++) {
+      expect(frameRungsOf(RATES[i])[0]).toBeLessThan(
+        frameRungsOf(RATES[i - 1])[0],
+      );
+    }
+  });
+});
+
+describe("formatTickLabel, rate by rate", () => {
+  it("counts frames to one less than the rate, then rolls the second", () => {
+    for (const fps of RATES) {
+      const step = frameDurationMs(fps);
+      expect(formatTickLabel(step * (fps - 1), step, fps)).toBe(
+        `0s ${fps - 1}f`,
+      );
+      expect(formatTickLabel(step * fps, step, fps)).toBe("1s");
+    }
+  });
+
+  it("never names a frame the rate cannot reach", () => {
+    for (const fps of RATES) {
+      const step = frameDurationMs(fps);
+      for (let frame = 0; frame < fps * 5; frame++) {
+        const label = formatTickLabel(step * frame, step, fps);
+        const match = /(\d+)f$/.exec(label);
+        if (match) {
+          expect(Number(match[1])).toBeLessThan(fps);
+        }
+      }
+    }
+  });
+
+  it("labels a 120fps eighth-second the way a 30fps one is labelled", () => {
+    // Same instant, different grids: 125ms is frame 15 at 120fps and is not a
+    // frame at all at 30, where the nearest rung is 133.3ms.
+    expect(formatTickLabel(125, frameDurationMs(120), 120)).toBe("0s 15f");
+    expect(formatTickLabel(1000 / 3, frameDurationMs(30), 30)).toBe("0s 10f");
   });
 });

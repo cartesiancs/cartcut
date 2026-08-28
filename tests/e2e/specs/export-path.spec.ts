@@ -19,7 +19,7 @@ import {
   setDuration,
   setResolution,
   setBackgroundColor,
-  setFpsThroughStore,
+  setFps,
   setExportPreset,
 } from "../harness/ui";
 
@@ -36,7 +36,10 @@ test("a short project exports through the real Render button", async ({
   const durationSec = 5;
   const width = 640;
   const height = 360;
-  const fps = 30;
+  // The profile's rate, not a literal: the code strip this spec decodes is
+  // generated at the profile's rate, and the index map only reads output frame
+  // N as source frame N while the two agree.
+  const fps = profile.fps;
   const frames = Math.round(durationSec * fps);
 
   const projectDir = path.join(artifactDir, "project");
@@ -48,8 +51,7 @@ test("a short project exports through the real Render button", async ({
     await setResolution(page, width, height);
     await setDuration(page, durationSec);
     await setBackgroundColor(page, "#101820");
-    // fps has no enabled control — see setFpsThroughStore.
-    await setFpsThroughStore(page, fps);
+    await setFps(page, fps);
     await setExportPreset(page, "low");
   });
 

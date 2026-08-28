@@ -3,6 +3,8 @@ import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { IUIStore, uiStore } from "../../states/uiStore";
 import { IKeyframeStore, keyframeStore } from "../../states/keyframeStore";
+import { renderOptionStore } from "../../states/renderOptionStore";
+import { formatTimecode } from "../../features/timeline/timecode";
 import "../../features/element/elementTimelineScroll";
 import "../../features/element/elementTimelineBottom";
 import "../../features/editor/timelineToolbar";
@@ -32,6 +34,9 @@ export class Timeline extends LitElement {
   target = this.keyframeState.target;
 
   @property()
+  fps: number = renderOptionStore.getInitialState().options.fps;
+
+  @property()
   isPlay: boolean = this.timelineState.control.isPlay;
 
   @property()
@@ -50,6 +55,10 @@ export class Timeline extends LitElement {
 
     keyframeStore.subscribe((state) => {
       this.target = state.target;
+    });
+
+    renderOptionStore.subscribe((state) => {
+      this.fps = state.options.fps;
     });
 
     window.addEventListener("mouseup", this._handleMouseUp.bind(this));
@@ -235,7 +244,7 @@ export class Timeline extends LitElement {
               </span>
             </button>
             <b class="text-light ms-2"
-              >${new Date(this.timelineCursor).toISOString().slice(11, 22)}</b
+              >${formatTimecode(this.timelineCursor, this.fps)}</b
             >
           </div>
         </div>

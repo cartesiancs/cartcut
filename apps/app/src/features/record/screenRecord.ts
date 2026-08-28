@@ -4,6 +4,7 @@ import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { uiStore } from "../../states/uiStore";
 import { Buffer } from "buffer";
 import { AssetController } from "../../controllers/asset";
+import { projectFps } from "../editor/frameRate";
 
 @customElement("screen-record-panel")
 export class ScreenRecordPanel extends LitElement {
@@ -78,7 +79,10 @@ export class ScreenRecordPanel extends LitElement {
         video: {
           width: 1920,
           height: 1080,
-          frameRate: 60,
+          // Capture at the rate the project runs at. A recording made at 60 for
+          // a 30fps timeline throws half its frames away at import, and one
+          // made at 60 for a 120fps timeline can never fill it.
+          frameRate: projectFps(),
           deviceId: this.selectedValue,
         },
       });

@@ -957,7 +957,7 @@ export class elementTimelineCanvas extends LitElement {
       // Proportional to the current range, so the wheel magnifies by a
       // constant ratio per notch — the same curve the slider now uses.
       const dx = parseFloat(e.deltaY) * (this.timelineRange / 75);
-      const next = clampRange(this.timelineRange - dx);
+      const next = clampRange(this.timelineRange - dx, this.projectFps());
       if (next !== this.timelineRange) {
         this.timelineState.setRange(next);
       }

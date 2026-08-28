@@ -6,6 +6,13 @@
     "fps": 30,
     "note": "Development loop. Small enough to run between edits; exercises every code path the full profile does, just fewer times."
   },
+  "smoke120": {
+    "durationSec": 20,
+    "width": 640,
+    "height": 360,
+    "fps": 120,
+    "note": "The top of the supported rate band, at smoke size. 120fps is where the frame-rate assumptions bite: a frame is 8.3ms, the bake rate follows the project instead of sitting at 60Hz, and the zoom ceiling doubles. Same length as `smoke`, so it renders twice the frames."
+  },
   "full": {
     "durationSec": 300,
     "width": 1920,

@@ -426,7 +426,7 @@ describe("the render-sample invariant", () => {
   });
 
   it("holds at every frame rate a project might use", () => {
-    for (const fps of [24, 25, 30, 60]) {
+    for (const fps of [24, 25, 30, 50, 60, 120]) {
       const base = doc({
         a: imageElement({
           trackId: "v1",

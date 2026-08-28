@@ -16,6 +16,9 @@ export class ElementTimelineBottomScroll extends LitElement {
 
   openaiKey: string;
 
+  @property({ attribute: false })
+  fps: number = renderOptionStore.getInitialState().options.fps;
+
   /** The `claude mcp add …` line, token included, for the user to paste. */
   mcpCommand = "";
   mcpError = "";
@@ -121,7 +124,7 @@ export class ElementTimelineBottomScroll extends LitElement {
 
       <div class="timeline-bottom">
         <div class="timeline-bottom-grid-start">
-          <span class="bottom-text">60fps</span>
+          <span class="bottom-text">${this.fps}fps</span>
         </div>
         <div class="timeline-bottom-grid-end">
           <span
@@ -325,6 +328,10 @@ export class ElementTimelineBottomScroll extends LitElement {
   }
 
   createRenderRoot() {
+    renderOptionStore.subscribe((state: IRenderOptionStore) => {
+      this.fps = state.options.fps;
+    });
+
     return this;
   }
 }

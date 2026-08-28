@@ -4,7 +4,11 @@ import { rendererModal } from "../utils/modal";
 import { uiStore } from "../states/uiStore";
 import { renderOptionStore } from "../states/renderOptionStore";
 import { SCHEMA_VERSION } from "../features/timeline/tracks";
-import { normalizeExportSettings } from "../features/export/settings";
+import {
+  deserializeRenderOptions,
+  serializeRenderOptions,
+} from "../features/project/renderOptionsFile";
+import { projectBakeHz } from "../features/editor/frameRate";
 
 const arrayBufferToBase64 = (buffer) => {
   var binary = "";
@@ -57,6 +61,12 @@ const project = {
       let filepath = path;
 
       window.electronAPI.req.filesystem.readFile(filepath).then((data) => {
+        // One read of the archive, not two. The document and the project's
+        // settings used to be pulled from separate `loadAsync` chains with no
+        // ordering between them, which was harmless only while nothing in the
+        // document depended on a setting. The frame rate does: it decides the
+        // rate `patchDocument` re-derives baked animation at, so it has to be
+        // in the store first.
         JSZip.loadAsync(data).then(async function (zip: any) {
           // Projects written before tracks existed have no `project.json` and
           // no `tracks.json`; their elements carry a hand-assigned `priority`
@@ -77,6 +87,23 @@ const project = {
             return;
           }
 
+          const optionsEntry = zip.file("renderOptions.json");
+          const rawOptions = optionsEntry
+            ? JSON.parse(await optionsEntry.async("string"))
+            : null;
+
+          // Read against a *fresh* project's settings, so a field the file
+          // predates falls back to the app's default rather than to whatever
+          // the previously open project happened to leave in the store.
+          renderOptionStore
+            .getState()
+            .updateOptions(
+              deserializeRenderOptions(
+                rawOptions,
+                renderOptionStore.getInitialState().options,
+              ),
+            );
+
           const elements = JSON.parse(
             await zip.file("timeline.json").async("string"),
           );
@@ -85,11 +112,14 @@ const project = {
             ? JSON.parse(await tracksEntry.async("string"))
             : [];
 
-          timelineStore.patchDocument({
-            schemaVersion: SCHEMA_VERSION,
-            tracks,
-            elements,
-          });
+          timelineStore.patchDocument(
+            {
+              schemaVersion: SCHEMA_VERSION,
+              tracks,
+              elements,
+            },
+            { bakeHz: projectBakeHz() },
+          );
 
           project.changeProjectFileValue({ projectDestination: filepath });
 
@@ -97,31 +127,6 @@ const project = {
           // Without this the freshly opened project immediately reads as
           // "modified" and blocks opening another one.
           elementTimeline.appendCheckpointInHashTable();
-        });
-
-        JSZip.loadAsync(data).then(function (zip: any) {
-          zip
-            .file("renderOptions.json")
-            .async("string")
-            .then(async (result) => {
-              let options = JSON.parse(result);
-
-              console.log(options, "Soptions");
-
-              renderOptionStore.getState().updateOptions({
-                previewSize: {
-                  w: options.previewSize.w,
-                  h: options.previewSize.h,
-                },
-                fps: 60,
-                duration: options.videoDuration,
-                backgroundColor: options.backgroundColor,
-                // Passed explicitly rather than omitted: omitting means "keep
-                // what is in the store", which would leak the previous
-                // project's settings into a project saved before they existed.
-                exportSettings: normalizeExportSettings(options.exportSettings),
-              });
-            });
         });
       });
     });
@@ -136,25 +141,14 @@ const project = {
     const renderOptionState = renderOptionStore.getState().options;
 
     const { tracks, elements } = useTimelineStore.getState().getDocument();
-    const projectDuration = renderOptionStore.getState().options.duration;
     const projectRatio = document.querySelector("element-control").previewRatio;
-    const previewSizeH = renderOptionState.previewSize.h;
-    const previewSizeW = renderOptionState.previewSize.w;
-    const backgroundColor = renderOptionState.backgroundColor;
 
     const zip = new JSZip();
 
-    const options = {
-      videoDuration: projectDuration,
+    const options = serializeRenderOptions(renderOptionState, {
       previewRatio: projectRatio,
       videoDestination: projectDestination,
-      backgroundColor: backgroundColor,
-      previewSize: {
-        w: previewSizeW,
-        h: previewSizeH,
-      },
-      exportSettings: renderOptionState.exportSettings,
-    };
+    });
 
     // `project.json` is what tells a future version which format this is; a
     // file without it predates tracks.

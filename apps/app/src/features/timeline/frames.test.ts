@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_FPS,
+  FPS_PRESETS,
+  MAX_FPS,
+  MIN_FPS,
+  coerceFps,
+  frameStartMs,
   GRID_HIDE_PX,
   GRID_SHOW_PX,
   frameDurationMs,
@@ -463,5 +468,127 @@ describe("planFrameGrid", () => {
     expect(xs).toEqual(
       planFrameGrid({ range: RANGE, hScroll: 0, x0: 0, x1: 200, fps: DEFAULT_FPS }),
     );
+  });
+});
+
+/**
+ * `coerceFps` is the write guard, and the whole point of it is that a rate
+ * reaching the store is already a whole positive number in the supported band —
+ * so no reader downstream has to ask. These pin what "already" means.
+ */
+describe("coerceFps", () => {
+  it("passes every preset through untouched", () => {
+    for (const fps of FPS_PRESETS) {
+      expect(coerceFps(fps)).toBe(fps);
+    }
+  });
+
+  it("accepts any integer between the bounds", () => {
+    for (const fps of [MIN_FPS, 2, 12, 48, 90, 144, MAX_FPS]) {
+      expect(coerceFps(fps)).toBe(fps);
+    }
+  });
+
+  it("rounds a fractional rate to the nearest whole one", () => {
+    // A number input can hand back a float for reasons that have nothing to do
+    // with intent, and 29.97 is a rate this app deliberately does not support.
+    expect(coerceFps(59.999999)).toBe(60);
+    expect(coerceFps(29.97)).toBe(30);
+    expect(coerceFps(23.976)).toBe(24);
+    expect(coerceFps(59.94)).toBe(60);
+    expect(coerceFps(30.4)).toBe(30);
+    expect(coerceFps(30.5)).toBe(31);
+  });
+
+  it("clamps to the supported band", () => {
+    expect(coerceFps(1000)).toBe(MAX_FPS);
+    expect(coerceFps(MAX_FPS + 1)).toBe(MAX_FPS);
+    // Rounds first, so anything above zero survives as at least one frame.
+    expect(coerceFps(0.4)).toBe(MIN_FPS);
+    expect(coerceFps(0.6)).toBe(MIN_FPS);
+  });
+
+  it("falls back for anything that is not a usable rate", () => {
+    for (const bad of [0, -1, -60, NaN, Infinity, -Infinity]) {
+      expect(coerceFps(bad)).toBe(DEFAULT_FPS);
+    }
+    for (const bad of [null, undefined, {}, [], "", "abc", true, false]) {
+      expect(coerceFps(bad)).toBe(DEFAULT_FPS);
+    }
+  });
+
+  it("reads a numeric string, because a form field is where it comes from", () => {
+    expect(coerceFps("30")).toBe(30);
+    expect(coerceFps(" 120 ")).toBe(120);
+  });
+
+  it("is idempotent", () => {
+    for (const value of [0, 29.97, 1000, NaN, "30", 24]) {
+      expect(coerceFps(coerceFps(value))).toBe(coerceFps(value));
+    }
+  });
+
+  it("never returns something normalizeFps would reject", () => {
+    for (const value of [0, -5, NaN, 1e9, "x", 47.3]) {
+      const fps = coerceFps(value);
+      expect(Number.isInteger(fps)).toBe(true);
+      expect(normalizeFps(fps)).toBe(fps);
+    }
+  });
+});
+
+describe("frameStartMs", () => {
+  it("is the frame boundary at or before the instant", () => {
+    for (const fps of RATES) {
+      const step = frameDurationMs(fps);
+      for (let frame = 0; frame < 400; frame++) {
+        const start = frameToMs(frame, fps);
+        expect(frameStartMs(start, fps)).toBeCloseTo(start, 9);
+        // Anywhere inside the frame answers with the same boundary.
+        expect(frameStartMs(start + step * 0.25, fps)).toBeCloseTo(start, 9);
+        expect(frameStartMs(start + step * 0.99, fps)).toBeCloseTo(start, 9);
+      }
+    }
+  });
+
+  it("lands on a frame boundary for any instant at all", () => {
+    const random = mulberry32(4242);
+    for (const fps of RATES) {
+      for (let i = 0; i < 500; i++) {
+        const ms = random() * 600_000;
+        expect(isFrameAligned(frameStartMs(ms, fps), fps)).toBe(true);
+        expect(frameStartMs(ms, fps)).toBeLessThanOrEqual(ms + 1e-6);
+      }
+    }
+  });
+
+  it("reproduces the expression the three clocks used to open-code", () => {
+    // `effectTimeOf`, `progressOf` and playback all held their own copy of
+    // this. Bit-identical, not close: the effect clock feeds a shader uniform
+    // that the export has to reproduce exactly.
+    const random = mulberry32(7);
+    for (const fps of RATES) {
+      for (let i = 0; i < 2000; i++) {
+        const ms = random() * 3_600_000;
+        expect(
+          Object.is(
+            frameStartMs(ms, fps),
+            frameToMs(msToFrameFloor(ms, fps), fps),
+          ),
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("never returns negative zero, and never precedes zero", () => {
+    for (const fps of RATES) {
+      expect(Object.is(frameStartMs(0, fps), 0)).toBe(true);
+      expect(Object.is(frameStartMs(0.0001, fps), 0)).toBe(true);
+    }
+  });
+
+  it("guards an unusable rate the way every other reader does", () => {
+    expect(frameStartMs(1000, 0)).toBe(frameStartMs(1000, DEFAULT_FPS));
+    expect(frameStartMs(1000, NaN)).toBe(frameStartMs(1000, DEFAULT_FPS));
   });
 });

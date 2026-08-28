@@ -1,3 +1,5 @@
+import { frameToMs } from "../timeline/frames";
+
 /**
  * How many frames an export produces.
  *
@@ -19,9 +21,19 @@ export function frameCount(options: {
   return Math.round(duration * fps);
 }
 
-/** The timeline position, in ms, of an absolute frame index. */
+/**
+ * The timeline position, in ms, of an absolute frame index.
+ *
+ * Delegates rather than repeating `(frameIndex / fps) * 1000`, which is what it
+ * used to hold. The editor has to sample the timeline at *exactly* the instants
+ * this produces — `frames.ts#frameToMs` carries the long version of why, and
+ * why `(k * 1000) / fps` is a different number in IEEE-754 — and a comment
+ * asking two copies to stay in step is a weaker guarantee than there being one
+ * copy. Calling through also picks up `normalizeFps`, so a rate of zero yields
+ * frame times instead of `Infinity`.
+ */
 export function frameTimeMs(frameIndex: number, fps: number): number {
-  return (frameIndex / fps) * 1000;
+  return frameToMs(frameIndex, fps);
 }
 
 /** Raw RGBA bytes of one frame at this size. */

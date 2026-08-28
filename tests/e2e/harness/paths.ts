@@ -37,7 +37,7 @@ const EXE = process.platform === "win32" ? ".exe" : "";
 export const FFMPEG = path.join(BIN_DIR, `ffmpeg${EXE}`);
 export const FFPROBE = path.join(BIN_DIR, `ffprobe${EXE}`);
 
-export type ProfileName = "smoke" | "full" | "extreme";
+export type ProfileName = "smoke" | "smoke120" | "full" | "extreme";
 
 export type Profile = {
   name: ProfileName;

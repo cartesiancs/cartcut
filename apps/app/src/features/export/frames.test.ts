@@ -5,6 +5,12 @@ import {
   frameTimeMs,
   inFlightWindow,
 } from "./frames";
+import {
+  DEFAULT_FPS,
+  frameToMs,
+  isFrameAligned,
+  msToFrame,
+} from "../timeline/frames";
 
 describe("frameCount", () => {
   it("is exact for integer durations", () => {
@@ -82,5 +88,46 @@ describe("inFlightWindow", () => {
 
   it("degenerates safely on a zero-sized frame", () => {
     expect(inFlightWindow(0, 0)).toBe(2);
+  });
+});
+
+/**
+ * The exporter and the editor must sample the timeline at the *same* doubles.
+ *
+ * `(k / fps) * 1000` and `(k * 1000) / fps` are equal in arithmetic and not in
+ * IEEE-754, and the gap is enough to put a clip's start one ULP above the
+ * instant the exporter samples — at which point `t >= start` is false and the
+ * clip loses its own first frame. `frameTimeMs` used to hold its own copy of
+ * the expression with a comment asking the two to stay in step; it now calls
+ * through, and this is what holds that.
+ */
+describe("frameTimeMs against the editor's frame grid", () => {
+  const RATES = [24, 25, 30, 50, 60, 120];
+
+  it("is bit-identical to frameToMs at every rate", () => {
+    for (const fps of RATES) {
+      for (let frame = 0; frame <= 20_000; frame++) {
+        if (!Object.is(frameTimeMs(frame, fps), frameToMs(frame, fps))) {
+          throw new Error(`frame ${frame} at ${fps}fps disagrees`);
+        }
+      }
+    }
+  });
+
+  it("agrees with the frame the timeline would snap to", () => {
+    for (const fps of RATES) {
+      for (let frame = 0; frame < 5_000; frame++) {
+        const t = frameTimeMs(frame, fps);
+        expect(isFrameAligned(t, fps)).toBe(true);
+        expect(msToFrame(t, fps)).toBe(frame);
+      }
+    }
+  });
+
+  it("guards a rate the loop should never have been handed", () => {
+    // The delegation picks this up for free; the open-coded division returned
+    // `Infinity` and rendered nothing.
+    expect(Number.isFinite(frameTimeMs(10, 0))).toBe(true);
+    expect(frameTimeMs(10, 0)).toBe(frameToMs(10, DEFAULT_FPS));
   });
 });

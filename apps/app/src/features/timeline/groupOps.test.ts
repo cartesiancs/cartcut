@@ -15,7 +15,7 @@ import {
 } from "./tracks";
 import { MAX_GROUP_DEPTH, childrenOf, parentOf } from "./hierarchy";
 import { applyPoint, worldMatrixOf, type Mat } from "./transform";
-import { bakeTrack } from "../animation/keyframes";
+import { BAKE_HZ, bakeTrack } from "../animation/keyframes";
 import {
   audioElement,
   groupElement,
@@ -791,6 +791,127 @@ describe("the document stays well formed", () => {
       if (parentId != null) {
         expect(d.elements[parentId]?.filetype).toBe("group");
       }
+    }
+  });
+});
+
+/**
+ * Grouping pushes a child's animation through a change of basis, so it rewrites
+ * the baked lanes and therefore has to be told how finely. The parameter is
+ * trailing and defaulted for one reason: every caller and every test that
+ * existed before it must behave exactly as it did.
+ */
+describe("bakeHz", () => {
+  const animatedPair = () =>
+    doc({
+      a: imageElement({
+        location: { x: 100, y: 100 },
+        width: 50,
+        height: 50,
+        animation: {
+          ...imageElement().animation,
+          position: positionTrack(
+            [
+              [0, 100],
+              [1000, 400],
+            ],
+            [
+              [0, 100],
+              [1000, 50],
+            ],
+          ),
+        },
+      }),
+      b: imageElement({ location: { x: 0, y: 0 } }),
+    });
+
+  const positionOf = (d: TimelineDocument, id: string) =>
+    (d.elements[id] as any).animation.position;
+
+  it("bakes at 60Hz when nobody says otherwise", () => {
+    const grouped = createGroup(animatedPair(), ["a", "b"], "grp", "g1");
+    const position = positionOf(grouped, "a");
+    expect(position.ax).toEqual(bakeTrack(position.x, BAKE_HZ));
+    expect(position.ay).toEqual(bakeTrack(position.y, BAKE_HZ));
+  });
+
+  it("is bit-identical to the same grouping before the parameter existed", () => {
+    const explicit = createGroup(animatedPair(), ["a", "b"], "grp", "g1", {
+      bakeHz: 60,
+    });
+    const implicit = createGroup(animatedPair(), ["a", "b"], "grp", "g1");
+    expect(explicit).toEqual(implicit);
+  });
+
+  it("is honoured by createGroup", () => {
+    const grouped = createGroup(animatedPair(), ["a", "b"], "grp", "g1", {
+      bakeHz: 120,
+    });
+    const position = positionOf(grouped, "a");
+    expect(position.ax).toEqual(bakeTrack(position.x, 120));
+    expect(position.ay).toEqual(bakeTrack(position.y, 120));
+    expect(position.ax.length).toBeGreaterThan(
+      bakeTrack(position.x, 60).length,
+    );
+  });
+
+  it("is honoured by ungroup", () => {
+    const grouped = createGroup(animatedPair(), ["a", "b"], "grp", "g1", {
+      bakeHz: 120,
+    });
+    const released = ungroup(grouped, "grp", 0, 120);
+    const position = positionOf(released, "a");
+    expect(position.ax).toEqual(bakeTrack(position.x, 120));
+    expect(position.ay).toEqual(bakeTrack(position.y, 120));
+  });
+
+  it("is honoured by setParent and removeFromParent", () => {
+    const base = doc({
+      grp: groupElement({
+        key: "grp",
+        trackId: "g1",
+        location: { x: 10, y: 20 },
+        width: 100,
+        height: 100,
+      }),
+      a: imageElement({
+        location: { x: 100, y: 100 },
+        width: 50,
+        height: 50,
+        animation: {
+          ...imageElement().animation,
+          position: positionTrack(
+            [
+              [0, 100],
+              [1000, 400],
+            ],
+            [
+              [0, 100],
+              [1000, 50],
+            ],
+          ),
+        },
+      }),
+    });
+
+    const parented = setParent(base, ["a"], "grp", 0, 120);
+    expect(positionOf(parented, "a").ax).toEqual(
+      bakeTrack(positionOf(parented, "a").x, 120),
+    );
+
+    const detached = removeFromParent(parented, ["a"], 0, 120);
+    expect(positionOf(detached, "a").ax).toEqual(
+      bakeTrack(positionOf(detached, "a").x, 120),
+    );
+  });
+
+  it("does not change where a grouped clip's pixels land", () => {
+    // The bake rate is a cache resolution, not a transform. Whatever it is set
+    // to, the invariant this whole suite exists for has to hold.
+    const before = animatedPair();
+    for (const bakeHz of [60, 120, 240]) {
+      const after = createGroup(before, ["a", "b"], "grp", "g1", { bakeHz });
+      expectUnmoved(before, after, ["a", "b"], [0, 250, 500, 1000]);
     }
   });
 });

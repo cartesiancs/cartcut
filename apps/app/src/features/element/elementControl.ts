@@ -17,6 +17,8 @@ import {
 } from "./textElement";
 import { fitToPreview } from "./mediaElement";
 import { setIn } from "../../utils/immutable";
+import { cursorAtElapsed } from "../timeline/playbackClock";
+import { projectFps } from "../editor/frameRate";
 
 @customElement("element-control")
 export class ElementControl extends LitElement {
@@ -35,7 +37,6 @@ export class ElementControl extends LitElement {
   progressTime: number;
   previewRatio: number;
   innerWidth: number | undefined;
-  fps: number;
 
   @query("#elementControlCanvasRef") canvas!: HTMLCanvasElement;
 
@@ -107,7 +108,6 @@ export class ElementControl extends LitElement {
 
     this.isPaused = true;
     this.isPlay = {};
-    this.fps = 60;
 
     this.activeElementId = "";
     this.selectElementsId = [];
@@ -915,7 +915,9 @@ export class ElementControl extends LitElement {
 
     this.progress = nowTimelineProgress;
     this.progressTime = elapsed;
-    this.timelineState.setCursor(elapsed);
+    // Quantized to the project's frame grid, so the frame on screen during
+    // playback is the frame the exporter writes. See `playbackClock.ts`.
+    this.timelineState.setCursor(cursorAtElapsed(elapsed, projectFps()));
 
     if ((this.innerWidth as number) + this.offsetWidth >= this.offsetWidth) {
       this.stop();

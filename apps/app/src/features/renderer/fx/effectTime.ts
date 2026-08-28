@@ -14,10 +14,12 @@
  * first frame. Timeline-absolute time would make an effect look different for
  * no reason the user could see.
  *
- * **Frame-snapped, by exactly the rule `progressOf` uses.** The preview's
- * playback loop drives the cursor from the wall clock (`Date.now()` in
- * `elementControl.step`) while export walks frame indices, so the same frame
- * reaches the two paths as different millisecond values. Feeding that straight
+ * **Frame-snapped, by exactly the rule `progressOf` uses.** The preview and the
+ * export reach this from different directions — a wall clock in
+ * `elementControl.step` against a frame index in `renderTimeline` — and while
+ * both now floor onto the same grid before they get here, this snap is what
+ * makes that a guarantee rather than a coincidence of two call sites. Feeding
+ * an unsnapped instant straight
  * into a shader means the grain pattern in the render is not the one the user
  * approved in the preview — invisible until they compare, and impossible to
  * explain afterwards. Flooring to the frame grid with the exporter's own
@@ -28,7 +30,7 @@
  */
 
 import type { EffectElementType } from "../../../@types/timeline";
-import { frameToMs, msToFrameFloor } from "../../timeline/frames";
+import { frameStartMs } from "../../timeline/frames";
 
 /**
  * Seconds since the effect began, snapped to the frame grid.
@@ -42,6 +44,6 @@ export function effectTimeOf(
   timeInMs: number,
   fps: number,
 ): number {
-  const snapped = frameToMs(msToFrameFloor(timeInMs, fps), fps);
+  const snapped = frameStartMs(timeInMs, fps);
   return Math.max(0, (snapped - element.startTime) / 1000);
 }

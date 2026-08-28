@@ -54,6 +54,14 @@ export default defineConfig({
       metadata: { profile: "smoke" },
     },
     {
+      // Same size and length as `smoke`, four times the rate — so it renders
+      // 2,400 frames rather than 600 and takes proportionally longer.
+      name: "smoke120",
+      timeout: 20 * MINUTE,
+      use: { actionTimeout: 30_000 },
+      metadata: { profile: "smoke120" },
+    },
+    {
       name: "full",
       // 18,000 frames. Measured throughput decides the real number; this is a
       // ceiling that lets a genuinely slow machine finish rather than a

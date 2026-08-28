@@ -12,9 +12,17 @@ export in one go.
 ```
 npm run test:e2e:fixtures     # download and build the media (once, ~150 MB)
 npm run test:e2e:smoke        # 20s @ 640x360x30  — ~1 min, for iterating
+npm run test:e2e:smoke120     # 20s @ 640x360x120 — ~2 min, the top of the rate band
 npm run test:e2e              # 5 min @ 1920x1080x60, 18,000 frames
 npm run test:e2e:extreme      # 5 min @ 3840x2160x60 — run by hand
 ```
+
+The frame rate is a profile axis, not a constant: every spec drives it through
+the settings panel (`harness/ui.ts#setFps`) and reads it back off the store, and
+each profile's instruments are generated at that profile's rate — which is why
+`export-path` and `seek-diagnosis` take `fps` from `profile` rather than naming
+one. `smoke` and `smoke120` are the same project at 30 and 120fps, so a
+difference between them is a frame-rate assumption and nothing else.
 
 **Read [FINDINGS.md](./FINDINGS.md) for what it found**, including the defect it
 was built to catch: a third to two thirds of every export carried the previous
@@ -122,7 +130,7 @@ assertions rather than adding to them.
 ## Layout
 
 ```
-profiles.json          the three scales, in one place
+profiles.json          the four scales, in one place
 fixtures/
   plan.mjs             what to download and what to derive from it
   instruments.mjs      the measuring instruments, and why each is built that way
