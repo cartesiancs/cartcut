@@ -245,6 +245,46 @@ test("every editing element survives a full-length export, frame for frame", asy
     return new Map(result.indices.map((index, i) => [index, { data: result.frames[i], width: profile.width, height: profile.height } as FrameBuffer]));
   });
 
+  await test.step("the instruments are actually visible in the export", async () => {
+    // An instrument that is covered fails *silently*: the band reads a constant
+    // colour, every candidate scores the same, and the alignment search reports
+    // "no winner" rather than "I could not see anything". That happened — all
+    // four instruments were put on one track, they fought for the same span,
+    // and the ticker ended up beneath a video clip. So the instruments are
+    // checked before anything is concluded from them.
+    const probeFrames = sample.frames.slice(0, 4).map((f) => f.index);
+    const withNeighbour = probeFrames.flatMap((n) => [n, n + 1]).filter((n) => n < totalFrames);
+    const band = await decodeFrames(
+      destination, withNeighbour, profile.width, profile.height, instruments.regions.ticker,
+    );
+    const byIndex = new Map(band.indices.map((n, i) => [n, band.frames[i]]));
+
+    const region = { x: 0, y: 0, w: instruments.regions.ticker.w, h: instruments.regions.ticker.h };
+    const movement: number[] = [];
+    for (const n of probeFrames) {
+      const a = byIndex.get(n);
+      const b = byIndex.get(n + 1);
+      if (a == null || b == null) continue;
+      movement.push(
+        diffStats(
+          { data: a, width: region.w, height: region.h },
+          { data: b, width: region.w, height: region.h },
+          region,
+        ).mean,
+      );
+    }
+    summary.tickerMovement = movement;
+
+    // The ticker scrolls 32px per frame over a high-frequency pattern; adjacent
+    // frames measured ~107 apart in isolation. Anything near zero means the
+    // band is not on screen.
+    expect(
+      Math.max(...movement, 0),
+      `the ticker band does not change between adjacent frames (${movement.map((m) => m.toFixed(2)).join(", ")}). ` +
+      `It is being composited over, so the alignment search is measuring nothing.`,
+    ).toBeGreaterThan(5);
+  });
+
   await test.step("the colour round trip is honest", async () => {
     const first = decoded.get(sample.frames[0].index)!;
     const canary = checkColorCanary(first, instruments.regions.swatch);
@@ -316,7 +356,16 @@ test("every editing element survives a full-length export, frame for frame", asy
 
   await test.step("sampled frames match a reference render of the same moment", async () => {
     const primed = await primeAssets(page);
-    summary.primedVideos = primed.videos;
+    summary.primedVideos = primed;
+
+    // A reference frame rendered without one of its clips does not look
+    // broken — it looks like the export drew something extra. Refuse to
+    // compare anything until every clip the timeline references is decoded.
+    expect(
+      primed.videos,
+      `only ${primed.videos} of ${primed.expected} video clips decoded, so a reference ` +
+      `render would be missing content the export has`,
+    ).toBe(primed.expected);
 
     const failures: string[] = [];
     const weakMargins: string[] = [];

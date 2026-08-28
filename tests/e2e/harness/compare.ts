@@ -119,19 +119,48 @@ export function diffStats(a: FrameBuffer, b: FrameBuffer, region: Region): DiffS
 /**
  * Thresholds for comparing an in-page reference render against the decoded file.
  *
- * Measured floors, on an editor-like frame through this repo's own encoder at
- * the `medium` preset:
+ * **What these do and do not detect.** They catch *wrong content* — an element
+ * that failed to draw, a transform applied differently, a colour space
+ * mangled. They are **not** the wrong-frame detector, and it is worth being
+ * blunt about that because it would be easy to assume otherwise: when this
+ * suite first ran against the frame-addressing defect, two thirds of the
+ * exported frames carried the previous source frame and these numbers barely
+ * moved — p99 and p999 sat in exactly the range they sit in now, on a correct
+ * export. Consecutive frames of real footage simply look alike. The code strip
+ * (`decodeFrameIndex`, zero tolerance) is what catches a wrong frame, and the
+ * colour canary is what catches a wrong matrix.
+ *
+ * **Two measured floors, and why the second one governs.** On a synthetic
+ * editor-like frame — flat background, boxes, text — the round trip through
+ * this repo's encoder at the `medium` preset costs:
  *
  *     mean 1.07 | p50 1 | p99 4 | p999 11 | frac>24 0.008% | max 115
  *
- * The multiples below are chosen to clear that floor while still failing a
- * wrong-range decode, which reads mean 9.79.
+ * But the scenario composites real film footage, an animated GIF and shader
+ * effects, which is far closer to the same measurement over `testsrc2`:
+ *
+ *     mean 1.30 | p99 22 | p999 48 | max 146
+ *
+ * Over 94 sampled frames of the actual kitchen-sink export the distribution is:
+ *
+ *     mean   median 0.24 | max 2.16
+ *     p99    median 2    | max 14
+ *     p999   median 7    | max 51
+ *     frac   median 0    | max 0.5%
+ *
+ * The values below clear that with margin. `mean` and `fracOver24` keep real
+ * discriminating power — a wrong-range decode reads mean 9.79, so 4.0 still
+ * fails it by a factor of two, and a missing element moves `fracOver24` by
+ * orders of magnitude rather than by a factor. `p99` and `p999` are deliberately
+ * loose: on high-detail content they are dominated by chroma-subsampling
+ * ringing at edges, which carries no signal, and a tight bound on them buys
+ * nothing but flake. They are kept as sanity ceilings, not as gates.
  */
 export const CODEC_THRESHOLDS = {
-  mean: 2.0,
-  p99: 12,
-  p999: 32,
-  fracOver24: 0.005,
+  mean: 4.0,
+  p99: 24,
+  p999: 72,
+  fracOver24: 0.02,
   // `max` is deliberately absent. A correct round trip reaches 115, so any
   // max-based assertion is a coin flip rather than a measurement.
 } as const;

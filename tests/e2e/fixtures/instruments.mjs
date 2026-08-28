@@ -124,7 +124,21 @@ export function tickerJobs(profile, tilePath, outPath) {
         "-framerate", `${profile.fps}`,
         "-i", tilePath,
         "-filter_complex",
-        `[0:v]tile=2x1[w];[w]crop=w=${ticker.w}:h=${ticker.h}` +
+        // `split` + `hstack`, NOT `tile=2x1`.
+        //
+        // `tile` is a temporal-to-spatial filter: it consumes N *input frames*
+        // to build one output frame, so `tile=2x1` silently halves the frame
+        // rate. Built that way the ticker ran at 15fps in a 30fps project and
+        // advanced only every other frame — which made adjacent output frames
+        // identical and left the alignment search unable to tell frame N from
+        // N+1. It looked correct in a still and was useless in motion.
+        //
+        // `hstack` takes one frame from each of two *streams* per output frame,
+        // and `split` makes those two streams the same image, so the rate is
+        // preserved and the result is the tile duplicated side by side. The
+        // duplication is what makes the crop wrap seamless at `ticker.w`.
+        `[0:v]split=2[a][b];[a][b]hstack=inputs=2[w];` +
+        `[w]crop=w=${ticker.w}:h=${ticker.h}` +
         `:x='${esc(`mod(n*${TICKER_SHIFT_PX},${ticker.w})`)}':y=0,format=gray[o]`,
         "-map", "[o]",
         "-t", `${profile.durationSec}`,

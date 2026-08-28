@@ -48,13 +48,33 @@ test("the renderer's own frames carry the index the frame loop asked for", async
       canvas.height = h;
       const ctx = canvas.getContext("2d")!;
 
-      const handles = C.loadedAssetStore.getState();
-
       // The export does this before its frame loop. Without it there are no
       // `<video>` handles at all, `seek` is a no-op over an empty list, and
       // every frame composites black — which looks exactly like a total
       // rendering failure.
-      await handles.loadEntireTimeline(timeline, { audio: false });
+      //
+      // Awaiting it once is not enough, and that is an app behaviour rather
+      // than a quirk of this test: `assetBatch.ts#runAssetBatch` *skips* a task
+      // whose key is already in the in-flight set (`continue`) instead of
+      // awaiting the load someone else started. The preview fires
+      // `loadAssetsNeededAtTime` un-awaited on every repaint, so a clip added a
+      // moment ago is usually already in flight — and `loadEntireTimeline` then
+      // resolves with the cache still empty. See FINDINGS.md #9.
+      const videoCount = Object.values<any>(timeline).filter(
+        (e) => e.filetype === "video",
+      ).length;
+      const deadline = Date.now() + 20_000;
+      let loadedVideos = 0;
+      do {
+        await C.loadedAssetStore.getState().loadEntireTimeline(timeline, { audio: false });
+        loadedVideos = Object.keys(
+          C.loadedAssetStore.getState()._loadedElementVideo ?? {},
+        ).length;
+        if (loadedVideos >= videoCount) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      } while (Date.now() < deadline);
+
+      const handles = C.loadedAssetStore.getState();
 
       const videoId = Object.keys(timeline).find((id) => timeline[id].filetype === "video")!;
       const videoEl = timeline[videoId];
@@ -65,7 +85,7 @@ test("the renderer's own frames carry the index the frame loop asked for", async
 
       for (let n = 0; n < count; n++) {
         const timeMs = C.frameTimeMs(n, rate);
-        await handles.seek(timeline, timeMs);
+        await handles.seek(timeline, timeMs, rate);
 
         // Exactly what `renderTimeline` does per frame.
         C.renderTimelineAtTime(
@@ -99,6 +119,7 @@ test("the renderer's own frames carry the index the frame loop asked for", async
       }
 
       return {
+        loadedVideos,
         samples: out,
         // Where the strip actually sits, so a decode of the wrong pixels is
         // distinguishable from a decode of the wrong frame.
@@ -114,6 +135,16 @@ test("the renderer's own frames carry the index the frame loop asked for", async
     },
     { fps, count: probeCount, code },
   );
+
+  // Refuse to report a number this spec cannot actually measure. With no
+  // decoded handle every frame composites to the background and every index
+  // reads 0, which looks identical to "the seek is catastrophically wrong" —
+  // and that reading, left unguarded, is exactly the kind of confident wrong
+  // answer a diagnostic exists to avoid.
+  expect(
+    probe.loadedVideos,
+    "no video handle decoded, so nothing here measures the seek",
+  ).toBeGreaterThan(0);
 
   const samples = probe.samples;
   const mismatches = samples.filter((s) => s.decoded !== s.n);
@@ -135,8 +166,6 @@ test("the renderer's own frames carry the index the frame loop asked for", async
     contentType: "application/json",
   });
 
-  // Reported, not asserted — this spec exists to characterise the behaviour.
-  // The assertion that matters lives in the stress spec's index map.
   test.info().annotations.push({
     type: "seek-fidelity",
     description:
@@ -145,4 +174,12 @@ test("the renderer's own frames carry the index the frame loop asked for", async
   });
 
   expect(samples.length).toBe(probeCount);
+
+  // A real assertion now, not a characterisation. This is the narrowest place
+  // the frame-addressing defect shows up — no encoder, no muxer, just seek and
+  // composite — so it is the fastest signal if `frameSampleMs` ever regresses.
+  expect(
+    mismatches.map((m) => `frame ${m.n}: got source index ${m.decoded}, currentTime ${m.currentTime}`),
+    `${mismatches.length}/${probeCount} composited frames carried the wrong source frame`,
+  ).toEqual([]);
 });

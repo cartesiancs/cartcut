@@ -179,6 +179,51 @@ export function snapMsToFrame(ms: number, fps: number): number {
   return frameToMs(msToFrame(ms, fps), fps);
 }
 
+/**
+ * The instant to address a *decoder* at, to get the frame covering `ms`.
+ *
+ * Not the same question as "what time is this frame", which is `frameToMs`.
+ * This one is about picking a discrete source frame through a continuous,
+ * lossily-quantised parameter, and the two answers differ by half a frame.
+ *
+ * A professional NLE never faces this: it converts a timeline frame index to a
+ * *source frame index* with integer or rational arithmetic, and addresses the
+ * decoder by presentation timestamp in the stream's own timebase, compared
+ * exactly. No float seconds are involved anywhere, so there is no tie to lose.
+ *
+ * An HTML `<video>` gives us no such handle. The only address is
+ * `currentTime`, a double in seconds, and the frame it selects is the one whose
+ * presentation interval `[pts, pts + duration)` contains that value. Asking for
+ * exactly `pts` is therefore a boundary case — and Chromium stores the
+ * assignment as whole **microseconds**, so whenever `1e6 / fps` is not an
+ * integer the request lands one microsecond *below* the boundary and the
+ * decoder correctly returns the previous frame. Measured against this app:
+ * requesting `0.0666667` read back as `0.066666`, and the composited frame
+ * carried source index 1 where 2 was wanted. At 30fps that spoiled a third of
+ * every export; at 60fps, two thirds.
+ *
+ * Sampling at the frame's **centre** removes the tie. It is the same convention
+ * as sampling a texel at its centre rather than its corner, and it is what the
+ * comparable seek in the E2E suite does for the same reason
+ * (`tests/e2e/harness/decode.ts` seeks to `(N - 0.25) / fps`). The margin it
+ * buys is half a frame — 8,333 microseconds at 60fps against a 1 microsecond
+ * quantisation, a factor of over eight thousand — so no rounding this side of a
+ * rewrite can push the request into a neighbouring frame.
+ *
+ * Snapping to the covering frame first, rather than simply adding half a frame
+ * to whatever came in, is what makes this exact for an off-grid `ms` too: the
+ * centre wanted is the centre of the frame that *contains* `ms`, which is only
+ * `ms + half` when `ms` already sits on a boundary.
+ *
+ * The real fix is to stop addressing frames by float seconds at all — WebCodecs
+ * `VideoDecoder` takes an integer timestamp — but that is a rewrite of the
+ * media layer, and this is correct in the meantime rather than merely adequate.
+ */
+export function frameSampleMs(ms: number, fps: number): number {
+  const rate = normalizeFps(fps);
+  return frameToMs(msToFrameFloor(ms, rate), rate) + frameDurationMs(rate) / 2;
+}
+
 /** How wide one frame is on screen at this zoom, in px. */
 export function framePx(range: number, fps: number): number {
   return msToPxSigned(frameDurationMs(fps), range);

@@ -166,32 +166,50 @@ export async function buildKitchenSink(ctx: BuildContext): Promise<ScenarioResul
   // First, and on their own tracks, so nothing else can ever be composited over
   // a band a measurement reads.
 
-  const instrumentTrack = await addTrack(session, "video");
-  tracks.instruments = instrumentTrack;
-
   const { code, swatch, ticker } = instruments.regions;
 
-  const codeId = await addMediaAt(session, instruments.paths.code, 0, D, instrumentTrack);
-  await placeExactly(session, codeId, { x: code.x, y: code.y, w: code.w, h: code.h });
-  record("instrument:code", codeId, 0, D);
+  // One track each, and this is not tidiness.
+  //
+  // All four instruments span the whole timeline, so putting them on a single
+  // track makes them fight for the same span: the first wins it and the rest
+  // are bumped onto whatever track placement finds, underneath the content.
+  // That failure is silent and it is *nearly* silent in the results too — the
+  // code strip still read perfectly from the top track while the ticker sat
+  // beneath a video clip, so the alignment search compared a band that never
+  // changed and quietly found no winner anywhere.
+  const instrumentSpecs = [
+    { role: "code", path: instruments.paths.code, box: code },
+    { role: "swatch", path: instruments.paths.swatch, box: swatch },
+    { role: "ticker", path: instruments.paths.ticker, box: ticker },
+    {
+      role: "syncFlash",
+      path: instruments.paths.syncFlash,
+      box: {
+        x: Math.round(profile.width * 0.75),
+        y: Math.round(profile.height * 0.5),
+        w: Math.round(profile.width / 6),
+        h: Math.round(profile.height / 6),
+      },
+    },
+  ];
 
-  const tickerId = await addMediaAt(session, instruments.paths.ticker, 0, D, instrumentTrack);
-  await placeExactly(session, tickerId, { x: ticker.x, y: ticker.y, w: ticker.w, h: ticker.h });
-  record("instrument:ticker", tickerId, 0, D);
+  const instrumentTracks: string[] = [];
+  for (const spec of instrumentSpecs) {
+    const trackId = await addTrack(session, "video");
+    instrumentTracks.push(trackId);
+    tracks[`instrument:${spec.role}`] = trackId;
 
-  const swatchId = await addMediaAt(session, instruments.paths.swatch, 0, D, instrumentTrack);
-  await placeExactly(session, swatchId, { x: swatch.x, y: swatch.y, w: swatch.w, h: swatch.h });
-  record("instrument:swatch", swatchId, 0, D);
-
-  const flashId = await addMediaAt(session, instruments.paths.syncFlash, 0, D, instrumentTrack);
-  await placeExactly(session, flashId, {
-    x: Math.round(profile.width * 0.75),
-    y: Math.round(profile.height * 0.5),
-    w: Math.round(profile.width / 6),
-    h: Math.round(profile.height / 6),
-  });
-  record("instrument:syncFlash", flashId, 0, D);
-  note(`instruments placed on ${instrumentTrack}: code ${code.w}x${code.h}, ticker ${ticker.w}x${ticker.h}, swatch, sync flash`);
+    const id = await addMediaAt(session, spec.path, 0, D, trackId);
+    await placeExactly(session, id, {
+      x: spec.box.x, y: spec.box.y, w: spec.box.w, h: spec.box.h,
+    });
+    record(`instrument:${spec.role}`, id, 0, D);
+  }
+  const instrumentTrack = instrumentTracks[0];
+  note(
+    `${instrumentSpecs.length} instruments, one track each: ` +
+    `code ${code.w}x${code.h}, swatch, ticker ${ticker.w}x${ticker.h}, sync flash`,
+  );
 
   // ------------------------------------------ 2. the animation-only carrier
   //
@@ -609,9 +627,16 @@ export async function buildKitchenSink(ctx: BuildContext): Promise<ScenarioResul
   // is the only way to change what covers what. Push the instrument track to
   // index 0 so nothing can ever be composited over a band a measurement reads.
 
-  await agent(session, "move_track", { trackId: instrumentTrack, toIndex: 0 })
-    .catch((error) => note(`move_track refused: ${(error as Error).message.slice(0, 120)}`));
-  note("instrument track moved to the top of the z-order");
+  // `paintOrder` sorts by *descending* track index — "the highest index is the
+  // bottom row, painted first" — so index 0 is the top of the z-order. Every
+  // instrument track goes there, in order, so nothing the scenario places can
+  // ever be composited over a band a measurement reads.
+  for (const [rank, trackId] of instrumentTracks.entries()) {
+    await agent(session, "move_track", { trackId, toIndex: rank })
+      .catch((error) => note(`move_track refused: ${(error as Error).message.slice(0, 120)}`));
+  }
+  note(`${instrumentTracks.length} instrument tracks moved to the top of the z-order`);
+  void instrumentTrack;
 
   await clearSelection(session.page);
   await agent(session, "set_playhead", { atMs: 0 });

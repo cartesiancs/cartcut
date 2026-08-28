@@ -28,16 +28,48 @@ export type ReferenceFrame = {
   currentTimes: Record<string, number>;
 };
 
-/** Load every asset the timeline needs, once, before any reference render. */
-export async function primeAssets(page: Page): Promise<{ videos: number }> {
-  return page.evaluate(async () => {
+/**
+ * Load every asset the timeline needs, before any reference render.
+ *
+ * Awaiting `loadEntireTimeline` once is not enough, and the reason is an app
+ * behaviour rather than a quirk of this harness: `assetBatch.ts#runAssetBatch`
+ * *skips* a task whose key is already in the in-flight set — `continue`, not
+ * await — so when the preview has already started decoding a clip (it fires
+ * `loadAssetsNeededAtTime` un-awaited on every repaint), `loadEntireTimeline`
+ * resolves with that clip still missing from the cache. See FINDINGS.md #9.
+ *
+ * The consequence here is quiet and expensive: a reference frame rendered
+ * without one of its clips does not look broken, it looks like the export drew
+ * something extra. It cost a round of chasing the ticker instrument before the
+ * cause turned out to be one un-decoded handle.
+ *
+ * So this loops until the cache holds every video the timeline references, and
+ * reports both numbers so the caller can refuse to proceed on a shortfall.
+ */
+export async function primeAssets(
+  page: Page,
+  timeoutMs = 60_000,
+): Promise<{ videos: number; expected: number }> {
+  return page.evaluate(async (budget) => {
     const C = (globalThis as any).CARTCUT;
     const timeline = C.useTimelineStore.getState().timeline;
-    await C.loadedAssetStore.getState().loadEntireTimeline(timeline, { audio: false });
-    return {
-      videos: Object.keys(C.loadedAssetStore.getState()._loadedElementVideo ?? {}).length,
-    };
-  });
+    const expected = Object.values<any>(timeline).filter(
+      (element) => element.filetype === "video",
+    ).length;
+
+    const deadline = Date.now() + budget;
+    let videos = 0;
+    do {
+      await C.loadedAssetStore.getState().loadEntireTimeline(timeline, { audio: false });
+      videos = Object.keys(
+        C.loadedAssetStore.getState()._loadedElementVideo ?? {},
+      ).length;
+      if (videos >= expected) break;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    } while (Date.now() < deadline);
+
+    return { videos, expected };
+  }, timeoutMs);
 }
 
 /**
@@ -90,7 +122,9 @@ export async function renderReferenceFrames(
       const out: Array<{ timeMs: number; b64: string; currentTimes: Record<string, number> }> = [];
 
       for (const timeMs of times) {
-        await store.seek(timeline, timeMs);
+        // Same fps the export passes, so the reference addresses frames
+        // identically — see loadedAssetStore#seek.
+        await store.seek(timeline, timeMs, options.fps);
 
         C.renderTimelineAtTime(
           ctx, timeline, timeMs, renderers,
@@ -193,7 +227,9 @@ export async function settlePreviewAt(page: Page, timeMs: number): Promise<void>
     const control: any = document.querySelector("element-control");
     if (control?.isPlay) control.stop?.();
     C.useTimelineStore.getState().setCursor?.(t);
-    await C.loadedAssetStore.getState().seek(timeline, t);
+    await C.loadedAssetStore.getState().seek(
+      timeline, t, C.renderOptionStore.getState().options.fps,
+    );
     const preview: any = document.querySelector("preview-canvas");
     preview?.scheduleDraw?.();
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));

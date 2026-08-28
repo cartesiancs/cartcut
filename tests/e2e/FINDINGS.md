@@ -7,10 +7,10 @@ repair.
 
 ---
 
-## 1. A third to two thirds of exported frames show the previous source frame
+## 1. A third to two thirds of exported frames showed the previous source frame
 
-**Severity: high.** Worst at 60 fps, which is the app's own default and the only
-rate its UI allows.
+**Severity: high. Fixed and verified — see below.** Worst at 60 fps, which is
+the app's own default and the only rate its UI allows.
 
 ### What happens
 
@@ -96,27 +96,80 @@ read back, and the frame index decoded off the composited canvas, per frame.
 The full assertion lives in `stress.spec.ts` under "every one of the exported
 frames carries its own index", and reports the offsets and the affected runs.
 
-### The shape of a fix
+### The fix, and why it is the standard algorithm
 
-Aim at the middle of the frame's interval rather than its edge, so quantisation
-in either direction stays inside the right frame. The same trick is already used
-on the extraction side of this suite (`decode.ts#singleFrameCommand` seeks to
-`(N - 0.25) / fps` for exactly this reason). A half-frame bias in
-`loadedAssetStore#seek` would do it:
+Applied in `apps/app/src/features/timeline/frames.ts#frameSampleMs`, used by
+`loadedAssetStore#seek`:
 
+```ts
+export function frameSampleMs(ms: number, fps: number): number {
+  const rate = normalizeFps(fps);
+  return frameToMs(msToFrameFloor(ms, rate), rate) + frameDurationMs(rate) / 2;
+}
 ```
-const want = (sourceTimeAt(element, time) + 500 / projectFps) / 1000;
-```
 
-Not applied here — it changes export output for every user and wants its own
-review and its own unit tests. `MIN_ALIGNMENT_MARGIN` in
-`harness/compare.ts` documents a second-order consequence: while frames are
-duplicated, neighbouring output frames are genuinely similar, so the ticker
-alignment search legitimately cannot separate them.
+**Address a frame at its centre, not at its boundary.** This is not a tolerance
+bolted on to make a test pass; it is the conventional way to select a discrete
+sample through a continuous parameter, the same reason a texel is sampled at its
+centre rather than its corner.
 
-Whatever the fix, it should be validated by running the suite at 30 **and** 60
-fps — the 60 fps case is twice as bad and is not explained by truncation alone,
-so a fix verified only at 30 fps may leave most of the damage in place.
+A professional NLE never faces the choice. It converts a timeline frame index to
+a *source frame index* with integer or rational arithmetic and addresses the
+decoder by presentation timestamp in the stream's own timebase, compared
+exactly — no float seconds anywhere, so there is no tie to lose. Cartcut cannot:
+an HTML `<video>` exposes only `currentTime`, a double in seconds, and the frame
+it selects is the one whose interval `[pts, pts + duration)` contains that
+value. Asking for exactly `pts` is a boundary case, and microsecond
+quantisation loses it.
+
+Centre sampling buys half a frame of clearance — 8,333 µs at 60fps against a
+1 µs quantisation, a factor of over eight thousand. The identical technique is
+used on the extraction side of this suite (`decode.ts#singleFrameCommand` seeks
+to `(N - 0.25) / fps`), arrived at independently for the same reason.
+
+Two details that are easy to get wrong, and were:
+
+- **The half-frame goes in on the timeline side of `sourceTimeAt`, not after
+  it.** `sourceTimeAt` multiplies by `speed`, so a 2x clip needs two source
+  frames of offset per timeline frame and a 0.25x clip a quarter of one. An
+  earlier draft of this note proposed `sourceTimeAt(...) + 500 / fps`, adding a
+  fixed offset in the *source* domain — correct only at speed 1.
+- **Visibility still uses the unbiased instant.** `isElementVisibleAtTime`
+  answers a question about the timeline moment; asking it half a frame late
+  would let a clip appear or vanish one frame off. Only the address *inside* an
+  already-visible clip moves.
+
+### Verified
+
+| check | before | after |
+|---|---|---|
+| `frameSample.test.ts` — survives µs truncation at 23.976/24/25/29.97/30/48/50/59.94/60/120 fps | — | 7 tests pass |
+| smoke export, 600 frames @ 30fps, every frame checked | 206 wrong (34.3 %) | **0 wrong** |
+| full export, 18,000 frames @ 1080p60, every frame checked | 12,029 wrong (66.8 %) | **0 wrong** |
+| in-page seek probe, 40 frames, no encoder involved | 39 wrong | **0 wrong** |
+| sampled frame parity (94 frames: fidelity, burned index, alignment) | 52 frames disagreed | **0** |
+| ticker alignment margin below the healthy 8x | 39 frames | **0** |
+| existing vitest suite | 117 files pass | 118 files pass, +7 tests, no regressions |
+
+The in-page probe shows the mechanism directly: frame 1 requests 33.333 ms, and
+`video.currentTime` now reads back 0.05 s — the boundary plus half a frame —
+and decodes source index 1.
+
+### What was deliberately not changed
+
+**The preview's own positioning.** `features/timeline/playback.ts#intentFor`
+computes `sourceTimeAt(element, cursorMs) / 1000` and has the same boundary
+problem, so scrubbing the preview still lands a frame early at 24/30/60 fps.
+It was left alone because `seek` has exactly one production caller (the export
+frame loop) and is therefore safe to change in isolation, whereas `intentFor`
+feeds real-time playback where a position is also used to correct audio/video
+drift — a change there deserves its own verification, and this suite's preview
+leg asserts presence rather than frame identity, so it could not confirm it.
+
+This means preview and export now disagree by one frame while scrubbing. That
+is a smaller defect than the one removed — the delivered file is now correct —
+but it is a real WYSIWYG gap and should be the next thing fixed, using the same
+`frameSampleMs`.
 
 ---
 
@@ -224,6 +277,47 @@ anyway — Chromium removed it in M123, and this is Electron 33 / Chromium 130.)
 `functions/project.ts#saveProjectFile` starts `zip.generateAsync(...).then(...)`
 and does not return that promise, so awaiting the call awaits nothing and the
 file does not exist yet when it resolves. The suite polls for the file instead.
+
+---
+
+## 9. `loadEntireTimeline` can resolve with clips still undecoded
+
+**Severity: medium**, and it sits directly on the export path.
+
+`assetBatch.ts#runAssetBatch` skips a task whose key is already in the in-flight
+set:
+
+```ts
+for (const task of tasks) {
+  if (task.inFlight.has(task.key)) {
+    continue;          // <- not awaited, just skipped
+  }
+  ...
+}
+await Promise.all(started);
+```
+
+It waits only for the loads *this* call started. The preview fires
+`loadAssetsNeededAtTime` un-awaited on every repaint, so a clip added moments
+earlier is usually already in flight — and `loadEntireTimeline` then resolves
+with that clip absent from `_loadedElementVideo`.
+
+`features/export/renderTimeline.ts` awaits `loadEntireTimeline` and immediately
+begins seeking. `seek` iterates `_loadedElementVideo`, so a clip missing from it
+is simply not positioned and not drawn. The window is short and the export is
+long, so most frames are unaffected — but the opening frames of an export
+started right after an import can legitimately be missing a clip.
+
+Observed twice while building this suite: `primeAssets` reported 17 of 18 videos
+decoded, and a reference frame rendered without one of its clips looks like the
+*export* drew something extra rather than like a missing handle — which cost a
+round of chasing the wrong instrument.
+
+The suite works around it by looping until the cache holds every video the
+timeline references (`harness/reference.ts#primeAssets`), and asserts the count
+before comparing anything. A fix in the app would be for `runAssetBatch` to
+await in-flight tasks rather than skip them — it would need a promise per key
+rather than a bare `Set`.
 
 ---
 

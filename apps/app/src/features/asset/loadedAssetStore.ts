@@ -11,6 +11,7 @@ import {
 import { VideoFilterPipeline } from "../renderer/filter/videoPipeline";
 import { isElementVisibleAtTime } from "../element/time";
 import { sourceTimeAt, speedOf } from "../timeline/geometry";
+import { frameSampleMs } from "../timeline/frames";
 import {
   syncPlayback as syncPlaybackHandles,
   whenSeeksLand,
@@ -123,7 +124,12 @@ export interface ILoadedAssetStore {
     options?: AssetLoadOptions,
   ) => Promise<boolean>;
 
-  seek: (timeline: Timeline, time: number) => Promise<void>;
+  /**
+   * `fps` is the project frame rate, and it is required rather than optional:
+   * without it a frame is addressed at its boundary and a third to two thirds
+   * of an export shows the previous frame. See `frames.ts#frameSampleMs`.
+   */
+  seek: (timeline: Timeline, time: number, fps: number) => Promise<void>;
 
   /**
    * Bring every decoded handle in line with the timeline.
@@ -372,13 +378,21 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
    * The export path needs frame-exact positioning, so unlike the preview it
    * waits. `timeline` was already a parameter here and was then ignored in
    * favour of a stale copy; it is now actually used.
+   *
+   * `fps` is what makes the positioning frame-exact rather than merely close.
+   * A frame is addressed at its centre, not at its boundary — see
+   * `frames.ts#frameSampleMs` for why that distinction decides whether an
+   * export shows the right frame or the one before it.
    */
-  async seek(timeline, time) {
+  async seek(timeline, time, fps) {
     const metas = Object.values(get()._loadedElementVideo).filter((meta) => {
       const element = timeline[meta.elementId];
       return (
         element != null &&
         isVisualTimelineElement(element) &&
+        // The *unbiased* instant. Visibility is a question about the timeline
+        // moment, and asking it half a frame late would let a clip appear or
+        // vanish one frame off. Only the address inside a visible clip moves.
         isElementVisibleAtTime(time, timeline, element)
       );
     });
@@ -394,7 +408,14 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
             // before its in-point — which is the whole mechanism, and
             // `sourceTimeAt` extrapolates there correctly because it is linear.
             // `maxTransitionMs` already guarantees the frames exist in the file.
-            const want = sourceTimeAt(element, time) / 1000;
+            //
+            // The half-frame goes in on the *timeline* side of `sourceTimeAt`,
+            // not after it. That is what makes it correct for a retimed clip:
+            // the conversion multiplies by `speed`, so a 2x clip needs two
+            // source frames of offset per timeline frame and a 0.25x clip a
+            // quarter of one. Adding a fixed offset to the source time instead
+            // would be right only at speed 1.
+            const want = sourceTimeAt(element, frameSampleMs(time, fps)) / 1000;
 
             video.playbackRate = speedOf(element);
 

@@ -134,7 +134,7 @@ export async function renderTimeline(
       const timeInMs = frameTimeMs(currentFrame, fps);
 
       await profiler.measureAsync("seek", () =>
-        assetStore.seek(timeline, timeInMs),
+        assetStore.seek(timeline, timeInMs, fps),
       );
 
       // A seek that lands after the abort would otherwise composite and ship a

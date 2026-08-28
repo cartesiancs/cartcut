@@ -16,17 +16,15 @@ npm run test:e2e              # 5 min @ 1920x1080x60, 18,000 frames
 npm run test:e2e:extreme      # 5 min @ 3840x2160x60 — run by hand
 ```
 
-**Read [FINDINGS.md](./FINDINGS.md) first.** The suite currently fails against
-`main`, and it is right to: one exported frame in three carries the previous
-source frame. To exercise the checks that come after that one while the defect
-is open:
+**Read [FINDINGS.md](./FINDINGS.md) for what it found**, including the defect it
+was built to catch: a third to two thirds of every export carried the previous
+source frame, because a frame was addressed at its boundary rather than its
+centre. That one is fixed and verified — 0 wrong frames out of 18,000 at
+1080p60 — and eight other findings are reported but not fixed.
 
-```
-CARTCUT_E2E_ALLOW_KNOWN_SEEK_OFFSET=1 npm run test:e2e:smoke
-```
-
-That downgrades the affected assertions to soft failures. The run still ends
-red.
+`CARTCUT_E2E_ALLOW_KNOWN_SEEK_OFFSET=1` downgrades the frame-index assertions to
+soft failures. It exists so the checks *after* that one can still be exercised
+while such a defect is open; it is not needed now and should stay unset.
 
 ## What it does to the app
 
@@ -89,18 +87,27 @@ get their index checked in about seven seconds.
 
 Every number is calibrated against a measured floor, not guessed. The floor is
 not zero — the export writes full-range RGBA into 4:2:0 H.264 and the decode
-comes back through the same conversion:
+comes back through the same conversion — and it depends on the content, so it
+is measured against the footage the scenario actually composites rather than
+against a synthetic frame:
 
-| metric | threshold | measured floor |
-|---|---|---|
-| `mean` | 2.0 | 1.07 |
-| `p99` | 12 | 4 |
-| `p999` | 32 | 11 |
-| `frac(Δ>24)` | 0.5 % | 0.008 % |
-| `max` | **not asserted** | 115 |
+| metric | threshold | synthetic floor | real-footage max over 94 frames |
+|---|---|---|---|
+| `mean` | 4.0 | 1.07 | 2.16 |
+| `p99` | 24 | 4 | 14 |
+| `p999` | 72 | 11 | 51 |
+| `frac(Δ>24)` | 2 % | 0.008 % | 0.5 % |
+| `max` | **not asserted** | 115 | 157 |
 
 `max` is deliberately absent: a *correct* round trip reaches 115, so any
 max-based assertion is a coin flip.
+
+These catch *wrong content* — a missing element, a mangled transform — not a
+wrong frame. That distinction is load-bearing: when the frame-addressing defect
+was live and two thirds of frames were wrong, these numbers sat in the same
+range they sit in now, because consecutive frames of real footage look alike.
+`mean` and `frac(Δ>24)` are the real gates; `p99`/`p999` are dominated by chroma
+ringing on detailed content and are kept only as sanity ceilings.
 
 ### Colour
 
@@ -138,7 +145,7 @@ specs/
   launch.spec.ts       the floor everything else stands on
   agent.spec.ts        the command channel
   export-path.spec.ts  the narrowest end-to-end export, for triage
-  seek-diagnosis.spec.ts  characterises finding #1
+  seek-diagnosis.spec.ts  seek fidelity, with no encoder in the way
   stress.spec.ts       the run
 ```
 
