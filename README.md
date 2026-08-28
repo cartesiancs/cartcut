@@ -79,7 +79,26 @@ First, install dependencies.
 npm install
 ```
 
-and, **Download** ffmpeg and ffprobe into the "./bin" folder. There's a version for Mac and a version for Windows separately. Compatible binary files can be downloaded from https://github.com/cartesiancs/ffmpeg4nugget
+and, **Download** ffmpeg and ffprobe into `./bin`, in a folder named for the
+target you are building. Only the folder matching your machine is needed to run
+the app locally; `npm run build` reads whichever one it is packaging for.
+
+```
+bin/
+  darwin-arm64/{ffmpeg,ffprobe}     Apple Silicon
+  darwin-x64/{ffmpeg,ffprobe}       Intel Mac
+  win32-x64/{ffmpeg.exe,ffprobe.exe}
+  yt-dlp
+```
+
+Compatible binaries can be downloaded from
+https://github.com/cartesiancs/ffmpeg4nugget
+
+The macOS builds must be **native** — an x86_64 binary runs on Apple Silicon
+through Rosetta 2 at roughly half the export speed, and nothing in the app will
+say so. Check with `lipo -archs bin/darwin-arm64/ffmpeg`, which must print
+`arm64`. The build also has to carry `libx264`, `libx265`, `libvpx-vp9`,
+`prores_ks` and the VideoToolbox encoders; `ffmpeg -encoders` lists them.
 
 next, **Permission** grant is required. Please enter the command below to grant permission for bin folder.
 

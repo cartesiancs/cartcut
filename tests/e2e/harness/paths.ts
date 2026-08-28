@@ -19,8 +19,23 @@ export const REPO_ROOT = path.resolve(E2E_ROOT, "../..");
 export const FIXTURE_DIR = path.join(E2E_ROOT, ".fixtures");
 export const OUT_DIR = path.join(E2E_ROOT, ".out");
 
-export const FFMPEG = path.join(REPO_ROOT, "bin", "ffmpeg");
-export const FFPROBE = path.join(REPO_ROOT, "bin", "ffprobe");
+/**
+ * The same per-target layout `electron/lib/ffmpeg.ts` reads in development.
+ *
+ * The harness has to measure the delivered file with the *same* binary the app
+ * encoded it with, or a decoder difference reads as a defect in the export. It
+ * also has to be the native one: an x86_64 build under Rosetta would make every
+ * timing number in `FINDINGS.md` describe a machine nobody is running.
+ */
+const BIN_DIR = path.join(
+  REPO_ROOT,
+  "bin",
+  `${process.platform}-${process.arch}`,
+);
+const EXE = process.platform === "win32" ? ".exe" : "";
+
+export const FFMPEG = path.join(BIN_DIR, `ffmpeg${EXE}`);
+export const FFPROBE = path.join(BIN_DIR, `ffprobe${EXE}`);
 
 export type ProfileName = "smoke" | "full" | "extreme";
 

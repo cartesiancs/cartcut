@@ -1,9 +1,8 @@
 /node_modules
 /dist
-/bin/ffmpeg
-/bin/ffprobe
-/bin/ffmpeg.exe
-/bin/ffprobe.exe
+/bin/darwin-arm64
+/bin/darwin-x64
+/bin/win32-x64
 /bin/yt-dlp
 /main
 /temp

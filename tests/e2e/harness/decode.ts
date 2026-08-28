@@ -219,9 +219,43 @@ export type DecodedFrames = {
 };
 
 /**
+ * The `select` expression matching exactly this set of frame indices.
+ *
+ * Runs of consecutive indices collapse into one `between(n,lo,hi)` rather than
+ * one `eq(n,K)` each, and that is not a micro-optimisation. The sampler asks for
+ * alignment windows — short contiguous stretches around each probe point — so a
+ * few hundred indices are really a few dozen runs, and the flat form built an
+ * expression FFmpeg 9 refuses outright: past roughly three hundred `+` terms its
+ * parser gives up with "Cannot allocate memory" and the export goes unchecked.
+ * FFmpeg 5 parsed the same string, so this only surfaced when the bundled
+ * binaries became native arm64 builds.
+ *
+ * Exported for its own test: the folded expression has to select the same set
+ * as the flat one, and that is worth pinning rather than eyeballing.
+ */
+export function selectExpression(indices: number[]): string {
+  const terms: string[] = [];
+
+  for (let i = 0; i < indices.length; ) {
+    let end = i;
+    while (end + 1 < indices.length && indices[end + 1] === indices[end] + 1) {
+      end++;
+    }
+    terms.push(
+      end === i
+        ? `eq(n\\,${indices[i]})`
+        : `between(n\\,${indices[i]}\\,${indices[end]})`,
+    );
+    i = end + 1;
+  }
+
+  return terms.join("+");
+}
+
+/**
  * Extract specific frames as RGBA, in one pass.
  *
- * `select` with `+`-joined `eq(n,K)` terms acts as OR and emits in ascending
+ * `select` with `+`-joined terms acts as OR and emits in ascending
  * `n`, so slice *k* of the output is index *k* of the sorted request. That
  * pairing is only sound if every requested frame actually arrived, which is why
  * the byte count is asserted rather than assumed: a short read would shift
@@ -249,7 +283,7 @@ export async function decodeFrames(
   const outH = crop?.h ?? height;
   const stride = outW * outH * 4;
 
-  const filters = [`select='${indices.map((n) => `eq(n\\,${n})`).join("+")}'`];
+  const filters = [`select='${selectExpression(indices)}'`];
   if (crop != null) filters.push(`crop=${crop.w}:${crop.h}:${crop.x}:${crop.y}`);
 
   const argv = [

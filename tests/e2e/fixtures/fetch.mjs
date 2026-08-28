@@ -34,8 +34,12 @@ export const E2E_ROOT = path.resolve(HERE, "..");
 export const REPO_ROOT = path.resolve(E2E_ROOT, "../..");
 export const FIXTURE_DIR = path.join(E2E_ROOT, ".fixtures");
 
-const FFMPEG = path.join(REPO_ROOT, "bin", "ffmpeg");
-const FFPROBE = path.join(REPO_ROOT, "bin", "ffprobe");
+// Per-target, matching `electron/lib/ffmpeg.ts` and `harness/paths.ts`: the
+// fixtures have to be built by the same binary that will later decode them.
+const BIN_DIR = path.join(REPO_ROOT, "bin", `${process.platform}-${process.arch}`);
+const EXE = process.platform === "win32" ? ".exe" : "";
+const FFMPEG = path.join(BIN_DIR, `ffmpeg${EXE}`);
+const FFPROBE = path.join(BIN_DIR, `ffprobe${EXE}`);
 const LOCK = path.join(FIXTURE_DIR, "sources.lock.json");
 const MANIFEST = path.join(FIXTURE_DIR, "manifest.json");
 
@@ -314,7 +318,7 @@ export async function ensureFixtures({ profiles = Object.keys(PROFILES), force =
   await fsp.mkdir(FIXTURE_DIR, { recursive: true });
   for (const bin of [FFMPEG, FFPROBE]) {
     if (!exists(bin)) {
-      throw new Error(`${bin} is missing. See the README — ffmpeg and ffprobe must be in ./bin.`);
+      throw new Error(`${bin} is missing. See the README — ffmpeg and ffprobe must be in ./bin/${process.platform}-${process.arch}.`);
     }
   }
 

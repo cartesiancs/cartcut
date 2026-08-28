@@ -14,6 +14,7 @@ import {
   AUDIO_SAMPLE_RATES,
   CODEC_CONTAINERS,
   CODEC_SUPPORTS_CRF,
+  CODEC_SUPPORTS_HW_ACCEL,
   CODEC_SUPPORTS_SPEED_PRESET,
   CONTAINERS,
   CONTAINER_AUDIO_CODECS,
@@ -38,6 +39,7 @@ import { requestIPCVideoExport } from "../../features/export/ipc";
 import { exportElementRenderers } from "../../features/export/renderers";
 import type { ExportOptions } from "../../features/export/types";
 import { formatSeconds } from "../../utils/time";
+import { IS_MAC } from "../../utils/platform";
 
 let socket;
 
@@ -268,10 +270,44 @@ export class ControlRender extends LitElement {
     });
   }
 
+  /**
+   * A checkbox, for the one setting that is a boolean.
+   *
+   * Deliberately not routed through `syncSelects` the way the dropdowns are —
+   * that exists because a `selected` *attribute* stops moving a `<select>` once
+   * the user has touched it, and `?checked` has no such problem.
+   */
+  private renderCheckbox(
+    key: keyof ExportSettings,
+    label: string,
+    checked: boolean,
+    handler: (e) => void,
+  ) {
+    return html`
+      <div class="form-check mb-1">
+        <input
+          class="form-check-input"
+          type="checkbox"
+          id=${`export-${key}`}
+          data-setting=${key}
+          ?checked=${checked}
+          @change=${handler}
+        />
+        <label class="form-check-label text-light" for=${`export-${key}`}>
+          ${label}
+        </label>
+      </div>
+    `;
+  }
+
   private renderVideoSection() {
     const settings = this.settings;
     const isProRes = settings.videoCodec === "prores";
     const crfRange = CRF_RANGE[settings.videoCodec];
+    // VideoToolbox is a macOS facility, and VP9 has no encoder on it. Where
+    // neither holds the toggle is not shown at all rather than shown inert.
+    const canHardwareAccel = IS_MAC && CODEC_SUPPORTS_HW_ACCEL[settings.videoCodec];
+    const hardwareActive = canHardwareAccel && settings.hardwareAccel;
 
     return html`
       ${this.renderSelect(
@@ -343,7 +379,24 @@ export class ControlRender extends LitElement {
             </div>
           `
         : ""}
-      ${CODEC_SUPPORTS_SPEED_PRESET[settings.videoCodec]
+      ${canHardwareAccel
+        ? html`
+            ${this.renderCheckbox(
+              "hardwareAccel",
+              this.lc.t("setting.hardware_accel"),
+              settings.hardwareAccel,
+              (e) => this.patch({ hardwareAccel: e.target.checked }),
+            )}
+            <p class="text-secondary mb-3" style="font-size: 0.75rem;">
+              ${this.lc.t(
+                isProRes || settings.videoCodec === "h265"
+                  ? "setting.hardware_accel_hint"
+                  : "setting.hardware_accel_hint_h264",
+              )}
+            </p>
+          `
+        : ""}
+      ${CODEC_SUPPORTS_SPEED_PRESET[settings.videoCodec] && !hardwareActive
         ? this.renderSelect(
             "preset",
             this.lc.t("setting.encode_preset"),

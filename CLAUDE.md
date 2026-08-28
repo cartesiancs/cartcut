@@ -30,7 +30,17 @@ npx tsc --noEmit -p ./.tsconfig    # typecheck the main process
 npx webpack --mode=development     # build the renderer once
 ```
 
-FFmpeg and ffprobe binaries must be in `./bin` — see the README.
+FFmpeg and ffprobe binaries live in `./bin/<platform>-<arch>/` — `darwin-arm64`,
+`darwin-x64`, `win32-x64` — and `electron/lib/ffmpeg.ts` picks the directory from
+`process.arch`. electron-builder flattens the matching one into `resources/bin`,
+so a packaged app sees them directly under `bin/`. `yt-dlp` sits at `bin/` root;
+it is already a universal binary. See the README.
+
+The macOS builds must be **native**. An x86_64 FFmpeg runs on Apple Silicon
+under Rosetta at roughly half speed and says nothing about it — measured through
+the app's own pipeline at 1080p60, H.264 goes 112 → 240 fps and H.265 32 → 102
+fps just by being the right architecture. `lipo -archs bin/darwin-arm64/ffmpeg`
+is the check.
 
 ## How editing works
 

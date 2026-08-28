@@ -51,6 +51,7 @@ export type ExportSettings = {
   audioBitrate: number;
   sampleRate: number;
   channels: 1 | 2;
+  hardwareAccel: boolean;
 };
 
 export const CODEC_CONTAINERS: Record<VideoCodec, readonly Container[]> = {
@@ -113,6 +114,7 @@ export const EXPORT_PRESETS: Record<PresetName, ExportSettings> = {
     audioBitrate: 320,
     sampleRate: 48000,
     channels: 2,
+    hardwareAccel: false,
   },
   medium: {
     container: "mp4",
@@ -126,6 +128,7 @@ export const EXPORT_PRESETS: Record<PresetName, ExportSettings> = {
     audioBitrate: 192,
     sampleRate: 48000,
     channels: 2,
+    hardwareAccel: false,
   },
   low: {
     container: "mp4",
@@ -139,6 +142,7 @@ export const EXPORT_PRESETS: Record<PresetName, ExportSettings> = {
     audioBitrate: 128,
     sampleRate: 44100,
     channels: 2,
+    hardwareAccel: false,
   },
 };
 
@@ -207,6 +211,10 @@ export function normalizeExportSettings(
     audioBitrate: positive(raw.audioBitrate, base.audioBitrate),
     sampleRate,
     channels: Number(raw.channels) === 1 ? 1 : 2,
+    // Strict `=== true`, so a project file written before this field existed
+    // normalizes to software encoding rather than to `undefined`, which would
+    // then reach the arg builder and read as falsy anyway — but only by luck.
+    hardwareAccel: raw.hardwareAccel === true,
   };
 }
 
@@ -220,6 +228,69 @@ export const VIDEO_ENCODERS: Record<VideoCodec, string> = {
   vp9: "libvpx-vp9",
   prores: "prores_ks",
 };
+
+/**
+ * The VideoToolbox encoder for each codec that has one, used when
+ * `settings.hardwareAccel` is set and the export is running on macOS.
+ *
+ * VP9 is deliberately absent — Apple's media engine does not encode it — and
+ * absence here is what `CODEC_SUPPORTS_HW_ACCEL` on the renderer side mirrors,
+ * asserted in `exportSettings.test.ts`.
+ */
+export const HW_ENCODERS: Partial<Record<VideoCodec, string>> = {
+  h264: "h264_videotoolbox",
+  h265: "hevc_videotoolbox",
+  prores: "prores_videotoolbox",
+};
+
+/** Where an export is running, and therefore which encoders it can reach. */
+export type EncodeTarget = {
+  platform: string;
+  arch: string;
+};
+
+export const HOST_TARGET: EncodeTarget = {
+  platform: process.platform,
+  arch: process.arch,
+};
+
+/**
+ * Whether this export actually takes the hardware path.
+ *
+ * Three conditions, and the platform one is not paranoia: `hardwareAccel` rides
+ * along inside a saved project, so a file authored on a Mac opens on Windows
+ * with the flag still set. Ignoring it there is what keeps that project
+ * exportable instead of failing on an encoder the build does not have.
+ */
+export function usesHardwareEncoder(
+  settings: ExportSettings,
+  target: EncodeTarget = HOST_TARGET,
+): boolean {
+  return (
+    settings.hardwareAccel === true &&
+    target.platform === "darwin" &&
+    HW_ENCODERS[settings.videoCodec] != null
+  );
+}
+
+/**
+ * A CRF value as VideoToolbox's `-q:v`.
+ *
+ * The two scales run in opposite directions — CRF is "smaller is better" over
+ * the codec's own range, `-q:v` is 1..100 where bigger is better — so this is a
+ * reversed linear map through the codec's declared range rather than a constant
+ * offset. It cannot be exact: the numbers mean different things to different
+ * encoders, and only the ordering carries over.
+ */
+export function videotoolboxQuality(settings: ExportSettings): number {
+  const range = CRF_RANGE[settings.videoCodec];
+  const span = range.max - range.min;
+  if (!(span > 0)) {
+    return 50;
+  }
+  const normalized = (settings.crf - range.min) / span;
+  return Math.min(100, Math.max(1, Math.round(100 - normalized * 99)));
+}
 
 export const AUDIO_ENCODERS: Record<AudioCodec, string> = {
   aac: "aac",
@@ -262,6 +333,9 @@ export const LEGACY_EXPORT_SETTINGS: ExportSettings = {
   audioBitrate: 128,
   sampleRate: 44100,
   channels: 2,
+  // The offscreen path has no UI to set this from, and "what an options object
+  // that predates the feature meant" is unambiguously "software".
+  hardwareAccel: false,
 };
 
 function containerFromPath(destination: unknown): Container | undefined {
@@ -303,13 +377,33 @@ export function pixelFormatFor(settings: ExportSettings): string {
   return "yuv420p";
 }
 
-export function videoOutputArgs(settings: ExportSettings): string[] {
-  const args: string[] = ["-c:v", VIDEO_ENCODERS[settings.videoCodec]];
+export function videoOutputArgs(
+  settings: ExportSettings,
+  target: EncodeTarget = HOST_TARGET,
+): string[] {
+  const hardware = usesHardwareEncoder(settings, target);
+
+  const args: string[] = [
+    "-c:v",
+    hardware ? HW_ENCODERS[settings.videoCodec]! : VIDEO_ENCODERS[settings.videoCodec],
+  ];
 
   if (settings.videoCodec === "prores") {
     // ProRes is intra-only at fixed per-profile rates; `-crf` and `-b:v` are
-    // both meaningless here, and `-preset` is rejected outright.
+    // both meaningless here, and `-preset` is rejected outright. The profile
+    // numbering is the same for `prores_ks` and `prores_videotoolbox`.
     args.push("-profile:v", `${settings.proresProfile}`);
+  } else if (hardware) {
+    // VideoToolbox has never understood `-crf`. Its constant-quality mode is
+    // `-q:v`, and that mode exists **only on Apple Silicon** — an Intel Mac
+    // answers "qscale not available for encoder" and the export dies during
+    // startup, after the renderer has already been told it began. So x64 falls
+    // back to the bitrate the settings already carry rather than failing.
+    if (settings.qualityMode === "crf" && target.arch === "arm64") {
+      args.push("-q:v", `${videotoolboxQuality(settings)}`);
+    } else {
+      args.push("-b:v", `${settings.videoBitrate}k`);
+    }
   } else if (settings.qualityMode === "crf") {
     args.push("-crf", `${settings.crf}`);
     if (settings.videoCodec === "vp9") {
@@ -322,7 +416,11 @@ export function videoOutputArgs(settings: ExportSettings): string[] {
     args.push("-b:v", `${settings.videoBitrate}k`);
   }
 
-  if (settings.videoCodec === "h264" || settings.videoCodec === "h265") {
+  if (hardware) {
+    // Nothing. The x264 preset names are not in VideoToolbox's vocabulary and
+    // it exits rather than ignoring one; the media engine has no equivalent
+    // speed/compression axis to map them onto anyway.
+  } else if (settings.videoCodec === "h264" || settings.videoCodec === "h265") {
     args.push("-preset", settings.preset);
   } else if (settings.videoCodec === "vp9") {
     args.push(

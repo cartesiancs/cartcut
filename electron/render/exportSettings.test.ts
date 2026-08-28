@@ -72,6 +72,133 @@ describe("the main-process mirror", () => {
       expect(main.VP9_CPU_USED[preset]).toBeTypeOf("number");
     }
   });
+
+  /**
+   * The renderer decides whether to *show* the hardware toggle and main decides
+   * what flag it becomes, so the two answer "does this codec have a hardware
+   * encoder?" independently. Comparing the derivation rather than duplicating a
+   * table is the stronger check: adding a VideoToolbox encoder on one side
+   * without the other fails here.
+   */
+  it("offers the hardware toggle for exactly the codecs that have an encoder", () => {
+    for (const codec of VIDEO_CODECS) {
+      expect(renderer.CODEC_SUPPORTS_HW_ACCEL[codec]).toBe(
+        main.HW_ENCODERS[codec] != null,
+      );
+    }
+  });
+});
+
+describe("hardware-accelerated output", () => {
+  const APPLE_SILICON = { platform: "darwin", arch: "arm64" };
+  const INTEL_MAC = { platform: "darwin", arch: "x64" };
+  const WINDOWS = { platform: "win32", arch: "x64" };
+
+  const hw = (patch: any) =>
+    normalizeExportSettings({ hardwareAccel: true, ...patch });
+
+  it("switches H.264 onto VideoToolbox and drops the x264 preset", () => {
+    const args = videoOutputArgs(
+      hw({ videoCodec: "h264", qualityMode: "crf", crf: 23 }),
+      APPLE_SILICON,
+    );
+    expect(args.slice(0, 2)).toEqual(["-c:v", "h264_videotoolbox"]);
+    // VideoToolbox exits on an x264 preset name rather than ignoring it.
+    expect(args).not.toContain("-preset");
+    expect(args).not.toContain("-crf");
+    expect(valueOf(args, "-q:v")).toBeDefined();
+    expect(valueOf(args, "-pix_fmt")).toBe("yuv420p");
+  });
+
+  it("keeps H.265's hvc1 tag on the hardware path", () => {
+    const args = videoOutputArgs(
+      hw({ videoCodec: "h265", container: "mp4" }),
+      APPLE_SILICON,
+    );
+    expect(args.slice(0, 2)).toEqual(["-c:v", "hevc_videotoolbox"]);
+    expect(valueOf(args, "-tag:v")).toBe("hvc1");
+  });
+
+  it("gives hardware ProRes the same profile and no rate control", () => {
+    const args = videoOutputArgs(
+      hw({ videoCodec: "prores", proresProfile: 3 }),
+      APPLE_SILICON,
+    );
+    expect(args.slice(0, 2)).toEqual(["-c:v", "prores_videotoolbox"]);
+    expect(valueOf(args, "-profile:v")).toBe("3");
+    expect(args).not.toContain("-q:v");
+    expect(args).not.toContain("-b:v");
+    expect(args).not.toContain("-preset");
+  });
+
+  it("maps a lower CRF onto a higher VideoToolbox quality", () => {
+    const better = videoOutputArgs(hw({ videoCodec: "h264", crf: 18 }), APPLE_SILICON);
+    const worse = videoOutputArgs(hw({ videoCodec: "h264", crf: 40 }), APPLE_SILICON);
+    expect(Number(valueOf(better, "-q:v"))).toBeGreaterThan(
+      Number(valueOf(worse, "-q:v")),
+    );
+    for (const crf of [0, 18, 23, 28, 51]) {
+      const q = Number(
+        valueOf(videoOutputArgs(hw({ videoCodec: "h264", crf }), APPLE_SILICON), "-q:v"),
+      );
+      expect(q).toBeGreaterThanOrEqual(1);
+      expect(q).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it("falls back to a bitrate on Intel, where -q:v is not available", () => {
+    const args = videoOutputArgs(
+      hw({ videoCodec: "h264", qualityMode: "crf", videoBitrate: 5000 }),
+      INTEL_MAC,
+    );
+    expect(args.slice(0, 2)).toEqual(["-c:v", "h264_videotoolbox"]);
+    expect(args).not.toContain("-q:v");
+    expect(valueOf(args, "-b:v")).toBe("5000k");
+  });
+
+  it("ignores the flag off macOS, so a Mac project still exports on Windows", () => {
+    const args = videoOutputArgs(hw({ videoCodec: "h264", crf: 23 }), WINDOWS);
+    expect(args.slice(0, 2)).toEqual(["-c:v", "libx264"]);
+    expect(valueOf(args, "-crf")).toBe("23");
+    expect(valueOf(args, "-preset")).toBe("medium");
+  });
+
+  it("ignores the flag for VP9, which has no VideoToolbox encoder", () => {
+    const args = videoOutputArgs(
+      hw({ videoCodec: "vp9", qualityMode: "crf", crf: 31 }),
+      APPLE_SILICON,
+    );
+    expect(args.slice(0, 2)).toEqual(["-c:v", "libvpx-vp9"]);
+    expect(valueOf(args, "-crf")).toBe("31");
+    expect(valueOf(args, "-cpu-used")).toBe("3");
+  });
+
+  /**
+   * The regression that matters most. Everything above is new behaviour behind a
+   * flag nobody has set yet; this is the promise that not setting it changes
+   * nothing, on every codec, on the machine most likely to run the tests.
+   */
+  it("produces the software argument vector whenever the flag is off", () => {
+    for (const codec of VIDEO_CODECS) {
+      const off = normalizeExportSettings({ videoCodec: codec });
+      expect(off.hardwareAccel).toBe(false);
+      expect(videoOutputArgs(off, APPLE_SILICON)).toEqual(
+        videoOutputArgs(off, WINDOWS),
+      );
+      expect(videoOutputArgs(off, APPLE_SILICON).slice(0, 2)).toEqual([
+        "-c:v",
+        main.VIDEO_ENCODERS[codec],
+      ]);
+    }
+  });
+
+  it("treats a missing hardwareAccel as off", () => {
+    const { hardwareAccel, ...withoutTheField } = DEFAULT_EXPORT_SETTINGS;
+    expect(normalizeExportSettings(withoutTheField).hardwareAccel).toBe(false);
+    expect(normalizeExportSettings({ hardwareAccel: "yes" as any }).hardwareAccel).toBe(
+      false,
+    );
+  });
 });
 
 describe("resolveExportSettings", () => {

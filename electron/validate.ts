@@ -63,7 +63,11 @@ export const downloadFfmpeg = (binType) => {
     detail: type + " 설치중...",
   });
 
-  const request = net.request(config.ffmpegBin[process.platform][type].url);
+  // Keyed by `platform-arch`, not platform alone: an Apple Silicon Mac and an
+  // Intel one both report `darwin` and would otherwise be handed the same
+  // x86_64 build, which is exactly the Rosetta trap `lib/ffmpeg.ts` avoids for
+  // the bundled copy.
+  const request = net.request(config.ffmpegBin[ffmpegConfig.TARGET][type].url);
   request.on("response", (response: any) => {
     totalBytes = parseInt(response.headers["content-length"]);
     response.pipe(fs.createWriteStream(downloadPath));
