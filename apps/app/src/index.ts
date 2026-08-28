@@ -83,3 +83,32 @@ customElements.define("toast-box", ToastBox);
  * earned their keep the same way.
  */
 export { mime, project, fonts, loadedAssetStore };
+
+/**
+ * The compositor and the stores it reads, exported for the same reason.
+ *
+ * `tests/e2e` drives the real app and then has to answer one question node
+ * tests cannot: *does the frame in the exported file match the frame the app
+ * would show?* Answering it means re-running the export's own per-frame work —
+ * `seek`, then `renderTimelineAtTime` with `exportElementRenderers` and an
+ * export FX runtime — at project resolution, and diffing that against the
+ * decoded video. Screenshotting the visible preview canvas cannot stand in for
+ * it: that canvas is device-sized, carries the viewport's pan and zoom, and has
+ * a dimmed pass, frame guides and selection chrome composited over it.
+ *
+ * Every name below is a re-export of a module the app already loads. There is
+ * no test-only code path here, nothing branches on whether a test is attached,
+ * and removing these lines would change no behaviour — which is the property
+ * that makes exposing them acceptable at all.
+ */
+export { useTimelineStore } from "./states/timelineStore";
+export { renderOptionStore } from "./states/renderOptionStore";
+export { selectionStore } from "./states/selectionStore";
+export { previewViewportStore } from "./states/previewViewportStore";
+export { renderTimelineAtTime } from "./features/renderer/timeline";
+export { exportElementRenderers } from "./features/export/renderers";
+export {
+  createExportFxRuntime,
+  previewFxRuntime,
+} from "./features/renderer/fx/createRuntime";
+export { frameCount, frameTimeMs } from "./features/export/frames";

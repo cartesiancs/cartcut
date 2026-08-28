@@ -1,0 +1,27 @@
+{
+  // The suite's own program.
+  //
+  // It is deliberately outside the app's: the root `tsconfig.json` excludes
+  // `tests` so the Playwright harness cannot land in the bundle's type program
+  // and fail `webpack` — a test breaking the build it exists to check. That
+  // exclusion would also leave this code unchecked, which is what this file is
+  // for.
+  //
+  // CommonJS, matching how Playwright transpiles these files at run time. That
+  // is why the harness uses `__dirname` rather than `import.meta.url`, and why
+  // `scenario/carriers.ts` reaches `fixtures/geometry.mjs` through
+  // `createRequire` instead of a static import.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", ".fixtures", ".out"]
+}

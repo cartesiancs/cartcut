@@ -35,11 +35,7 @@ import { v4 as uuidv4 } from "uuid";
 import { io } from "socket.io-client";
 import { rendererModal } from "../../utils/modal";
 import { requestIPCVideoExport } from "../../features/export/ipc";
-import { renderImage } from "../../features/renderer/image";
-import { renderVideoWithWait } from "../../features/renderer/video";
-import { renderGif } from "../../features/renderer/gif";
-import { renderText } from "../../features/renderer/text";
-import { renderShape } from "../../features/renderer/shape";
+import { exportElementRenderers } from "../../features/export/renderers";
 import type { ExportOptions } from "../../features/export/types";
 import { formatSeconds } from "../../utils/time";
 
@@ -425,13 +421,7 @@ export class ControlRender extends LitElement {
       videoBitrate: renderOptionState.exportSettings.videoBitrate,
     };
 
-    const elementRenderers = {
-      image: renderImage,
-      video: renderVideoWithWait,
-      gif: renderGif,
-      text: renderText,
-      shape: renderShape,
-    };
+    const elementRenderers = exportElementRenderers;
 
     const env = getLocationEnv();
     if (env == "electron") {

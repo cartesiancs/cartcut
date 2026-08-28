@@ -27,6 +27,13 @@
     "./node_modules",
     "packages",
     "main",
+    // The E2E suite. With no `include`, this config takes in every .ts file
+    // under the repo root, so without this the Playwright harness lands in the
+    // app's own program and its type errors fail `webpack` — a test breaking
+    // the build it is supposed to be checking. `**/*.spec.ts` already covered
+    // the specs; `tests/e2e/harness` and `tests/e2e/scenario` are not specs.
+    // The suite is type-checked on its own, against Playwright's config.
+    "tests",
     "**/*.test.ts",
     "**/*.spec.ts"
   ]

@@ -118,6 +118,22 @@ Vitest, suites co-located with sources. The `features/timeline/` and
 New pure ops should get a co-located suite that covers the decline path —
 returning the input by identity — as well as the happy one.
 
+`tests/e2e/` is the end-to-end render suite: Playwright launches the real app,
+builds a project holding all nine element types, clicks the real Render button
+and checks the delivered file frame by frame. It lives outside the vitest
+include patterns and outside the root `tsconfig.json` (which has no `include`,
+so `tests` has to be excluded explicitly or the harness lands in the bundle's
+type program and breaks `webpack`). Start with `tests/e2e/README.md`, and
+`tests/e2e/FINDINGS.md` for what it currently reports — including a
+one-frame-in-three seek defect that makes it fail against `main`.
+
+```
+npm run test:e2e:fixtures   # download and derive the media, once
+npm run test:e2e:smoke      # ~1 min, for iterating
+npm run test:e2e            # 5 min at 1080p60, 18,000 frames
+npm run test:e2e:check      # typecheck the suite on its own
+```
+
 ## Known rough edges
 
 - Undo history stores post-edit snapshots only, and nothing checkpoints on

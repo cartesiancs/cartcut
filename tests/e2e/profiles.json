@@ -1,0 +1,23 @@
+{
+  "smoke": {
+    "durationSec": 20,
+    "width": 640,
+    "height": 360,
+    "fps": 30,
+    "note": "Development loop. Small enough to run between edits; exercises every code path the full profile does, just fewer times."
+  },
+  "full": {
+    "durationSec": 300,
+    "width": 1920,
+    "height": 1080,
+    "fps": 60,
+    "note": "The headline spec: 5 minutes, 18000 frames, 1080p60. This is the profile the stress test exists for."
+  },
+  "extreme": {
+    "durationSec": 300,
+    "width": 3840,
+    "height": 2160,
+    "fps": 60,
+    "note": "Limit test. 4K raw frames are 33MB each, which halves the in-flight window (see features/export/frames.ts inFlightWindow). Run by hand."
+  }
+}
