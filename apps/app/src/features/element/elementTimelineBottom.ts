@@ -248,7 +248,7 @@ export class ElementTimelineBottomScroll extends LitElement {
               <span class="text-secondary" style="font-size: 13px;">
                 ${this.isRunMcp
                   ? html`Cartcut is listening. Run this once in your terminal,
-                      from any folder, then just ask Claude Code to edit.`
+                    from any folder, then just ask Claude Code to edit.`
                   : html`The editor bridge is not running.`}
               </span>
 
@@ -271,14 +271,6 @@ export class ElementTimelineBottomScroll extends LitElement {
               </div>
 
               <span
-                class="text-secondary ${this.isRunMcp ? "" : "d-none"}"
-                style="font-size: 12px;"
-              >
-                The command carries an access token. Anyone with it can edit
-                this project, so keep it to yourself.
-              </span>
-
-              <span
                 class="text-danger ${this.mcpError ? "" : "d-none"}"
                 style="font-size: 12px;"
                 >${this.mcpError}</span
@@ -296,8 +288,7 @@ export class ElementTimelineBottomScroll extends LitElement {
               <hr class="text-secondary" />
 
               <span class="text-secondary" style="font-size: 13px;"
-                >OpenAI API key — used for speech-to-text when no local
-                transcription server is running.</span
+                >OpenAI API key</span
               >
 
               <div class="input-group mb-1 mt-2">
