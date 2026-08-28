@@ -208,7 +208,7 @@ describe("detectPreset", () => {
 describe("describeExportSettings", () => {
   it("summarises a constant-quality H.264 export", () => {
     expect(describeExportSettings(EXPORT_PRESETS.medium)).toBe(
-      "H.264 · MP4 · CRF 23 · AAC 192k",
+      "H.264 MP4 CRF 23 AAC 192k",
     );
   });
 
@@ -217,9 +217,7 @@ describe("describeExportSettings", () => {
       ...EXPORT_PRESETS.medium,
       qualityMode: "bitrate",
     });
-    expect(describeExportSettings(settings)).toBe(
-      "H.264 · MP4 · 5000k · AAC 192k",
-    );
+    expect(describeExportSettings(settings)).toBe("H.264 MP4 5000k AAC 192k");
   });
 
   it("names the ProRes profile and drops the bitrate for PCM", () => {
@@ -229,7 +227,7 @@ describe("describeExportSettings", () => {
       audioCodec: "pcm_s16le",
     });
     expect(describeExportSettings(settings)).toBe(
-      "ProRes · MOV · 422 HQ · PCM (16-bit)",
+      "ProRes MOV 422 HQ PCM (16-bit)",
     );
   });
 });
