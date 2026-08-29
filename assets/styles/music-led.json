@@ -1,0 +1,30 @@
+{
+  "id": "music-led",
+  "name": "Music led",
+  "description": "The music decides the pace. Cuts land on measured beats rather than on words, shots hold for whole bars, and the grade does the talking where there is no dialogue to carry it.",
+  "fit": { "musicLed": true },
+
+  "cutting": {
+    "paddingMs": 40,
+    "minShotMs": 900,
+    "maxSilenceMs": 1200,
+    "removeFillers": false
+  },
+  "motion": {
+    "punchesPerMinute": 6,
+    "punchScale": 11,
+    "easing": "snap",
+    "onEmphasis": false
+  },
+  "transitions": {
+    "allowed": ["com.cartcut.cross-zoom", "com.cartcut.light-leak", "com.cartcut.additive-dissolve"],
+    "perMinute": 4,
+    "durationMs": 300
+  },
+  "captions": {
+    "wordsPerLine": 4,
+    "case": "upper",
+    "positionPercent": 80
+  },
+  "effects": { "allowed": ["com.cartcut.teal-orange", "com.cartcut.halation", "com.cartcut.bloom"] }
+}

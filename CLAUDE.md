@@ -198,8 +198,25 @@ npm run test:e2e:check      # typecheck the suite on its own
   does still hold for `electron/render/renderMain.ts`, the legacy `RENDER` ipc
   path, which nothing in the renderer calls any more. Traced through the source,
   not yet confirmed by running an export — do that before relying on it.
-- Transitions do not exist in the data model; the transition tab is an empty
-  panel.
+- Transitions and effects are **finished everywhere except the agent surface**.
+  `TransitionElementType` and `EffectElementType` are real, `transitionOps.ts`
+  and `effectOps.ts` hold every mutator, `transitionRepair.ts` keeps them honest
+  from `normalizeDocument`, and both the WebGL preview and the v2 export render
+  them — 37 transition presets and 39 effect presets ship under
+  `assets/presets/`. What is missing is MCP: no tool creates or reads either,
+  `FILETYPES` in `electron/mcp/tools/define.ts` omits both, and `add_track`'s
+  enum has no `"effect"`, so an agent cannot even make the row an effect needs.
+  An earlier version of this file said transitions did not exist at all; that
+  was wrong, and it made agents refuse work the renderer could do.
+- **`fluent-ffmpeg` cannot read this ffmpeg's capabilities.** The bundled
+  binary is ffmpeg 9, whose `-formats` output puts *two* spaces between the flag
+  column and the name (it gained a third flag for devices); `fluent-ffmpeg`
+  2.1.2's parser expects one. So its capability list comes back **empty** and
+  every `.format(...)` is rejected with "Output format X is not available"
+  against a binary whose own `-muxers` lists it. Spawn ffmpeg directly for
+  anything new — `render/framePipe.ts`, `mcp/transcribe.ts` and `mcp/analyze.ts`
+  all do. The wrapper survives only in `render/renderMain.ts`, the legacy
+  `RENDER` ipc path nothing calls.
 - The playback loop still reads the wall clock and drives the cursor from
   `requestAnimationFrame`; only the *value* is quantized
   (`timeline/playbackClock.ts`). It does not drop or pace frames, so a project

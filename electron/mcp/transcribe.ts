@@ -17,30 +17,22 @@
 import fs from "fs";
 import path from "path";
 import { createHash } from "crypto";
+import { spawn } from "child_process";
 import { app } from "electron";
-import ffmpeg from "fluent-ffmpeg";
 import axios from "axios";
 import Store from "electron-store";
 import { ffmpegConfig } from "../lib/ffmpeg";
+import { toFsPath } from "./localpath";
+import {
+  confidenceFromLogProb,
+  segmentWords,
+  type TranscriptSegment,
+  type TranscriptWord,
+} from "./analysis/segments";
 
 const store = new Store();
 
-ffmpeg.setFfmpegPath(ffmpegConfig.FFMPEG_PATH);
-ffmpeg.setFfprobePath(ffmpegConfig.FFPROBE_PATH);
-
-/** One recognised word, in **source-file** milliseconds. */
-export type TranscriptWord = {
-  word: string;
-  startMs: number;
-  endMs: number;
-};
-
-/** A run of words, in **source-file** milliseconds. */
-export type TranscriptSegment = {
-  text: string;
-  startMs: number;
-  endMs: number;
-};
+export type { TranscriptWord, TranscriptSegment } from "./analysis/segments";
 
 export type Transcript = {
   words: TranscriptWord[];
@@ -75,6 +67,16 @@ function cacheDir(): string {
 }
 
 /**
+ * What a cached transcript holds. Bump it when the shape changes.
+ *
+ * v2 added per-word confidence and speaker labels. Without a bump every project
+ * already transcribed would keep answering from a cache that has neither, and
+ * the new fields would look like a back end that does not report them — a
+ * silent, permanent absence rather than a visible re-transcription.
+ */
+const CACHE_VERSION = "v2";
+
+/**
  * Cache key from the file's identity, not its path.
  *
  * Size and mtime are in because the interesting failure is re-exporting over
@@ -83,7 +85,9 @@ function cacheDir(): string {
 function cacheKey(filepath: string, method: string): string {
   const stat = fs.statSync(filepath);
   return createHash("sha1")
-    .update(`${filepath}:${stat.size}:${stat.mtimeMs}:${method}`)
+    .update(
+      `${filepath}:${stat.size}:${stat.mtimeMs}:${method}:${CACHE_VERSION}`,
+    )
     .digest("hex");
 }
 
@@ -109,7 +113,21 @@ function writeCache(key: string, transcript: Transcript) {
   );
 }
 
-/** Strip the audio to a wav the STT back ends both accept. */
+/**
+ * Strip the audio to a wav the STT back ends both accept.
+ *
+ * `spawn` rather than `fluent-ffmpeg`. That wrapper validates every requested
+ * format against a capability list it builds by parsing `ffmpeg -formats`, and
+ * its parser (2.1.2, last published years ago) expects one space between the
+ * flag column and the format name. **ffmpeg 9 emits two**, having added a third
+ * flag for devices — so the parse yields *zero* formats, every format looks
+ * unavailable, and this failed with "Output format wav is not available"
+ * against a binary whose own `-muxers` lists it.
+ *
+ * That made `get_transcript` fail outright for every clip. The live export path
+ * spawns ffmpeg directly and was never affected; the only other wrapper user is
+ * `render/renderMain.ts`, the legacy IPC path nothing calls any more.
+ */
 function extractAudio(mediaPath: string): Promise<string> {
   const output = path.join(
     app.getPath("temp"),
@@ -117,64 +135,56 @@ function extractAudio(mediaPath: string): Promise<string> {
   );
 
   return new Promise((resolve, reject) => {
-    ffmpeg()
-      .input(mediaPath)
-      .noVideo()
-      .audioCodec("pcm_s16le")
-      .audioFrequency(16000)
-      .audioChannels(1)
-      .format("wav")
-      .output(output)
-      .on("end", () => resolve(output))
-      .on("error", (error) =>
+    let stderr = "";
+    const child = spawn(ffmpegConfig.FFMPEG_PATH, [
+      "-v", "error",
+      "-y",
+      "-i", mediaPath,
+      "-vn",
+      "-acodec", "pcm_s16le",
+      "-ar", "16000",
+      "-ac", "1",
+      "-f", "wav",
+      output,
+    ]);
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) =>
+      reject(
+        new Error(`Could not extract audio from ${mediaPath}: ${error.message}`),
+      ),
+    );
+    child.on("close", (code) => {
+      if (code !== 0) {
         reject(
-          new Error(`Could not extract audio from ${mediaPath}: ${error.message}`),
-        ),
-      )
-      .run();
+          new Error(
+            `Could not extract audio from ${mediaPath}: ffmpeg exited ${code}. ${stderr.trim()}`,
+          ),
+        );
+        return;
+      }
+      resolve(output);
+    });
   });
 }
 
-/** Group words into caption-sized lines. */
-function segmentWords(words: TranscriptWord[]): TranscriptSegment[] {
-  const MAX_CHARS = 42;
-  const MAX_MS = 6000;
-  /** A pause this long reads as a sentence boundary. */
-  const GAP_MS = 700;
-
-  const segments: TranscriptSegment[] = [];
-  let current: TranscriptWord[] = [];
-
-  const flush = () => {
-    if (current.length === 0) {
-      return;
-    }
-    segments.push({
-      text: current.map((w) => w.word).join(" ").replace(/\s+/g, " ").trim(),
-      startMs: current[0].startMs,
-      endMs: current[current.length - 1].endMs,
-    });
-    current = [];
-  };
-
-  for (const word of words) {
-    if (current.length > 0) {
-      const gap = word.startMs - current[current.length - 1].endMs;
-      const chars = current.reduce((n, w) => n + w.word.length + 1, 0);
-      const span = word.endMs - current[0].startMs;
-      const endsSentence = /[.!?。？！]$/.test(
-        current[current.length - 1].word,
-      );
-
-      if (gap >= GAP_MS || chars >= MAX_CHARS || span >= MAX_MS || endsSentence) {
-        flush();
-      }
-    }
-    current.push(word);
+/** A back end's score as a 0..1 number, or nothing at all. */
+function asScore(raw: unknown): number | undefined {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return undefined;
   }
-  flush();
+  return Math.round(Math.max(0, Math.min(1, raw)) * 100) / 100;
+}
 
-  return segments;
+/** A diarisation label, or nothing. Empty strings are nothing. */
+function asSpeaker(raw: unknown): string | undefined {
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 async function transcribeLocal(wavPath: string): Promise<Transcript> {
@@ -197,17 +207,30 @@ async function transcribeLocal(wavPath: string): Promise<Transcript> {
   }
 
   // WhisperX shape: `result` is a list of segments, each with a `words` list of
-  // `{word, start, end, score}` where the times are seconds.
+  // `{word, start, end, score}` where the times are seconds. With diarisation
+  // on, a `speaker` label sits on the segment and often on the word too.
+  //
+  // `score` and `speaker` were both being read past and thrown away. They are
+  // the two things a transcript can say that the words alone cannot: which of
+  // them the recogniser was unsure of, and who was talking.
   const words: TranscriptWord[] = [];
   for (const segment of data?.result ?? []) {
+    const segmentSpeaker = asSpeaker(segment?.speaker);
     for (const word of segment?.words ?? []) {
       if (word?.start == null || word?.end == null) {
         continue;
       }
+      // The word's own label wins; the segment's is the fallback, because some
+      // builds label only the segment.
+      const speaker = asSpeaker(word?.speaker) ?? segmentSpeaker;
       words.push({
         word: String(word.word ?? "").trim(),
         startMs: Math.round(word.start * 1000),
         endMs: Math.round(word.end * 1000),
+        ...(asScore(word?.score) != null
+          ? { confidence: asScore(word.score) }
+          : {}),
+        ...(speaker != null ? { speaker } : {}),
       });
     }
   }
@@ -250,13 +273,21 @@ async function transcribeOpenAi(wavPath: string): Promise<Transcript> {
     endMs: Math.round((word.end ?? 0) * 1000),
   }));
 
+  // whisper-1 reports no per-word score, only a per-segment mean log
+  // probability — so confidence lives on the segment here and the words carry
+  // none, rather than a sentence-level number being dressed up as a word-level
+  // one. No diarisation either, so no speakers.
   const segments: TranscriptSegment[] =
     (data?.segments ?? []).length > 0
-      ? data.segments.map((segment: any) => ({
-          text: String(segment.text ?? "").trim(),
-          startMs: Math.round((segment.start ?? 0) * 1000),
-          endMs: Math.round((segment.end ?? 0) * 1000),
-        }))
+      ? data.segments.map((segment: any) => {
+          const confidence = confidenceFromLogProb(segment?.avg_logprob);
+          return {
+            text: String(segment.text ?? "").trim(),
+            startMs: Math.round((segment.start ?? 0) * 1000),
+            endMs: Math.round((segment.end ?? 0) * 1000),
+            ...(confidence != null ? { confidence } : {}),
+          };
+        })
       : segmentWords(words);
 
   return { words, segments, method: "openai" };
@@ -271,9 +302,14 @@ async function transcribeOpenAi(wavPath: string): Promise<Transcript> {
  * clip's trim and speed.
  */
 export async function transcribeFile(
-  mediaPath: string,
+  source: string,
   method?: "local" | "openai",
 ): Promise<Transcript> {
+  // A clip's `localpath` is a percent-encoded `file://` URL, not a path, so
+  // everything below that reaches `fs` — this guard and `cacheKey`'s `statSync`
+  // — needs the converted form. ffmpeg accepts either, which is why only the
+  // filesystem half ever complained.
+  const mediaPath = toFsPath(source);
   if (!fs.existsSync(mediaPath)) {
     throw new Error(`No such media file: ${mediaPath}`);
   }

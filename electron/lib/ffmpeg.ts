@@ -27,7 +27,23 @@ import config from "../config.json";
 /** The key `config.json` files its download URLs under, e.g. `darwin-arm64`. */
 const TARGET = `${process.platform}-${process.arch}`;
 
-const resourcesPath = isDev == true ? "." : process.resourcesPath;
+/**
+ * The repo root in development, from this file's own location.
+ *
+ * It used to be `"."`, which is the process's working directory — so every
+ * ffmpeg feature worked only when the app happened to be launched *from* the
+ * repo. Start it any other way (`open -a`, a debugger, the Finder) and cwd is
+ * `/`, `spawn` reports `ENOENT` on a relative path, and export, transcription
+ * and analysis all fail in the same confusing way.
+ *
+ * This file compiles to `main/lib/ffmpeg.js`, so two levels up is the root.
+ * `__dirname` rather than `app.getAppPath()` because these constants are
+ * computed at module load, and `app` is not reliably populated that early —
+ * the same hazard `lib/preset.ts` calls out and dodges by computing per call.
+ */
+const devRoot = path.join(__dirname, "..", "..");
+
+const resourcesPath = isDev == true ? devRoot : process.resourcesPath;
 
 const FFMPEG_BIN_PATH = isDev
   ? path.join(resourcesPath, "bin", TARGET)

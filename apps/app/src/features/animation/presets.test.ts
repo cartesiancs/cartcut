@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { applyPreset, presetNames, presetProperty } from "./presets";
+import {
+  applyPreset,
+  focusOffset,
+  presetIsFocusable,
+  presetNames,
+  presetProperties,
+  presetProperty,
+} from "./presets";
 import {
   createTrack,
   normalizeDocument,
@@ -136,9 +143,231 @@ describe("applyPreset", () => {
 });
 
 describe("the preset table", () => {
-  it("names a property for every preset it offers", () => {
+  it("names at least one property for every preset it offers", () => {
     for (const name of presetNames()) {
-      expect(presetProperty(name)).not.toBeNull();
+      expect(presetProperties(name).length, name).toBeGreaterThan(0);
     }
+  });
+
+  it("still answers presetProperty for the single-property ones", () => {
+    expect(presetProperty("fade_in")).toBe("opacity");
+    expect(presetProperty("zoom_in")).toBe("scale");
+    // `pop` drives two, so there is no single answer and it says so.
+    expect(presetProperty("pop")).toBeNull();
+  });
+
+  it("only marks scale-driven presets focusable", () => {
+    for (const name of presetNames()) {
+      if (presetIsFocusable(name)) {
+        expect(presetProperties(name), name).toContain("scale");
+        // Focus works by counter-animating position, so a preset that already
+        // moves the clip has nowhere to put it.
+        expect(presetProperties(name), name).not.toContain("position");
+      }
+    }
+  });
+});
+
+describe("the moves that land", () => {
+  const track = (document: any, property: string, lane = "x") =>
+    document.elements.a.animation[property][lane];
+
+  it("gives punch_in a curve that covers the distance immediately", () => {
+    const after = applyPreset(doc({ a: clip() }), "a", "punch_in", 180);
+    const list = track(after, "scale");
+
+    expect(list).toHaveLength(2);
+    expect(list[0].p[1]).toBe(10);
+    expect(list[1].p[1]).toBe(11.5);
+    // `snap` reaches the target value at 16% of the segment. The default
+    // handles would sit at the anchor's own value, which is the soft curve.
+    expect(list[0].ce[1]).toBe(11.5);
+    expect(list[0].ce[0]).toBeCloseTo(180 * 0.16, 5);
+  });
+
+  it("makes drift a constant rate, not an eased one", () => {
+    const after = applyPreset(doc({ a: clip() }), "a", "drift", 4_000);
+    const list = track(after, "scale");
+    // Linear puts the control points on the straight line between anchors.
+    expect(list[0].ce).toEqual([0, 10]);
+    expect(list[1].cs).toEqual([4_000, 10.8]);
+  });
+
+  it("takes overshoot_in past its target", () => {
+    const after = applyPreset(doc({ a: clip() }), "a", "overshoot_in", 420);
+    expect(track(after, "scale")[0].ce[1]).toBeGreaterThan(12);
+  });
+
+  it("drives both of pop's properties, or the move would be a different one", () => {
+    const after = applyPreset(doc({ a: clip() }), "a", "pop", 320);
+    expect(track(after, "scale")).toHaveLength(3);
+    expect(track(after, "opacity")).toHaveLength(2);
+    expect(after.elements.a.animation.scale.isActivate).toBe(true);
+    expect(after.elements.a.animation.opacity.isActivate).toBe(true);
+  });
+
+  it("gives shake alternating sign and decaying amplitude", () => {
+    const after = applyPreset(doc({ a: clip() }), "a", "shake", 300);
+    const xs = track(after, "position").map((k: any) => k.p[1]);
+
+    expect(xs[0]).toBe(0);
+    expect(xs[xs.length - 1]).toBe(0);
+    // Alternating: each extreme is on the other side of the last.
+    expect(xs[1]).toBeLessThan(0);
+    expect(xs[2]).toBeGreaterThan(0);
+    expect(xs[3]).toBeLessThan(0);
+    // Decaying: each swing is smaller than the one before.
+    expect(Math.abs(xs[2])).toBeLessThan(Math.abs(xs[1]));
+    expect(Math.abs(xs[3])).toBeLessThan(Math.abs(xs[2]));
+  });
+
+  it("writes shake as an offset from where the clip already sits", () => {
+    const after = applyPreset(
+      doc({ a: clip({ location: { x: 500, y: 40 } }) }),
+      "a",
+      "shake",
+      300,
+    );
+    const xs = track(after, "position").map((k: any) => k.p[1]);
+    expect(xs[0]).toBe(500);
+    expect(xs[1]).toBe(486);
+    // The untouched axis holds its own value rather than snapping to zero.
+    expect(track(after, "position", "y")[1].p[1]).toBe(40);
+  });
+
+  it("rotates from an offset against the clip's own angle", () => {
+    const after = applyPreset(
+      doc({ a: clip({ rotation: 20 }) }),
+      "a",
+      "rotate_settle",
+      380,
+    );
+    const list = track(after, "rotation");
+    expect(list[0].p[1]).toBe(13);
+    expect(list[1].p[1]).toBe(20);
+  });
+
+  it("scales every preset to the duration it is given", () => {
+    const after = applyPreset(doc({ a: clip() }), "a", "pop", 1_000);
+    const times = track(after, "scale").map((k: any) => k.p[0]);
+    expect(times).toEqual([0, 550, 1_000]);
+  });
+});
+
+describe("focus", () => {
+  it("is a no-op at the centre, so the middle costs nothing", () => {
+    expect(focusOffset({ x: 50, y: 50 }, 14, 1920, 1080)).toEqual({
+      x: 0,
+      y: 0,
+    });
+  });
+
+  it("pushes the clip away from the point it zooms towards", () => {
+    // Zooming 2x at the right edge has to move the content left by half the
+    // width, or the edge slides out of frame.
+    expect(focusOffset({ x: 100, y: 50 }, 20, 1920, 1080).x).toBe(-960);
+  });
+
+  it("reverses for a zoom out", () => {
+    expect(focusOffset({ x: 100, y: 50 }, 5, 1920, 1080).x).toBe(480);
+  });
+
+  it("holds the focus point exactly, by the transform's own arithmetic", () => {
+    // `localMatrixOf` maps an element-local point p to x + c + s*(p - c).
+    // The focus point must land in the same place unscaled and scaled.
+    const width = 1920;
+    const height = 1080;
+    const focus = { x: 25, y: 75 };
+    const px = (focus.x / 100) * width;
+    const py = (focus.y / 100) * height;
+    const cx = width / 2;
+    const cy = height / 2;
+
+    const at = (scaleTenths: number) => {
+      const s = scaleTenths / 10;
+      const offset = focusOffset(focus, scaleTenths, width, height);
+      return {
+        x: offset.x + cx + s * (px - cx),
+        y: offset.y + cy + s * (py - cy),
+      };
+    };
+
+    const unscaled = at(10);
+    for (const scale of [11.5, 14, 20, 8]) {
+      const moved = at(scale);
+      expect(moved.x).toBeCloseTo(unscaled.x, 9);
+      expect(moved.y).toBeCloseTo(unscaled.y, 9);
+    }
+  });
+
+  it("writes a position track alongside the scale one", () => {
+    const after = applyPreset(
+      doc({ a: clip({ width: 1920, height: 1080 }) }),
+      "a",
+      "punch_in",
+      180,
+      undefined,
+      { focus: { x: 20, y: 30 } },
+    );
+
+    expect(after.elements.a.animation.position.isActivate).toBe(true);
+    // Same times as the scale track, so the counter-move cannot lag the zoom.
+    const scaleTimes = after.elements.a.animation.scale.x.map((k: any) => k.p[0]);
+    const posTimes = after.elements.a.animation.position.x.map((k: any) => k.p[0]);
+    expect(posTimes).toEqual(scaleTimes);
+  });
+
+  it("leaves position alone at the centre", () => {
+    const after = applyPreset(
+      doc({ a: clip({ width: 1920, height: 1080, location: { x: 0, y: 0 } }) }),
+      "a",
+      "punch_in",
+      180,
+      undefined,
+      { focus: { x: 50, y: 50 } },
+    );
+    const xs = after.elements.a.animation.position.x.map((k: any) => k.p[1]);
+    expect(xs).toEqual([0, 0]);
+  });
+
+  it("is ignored by a preset that already moves the clip", () => {
+    const withFocus = applyPreset(
+      doc({ a: clip() }),
+      "a",
+      "shake",
+      300,
+      undefined,
+      { focus: { x: 10, y: 10 } },
+    );
+    const without = applyPreset(doc({ a: clip() }), "a", "shake", 300);
+
+    expect(
+      withFocus.elements.a.animation.position.x.map((k: any) => k.p[1]),
+    ).toEqual(without.elements.a.animation.position.x.map((k: any) => k.p[1]));
+  });
+});
+
+describe("bake rate", () => {
+  // The bug this guards: every authoring path took `bakeTrack`'s 60Hz default,
+  // so in a 120fps project a preset was baked at half the project's rate and
+  // handed consecutive frames the same value until the file was reloaded.
+  const samplesOf = (document: any) => document.elements.a.animation.opacity.ax;
+
+  it("bakes at the default 60Hz when no rate is given", () => {
+    const after = applyPreset(doc({ a: clip() }), "a", "fade_in", 1_000);
+    // A one-second fade at 60Hz: 61 samples, endpoints included.
+    expect(samplesOf(after)).toHaveLength(61);
+  });
+
+  it("bakes at the project's rate when it is higher", () => {
+    const after = applyPreset(doc({ a: clip() }), "a", "fade_in", 1_000, 120);
+    expect(samplesOf(after)).toHaveLength(121);
+  });
+
+  it("does not coarsen below 60Hz for a slower project", () => {
+    // `bakeRateFor` is max(60, fps), so a caller passing 60 for a 24fps project
+    // gets the floor — the lane is a cache, and a coarser one would step.
+    const after = applyPreset(doc({ a: clip() }), "a", "fade_in", 1_000, 60);
+    expect(samplesOf(after)).toHaveLength(61);
   });
 });

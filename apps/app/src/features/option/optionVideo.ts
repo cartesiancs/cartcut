@@ -6,6 +6,8 @@ import { VideoElementType } from "../../@types/timeline";
 import { KeyframeController } from "../../controllers/keyframe";
 import { addKeyframe } from "../animation/keyframeOps";
 import { applyPreset, type PresetName } from "../animation/presets";
+import { bakeRateFor } from "../animation/keyframes";
+import { renderOptionStore } from "../../states/renderOptionStore";
 import { setIn } from "../../utils/immutable";
 import { GestureCommit } from "./gestureCommit";
 import { isAudibleElement } from "../timeline/audio";
@@ -358,9 +360,13 @@ export class OptionVideo extends LitElement {
    */
   handleClickAddAnimatePreset(preset: PresetName) {
     const elementId = this.elementId;
+    // Baked at the project's own rate, not the 60Hz default: a 120fps project
+    // would otherwise hand two consecutive frames the same value and the preset
+    // would visibly run at half speed until the file was reloaded.
+    const bakeHz = bakeRateFor(renderOptionStore.getState().options.fps);
     useTimelineStore
       .getState()
-      .withCheckpoint((doc) => applyPreset(doc, elementId, preset, 250));
+      .withCheckpoint((doc) => applyPreset(doc, elementId, preset, 250, bakeHz));
 
     this.requestUpdate();
   }

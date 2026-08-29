@@ -20,6 +20,18 @@ export type ShapeKind = "rectangle" | "ellipse" | "triangle";
 /** How many segments approximate an ellipse. Matches the preview's own value. */
 const ELLIPSE_SEGMENTS = 50;
 
+/**
+ * The box points are authored in, and therefore what `oWidth`/`oHeight` hold.
+ *
+ * `renderShape` paints each point at `point * (width / oWidth)`. Recording the
+ * *drawn* size here instead makes that ratio 1 for every shape, so the polygon
+ * is painted at 100x100 whatever size was asked for — the width and height only
+ * move the selection box. That went unnoticed because the one UI path calls
+ * this with no size at all and lands on the 100 default by accident; `add_shape`
+ * is the only caller that passes one, and its bar came out a small square.
+ */
+export const SHAPE_AUTHORING_BOX = 100;
+
 /** Points in the 0..100 box, for one of the built-in kinds. */
 export function shapePoints(
   kind: ShapeKind,
@@ -97,8 +109,8 @@ export function createShapeElement({
     rotation,
     width,
     height,
-    oWidth: width,
-    oHeight: height,
+    oWidth: SHAPE_AUTHORING_BOX,
+    oHeight: SHAPE_AUTHORING_BOX,
     ratio: width / height,
     filetype: "shape",
     localpath: "SHAPE",

@@ -27,6 +27,9 @@ import "./commands/appearance";
 import "./commands/rasterize";
 import "./commands/animation";
 import "./commands/groups";
+import "./commands/contactSheet";
+import "./commands/fx";
+import "./commands/plan";
 
 let installed = false;
 

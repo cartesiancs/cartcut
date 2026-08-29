@@ -42,11 +42,23 @@ describe("createShapeElement", () => {
     expect(element.priority).toBe(0);
   });
 
-  it("records the authoring box as oWidth/oHeight", () => {
+  it("records the authoring box as oWidth/oHeight, not the drawn size", () => {
+    // The name of this test was always right and the assertion was not.
+    // `renderShape` paints `point * (width / oWidth)`, so recording the drawn
+    // size makes that ratio 1 and the polygon comes out 100x100 whatever was
+    // asked for — a full-width lower-third bar drew as a small square.
     const element = createShapeElement({ width: 320, height: 240 });
-    expect(element.oWidth).toBe(320);
-    expect(element.oHeight).toBe(240);
+    expect(element.oWidth).toBe(100);
+    expect(element.oHeight).toBe(100);
+    // `ratio` is the drawn aspect and stays that.
     expect(element.ratio).toBeCloseTo(320 / 240);
+  });
+
+  it("scales the authored points to the size that was asked for", () => {
+    const element = createShapeElement({ width: 1_920, height: 200 });
+    // What `renderShape` will multiply each authored point by.
+    expect(element.width / element.oWidth).toBe(19.2);
+    expect(element.height / element.oHeight).toBe(2);
   });
 
   it("carries an animation block, since a shape animates opacity", () => {

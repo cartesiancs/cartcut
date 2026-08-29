@@ -234,6 +234,26 @@ describe("localSampleAt", () => {
     });
   });
 
+  it("never lets a sampled scale reach zero or go negative", () => {
+    // An overshooting or anticipating curve is meant to leave the range between
+    // its keyframes — `handleBounds` frees the value axis so it can. But a
+    // scale through zero flips the matrix and mirrors the element, which is a
+    // different picture rather than an overshoot. Only what reaches the matrix
+    // is bounded; the authored curve keeps its shape.
+    const list = keys([
+      [0, 10],
+      [500, -40],
+    ]);
+    const element = imageElement({
+      animation: {
+        ...imageElement().animation,
+        scale: { isActivate: true, x: list, ax: bakeTrack(list) },
+      },
+    });
+
+    expect(localSampleAt(element, 500).scale).toBeGreaterThan(0);
+  });
+
   it("ignores a track whose isActivate is false even when it has keyframes", () => {
     // Turning animation off must actually stop the animation. This gate is the
     // one `applyElementTransform` had to grow after position animated whenever

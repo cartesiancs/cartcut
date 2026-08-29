@@ -1,0 +1,33 @@
+{
+  "id": "punchy",
+  "name": "Punchy",
+  "description": "Short-form vertical: something moves every couple of seconds, every pause is gone, captions are two words at a time. The look that reads as native on a phone, and the one that looks frantic anywhere else.",
+  "fit": {
+    "aspect": "vertical",
+    "speechRate": { "min": 150 }
+  },
+
+  "cutting": {
+    "paddingMs": 60,
+    "minShotMs": 700,
+    "maxSilenceMs": 220,
+    "removeFillers": true
+  },
+  "motion": {
+    "punchesPerMinute": 12,
+    "punchScale": 11.5,
+    "easing": "snap",
+    "onEmphasis": true
+  },
+  "transitions": {
+    "allowed": ["com.cartcut.whip-pan", "com.cartcut.cross-zoom", "com.cartcut.flash"],
+    "perMinute": 3,
+    "durationMs": 220
+  },
+  "captions": {
+    "wordsPerLine": 2,
+    "case": "upper",
+    "positionPercent": 72
+  },
+  "effects": { "allowed": [] }
+}

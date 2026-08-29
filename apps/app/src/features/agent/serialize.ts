@@ -149,6 +149,23 @@ export function clipRow(
       row.color = element.textcolor;
       break;
     }
+    // A transition and an effect have no appearance of their own to describe —
+    // they are operations on frames other clips drew. The preset is the whole
+    // identity, and a transition's is only meaningful alongside the two clips
+    // it mixes. Before this they came back as `{type, start, dur, end}` and
+    // nothing else, which reads as a clip with no content rather than as a
+    // cross-dissolve. `get_fx` has the parameters.
+    case "transition": {
+      row.presetId = (element as any).presetId;
+      row.fromId = (element as any).fromId;
+      row.toId = (element as any).toId;
+      break;
+    }
+    case "effect": {
+      row.presetId = (element as any).presetId;
+      row.intensity = (element as any).intensity;
+      break;
+    }
     case "video": {
       const filters = element.filter?.enable
         ? (element.filter.list ?? []).map((f) => f.name)

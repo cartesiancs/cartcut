@@ -1,0 +1,29 @@
+{
+  "id": "restrained",
+  "name": "Restrained",
+  "description": "Cuts and nothing else. The edit stays out of the way; movement is reserved for moments that earn it. Safe on any material, and the one to fall back to when the footage has not said what it wants.",
+
+  "cutting": {
+    "paddingMs": 140,
+    "minShotMs": 1800,
+    "maxSilenceMs": 700,
+    "removeFillers": true
+  },
+  "motion": {
+    "punchesPerMinute": 0.6,
+    "punchScale": 10.6,
+    "easing": "ease_out",
+    "onEmphasis": true
+  },
+  "transitions": {
+    "allowed": ["com.cartcut.cross-dissolve"],
+    "perMinute": 0,
+    "durationMs": 500
+  },
+  "captions": {
+    "wordsPerLine": 6,
+    "case": "as-spoken",
+    "positionPercent": 84
+  },
+  "effects": { "allowed": [] }
+}

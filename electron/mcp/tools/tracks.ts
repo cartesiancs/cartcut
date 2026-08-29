@@ -29,7 +29,7 @@ export function registerTrackTools(define: Registrar) {
         "topmost row of its own kind — or, when the project has none of that kind yet, where that kind " +
         "belongs: text in front of the picture, audio behind it.",
       inputSchema: {
-        kind: z.enum(["video", "audio", "text"]),
+        kind: z.enum(["video", "audio", "text", "effect"]),
         index: z
           .number()
           .int()

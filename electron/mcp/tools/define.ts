@@ -133,7 +133,14 @@ export const trackIdField = z
   .string()
   .describe("A track id from get_project_overview.");
 
-/** Every element type the timeline can hold, for filters and enums. */
+/**
+ * Every element type the timeline can hold, for filters and enums.
+ *
+ * `transition` and `effect` are in it. They were not, so `list_clips` could not
+ * even be asked for them — while returning them anyway, because nothing
+ * filtered them out. A filter that cannot name half of what it returns is worse
+ * than no filter.
+ */
 export const FILETYPES = [
   "video",
   "image",
@@ -142,6 +149,8 @@ export const FILETYPES = [
   "text",
   "audio",
   "group",
+  "transition",
+  "effect",
 ] as const;
 
 /** The properties that carry a keyframe track. */
@@ -150,4 +159,38 @@ export const ANIMATABLE = [
   "opacity",
   "scale",
   "rotation",
+] as const;
+
+/**
+ * The animation presets.
+ *
+ * A copy of `features/animation/presets.ts`'s table, and a copy on purpose:
+ * `.tsconfig` pins `rootDir` to `electron/` so nothing here can import from
+ * `apps/app/src` — the same reason `ANIMATABLE` is duplicated. `tools.test.ts`
+ * asserts the two lists against each other, so drift is a failing test rather
+ * than a preset the schema advertises and the renderer does not have.
+ */
+export const PRESETS = [
+  "fade_in",
+  "fade_out",
+  "zoom_in",
+  "zoom_out",
+  "punch_in",
+  "drift",
+  "overshoot_in",
+  "pop",
+  "slam",
+  "shake",
+  "rotate_settle",
+] as const;
+
+/** The named easing curves `add_keyframes` accepts. Copied, and pinned, as above. */
+export const EASINGS = [
+  "linear",
+  "ease_in",
+  "ease_out",
+  "ease_in_out",
+  "snap",
+  "overshoot",
+  "anticipate",
 ] as const;

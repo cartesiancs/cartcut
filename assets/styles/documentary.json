@@ -1,0 +1,33 @@
+{
+  "id": "documentary",
+  "name": "Documentary",
+  "description": "Long shots, gentle drifts, dissolves where a hard cut would jar. Written for interviews and talking heads at a considered pace: the pauses carry meaning, so they are trimmed rather than removed.",
+  "fit": {
+    "aspect": "horizontal",
+    "speechRate": { "max": 165 }
+  },
+
+  "cutting": {
+    "paddingMs": 180,
+    "minShotMs": 2500,
+    "maxSilenceMs": 900,
+    "removeFillers": true
+  },
+  "motion": {
+    "punchesPerMinute": 1,
+    "punchScale": 10.8,
+    "easing": "ease_in_out",
+    "onEmphasis": true
+  },
+  "transitions": {
+    "allowed": ["com.cartcut.cross-dissolve", "com.cartcut.film-dissolve"],
+    "perMinute": 1,
+    "durationMs": 700
+  },
+  "captions": {
+    "wordsPerLine": 7,
+    "case": "as-spoken",
+    "positionPercent": 86
+  },
+  "effects": { "allowed": ["com.cartcut.faded-film", "com.cartcut.film-grain"] }
+}

@@ -173,6 +173,19 @@ function track(
 }
 
 /**
+ * Smallest scale a sampled curve may produce.
+ *
+ * Not zero, and never negative. An overshooting or anticipating curve is
+ * *supposed* to leave the range between its keyframes — `handleBounds.ts`
+ * leaves the value axis free precisely so it can — but a scale that crosses
+ * zero flips the transform matrix and mirrors the element, which is not an
+ * overshoot, it is a different picture. Clamping here rather than in the curve
+ * keeps the authored shape intact and readable in the curve editor; only what
+ * reaches the matrix is bounded.
+ */
+const MIN_SAMPLED_SCALE = 0.001;
+
+/**
  * The element's own transform at `cursor`, before any parent is applied.
  *
  * `scale` seeds at 10 rather than 1 because there is no static scale field on
@@ -196,7 +209,10 @@ export function localSampleAt(
     x: track(any, "position", "ax", staticX, cursor),
     y: track(any, "position", "ay", staticY, cursor),
     rotationDeg: track(any, "rotation", "ax", any.rotation ?? 0, cursor),
-    scale: track(any, "scale", "ax", 10, cursor) / 10,
+    scale: Math.max(
+      MIN_SAMPLED_SCALE,
+      track(any, "scale", "ax", 10, cursor) / 10,
+    ),
     opacity: track(any, "opacity", "ax", any.opacity ?? 100, cursor),
   };
 }

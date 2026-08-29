@@ -41,6 +41,8 @@ import { registerMediaTools } from "./tools/media";
 import { registerTextTools } from "./tools/text";
 import { registerTrackTools } from "./tools/tracks";
 import { registerAnimationTools } from "./tools/animation";
+import { registerFxTools } from "./tools/fx";
+import { registerPlanTools } from "./tools/plan";
 import { registerGroupTools } from "./tools/groups";
 import { registerMetaTools } from "./tools/meta";
 import type { Registrar } from "./tools/define";
@@ -53,8 +55,10 @@ export function registerToolsWith(define: Registrar) {
   registerTextTools(define);
   registerTrackTools(define);
   registerAnimationTools(define);
+  registerFxTools(define);
   registerGroupTools(define);
   registerMetaTools(define);
+  registerPlanTools(define);
 }
 
 export function registerTools(server: McpServer) {

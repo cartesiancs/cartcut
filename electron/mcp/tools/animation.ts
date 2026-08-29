@@ -9,7 +9,14 @@
 
 import { z } from "zod";
 import { requestEditor } from "../bridge";
-import { ANIMATABLE, mutating, tool, type Registrar } from "./define";
+import {
+  ANIMATABLE,
+  EASINGS,
+  PRESETS,
+  mutating,
+  tool,
+  type Registrar,
+} from "./define";
 
 export function registerAnimationTools(define: Registrar) {
   define(
@@ -17,13 +24,33 @@ export function registerAnimationTools(define: Registrar) {
     {
       title: "Apply an animation preset",
       description:
-        "The common moves, correctly built: a fade in or out on opacity, a slow zoom in or out on scale. " +
-        "Prefer this over hand-authoring keyframes — it is one undo step, it activates the track for you, and " +
-        "it gets the value units right.",
+        "The common moves, correctly built — one undo step, the track activated for you, the value units and " +
+        "the curve already right. Prefer this over hand-authoring keyframes. " +
+        "`fade_in`/`fade_out` on opacity. `drift` is a Ken Burns, constant-rate over seconds. " +
+        "`punch_in` is a hard push that lands in under a fifth of a second. `overshoot_in` passes its target " +
+        "and settles back. `pop` and `slam` are for something arriving — `pop` grows past full size, `slam` " +
+        "comes in oversized and lands. `shake` is a decaying rattle, `rotate_settle` rocks past level. " +
+        "`zoom_in`/`zoom_out` are the older gentle pair the toolbar buttons use. " +
+        "Omit `durationMs` and each preset uses the length it is meant to have; they differ a lot, and a " +
+        "punch stretched to a second is not a punch. " +
+        "**`focus` is how you zoom towards something.** Scale animates about the clip's centre, so a zoom " +
+        "always converges on the middle unless the clip is pushed the other way as it grows — `focus` does " +
+        "that arithmetic. It is a point in the clip's own box, 0-100 per axis, and only means anything for the " +
+        "scale presets.",
       inputSchema: {
         elementIds: z.array(z.string()).min(1),
-        preset: z.enum(["fade_in", "fade_out", "zoom_in", "zoom_out"]),
-        durationMs: z.number().min(1).optional().default(250),
+        preset: z.enum(PRESETS),
+        durationMs: z
+          .number()
+          .min(1)
+          .optional()
+          .describe("Defaults to the preset's own length."),
+        focus: z
+          .object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100) })
+          .optional()
+          .describe(
+            "Where to zoom towards, 0-100 in the clip's own box. {50,50} is the centre and changes nothing.",
+          ),
       },
       annotations: mutating,
     },
@@ -58,7 +85,14 @@ export function registerAnimationTools(define: Registrar) {
         "`position` needs both `x` and `y` on every entry; opacity, scale and rotation take `value`. " +
         "Units: opacity 0-100, rotation in degrees, and **scale is in tenths — 10 is unscaled, 12 is 120%**. " +
         "Times are absolute timeline ms and must fall inside the clip; one outside is refused rather than " +
-        "clamped, because a keyframe past the clip's end never plays.",
+        "clamped, because a keyframe past the clip's end never plays. " +
+        "**Set `easing` or the move will be soft.** With none, a keyframe gets handles that leave and arrive " +
+        "at zero velocity — the gentlest curve there is, and applied to everything it is what makes motion " +
+        "read as drifting rather than deliberate. `easing` shapes the segment *leaving* the entry it is on " +
+        "(as CSS reads it), so the last entry's is ignored. " +
+        "`snap` covers most of the distance immediately and settles: this is a punch-in. " +
+        "`overshoot` passes the target and comes back. `anticipate` winds up before it goes. " +
+        "`linear` for a constant drift, and `ease_in`/`ease_out`/`ease_in_out` where CSS would use them.",
       inputSchema: {
         elementId: z.string(),
         property: z.enum(ANIMATABLE),
@@ -69,6 +103,12 @@ export function registerAnimationTools(define: Registrar) {
               value: z.number().optional().describe("opacity / scale / rotation"),
               x: z.number().optional().describe("position only"),
               y: z.number().optional().describe("position only"),
+              easing: z
+                .union([z.enum(EASINGS), z.array(z.number()).length(4)])
+                .optional()
+                .describe(
+                  "Shapes the segment leaving this keyframe. A name, or [x1,y1,x2,y2] control points as CSS writes them.",
+                ),
             }),
           )
           .min(1),

@@ -12,13 +12,15 @@
 
 import { describe, it, expect } from "vitest";
 import { registerToolsWith } from "../tools";
-import type { Registrar, ToolConfig } from "./define";
+import { EASINGS, PRESETS, type Registrar, type ToolConfig } from "./define";
 
 /** Every tool the MCP server exposes, in registration order. */
 const EXPECTED = [
   // reading
   "get_project_overview",
   "list_clips",
+  "analyze_audio",
+  "get_contact_sheet",
   "get_clip",
   "get_keyframes",
   "list_assets",
@@ -51,6 +53,16 @@ const EXPECTED = [
   "set_animation",
   "add_keyframes",
   "remove_keyframes",
+  // transitions and effects
+  "list_transition_presets",
+  "list_effect_presets",
+  "list_cuts",
+  "add_transition",
+  "set_transition",
+  "remove_transition",
+  "add_effect",
+  "set_effect",
+  "get_fx",
   // groups
   "group_clips",
   "ungroup",
@@ -61,6 +73,9 @@ const EXPECTED = [
   "get_selection",
   "undo",
   "redo",
+  // planning
+  "get_edit_brief",
+  "apply_edit_plan",
 ];
 
 type Registered = { name: string; config: ToolConfig };
@@ -122,6 +137,24 @@ describe("every tool is usable as declared", () => {
     for (const { name, config } of collect()) {
       expect(config.inputSchema, `${name} has no inputSchema`).toBeDefined();
     }
+  });
+
+  it("advertises exactly the presets the renderer has", async () => {
+    const { presetNames } = await import(
+      "../../../apps/app/src/features/animation/presets"
+    );
+    expect([...PRESETS].sort()).toEqual([...presetNames()].sort());
+  });
+
+  it("advertises exactly the easings the renderer can resolve", async () => {
+    // `EASINGS` is a hand copy of the renderer's list, because `.tsconfig`
+    // forbids importing across that boundary. Vitest has no such constraint, so
+    // the copy is pinned here: drift becomes a failing test rather than a curve
+    // the schema offers and `add_keyframes` then refuses.
+    const { easingNames } = await import(
+      "../../../apps/app/src/features/animation/easing"
+    );
+    expect([...EASINGS].sort()).toEqual([...easingNames()].sort());
   });
 
   it("keeps descriptions short enough to live in every request's context", () => {

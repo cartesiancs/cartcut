@@ -15,6 +15,8 @@ import {
   isDynamicElement,
   spanEnd,
   spanStart,
+  speedOf,
+  timelineTimeAt,
 } from "../../timeline/geometry";
 import {
   animatableProperties,
@@ -34,6 +36,7 @@ import { registerCommands } from "../registry";
 
 /** Default page size for `list_clips`, chosen to stay well under the warning. */
 const DEFAULT_LIMIT = 100;
+
 
 function doc() {
   return useTimelineStore.getState().getDocument();
@@ -200,7 +203,12 @@ registerCommands({
    */
   map_transcript: (params: {
     elementId: string;
-    items: Array<{ text: string; startMs: number; endMs: number }>;
+    items: Array<{
+      text: string;
+      startMs: number;
+      endMs: number;
+      [extra: string]: unknown;
+    }>;
   }) => {
     const element = requireElement(params.elementId);
     if (!isDynamicElement(element)) {
@@ -219,8 +227,11 @@ registerCommands({
           { startTime: item.startMs, duration: item.endMs - item.startMs },
           element,
         );
+        // Spread first so anything the back end reported — confidence, a
+        // speaker label, whatever a later one adds — survives the trip, and
+        // only the two fields this function exists to change are overwritten.
         return {
-          text: item.text,
+          ...item,
           startMs: timing.startTime,
           endMs: timing.startTime + timing.duration,
         };
@@ -228,6 +239,86 @@ registerCommands({
 
     return {
       items: mapped,
+      clipSpan: {
+        startMs: Math.round(spanStart(element)),
+        endMs: Math.round(spanEnd(element)),
+      },
+    };
+  },
+
+  /**
+   * Put an audio analysis onto the timeline.
+   *
+   * The sibling of `map_transcript`, and here for the same reason: `analyze.ts`
+   * measures the **source file**, and only `geometry.ts` knows what a source ms
+   * is on the timeline. Doing the affine conversion in main instead would be a
+   * second implementation of the one thing that must not drift.
+   *
+   * Tempo needs more than a time shift. A clip playing at 2x carries music that
+   * is twice as fast on the timeline as it is in the file, so **bpm scales by
+   * speed** — getting that wrong reports a rate that disagrees with the beats
+   * beside it, which is how a caller ends up spacing cuts by arithmetic instead
+   * of by the measured beat list.
+   */
+  map_analysis: (params: {
+    elementId: string;
+    silences?: Array<{ startMs: number; endMs: number }>;
+    onsets?: number[];
+    beats?: number[];
+    tempo?: { bpm: number; confidence: number } | null;
+  }) => {
+    const element = requireElement(params.elementId);
+    if (!isDynamicElement(element)) {
+      throw new Error(`Clip "${params.elementId}" has no source window.`);
+    }
+
+    const window = {
+      start: element.trim?.startTime ?? 0,
+      end: element.trim?.endTime ?? element.duration,
+    };
+    const speed = speedOf(element);
+
+    /** One source instant on the timeline, or null if trimmed away. */
+    const instant = (sourceMs: number): number | null => {
+      if (sourceMs < window.start || sourceMs >= window.end) {
+        return null;
+      }
+      return Math.round(timelineTimeAt(element, sourceMs));
+    };
+
+    const silences = (params.silences ?? [])
+      .filter((r) => r.endMs > window.start && r.startMs < window.end)
+      .map((r) => {
+        // Clamped to the window rather than dropped: a silence that runs off
+        // the end of the trim is still silent for the part that plays.
+        const from = Math.max(r.startMs, window.start);
+        const to = Math.min(r.endMs, window.end);
+        return {
+          startMs: Math.round(timelineTimeAt(element, from)),
+          endMs: Math.round(timelineTimeAt(element, to)),
+        };
+      });
+
+    const onsets = (params.onsets ?? [])
+      .map(instant)
+      .filter((at): at is number => at != null);
+    const beats = (params.beats ?? [])
+      .map(instant)
+      .filter((at): at is number => at != null);
+
+    const tempo =
+      params.tempo == null
+        ? null
+        : {
+            bpm: Math.round(params.tempo.bpm * speed * 10) / 10,
+            confidence: params.tempo.confidence,
+          };
+
+    return {
+      silences,
+      onsets,
+      beats,
+      tempo,
       clipSpan: {
         startMs: Math.round(spanStart(element)),
         endMs: Math.round(spanEnd(element)),
@@ -265,6 +356,16 @@ registerCommands({
 
     // Times go back out absolute, matching every other tool. They are stored
     // relative to the clip's start; `commands/animation.ts` owns that seam.
+    //
+    // **The handles are rebased too.** They were not, and the anchor was — so a
+    // clip starting at 5s reported a keyframe at 5200ms whose own control point
+    // sat at 200ms, which reads as a handle before the clip begins. Two time
+    // bases in one object is the kind of thing a reader trusts and should not.
+    const rebase = (handle: unknown): number[] | undefined =>
+      Array.isArray(handle) && handle.length >= 2
+        ? [Math.round(start + handle[0]), handle[1]]
+        : undefined;
+
     const lanes: Record<string, unknown> = {};
     for (const lane of lanesOf(params.property)) {
       const list = Array.isArray(track[lane]) ? track[lane] : [];
@@ -276,8 +377,8 @@ registerCommands({
           atMs: Math.round(start + (keyframe?.p?.[0] ?? 0)),
           value: keyframe?.p?.[1],
           type: keyframe?.type,
-          cs: keyframe?.cs,
-          ce: keyframe?.ce,
+          cs: rebase(keyframe?.cs),
+          ce: rebase(keyframe?.ce),
         })),
       };
     }
