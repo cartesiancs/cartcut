@@ -31,8 +31,14 @@ export type ExportOutcome = {
   error?: { message: string; stderrTail?: string; code?: number; signal?: string };
   frames: { current: number; total: number } | null;
   elapsedMs: number;
-  /** Progress samples, for the artifact — enough to see a stall's shape. */
-  progress: Array<{ atMs: number; percent: number }>;
+  /**
+   * Progress samples, for the artifact — enough to see a stall's shape.
+   *
+   * `remaining` is the countdown the user was actually reading. It is recorded
+   * because the property that matters about it is a property of the *sequence*
+   * — it must never increase — and a single reading cannot show that.
+   */
+  progress: Array<{ atMs: number; percent: number; remaining: string }>;
 };
 
 /** Longest the frame counter may stand still before the export is called stuck. */
@@ -69,14 +75,25 @@ async function renderEvents(page: Page): Promise<RenderEvent[]> {
   return page.evaluate(() => (globalThis as any).__cartcutRenderEvents ?? []);
 }
 
-/** The frame loop's own counter, read off the progress bar the app maintains. */
-async function progressPercent(page: Page): Promise<number | null> {
+/**
+ * The frame loop's own counter, read off the progress bar the app maintains,
+ * alongside the remaining-time line beside it.
+ *
+ * Both in one `evaluate` so they describe the same instant — and note that a
+ * `null` percent does not reset the stall timer below, which is why `#progress`
+ * must only ever carry a number. Everything else the dialog has to say goes to
+ * `#remainingTime`.
+ */
+async function progressSample(
+  page: Page,
+): Promise<{ percent: number | null; remaining: string }> {
   return page.evaluate(() => {
     const bar = document.querySelector("#progress") as HTMLElement | null;
-    if (bar == null) return null;
-    const text = (bar.textContent ?? "").trim().replace("%", "");
-    const value = Number(text);
-    return Number.isFinite(value) ? value : null;
+    const line = document.querySelector("#remainingTime") as HTMLElement | null;
+    const remaining = (line?.textContent ?? "").trim();
+    if (bar == null) return { percent: null, remaining };
+    const value = Number((bar.textContent ?? "").trim().replace("%", ""));
+    return { percent: Number.isFinite(value) ? value : null, remaining };
   });
 }
 
@@ -125,6 +142,7 @@ export async function runExport(
   // export is still starting here.
   const progress: ExportOutcome["progress"] = [];
   let lastPercent = -1;
+  let lastRemaining = "";
   let lastMoveAt = Date.now();
   let sawRunning = false;
 
@@ -167,11 +185,18 @@ export async function runExport(
     const running = await exportRunning(page);
     if (running) sawRunning = true;
 
-    const percent = await progressPercent(page);
-    if (percent != null && percent !== lastPercent) {
+    const { percent, remaining } = await progressSample(page);
+    if (percent != null && (percent !== lastPercent || remaining !== lastRemaining)) {
+      // Only the *bar* clears the stall timer. The countdown ticks once a
+      // second on a timer of its own, by design — it keeps moving precisely
+      // when the frame loop does not — so letting it reset `lastMoveAt` would
+      // mean a wedged export never trips the detector again.
+      if (percent !== lastPercent) {
+        lastMoveAt = Date.now();
+      }
       lastPercent = percent;
-      lastMoveAt = Date.now();
-      progress.push({ atMs: Date.now() - startedAt, percent });
+      lastRemaining = remaining;
+      progress.push({ atMs: Date.now() - startedAt, percent, remaining });
       options.onProgress?.(percent);
     }
 

@@ -22,6 +22,35 @@ export function formatSeconds(seconds: number) {
 }
 
 /**
+ * A remaining duration, for a countdown.
+ *
+ * Separate from `formatSeconds` rather than a change to it. The contracts
+ * genuinely differ — this one has an hours bucket, pads its lower units, and
+ * drops empty leading ones — and `formatSeconds` is a general utility with a
+ * test pinning `"0m 0s"`.
+ *
+ * The padding is not cosmetic: an unpadded countdown changes width every second
+ * as it crosses each multiple of ten, and text that jitters reads as broken.
+ * The hours bucket exists because a long 4K export runs past sixty minutes, and
+ * `formatSeconds` would have called that `"73m 4s"`.
+ */
+export function formatRemaining(ms: number): string {
+  const total = Number.isFinite(ms) ? Math.max(0, Math.ceil(ms / 1000)) : 0;
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const pad = (value: number) => String(value).padStart(2, "0");
+
+  if (hours > 0) {
+    return `${hours}h ${pad(minutes)}m ${pad(seconds)}s`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${pad(seconds)}s`;
+  }
+  return `${seconds}s`;
+}
+
+/**
  * Slack at the edges of a clip's window, in ms.
  *
  * Frame-accurate editing puts a clip's start on an exact frame instant, but the

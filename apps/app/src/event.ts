@@ -1,4 +1,5 @@
 import { rendererModal } from "./utils/modal";
+import { renderProgress } from "./ui/modal/renderProgress";
 
 window.electronAPI.res.render.progressing((evt, prog) => {
   rendererModal.progressModal.show();
@@ -7,6 +8,9 @@ window.electronAPI.res.render.progressing((evt, prog) => {
 });
 
 window.electronAPI.res.render.finish((evt) => {
+  // The end of the finalizing phase `ControlRender` handed over — FFmpeg has
+  // finished muxing, which nothing before this point can know.
+  renderProgress.finish();
   rendererModal.progressModal.hide();
   rendererModal.progressFinish.show();
 
@@ -40,6 +44,7 @@ window.electronAPI.res.render.error((evt, errormsg) => {
  * file.
  */
 window.electronAPI.res.render.v2Error((evt, detail) => {
+  renderProgress.stop();
   rendererModal.progressModal.hide();
   rendererModal.progressError.show();
 
@@ -54,6 +59,7 @@ window.electronAPI.res.render.v2Error((evt, detail) => {
 });
 
 window.electronAPI.res.render.v2Cancelled(() => {
+  renderProgress.stop();
   rendererModal.progressModal.hide();
 });
 

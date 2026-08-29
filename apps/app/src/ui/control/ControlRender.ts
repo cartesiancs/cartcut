@@ -38,7 +38,8 @@ import { rendererModal } from "../../utils/modal";
 import { requestIPCVideoExport } from "../../features/export/ipc";
 import { exportElementRenderers } from "../../features/export/renderers";
 import type { ExportOptions } from "../../features/export/types";
-import { formatSeconds } from "../../utils/time";
+import { frameCount } from "../../features/export/frames";
+import { renderProgress } from "../modal/renderProgress";
 import { IS_MAC } from "../../utils/platform";
 
 let socket;
@@ -66,8 +67,6 @@ export class ControlRender extends LitElement {
   @state()
   private showAdvanced = false;
 
-  renderTime: number[] = [];
-
   /** Non-null only while an export is running. See `cancelExport`. */
   exportController: AbortController | null = null;
 
@@ -84,7 +83,15 @@ export class ControlRender extends LitElement {
    * stopped watching.
    */
   cancelExport() {
+    renderProgress.stop();
     this.exportController?.abort();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    // The progress ticker is a module singleton and outlives this component by
+    // design, so it has to be told when the component that started it goes.
+    renderProgress.stop();
   }
 
   private get settings(): ExportSettings {
@@ -505,60 +512,38 @@ export class ControlRender extends LitElement {
         videoDestination,
       };
 
-      // Resolved once, outside the loop. These were four full-document
-      // `querySelector` calls plus a Bootstrap `Modal.show()` on every one of
-      // 3600 frames; with PNG gone that was a real share of the frame budget.
-      const progressBar = document.querySelector("#progress");
-      const remainingTime = document.querySelector("#remainingTime");
+      const timeline = useTimelineStore.getState().timeline;
+
+      // Before the dialog, so the bar and the remaining-time line are reset
+      // rather than still showing the previous export's numbers.
+      renderProgress.begin(
+        timeline,
+        frameCount(options),
+        renderOptionState.fps,
+      );
       rendererModal.progressModal.show();
 
       const controller = new AbortController();
       this.exportController = controller;
 
-      let lastPaintAt = 0;
-      let lastSample: { at: number; frame: number } | null = null;
-      let msPerFrameEma = 0;
-
       try {
         await requestIPCVideoExport(
-          useTimelineStore.getState().timeline,
+          timeline,
           elementRenderers,
           options,
-          (currentFrame, totalFrames) => {
-            const now = Date.now();
-            const isLast = currentFrame === totalFrames - 1;
-            // ~10 Hz. The eye cannot read faster and the DOM writes below
-            // invalidate layout.
-            if (now - lastPaintAt < 100 && !isLast) {
-              return;
-            }
-            lastPaintAt = now;
-
-            const progressTo100 = (currentFrame / totalFrames) * 100;
-            progressBar.style.width = `${progressTo100}%`;
-            progressBar.innerHTML = `${Math.round(progressTo100)}%`;
-
-            // An EMA over the throttled samples, rather than the difference
-            // between the last two frames, which was far too noisy to read.
-            if (lastSample != null && currentFrame > lastSample.frame) {
-              const perFrame =
-                (now - lastSample.at) / (currentFrame - lastSample.frame);
-              msPerFrameEma =
-                msPerFrameEma === 0
-                  ? perFrame
-                  : msPerFrameEma * 0.8 + perFrame * 0.2;
-              const framesLeft = totalFrames - currentFrame;
-              remainingTime.innerHTML = `${formatSeconds(
-                Math.round((msPerFrameEma * framesLeft) / 1000),
-              )} left`;
-            }
-            lastSample = { at: now, frame: currentFrame };
-          },
+          (currentFrame, totalFrames) =>
+            renderProgress.onFrame(currentFrame, totalFrames),
           controller.signal,
         );
+
+        // The frame loop is done; FFmpeg is not. `finishStream` only closes its
+        // stdin, so the mux still has seconds to run and nothing reports on it
+        // until `PROCESSING_FINISH` reaches `event.ts`.
+        renderProgress.finalizing();
       } catch (error) {
         // Un-awaited, this was an unhandled rejection and the modal froze at
         // whatever percent it had reached.
+        renderProgress.stop();
         rendererModal.progressModal.hide();
         if ((error as Error)?.name !== "AbortError") {
           document.querySelector("toast-box")?.showToast({

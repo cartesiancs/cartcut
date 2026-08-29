@@ -5,6 +5,7 @@ import {
   shortcutLabelWithAlternates,
   shortcutsByGroup,
 } from "../../features/editor/shortcuts";
+import { renderProgress } from "./renderProgress";
 
 @customElement("modal-list-ui")
 export class ModalList extends LitElement {
@@ -73,6 +74,11 @@ export class ModalList extends LitElement {
    * running to completion. It now stops the export as well.
    */
   _handleClickCancelRender() {
+    // The button dismisses the dialog immediately, well before
+    // `render:v2:cancelled` comes back, so the ticker must be stopped here
+    // rather than waiting for the event — otherwise it keeps writing into a
+    // modal nobody can see.
+    renderProgress.stop();
     const control = document.querySelector("control-ui-render") as
       | (HTMLElement & { cancelExport?: () => void })
       | null;
@@ -109,27 +115,26 @@ export class ModalList extends LitElement {
         <dds-content>
           <div class="mb-3">
             <div class="progress">
+              <!-- Zero, not the 25% this was authored at: the dialog is shown
+                   before the first frame is drawn, so a hardcoded quarter was
+                   on screen for the whole of asset loading and was the first
+                   value every e2e artifact recorded. -->
               <div
                 id="progress"
                 class="progress-bar"
                 role="progressbar"
-                style="width: 25%;"
-                aria-valuenow="25"
+                style="width: 0%;"
+                aria-valuenow="0"
                 aria-valuemin="0"
                 aria-valuemax="100"
               >
-                25%
+                0%
               </div>
             </div>
             <b class="text-secondary"
               ><i class="fas fa-info-circle"></i>
-              <span id="remainingTime">-s left</span>
+              <span id="remainingTime">Estimating…</span>
             </b>
-
-            <!-- <b class="text-secondary"
-              ><i class="fas fa-info-circle"></i> 랜더링 100%에 도달해도
-              일정시간 지연될 수 있어요.
-            </b> -->
           </div>
         </dds-content>
         <dds-modal-button
