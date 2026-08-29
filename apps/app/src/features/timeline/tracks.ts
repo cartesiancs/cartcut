@@ -48,6 +48,24 @@ const KIND_PREFIX: Record<TrackKind, string> = {
   effect: "E",
 };
 
+/**
+ * Where a kind belongs in the stack when the document holds none of it yet.
+ *
+ * Lower is nearer the front. This decides only the *first* row of a kind: once
+ * one exists, `appendTrackOfKind` stacks on top of it, and the user is free to
+ * drag rows anywhere afterwards. It exists because "append at the end" is right
+ * for audio and wrong for text — a caption behind the picture is not a caption,
+ * and a project has video rows and no text row before its first title, so the
+ * end is exactly where a title must not go.
+ */
+const KIND_STACK_ORDER: Record<TrackKind, number> = {
+  effect: 0, // an adjustment layer applies to everything painted beneath it
+  text: 1, // titles and captions read over the picture, never under it
+  video: 2,
+  group: 3, // draws nothing: a row for the bar, not for the composite
+  audio: 4, // carries no z-order, but the rows read below the picture
+};
+
 /** Which kind of track a newly added element belongs on. */
 export function defaultTrackKindFor(filetype: string): TrackKind {
   if (filetype === "audio") {
@@ -248,16 +266,37 @@ export function insertTrackAt(
   });
 }
 
-/** Appends a track of `kind` directly below the last track of that kind. */
+/**
+ * Appends a track of `kind` directly above the topmost track of that kind.
+ *
+ * With no row of that kind to stack on, `KIND_STACK_ORDER` decides instead: the
+ * new row lands above the topmost row that belongs *behind* it. That is what
+ * puts a project's first text track in front of the picture rather than at the
+ * bottom of the stack, where it would be painted first and covered.
+ */
 export function appendTrackOfKind(
   doc: TimelineDocument,
   kind: TrackKind,
   id: string,
 ): TimelineDocument {
   const sameKind = tracksOfKind(doc, kind);
+  if (sameKind.length > 0) {
+    return insertTrackAt(
+      doc,
+      Math.min(...sameKind.map((track) => track.index)),
+      kind,
+      id,
+    );
+  }
+
+  // Above the highest row ranked behind this kind, so anything ranked in front
+  // stays in front and a row the user dragged to the top is never jumped over.
+  const behind = doc.tracks.filter(
+    (track) => KIND_STACK_ORDER[track.kind] > KIND_STACK_ORDER[kind],
+  );
   const index =
-    sameKind.length > 0
-      ? Math.min(...sameKind.map((track) => track.index))
+    behind.length > 0
+      ? Math.min(...behind.map((track) => track.index))
       : doc.tracks.length;
 
   return insertTrackAt(doc, index, kind, id);

@@ -125,11 +125,34 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
   });
 }
 
+/**
+ * What the client is told once, on connect.
+ *
+ * Invariants only — the things that are true of every call and that an agent
+ * gets wrong silently rather than loudly. Layering is here because getting it
+ * wrong produces a caption nobody can see and no error at all, and the title
+ * convention because a full stop on a title is a defect no tool can refuse.
+ *
+ * Not a substitute for the tool descriptions: not every client surfaces this
+ * field, and a tool is read on its own. It is reinforcement, so it stays short.
+ */
+const INSTRUCTIONS = [
+  "Cartcut is a live video editor. Every call changes the project the user is watching, and shares their undo history.",
+  "Times are timeline milliseconds, absolute from the start of the project. Never seconds, frames or timecode.",
+  "Layering is track order, never a clip property: index 0 is the top row and the front of the composite. A title or caption has to sit on a track above the picture to be seen, and move_track is how that changes.",
+  "One call with many items is one undo step; N calls are N. Batch.",
+  "On-screen titles take no terminal full stop. Captions transcribing speech keep their punctuation.",
+  "Start with get_project_overview and list_clips rather than guessing ids.",
+].join("\n");
+
 function newMcpServer(): McpServer {
-  const mcp = new McpServer({
-    name: "cartcut",
-    version: "0.4.3",
-  });
+  const mcp = new McpServer(
+    {
+      name: "cartcut",
+      version: "0.4.3",
+    },
+    { instructions: INSTRUCTIONS },
+  );
   registerTools(mcp);
   return mcp;
 }

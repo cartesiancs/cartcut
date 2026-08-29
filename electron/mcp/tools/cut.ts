@@ -12,7 +12,15 @@
 
 import { z } from "zod";
 import { requestEditor } from "../bridge";
-import { destructive, mutating, timeRange, tool, type Registrar } from "./define";
+import {
+  Z_ORDER_NOTE,
+  destructive,
+  mutating,
+  timeRange,
+  tool,
+  trackIdField,
+  type Registrar,
+} from "./define";
 
 export function registerCutTools(define: Registrar) {
   define(
@@ -77,12 +85,14 @@ export function registerCutTools(define: Registrar) {
         "Move clips in time and/or to another track. `toMs` places the earliest of them and carries the rest " +
         "along, preserving their spacing; `deltaMs` shifts everything by the same amount. " +
         "Atomic: if any clip cannot land where it is asked, none of them move. " +
-        "A track only accepts clips of its own kind, so a video clip cannot move onto an audio track.",
+        "A track only accepts clips of its own kind, so a video clip cannot move onto an audio track. " +
+        "Moving a clip to another track also changes what it draws in front of — " +
+        Z_ORDER_NOTE,
       inputSchema: {
         elementIds: z.array(z.string()).min(1),
         toMs: z.number().optional(),
         deltaMs: z.number().optional(),
-        trackId: z.string().optional(),
+        trackId: trackIdField.optional(),
       },
       annotations: mutating,
     },

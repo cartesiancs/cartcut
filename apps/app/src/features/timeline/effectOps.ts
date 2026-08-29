@@ -88,12 +88,12 @@ function writeEffect(
  * for effects is the right outcome anyway, since stacked rows compose.
  *
  * What it does **not** do is let `placeNewElement` invent the first effect
- * track. `chooseTrackFor` falls through to `appendTrackOfKind`, which puts a
- * new row at the bottom of the stack. For a clip that is correct; for an
- * adjustment layer it is exactly backwards — the bottom row paints first, so
- * the effect would be composited *underneath* every clip and apply to nothing
- * at all. So when no effect track exists yet, one is created at the top first
- * and named as the preference.
+ * track. `appendTrackOfKind` now ranks the kinds and would land it at the top
+ * anyway, but an adjustment layer's row is the whole feature rather than a
+ * detail of where new rows go — the bottom row paints first, so an effect
+ * composited there would apply to nothing at all. So when no effect track
+ * exists yet, one is created at the top explicitly and named as the preference,
+ * and this op does not depend on a table it does not own.
  *
  * Declines when the id is taken or the length is not positive.
  */
@@ -246,9 +246,10 @@ export function setEffectBlend(
  *
  * Index 0 is the top row and the front of the composite, which for an effect
  * means "applies to every layer" — the sensible default, and the one the user
- * can then narrow by dragging the row down. `appendTrackOfKind` would put it at
- * the top of the *effect* block instead, which on a first effect track means
- * the bottom of the stack, where it would apply to nothing.
+ * can then narrow by dragging the row down. `appendTrackOfKind` ranks `effect`
+ * at the front too, so it would agree; this stays explicit because the
+ * guarantee belongs to the feature rather than to that table, and because it
+ * also declines an id that is already taken.
  */
 export function addEffectTrack(
   doc: TimelineDocument,

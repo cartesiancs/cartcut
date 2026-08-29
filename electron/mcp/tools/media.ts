@@ -7,7 +7,13 @@
 
 import { z } from "zod";
 import { requestEditor } from "../bridge";
-import { mutating, tool, type Registrar } from "./define";
+import {
+  Z_ORDER_NOTE,
+  mutating,
+  tool,
+  trackIdField,
+  type Registrar,
+} from "./define";
 
 /**
  * Long enough for ffprobe plus a metadata decode on a feature-length file.
@@ -41,7 +47,7 @@ export function registerMediaTools(define: Registrar) {
                 .number()
                 .optional()
                 .describe("Images and GIFs only. Default 1000."),
-              trackId: z.string().optional(),
+              trackId: trackIdField.optional(),
             }),
           )
           .min(1),
@@ -66,7 +72,9 @@ export function registerMediaTools(define: Registrar) {
       title: "Add a shape",
       description:
         "Draw a rectangle, ellipse or triangle on the canvas — useful as a background, a lower-third bar, or a " +
-        "block to mask something out. Pass `points` instead of `kind` for an arbitrary polygon, in a 0-100 box.",
+        "block to mask something out. Pass `points` instead of `kind` for an arbitrary polygon, in a 0-100 box. " +
+        "A shape goes on a video track, so a lower-third bar needs a row between the picture and the text — " +
+        Z_ORDER_NOTE,
       inputSchema: {
         kind: z
           .enum(["rectangle", "ellipse", "triangle"])
@@ -85,7 +93,7 @@ export function registerMediaTools(define: Registrar) {
         fillColor: z.string().optional().describe('Hex, e.g. "#ffffff".'),
         opacity: z.number().min(0).max(100).optional(),
         rotation: z.number().optional(),
-        trackId: z.string().optional(),
+        trackId: trackIdField.optional(),
       },
       annotations: mutating,
     },

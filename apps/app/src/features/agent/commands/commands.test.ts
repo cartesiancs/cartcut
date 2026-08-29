@@ -20,6 +20,7 @@ import {
   clipsOnTrack,
   createTrack,
   normalizeDocument,
+  trackIndexOf,
 } from "../../timeline/tracks";
 import { spanOf } from "../../timeline/geometry";
 import { videoElement, imageElement } from "../../renderer/testing";
@@ -273,12 +274,68 @@ describe("trim and move", () => {
   });
 });
 
+describe("add_text", () => {
+  it("lands a title in front of the picture and says nothing about it", async () => {
+    seed({ a: tenSecondClip() });
+
+    const result = await run("add_text", {
+      text: "Chapter one",
+      startMs: 0,
+      durationMs: 3000,
+    });
+
+    const doc = useTimelineStore.getState().getDocument();
+    const title = doc.elements[result.created[0]];
+    expect(trackIndexOf(doc, title.trackId)).toBe(0);
+    // The healthy path stays the size it was: no warning, no coveredBy.
+    expect(result.warning).toBeUndefined();
+    expect(result.coveredBy).toBeUndefined();
+  });
+
+  it("warns when the text track it lands on sits behind the picture", async () => {
+    // A project from before the placement fix, or one whose rows the user
+    // dragged: T1 is below V1, so the caption is painted first and covered.
+    seed({ a: tenSecondClip() }, [
+      ["v1", "video"],
+      ["t1", "text"],
+    ]);
+
+    const result = await run("add_text", {
+      text: "Buried",
+      startMs: 0,
+      durationMs: 3000,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.coveredBy).toEqual(["a"]);
+    expect(result.warning).toMatch(/will not be visible/);
+    // The warning names the call that fixes it, not just the problem.
+    expect(result.warning).toMatch(/move_track/);
+  });
+});
+
 describe("add_subtitles", () => {
   const lines = Array.from({ length: 12 }, (_, i) => ({
     text: `line ${i}`,
     startMs: i * 1000,
     durationMs: 900,
   }));
+
+  it("reports buried captions once, not once per line", async () => {
+    seed({ a: tenSecondClip() }, [
+      ["v1", "video"],
+      ["t1", "text"],
+    ]);
+
+    const result = await run("add_subtitles", { items: lines });
+
+    // Ten, not twelve: the last two lines start after the clip ends, so
+    // nothing overlaps them and the check does not claim they are hidden.
+    expect(result.hiddenCount).toBe(10);
+    expect(result.warning).toMatch(/10 of these captions/);
+    // One sentence for twelve lines: the output cap is the reason.
+    expect(JSON.stringify(result).length).toBeLessThan(2000);
+  });
 
   it("puts a whole transcript on one text track in one undo step", async () => {
     seed({ a: tenSecondClip() });

@@ -297,8 +297,7 @@ export class ElementTimelineLeftOption extends LitElement {
    * Index 0 is deliberate and is not merely "the top". An effect applies to
    * everything painted beneath it, so a row at the bottom of the stack would
    * apply to nothing; `addEffectTrack` puts it in front and the user narrows
-   * the scope afterwards by dragging it down. `appendTrackOfKind` would have
-   * done the opposite.
+   * the scope afterwards by dragging it down.
    */
   private addEffectTrack() {
     this.openMenu = null;

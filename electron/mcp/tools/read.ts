@@ -16,8 +16,10 @@ import { requestEditor } from "../bridge";
 import {
   ANIMATABLE,
   FILETYPES,
+  Z_ORDER_NOTE,
   readOnly,
   tool,
+  trackIdField,
   type Registrar,
 } from "./define";
 
@@ -28,7 +30,8 @@ export function registerReadTools(define: Registrar) {
       title: "Project overview",
       description:
         "Resolution, frame rate, duration, playhead, track list and clip counts. " +
-        "Start here: it is small, and it gives you the track ids the other tools take.",
+        "Start here: it is small, and it gives you the track ids the other tools take. " +
+        Z_ORDER_NOTE,
       inputSchema: {},
       annotations: readOnly,
     },
@@ -42,9 +45,11 @@ export function registerReadTools(define: Registrar) {
       description:
         "Clips on the timeline as compact rows, newest filters first. " +
         "Paged: check `truncated` and `total`, and raise `offset` rather than assuming you have seen everything. " +
-        "Rows omit keyframe data and blob URLs; use get_clip for one clip in full.",
+        "Rows omit keyframe data and blob URLs; use get_clip for one clip in full. " +
+        "Rows read by track from the top down — the first rows are the front-most layers — then left to " +
+        "right in time.",
       inputSchema: {
-        trackId: z.string().optional(),
+        trackId: trackIdField.optional(),
         filetype: z.enum(FILETYPES).optional(),
         startMs: z
           .number()

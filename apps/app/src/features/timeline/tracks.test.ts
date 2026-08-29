@@ -306,9 +306,29 @@ describe("appendTrackOfKind", () => {
     expect(doc.tracks.map((t) => t.id)).toEqual(["v2", "t0", "t1"]);
   });
 
-  it("appends at the bottom when the kind is new to the document", () => {
+  it("puts a first audio track at the bottom, behind the picture", () => {
     const doc = appendTrackOfKind(docWithTracks("video"), "audio", "a1");
     expect(doc.tracks.map((t) => t.id)).toEqual(["t0", "a1"]);
+  });
+
+  it("puts a first text track in front of the picture, not behind it", () => {
+    // The whole point: a caption appended to the end of the stack is painted
+    // first and covered by the video, so it may as well not be there.
+    const doc = appendTrackOfKind(docWithTracks("video"), "text", "x1");
+    expect(doc.tracks.map((t) => t.id)).toEqual(["x1", "t0"]);
+    expect(trackIndexOf(doc, "x1")).toBe(0);
+  });
+
+  it("puts a first group track at the bottom — it draws nothing", () => {
+    const doc = appendTrackOfKind(docWithTracks("video"), "group", "g1");
+    expect(doc.tracks.map((t) => t.id)).toEqual(["t0", "g1"]);
+  });
+
+  it("keeps a first text track under an effect row that already leads", () => {
+    // An adjustment layer applies to what is beneath it, so text goes below it
+    // and above the picture rather than jumping to index 0.
+    const doc = appendTrackOfKind(docWithTracks("effect", "video"), "text", "x1");
+    expect(doc.tracks.map((t) => t.id)).toEqual(["t0", "x1", "t1"]);
   });
 
   it("starts a document off with a single track", () => {

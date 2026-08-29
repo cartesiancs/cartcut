@@ -6,6 +6,8 @@ import {
   createTrack,
   emptyDocument,
   normalizeDocument,
+  paintOrder,
+  trackIndexOf,
   tracksOfKind,
   type TimelineDocument,
 } from "./tracks";
@@ -238,6 +240,21 @@ describe("placeNewElement", () => {
     expect(doc.elements.v.trackId).toBe("v1");
     expect(doc.elements.a.trackId).toBe("a1");
     expect(doc.elements.t.trackId).toBe("t1");
+
+    // And in the order the kinds belong in: text over the picture, audio under.
+    expect(trackIndexOf(doc, "t1")).toBe(0);
+    expect(trackIndexOf(doc, "v1")).toBe(1);
+    expect(trackIndexOf(doc, "a1")).toBe(2);
+  });
+
+  it("puts a caption in front of the video it captions", () => {
+    // The defect this guards: a first text track used to be appended at the
+    // bottom of the stack, so the caption was painted first and the picture
+    // covered it. `paintOrder` runs back to front, so the text comes last.
+    let doc = placeNewElement(emptyDocument(), "v", videoElement({}), 0, "v1");
+    doc = placeNewElement(doc, "cap", textElement({}), 0, "t1");
+
+    expect(paintOrder(doc)).toEqual(["v", "cap"]);
   });
 
   it("clamps a negative moment to the start of the timeline", () => {

@@ -38,6 +38,26 @@ list_clips               →  the clips themselves, with their ids
 
 Both are small. Do not skip them and guess.
 
+## Layering
+
+The track list reads top to bottom, and the top row is the front of the
+picture: index 0 draws over everything under it, the way V2 sits over V1 in
+Premiere. A clip's layer **is** its track. There is no per-clip "bring to
+front", and `update_clip` will refuse `priority`.
+
+So titles and captions belong on a text track above the video, and that is
+where `add_text` and `add_subtitles` put them. When they cannot — a project
+that already has a text track sitting under the picture — the result carries a
+`warning` naming what is stacked over the text, and the fix is one call:
+
+```
+move_track({ trackId: "…", toIndex: 0 })
+```
+
+The same rule is what makes `add_shape` usable as a lower-third bar. The bar
+has to be behind the words and in front of the picture, which means a row
+between the two — not a property on the bar.
+
 ## Cut editing from speech
 
 This is the main workflow. The judgement is yours; the tools just carry it out.
@@ -91,6 +111,27 @@ vertical video gets captions in the right place without being told. Pass
 
 Use `add_text` for a single title, `add_subtitles` for anything plural.
 
+## Writing text for the screen
+
+**A title takes no full stop.** "Chapter one", not "Chapter one." — a terminal
+period on a title, a lower third, a name super or a chapter card reads as a
+typo to anyone who watches video, and it is the clearest tell that a title was
+written by something that thinks in prose. Keep a question mark or an
+exclamation mark where the line genuinely asks or exclaims, and keep
+punctuation *inside* a multi-clause line. Drop only the final period.
+
+This bites hardest when the title is lifted from the transcript, because
+`get_transcript` returns punctuated sentences: "So this is the part that
+matters." becomes a title only once the period comes off.
+
+**Captions are the opposite.** A subtitle transcribes speech and keeps the
+sentence's own punctuation, full stop included. That is broadcast practice, and
+it is what a viewer reads sentence boundaries from. Pass `add_subtitles` the
+words as spoken.
+
+Keep titles short. A screen title that needs a comma usually wants to be two
+lines, or a shorter phrase.
+
 ## Other edits
 
 | Want to | Use |
@@ -99,6 +140,7 @@ Use `add_text` for a single title, `add_subtitles` for anything plural.
 | Change where a clip starts or ends | `trim_clip` (absolute times) |
 | Reorder or restage clips | `move_clips` |
 | Delete outright | `delete_clips` (`ripple: true` closes the gap) |
+| Change which clip draws on top | `move_track` |
 | Change text, colour, position, size, opacity | `update_clip` |
 | Show the user what you did | `select_clips`, then `set_playhead` |
 
@@ -133,6 +175,11 @@ Report what you actually removed afterwards, in seconds, so they can judge it:
 
 ## What is not here yet
 
-Effects, filters, transitions and keyframe animation are not exposed. If the
-user asks for a fade, a transition, a blur or a chroma key, say so plainly
-rather than approximating it with cuts.
+Transitions do not exist in the data model at all — the transition tab is an
+empty panel. If the user asks for a cross-dissolve, say so plainly rather than
+approximating it with cuts.
+
+Everything else that used to be missing is here: filters (`set_video_filters`),
+keyframe animation (`add_keyframes`, `set_animation`, `apply_animation_preset`),
+shapes (`add_shape`), fonts (`list_fonts`, `set_text_font`) and grouping
+(`group_clips`). Those are real work, not approximations.

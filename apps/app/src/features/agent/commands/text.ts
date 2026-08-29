@@ -12,9 +12,13 @@
  */
 
 import { v4 as uuidv4 } from "uuid";
+import { isVisualTimelineElement } from "../../../@types/timeline";
 import { useTimelineStore } from "../../../states/timelineStore";
 import { renderOptionStore } from "../../../states/renderOptionStore";
 import { placeNewElement } from "../../timeline/placement";
+import { spanOf } from "../../timeline/geometry";
+import { overlaps } from "../../timeline/overlap";
+import { trackIndexOf, type TimelineDocument } from "../../timeline/tracks";
 import { createTextElement } from "../../element/textElement";
 import { captionToTimeline } from "../../caption/timing";
 import { ensureUndoBaseline } from "../checkpoint";
@@ -52,6 +56,68 @@ function defaultLayout(style: SubtitleStyle) {
     width: style.width ?? w,
     locationX: style.locationX ?? 0,
     locationY: style.locationY ?? h - bottomPadding - fontsize,
+  };
+}
+
+/** Most covering clips a warning names before it stops being a list. */
+const MAX_COVERING = 3;
+
+/**
+ * Ids of clips painting in front of `elementId` that overlap it in time.
+ *
+ * Deliberately cheap: it reports what is *stacked over* the text, not whether
+ * the pixels are actually covered — that would need the compositor, and a
+ * caption underneath a clip is worth reporting either way.
+ *
+ * `isVisualTimelineElement` is the guard rather than a list of filetypes
+ * because it is written negatively: a type added later stays covered by this
+ * check instead of quietly escaping it.
+ */
+function coveringClips(doc: TimelineDocument, elementId: string): string[] {
+  const element = doc.elements[elementId];
+  if (element == null) {
+    return [];
+  }
+
+  const index = trackIndexOf(doc, element.trackId);
+  const span = spanOf(element);
+
+  return Object.entries(doc.elements)
+    .filter(
+      ([id, other]) =>
+        id !== elementId &&
+        isVisualTimelineElement(other) &&
+        trackIndexOf(doc, other.trackId) < index &&
+        overlaps(span, spanOf(other)),
+    )
+    .map(([id]) => id);
+}
+
+/**
+ * The extra fields a text result carries when something paints over it.
+ *
+ * Silent on the healthy path — new text lands in front of the picture — so the
+ * common result stays the size it was. It fires on a project whose text track
+ * sits below the video: one the user dragged there, or one created before
+ * `appendTrackOfKind` learned where a first text row belongs. Nothing is
+ * corrected automatically, because moving a row is the user's edit to make.
+ */
+function hiddenNote(doc: TimelineDocument, elementId: string) {
+  const covering = coveringClips(doc, elementId);
+  if (covering.length === 0) {
+    return {};
+  }
+
+  const element = doc.elements[elementId];
+  const trackName =
+    doc.tracks.find((track) => track.id === element.trackId)?.name ?? "its row";
+
+  return {
+    warning:
+      `This text is on ${trackName}, which paints behind ${covering.length} overlapping ` +
+      `clip(s), so it will not be visible. Move its row to the front with ` +
+      `move_track({trackId: "${element.trackId}", toIndex: 0}).`,
+    coveredBy: covering.slice(0, MAX_COVERING),
   };
 }
 
@@ -126,9 +192,22 @@ registerCommands({
     const names = new Map(after.tracks.map((t) => [t.id, t.name]));
     const landed = createdIds.filter((id) => after.elements[id] != null);
 
+    // One aggregate line, never one per caption: forty of these would be forty
+    // copies of the same sentence, and the tool output is capped.
+    const hidden = landed.filter((id) => coveringClips(after, id).length > 0);
+
     return {
       ok: landed.length > 0,
       created: landed,
+      ...(hidden.length > 0
+        ? {
+            hiddenCount: hidden.length,
+            warning:
+              `${hidden.length} of these captions paint behind a clip that overlaps them, ` +
+              `so they will not be visible. Their text track sits below the picture — ` +
+              `move_track({trackId, toIndex: 0}) puts it in front.`,
+          }
+        : {}),
       // Which tracks they ended up on is the thing worth checking: all on one
       // is the expected result, and anything else means captions overlapped.
       tracks: [
@@ -188,6 +267,7 @@ registerCommands({
       ok: true,
       created: [elementId],
       clips: [clipRow(elementId, created, names.get(created.trackId))],
+      ...hiddenNote(after, elementId),
     };
   },
 });

@@ -117,6 +117,22 @@ export const subtitleStyle = z
     "Omit for a lower-third caption sized to the project's own resolution.",
   );
 
+/**
+ * The one sentence the whole track surface depends on, written once.
+ *
+ * An agent that has not read it reaches for `update_clip` to bring a title
+ * forward and is refused, or reasons about a caption it cannot see without the
+ * fact that would explain it. It is repeated into several descriptions on
+ * purpose: a tool is read on its own, not alongside its siblings.
+ */
+export const Z_ORDER_NOTE =
+  "Tracks read top row first: index 0 is the front of the composite, the last row is the back. " +
+  "A clip's layer is its track — move_track changes it, update_clip cannot.";
+
+export const trackIdField = z
+  .string()
+  .describe("A track id from get_project_overview.");
+
 /** Every element type the timeline can hold, for filters and enums. */
 export const FILETYPES = [
   "video",
