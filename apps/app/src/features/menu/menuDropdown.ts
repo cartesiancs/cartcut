@@ -86,10 +86,14 @@ export class MenuDropdownBody extends LitElement {
 @customElement("menu-dropdown-item")
 export class MenuDropdownItem extends LitElement {
   name: string;
+  /** A Material Symbols glyph name, or "" for a text-only item. */
+  icon: string;
+
   constructor() {
     super();
 
     this.name = this.getAttribute("item-name") || "untitle";
+    this.icon = this.getAttribute("item-icon") || "";
   }
 
   render() {
@@ -98,7 +102,10 @@ export class MenuDropdownItem extends LitElement {
   }
 
   template() {
-    return `<li><a class="dropdown-item dropdown-item-sm">${this.name}</a></li>`;
+    const icon = this.icon
+      ? `<span class="material-symbols-outlined icon-xs">${this.icon}</span>`
+      : "";
+    return `<li><a class="dropdown-item dropdown-item-sm dropdown-item-icon">${icon}${this.name}</a></li>`;
   }
 
   connectedCallback() {

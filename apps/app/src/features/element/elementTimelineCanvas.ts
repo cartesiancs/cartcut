@@ -108,6 +108,21 @@ import {
 const DEFAULT_TRANSITION_PRESET = "com.cartcut.cross-dissolve";
 
 /**
+ * How each animatable property is named and drawn on the context menu.
+ *
+ * A lookup rather than a formatted string because the icon cannot be derived
+ * from the property name. An unlisted property still gets an entry — a plain
+ * `Animate <type>` with no icon — so widening `animatableProperties` can never
+ * silently drop a row from the menu.
+ */
+const ANIMATION_MENU: Record<string, { label: string; icon: string }> = {
+  position: { label: "Animate position", icon: "open_with" },
+  opacity: { label: "Animate opacity", icon: "opacity" },
+  scale: { label: "Animate scale", icon: "aspect_ratio" },
+  rotation: { label: "Animate rotation", icon: "rotate_90_degrees_cw" },
+};
+
+/**
  * A clip's label, with an effect's preset name resolved.
  *
  * `draw.ts` derives labels from the element alone, which is right for every
@@ -619,19 +634,19 @@ export class elementTimelineCanvas extends LitElement {
     }
 
     const doc = this.currentDoc();
-    const call = (method: string, label: string) =>
-      `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').${method}()" item-name="${label}"> </menu-dropdown-item>`;
+    const call = (method: string, label: string, icon: string) =>
+      `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').${method}()" item-name="${label}" item-icon="${icon}"> </menu-dropdown-item>`;
 
     const rows: string[] = [];
 
     if (ids.every((id) => canBeGrouped(doc.elements[id]))) {
-      rows.push(call("groupSelected", "group selected"));
+      rows.push(call("groupSelected", "Group selected", "layers"));
     }
     if (ids.some((id) => doc.elements[id]?.filetype === "group")) {
-      rows.push(call("ungroupSelected", "ungroup"));
+      rows.push(call("ungroupSelected", "Ungroup", "layers_clear"));
     }
     if (ids.some((id) => parentOf(doc.elements, id) != null)) {
-      rows.push(call("removeSelectedFromGroup", "remove from group"));
+      rows.push(call("removeSelectedFromGroup", "Remove from group", "link_off"));
     }
 
     return rows.join("\n          ");
@@ -672,7 +687,7 @@ export class elementTimelineCanvas extends LitElement {
       return "";
     }
 
-    return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').detachAudioFromSelected()" item-name="detach audio"> </menu-dropdown-item>`;
+    return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').detachAudioFromSelected()" item-name="Detach audio" item-icon="music_off"> </menu-dropdown-item>`;
   }
 
   /**
@@ -711,7 +726,7 @@ export class elementTimelineCanvas extends LitElement {
       return "";
     }
 
-    return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').rasterizeSelectedText()" item-name="rasterize text"> </menu-dropdown-item>`;
+    return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').rasterizeSelectedText()" item-name="Rasterize text" item-icon="image"> </menu-dropdown-item>`;
   }
 
   // ----------------------------------------------------------------- drag
@@ -1433,10 +1448,13 @@ export class elementTimelineCanvas extends LitElement {
     }
 
     return animatableProperties(element)
-      .map(
-        (type) =>
-          `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').openAnimationPanel('${elementId}', '${type}')" item-name="animate ${type}"></menu-dropdown-item>`,
-      )
+      .map((type) => {
+        const entry = ANIMATION_MENU[type] ?? {
+          label: `Animate ${type}`,
+          icon: "",
+        };
+        return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').openAnimationPanel('${elementId}', '${type}')" item-name="${entry.label}" item-icon="${entry.icon}"></menu-dropdown-item>`;
+      })
       .join("");
   }
 
@@ -1447,8 +1465,8 @@ export class elementTimelineCanvas extends LitElement {
           ${this.audioMenuTemplate()}
           ${this.rasterizeMenuTemplate()}
           ${this.groupMenuTemplate()}
-          <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').removeSeletedElements()" item-name="remove"> </menu-dropdown-item>
-          <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').rippleDeleteSelected()" item-name="remove and close gap"> </menu-dropdown-item>
+          <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').removeSeletedElements()" item-name="Remove" item-icon="delete"> </menu-dropdown-item>
+          <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').rippleDeleteSelected()" item-name="Remove and close gap" item-icon="delete_sweep"> </menu-dropdown-item>
         </menu-dropdown-body>`;
   }
 

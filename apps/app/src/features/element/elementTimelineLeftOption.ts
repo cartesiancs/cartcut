@@ -254,6 +254,7 @@ export class ElementTimelineLeftOption extends LitElement {
             ?disabled=${track.index === 0}
             @click=${() => this.moveTrack(track.id, -1)}
           >
+            <span class="material-symbols-outlined icon-xs">arrow_upward</span>
             Move up
           </button>
         </li>
@@ -263,6 +264,9 @@ export class ElementTimelineLeftOption extends LitElement {
             ?disabled=${track.index === ordered.length - 1}
             @click=${() => this.moveTrack(track.id, 1)}
           >
+            <span class="material-symbols-outlined icon-xs"
+              >arrow_downward</span
+            >
             Move down
           </button>
         </li>
@@ -272,6 +276,7 @@ export class ElementTimelineLeftOption extends LitElement {
             class="dropdown-item dropdown-item-sm"
             @click=${() => this.addEffectTrack()}
           >
+            <span class="material-symbols-outlined icon-xs">add</span>
             Add effect track
           </button>
         </li>
@@ -281,6 +286,7 @@ export class ElementTimelineLeftOption extends LitElement {
             class="dropdown-item dropdown-item-sm text-danger"
             @click=${() => this.removeTrack(track.id)}
           >
+            <span class="material-symbols-outlined icon-xs">delete</span>
             ${deleteLabel}
           </button>
         </li>
@@ -358,7 +364,9 @@ export class ElementTimelineLeftOption extends LitElement {
 
         ul.track-menu .dropdown-item {
           width: 100%;
-          text-align: left;
+          display: flex;
+          align-items: center;
+          gap: 0.4rem;
           background: none;
           border: 0;
         }
