@@ -101,8 +101,8 @@ const window = {
 
   // Shown for `SPLASH_DURATION_MS` (see `electron/main.ts`) while the editor
   // window loads behind it, hidden. Nothing but the image: no frame, no
-  // background, no chrome — and floating above every other window, ours and
-  // everyone else's.
+  // background, no chrome, no drop shadow and no rounded corners — and
+  // floating above every other window, ours and everyone else's.
   createSplashWindow: () => {
     const splashWindow = new BrowserWindow({
       width: SPLASH_WIDTH,
@@ -118,7 +118,8 @@ const window = {
       maximizable: false,
       fullscreenable: false,
       skipTaskbar: true,
-      hasShadow: true,
+      hasShadow: false,
+      roundedCorners: false,
       alwaysOnTop: true,
       webPreferences: {
         nodeIntegration: false,

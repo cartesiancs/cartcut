@@ -11,6 +11,7 @@ import {
 import { msToPxSigned, pxToMsSigned } from "../timeline/geometry";
 import { normalizeFps, snapMsToFrame } from "../timeline/frames";
 import { planRulerTicks } from "../timeline/rulerTicks";
+import { LABEL_FONT } from "../timeline/draw";
 
 @customElement("element-timeline-ruler")
 export class ElementTimelineRuler extends LitElement {
@@ -187,7 +188,7 @@ export class ElementTimelineRuler extends LitElement {
 
     ctx.strokeStyle = "#e3e3e3";
     ctx.lineWidth = 1;
-    ctx.font = "300 12px serif";
+    ctx.font = LABEL_FONT;
 
     for (const tick of plan.ticks) {
       ctx.beginPath();

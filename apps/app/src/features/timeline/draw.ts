@@ -154,7 +154,9 @@ export type DrawOptions = {
   labelOf?: (element: TimelineElement) => string;
 };
 
-const LABEL_FONT = '12px "Noto Sans", sans-serif';
+/** The timeline's label face. The ruler draws its tick numbers with it too,
+ * so the two canvases that sit on top of each other read as one surface. */
+export const LABEL_FONT = '12px "Noto Sans", sans-serif';
 const LABEL_PADDING = 6;
 /** Dark outline that keeps the label readable without hiding the frame. */
 const LABEL_HALO = "rgba(0, 0, 0, 0.85)";
