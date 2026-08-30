@@ -40,3 +40,15 @@
   align-items: center;
   gap: 0.4rem;
 }
+
+// `.icon-xs` and its siblings hard-set `color: #ffffff`, so an icon inside a
+// coloured row — the red "Delete track" — would come out white while its label
+// went red. Inheriting instead lets one class colour the whole row, and it also
+// settles the icons at the label's own `#dedede` rather than a brighter white.
+.dropdown-item-icon .material-symbols-outlined {
+  color: inherit;
+  // `.icon-xs` is `x-small`, which lands at 10px against a 12px label and reads
+  // as an afterthought. An icon wants to be a little larger than its text, not
+  // smaller.
+  font-size: 14px;
+}

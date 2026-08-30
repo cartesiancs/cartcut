@@ -250,7 +250,7 @@ export class ElementTimelineLeftOption extends LitElement {
       >
         <li>
           <button
-            class="dropdown-item dropdown-item-sm"
+            class="dropdown-item dropdown-item-sm dropdown-item-icon"
             ?disabled=${track.index === 0}
             @click=${() => this.moveTrack(track.id, -1)}
           >
@@ -260,7 +260,7 @@ export class ElementTimelineLeftOption extends LitElement {
         </li>
         <li>
           <button
-            class="dropdown-item dropdown-item-sm"
+            class="dropdown-item dropdown-item-sm dropdown-item-icon"
             ?disabled=${track.index === ordered.length - 1}
             @click=${() => this.moveTrack(track.id, 1)}
           >
@@ -273,7 +273,7 @@ export class ElementTimelineLeftOption extends LitElement {
         <li><hr class="dropdown-divider" /></li>
         <li>
           <button
-            class="dropdown-item dropdown-item-sm"
+            class="dropdown-item dropdown-item-sm dropdown-item-icon"
             @click=${() => this.addEffectTrack()}
           >
             <span class="material-symbols-outlined icon-xs">add</span>
@@ -283,7 +283,7 @@ export class ElementTimelineLeftOption extends LitElement {
         <li><hr class="dropdown-divider" /></li>
         <li>
           <button
-            class="dropdown-item dropdown-item-sm text-danger"
+            class="dropdown-item dropdown-item-sm dropdown-item-icon text-danger"
             @click=${() => this.removeTrack(track.id)}
           >
             <span class="material-symbols-outlined icon-xs">delete</span>
@@ -362,11 +362,12 @@ export class ElementTimelineLeftOption extends LitElement {
           flex: 0 0 auto;
         }
 
+        /* Layout and icon colour come from .dropdown-item-icon in
+           _dropdown.scss, shared with the timeline's right-click menu. What is
+           left here is only what makes a button look like the anchor that
+           Bootstrap styles. */
         ul.track-menu .dropdown-item {
           width: 100%;
-          display: flex;
-          align-items: center;
-          gap: 0.4rem;
           background: none;
           border: 0;
         }
