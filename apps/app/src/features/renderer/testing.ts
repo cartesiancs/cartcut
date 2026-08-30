@@ -12,6 +12,7 @@
 
 import { createCanvas, type Canvas } from "@napi-rs/canvas";
 import type {
+  EffectElementType,
   GifElementType,
   GroupElementType,
   ImageElementType,
@@ -187,7 +188,7 @@ export function shapeElement(
     ...placed,
     ...visual,
     filetype: "shape",
-    animation: { opacity: { isActivate: false, x: [], ax: [] } },
+    animation: emptyAnimation("shape"),
     oWidth: 100,
     oHeight: 100,
     shape: [
@@ -199,6 +200,33 @@ export function shapeElement(
     option: { fillColor: "#ff0000" },
     ...over,
   };
+}
+
+/**
+ * The one element that animates opacity and nothing else.
+ *
+ * A shape used to be the other, which is what most of the decline-by-identity
+ * suites reached for. Now that a shape carries the full `Animatable` block,
+ * this is the fixture that keeps "a property the element cannot animate"
+ * covered — without it, those tests would have had to be deleted rather than
+ * retargeted, and the decline path would have gone untested.
+ *
+ * No `Visual`: an effect covers the whole frame, so it has no width, height,
+ * opacity or rotation field of its own.
+ */
+export function effectElement(
+  over: Partial<EffectElementType> = {},
+): EffectElementType {
+  return {
+    ...placed,
+    localpath: "EFFECT",
+    filetype: "effect",
+    presetId: "vhs",
+    params: {},
+    intensity: 1,
+    animation: emptyAnimation("effect"),
+    ...over,
+  } as EffectElementType;
 }
 
 export function videoElement(

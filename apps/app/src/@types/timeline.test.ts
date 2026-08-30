@@ -10,6 +10,7 @@ import {
   gifElement,
   textElement,
   shapeElement,
+  effectElement,
   audioElement,
 } from "../features/renderer/testing";
 
@@ -68,8 +69,17 @@ describe("canAnimate / animatableProperties", () => {
     ]);
   });
 
-  it("offers only opacity for a shape, which is all its type has", () => {
-    expect(animatableProperties(shapeElement({}))).toEqual(["opacity"]);
+  it("offers all four for a shape, which animates like any other visual", () => {
+    expect(animatableProperties(shapeElement({}))).toEqual([
+      "position",
+      "opacity",
+      "scale",
+      "rotation",
+    ]);
+  });
+
+  it("offers only opacity for an effect, which covers the whole frame", () => {
+    expect(animatableProperties(effectElement({}))).toEqual(["opacity"]);
   });
 
   it("offers nothing for an element that cannot animate", () => {

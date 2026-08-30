@@ -88,7 +88,15 @@ type Visual = {
   rotation: number;
 };
 
-// Shape는 opacity만 애니메이팅 가능하므로 다른 속성을 지원할 때 까지 임시 타입을 사용한다
+/**
+ * The opacity track on its own, for an element that has nothing else to move.
+ *
+ * `effect` is the only such element: it covers the whole frame by definition,
+ * so it has no position, scale or rotation to animate in the first place. A
+ * shape used to share this mixin as a placeholder — its other properties were
+ * merely unimplemented rather than meaningless — and now carries the full
+ * `Animatable` like every other visual element.
+ */
 type OpacityAnimatable = {
   animation: {
     opacity: {
@@ -166,7 +174,7 @@ export type GifElementType = TimelinePlaced &
 
 export type ShapeElementType = TimelinePlaced &
   Visual &
-  OpacityAnimatable & {
+  Animatable & {
     filetype: "shape";
     oWidth: number; // 원래 shape 사이즈
     oHeight: number;
@@ -596,10 +604,11 @@ export type AnimatableProperty = "position" | "opacity" | "scale" | "rotation";
 /**
  * Which properties an element can actually animate.
  *
- * Shape is `OpacityAnimatable` only — its type carries no position, scale or
- * rotation tracks, so those keyframes would have nowhere to live. An effect is
- * the same shape for a different reason: it has no position, scale or rotation
- * at all, because it always covers the whole frame.
+ * An effect is `OpacityAnimatable` only — it always covers the whole frame, so
+ * it has no position, scale or rotation to move, and those keyframes would have
+ * nowhere to live. A shape used to be listed here beside it, but for a weaker
+ * reason: its other properties were simply unimplemented. It now carries the
+ * full `Animatable` block, so it animates like any other visual element.
  *
  * An effect's `intensity` is deliberately not here. `AnimatableProperty` is a
  * closed union that `keyframeOps`, the curve editor and the timeline's diamond
@@ -613,7 +622,7 @@ export function animatableProperties(
   if (!canAnimate(element)) {
     return [];
   }
-  if (element.filetype === "shape" || element.filetype === "effect") {
+  if (element.filetype === "effect") {
     return ["opacity"];
   }
   return ["position", "opacity", "scale", "rotation"];

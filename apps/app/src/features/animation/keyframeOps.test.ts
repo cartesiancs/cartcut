@@ -19,6 +19,7 @@ import {
 } from "../timeline/tracks";
 import {
   audioElement,
+  effectElement,
   gifElement,
   imageElement,
   keys,
@@ -67,11 +68,13 @@ describe("decline by identity", () => {
   });
 
   it("declines a property the element cannot animate", () => {
-    // A shape's type carries `opacity` alone, so a scale keyframe would create
-    // a track the renderer never reads.
-    const shapes = doc({ a: shapeElement({ trackId: "v1" }) });
-    expect(addKeyframe(shapes, "a", "scale", "x", 0, 1)).toBe(shapes);
-    expect(addKeyframe(shapes, "a", "position", "x", 0, 1)).toBe(shapes);
+    // An effect's type carries `opacity` alone — it covers the whole frame, so
+    // a scale keyframe would create a track the renderer never reads. This
+    // used to be asserted of a shape, which now animates all four.
+    const effects = doc({ a: effectElement({ trackId: "v1" }) });
+    expect(addKeyframe(effects, "a", "scale", "x", 0, 1)).toBe(effects);
+    expect(addKeyframe(effects, "a", "position", "x", 0, 1)).toBe(effects);
+    expect(setTrackActive(effects, "a", "rotation", true)).toBe(effects);
   });
 
   it("declines gif and audio, which carry no animation block", () => {
@@ -224,10 +227,85 @@ describe("setTrackActive", () => {
     expect((next.elements.a as any).animation.scale.x[0].p).toEqual([0, 10]);
   });
 
+  /**
+   * A shape takes exactly the same path as an image now that its type carries
+   * the four-track block. This is the gate, not the draw: `localMatrixOf` was
+   * always generic and would have animated a shape given the data — what used
+   * to be missing was any way to *produce* that data. `setTrackActive` returned
+   * the document by identity, so the panel's Position and Rotation stopwatch
+   * buttons clicked and did nothing at all.
+   */
+  it("seeds a shape's position and rotation from its static fields", () => {
+    const shapes = doc({
+      a: shapeElement({
+        trackId: "v1",
+        location: { x: 12, y: 34 },
+        rotation: 90,
+      }),
+    });
+
+    const moved = setTrackActive(shapes, "a", "position", true, { atMs: 500 });
+    expect(moved).not.toBe(shapes);
+    const position = (moved.elements.a as any).animation.position;
+    expect(position.isActivate).toBe(true);
+    expect(position.x[0].p).toEqual([500, 12]);
+    expect(position.y[0].p).toEqual([500, 34]);
+
+    const spun = setTrackActive(shapes, "a", "rotation", true, { atMs: 500 });
+    expect(spun).not.toBe(shapes);
+    const rotation = (spun.elements.a as any).animation.rotation;
+    expect(rotation.isActivate).toBe(true);
+    expect(rotation.x[0].p).toEqual([500, 90]);
+  });
+
   it("activates without seeding when no cursor is given", () => {
     const next = setTrackActive(inactive(), "a", "opacity", true);
     expect((next.elements.a as any).animation.opacity.isActivate).toBe(true);
     expect((next.elements.a as any).animation.opacity.x).toEqual([]);
+  });
+
+  it("moves a shape on the canvas, from the ops the panel actually calls", () => {
+    // The whole feature end to end: enable the track, add the second keyframe,
+    // and check the pixels — the same two calls the Position stopwatch and a
+    // preview drag make. Asserted through `renderElement` because the transform
+    // lives in `localMatrixOf`, not in `renderShape`.
+    const base = doc({
+      a: shapeElement({
+        trackId: "v1",
+        width: 40,
+        height: 40,
+        oWidth: 40,
+        oHeight: 40,
+        location: { x: 0, y: 0 },
+        shape: points([0, 0], [40, 0], [40, 40], [0, 40]),
+        option: { fillColor: "#ff0000" },
+      }),
+    });
+
+    const enabled = setTrackActive(base, "a", "position", true, { atMs: 0 });
+    const withEnd = addKeyframePaired(
+      addKeyframePaired(enabled, "a", "position", "x", 1000, 100),
+      "a",
+      "position",
+      "y",
+      1000,
+      100,
+    );
+
+    const draw = (cursor: number) => {
+      const { canvas, ctx } = scene(200, 200, "#000000");
+      renderElement(ctx, "a", withEnd.elements.a as any, cursor, false, (c) => {
+        c.fillStyle = "#ff0000";
+        c.fillRect(0, 0, 40, 40);
+      });
+      return canvas;
+    };
+
+    expect(pixel(draw(0), 20, 20).r).toBeGreaterThan(200);
+    expect(pixel(draw(0), 120, 120).r).toBeLessThan(50);
+
+    expect(pixel(draw(1000), 120, 120).r).toBeGreaterThan(200);
+    expect(pixel(draw(1000), 20, 20).r).toBeLessThan(50);
   });
 
   it("does not re-seed a track that already has keyframes", () => {

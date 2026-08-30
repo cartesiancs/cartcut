@@ -25,6 +25,7 @@ import {
 import { bakeTrack } from "../animation/keyframes";
 import {
   audioElement,
+  effectElement,
   gifElement,
   imageElement,
   keys,
@@ -101,16 +102,27 @@ describe("keyframeTimes", () => {
     expect(keyframeTimes(el)).toEqual([]);
   });
 
-  it("gives a shape its opacity track and nothing else", () => {
-    // A shape's type carries opacity alone, so any other track on it is data
-    // the renderer never reads and must not be advertised.
-    const el = shapeElement({
+  it("gives an effect its opacity track and nothing else", () => {
+    // An effect's type carries opacity alone, so any other track on it is data
+    // the renderer never reads and must not be advertised. This used to be
+    // asserted of a shape, which now animates position too — see below.
+    const el = effectElement({
       animation: {
         opacity: track([[0, 0]]),
         position: track([[500, 5]]),
       } as any,
     });
     expect(keyframeTimes(el)).toEqual([0]);
+  });
+
+  it("gives a shape both tracks, now that its type carries them", () => {
+    const el = shapeElement({
+      animation: {
+        opacity: track([[0, 0]]),
+        position: track([[500, 5]]),
+      } as any,
+    });
+    expect(keyframeTimes(el)).toEqual([0, 500]);
   });
 
   it.each([

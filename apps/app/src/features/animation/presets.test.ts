@@ -16,6 +16,7 @@ import {
   videoElement,
   gifElement,
   shapeElement,
+  effectElement,
   audioElement,
 } from "../renderer/testing";
 
@@ -128,17 +129,30 @@ describe("applyPreset", () => {
     expect(applyPreset(before, "a", "fade_in", 250)).toBe(before);
   });
 
-  it("returns the input by identity for a scale preset on a shape", () => {
-    // A shape animates opacity and nothing else.
-    const before = doc({ a: shapeElement({ trackId: "v1" }) });
+  it("returns the input by identity for a scale preset on an effect", () => {
+    // An effect animates opacity and nothing else. This used to be asserted of
+    // a shape, which now carries the full four-track block.
+    const before = doc({ a: effectElement({ trackId: "v1" }) });
     expect(applyPreset(before, "a", "zoom_in", 250)).toBe(before);
   });
 
-  it("still fades a shape, which does animate opacity", () => {
-    const before = doc({ a: shapeElement({ trackId: "v1" }) });
+  it("still fades an effect, which does animate opacity", () => {
+    const before = doc({ a: effectElement({ trackId: "v1" }) });
     const after = applyPreset(before, "a", "fade_in", 250);
     expect(after).not.toBe(before);
     expect(after.elements.a.animation.opacity.isActivate).toBe(true);
+  });
+
+  it("scales and rotates a shape, which now animates all four", () => {
+    const before = doc({ a: shapeElement({ trackId: "v1" }) });
+
+    const zoomed = applyPreset(before, "a", "zoom_in", 250);
+    expect(zoomed).not.toBe(before);
+    expect(zoomed.elements.a.animation.scale.isActivate).toBe(true);
+
+    const settled = applyPreset(before, "a", "rotate_settle", 250);
+    expect(settled).not.toBe(before);
+    expect(settled.elements.a.animation.rotation.isActivate).toBe(true);
   });
 });
 

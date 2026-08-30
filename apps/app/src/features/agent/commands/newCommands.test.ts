@@ -28,6 +28,7 @@ import {
   textElement,
   audioElement,
   shapeElement,
+  effectElement,
 } from "../../renderer/testing";
 import { getCommand } from "../registry";
 import type { MediaProber } from "../../element/mediaProbe";
@@ -725,9 +726,10 @@ describe("animation commands", () => {
     });
 
     it("declines by identity for a clip that cannot animate scale", async () => {
-      // A shape animates opacity and nothing else, so `punch_in` has nothing to
-      // drive and must cost no undo step at all.
-      seed({ s: shapeElement({ trackId: "v1" }) });
+      // An effect animates opacity and nothing else, so `punch_in` has nothing
+      // to drive and must cost no undo step at all. This used to be asserted of
+      // a shape, which now animates all four properties.
+      seed({ s: effectElement({ trackId: "v1" }) });
       const before = historyLength();
 
       const result = await run("apply_animation_preset", {
@@ -737,6 +739,18 @@ describe("animation commands", () => {
 
       expect(result.ok).toBe(false);
       expect(historyLength()).toBe(before);
+    });
+
+    it("drives a shape's scale, now that its type carries the track", async () => {
+      seed({ s: shapeElement({ trackId: "v1" }) });
+
+      const result = await run("apply_animation_preset", {
+        elementIds: ["s"],
+        preset: "punch_in",
+      });
+
+      expect(result.ok).toBe(true);
+      expect((doc().elements.s as any).animation.scale.isActivate).toBe(true);
     });
   });
 

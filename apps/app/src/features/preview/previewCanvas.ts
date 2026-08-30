@@ -25,7 +25,10 @@ import {
 import { previewFxRuntime } from "../renderer/fx/createRuntime";
 import { hasFxElements } from "../renderer/fx/planFrame";
 import { releaseUnusedOverlays } from "../renderer/fx/overlaySource";
-import { isVisualTimelineElement } from "../../@types/timeline";
+import {
+  animatableProperties,
+  isVisualTimelineElement,
+} from "../../@types/timeline";
 import { isTypingEvent } from "../../utils/typingTarget";
 import { hasEditorModifier } from "../../utils/platform";
 import { applyElementTransform } from "../renderer/element";
@@ -895,16 +898,12 @@ export class PreviewCanvas extends LitElement {
       return null;
     }
 
-    // The filetypes carrying a two-lane `position` track. A group is one of
-    // them — dragging it with position animation on has to lay down keyframes
-    // like any other element, and that animation is the whole reason a group
-    // exists.
-    if (
-      activeElement.filetype != "image" &&
-      activeElement.filetype != "video" &&
-      activeElement.filetype != "text" &&
-      activeElement.filetype != "group"
-    ) {
+    // Whether this element carries a two-lane `position` track at all. Asked of
+    // `animatableProperties` rather than of a filetype list written out here:
+    // the list version went stale the moment shapes gained position keyframes,
+    // and it would have gone stale silently — a drag simply stops recording,
+    // with the element still drawing its animation correctly.
+    if (!animatableProperties(activeElement).includes("position")) {
       return null;
     }
 

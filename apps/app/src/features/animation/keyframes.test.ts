@@ -746,8 +746,8 @@ describe("sampleTrack / sampleTrackXY", () => {
 // ======================================================== element helpers
 
 describe("emptyAnimation", () => {
-  it("gives all four tracks to image, video and text", () => {
-    for (const filetype of ["image", "video", "text"]) {
+  it("gives all four tracks to image, video, text, shape and group", () => {
+    for (const filetype of ["image", "video", "text", "shape", "group"]) {
       expect(Object.keys(emptyAnimation(filetype)).sort()).toEqual([
         "opacity",
         "position",
@@ -757,8 +757,10 @@ describe("emptyAnimation", () => {
     }
   });
 
-  it("gives shape opacity alone, matching its type", () => {
-    expect(Object.keys(emptyAnimation("shape"))).toEqual(["opacity"]);
+  it("gives effect opacity alone, matching its type", () => {
+    // The only element left with nothing to move: it covers the whole frame, so
+    // it has no position, scale or rotation for a keyframe to address.
+    expect(Object.keys(emptyAnimation("effect"))).toEqual(["opacity"]);
   });
 
   it("gives gif and audio no animation block at all", () => {
