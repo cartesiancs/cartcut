@@ -17,6 +17,7 @@ import {
   msToFrameFloor,
   normalizeFps,
   planFrameGrid,
+  isFrameLocked,
   shouldShowFrameGrid,
   snapMsToFrame,
   stepCursorByFrames,
@@ -24,7 +25,16 @@ import {
 import { msToPxSigned, pxToMsSigned } from "./geometry";
 import { xAtTime } from "./layout";
 import { MAX_RANGE } from "./zoom";
-import { mulberry32 } from "../renderer/testing";
+import {
+  audioElement,
+  gifElement,
+  imageElement,
+  mulberry32,
+  shapeElement,
+  textElement,
+  videoElement,
+} from "../renderer/testing";
+import { isAudibleElement } from "./audio";
 
 /** The rates a project plausibly runs at, plus two awkward ones. */
 const RATES = [24, 25, 30, 50, 60, 120];
@@ -590,5 +600,35 @@ describe("frameStartMs", () => {
   it("guards an unusable rate the way every other reader does", () => {
     expect(frameStartMs(1000, 0)).toBe(frameStartMs(1000, DEFAULT_FPS));
     expect(frameStartMs(1000, NaN)).toBe(frameStartMs(1000, DEFAULT_FPS));
+  });
+});
+
+describe("isFrameLocked", () => {
+  // The grid is a picture constraint. Every element type that draws is bound by
+  // it; the one that only makes a sound is not.
+  it("holds every drawn element on the grid", () => {
+    expect(isFrameLocked(videoElement())).toBe(true);
+    expect(isFrameLocked(imageElement())).toBe(true);
+    expect(isFrameLocked(gifElement())).toBe(true);
+    expect(isFrameLocked(textElement())).toBe(true);
+    expect(isFrameLocked(shapeElement())).toBe(true);
+  });
+
+  it("lets audio off it", () => {
+    expect(isFrameLocked(audioElement())).toBe(false);
+  });
+
+  // The two predicates read the same field and answer opposite questions, so
+  // reaching for the wrong one compiles and very nearly works. A video with
+  // sound is the case that tells them apart: audible, and still drawn.
+  it("is not `isAudibleElement` — a noisy video stays locked", () => {
+    const noisy = videoElement({ isExistAudio: true });
+    expect(isAudibleElement(noisy)).toBe(true);
+    expect(isFrameLocked(noisy)).toBe(true);
+
+    // And the mirror image: a detached video is silent but still drawn.
+    const silenced = videoElement({ isExistAudio: true, audioDetached: true });
+    expect(isAudibleElement(silenced)).toBe(false);
+    expect(isFrameLocked(silenced)).toBe(true);
   });
 });

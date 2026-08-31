@@ -27,10 +27,22 @@
  * maximum zoom ten pixels is a fifth of a frame, so snapping can only fire when
  * quantization would have chosen the same edge anyway; zoomed out, ten pixels
  * is hundreds of milliseconds and snapping does all the work.
+ *
+ * Layer 2 asks *who* before it fires. The grid is a picture constraint — see
+ * `frames.ts#isFrameLocked` — so a drag carrying nothing but audio skips it and
+ * comes to rest wherever the pointer put it, to the millisecond. Layer 1 still
+ * runs: a magnet onto a neighbour's edge is adjacency, not a grid, and lining
+ * sound up with a cut is the thing an audio drag most often means.
  */
 
 import { pxToMsSigned, spanEnd, spanLength, spanStart } from "./geometry";
-import { snapMsToFrame } from "./frames";
+import {
+  frameToMs,
+  isFrameLocked,
+  msToFrame,
+  msToFrameCeil,
+  snapMsToFrame,
+} from "./frames";
 import { collectSnapPoints, snapSpan } from "./snapping";
 import { trackDeltaFor } from "./dragMachine";
 import type { TimelineDocument } from "./tracks";
@@ -48,6 +60,24 @@ export const SNAP_TOLERANCE_PX = 10;
  * pointer can express.
  */
 const NOOP_EPSILON_MS = 1e-6;
+
+/**
+ * How far to travel, rounded to a whole number of frames, without crossing zero.
+ *
+ * The clamp is `ceil` rather than `max(0, …)` on the result: taking the
+ * shortest travel that still keeps the anchor at or after zero preserves the
+ * whole-frame property, where clamping the destination afterwards would break
+ * it — and breaking it is exactly what this function exists to avoid.
+ */
+function travelInWholeFrames(
+  fromMs: number,
+  toMs: number,
+  fps: number,
+): number {
+  const wanted = msToFrame(toMs - fromMs, fps);
+  const shortest = msToFrameCeil(-fromMs, fps);
+  return frameToMs(Math.max(wanted, shortest), fps);
+}
 
 export type MovePlan =
   | { kind: "none" }
@@ -77,7 +107,12 @@ export type ResolveMoveInput = {
   playheadMs: number;
   trackPitch: number;
   tolerancePx?: number;
-  /** Off only for testing the pre-quantization behaviour. */
+  /**
+   * Off only for testing the pre-quantization behaviour.
+   *
+   * A permission, not an instruction: an all-audio drag is unquantized whatever
+   * this says. Leaving it on is what the app does.
+   */
   quantize?: boolean;
 };
 
@@ -101,6 +136,22 @@ export function resolveMove(input: ResolveMoveInput): MovePlan {
     return { kind: "none" };
   }
 
+  // The grid applies to the whole gesture or to none of it, because one delta
+  // moves every dragged clip. One picture clip in the selection keeps it on:
+  // dragging a video together with its detached audio has to preserve their
+  // relative sync, so they must share a delta, and it is the picture that has a
+  // say in what that delta may be.
+  const onGrid =
+    quantize &&
+    [primaryId, ...dragIds].some((id) => {
+      const element = base.elements[id];
+      return element != null && isFrameLocked(element);
+    });
+
+  // ...and *how* it applies depends on which clip the pointer is holding, since
+  // the anchor is the one whose position the grid gets to choose.
+  const anchorLocked = isFrameLocked(primary);
+
   const trackDelta = free ? trackDeltaFor(dyPx, trackPitch) : 0;
 
   // A press that has not travelled must stay a press. Without this the pointer
@@ -122,11 +173,39 @@ export function resolveMove(input: ResolveMoveInput): MovePlan {
     primary.trackId,
   );
 
-  const snappedToEdge = snapped.hit != null;
-  const targetMs =
-    snappedToEdge || !quantize
-      ? snapped.startMs
-      : Math.max(0, snapMsToFrame(snapped.startMs, fps));
+  let targetMs: number;
+  if (!onGrid) {
+    // Audio, alone. Wherever the pointer left it, edge included.
+    targetMs = snapped.startMs;
+  } else if (!anchorLocked) {
+    // The pointer is holding audio, and audio is not the grid's to place — but
+    // the picture coming with it is. So quantize the *distance travelled*
+    // instead of the destination: a whole number of frames of travel leaves
+    // every already-aligned clip in the selection exactly as aligned as it was,
+    // and leaves the audio on whatever phase it chose.
+    //
+    // This is the one case where quantizing the delta is right, and it is right
+    // for the reason it is wrong everywhere else. Elsewhere the phase it
+    // preserves is drift nobody asked for; here it is the whole point.
+    //
+    // It also outranks the edge snap, which is the only place in this module
+    // where anything does. The snap has chosen where to aim; honouring it to
+    // the millisecond would put the audio flush against a neighbour and knock
+    // every picture clip in the selection off the grid to do it. An audio clip
+    // meeting an edge exactly is a nicety. A video clip landing between two
+    // frames is a frame of background at the cut.
+    targetMs =
+      spanStart(primary) +
+      travelInWholeFrames(spanStart(primary), snapped.startMs, fps);
+  } else if (snapped.hit != null) {
+    targetMs = snapped.startMs;
+  } else {
+    targetMs = Math.max(0, snapMsToFrame(snapped.startMs, fps));
+  }
+
+  // Honoured, or aimed at and then rounded away from. Only the first draws a
+  // guide — a line the clip visibly did not land on reads as a bug.
+  const snappedToEdge = snapped.hit != null && targetMs === snapped.startMs;
 
   // Both targets are exact — a frame instant, or a neighbour's actual edge — so
   // neither may be rounded. Rounding the *delta* is what the old code did, and
@@ -136,10 +215,19 @@ export function resolveMove(input: ResolveMoveInput): MovePlan {
   // That was invisible while every clip sat on a whole millisecond and is not
   // once two of every three frames fall between them.
   //
-  // The rounding survives only on the unquantized path, where the target came
-  // straight from pixel arithmetic and there is nothing exact to preserve.
+  // The rounding survives only where the target came straight from pixel
+  // arithmetic and there is nothing exact to preserve — the unquantized path,
+  // and an audio drag that found no edge. An audio drag which *did* find one is
+  // exact like any other: the edge is the same promise whoever asked for it,
+  // and rounding to the nearest millisecond would land beside it.
+  //
+  // What gets rounded there is the delta, not the resting place, so a clip
+  // already sitting between two milliseconds keeps that phase. A clip parked
+  // exactly on a cut should not lurch a half-millisecond off it the first time
+  // it is nudged, which rounding the position would do.
+  const preserveTarget = onGrid || (quantize && snappedToEdge);
   const rawApplied = targetMs - spanStart(primary);
-  const appliedMs = quantize ? rawApplied : Math.round(rawApplied);
+  const appliedMs = preserveTarget ? rawApplied : Math.round(rawApplied);
 
   // A gesture that moves nothing must produce nothing: `moveClips` builds a
   // fresh document even for a zero delta, so the identity check `withCheckpoint`
@@ -152,7 +240,7 @@ export function resolveMove(input: ResolveMoveInput): MovePlan {
     kind: "move",
     appliedMs,
     trackDelta,
-    snapGuideMs: snapped.hit?.ms ?? null,
+    snapGuideMs: snappedToEdge ? (snapped.hit?.ms ?? null) : null,
   };
 }
 

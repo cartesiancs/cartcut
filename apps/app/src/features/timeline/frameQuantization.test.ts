@@ -31,7 +31,7 @@ import {
 } from "./tracks";
 import { TRACK_PITCH } from "./layout";
 import { MAX_RANGE, maxRangeForFps } from "./zoom";
-import { imageElement, mulberry32 } from "../renderer/testing";
+import { audioElement, imageElement, mulberry32 } from "../renderer/testing";
 import { rebakeAnimations } from "../animation/keyframeOps";
 import { bakeRateFor } from "../animation/keyframes";
 
@@ -40,7 +40,7 @@ const RATES = [24, 25, 30, 50, 60, 120];
 function doc(elements: Record<string, any>): TimelineDocument {
   return normalizeDocument({
     schemaVersion: SCHEMA_VERSION,
-    tracks: [createTrack("v1", "video", 0)],
+    tracks: [createTrack("v1", "video", 0), createTrack("a1", "audio", 1)],
     elements,
   });
 }
@@ -118,6 +118,54 @@ describe("a quantized edit lines up with the export", () => {
 });
 
 describe("a drag survives the trip through the document", () => {
+  it("keeps the picture on the grid when audio is dragged along with it", () => {
+    // Audio is exempt from the grid (`frames.ts#isFrameLocked`), and this is
+    // where that exemption has to stop: one gesture is one delta, so an audio
+    // clip in the selection must not carry the picture off the instants the
+    // exporter samples. Checked through `isElementVisibleAtTime` rather than by
+    // asserting alignment, because being drawn on the right frames is the claim
+    // alignment exists to serve.
+    const fps = 60;
+    const random = mulberry32(4242);
+    const base = doc({
+      v: imageElement({
+        trackId: "v1",
+        startTime: frameToMs(60, fps),
+        duration: frameToMs(24, fps),
+      }),
+      a: audioElement({ trackId: "a1", startTime: 1988.888, duration: 2000 }),
+    });
+    const before = visibleFrames(base.elements.v, fps, 400);
+
+    for (let i = 0; i < 100; i++) {
+      const plan = resolveMove({
+        base,
+        primaryId: "a", // the *audio* is under the pointer — the harder direction
+        dragIds: ["a", "v"],
+        dxPx: (random() - 0.5) * 1200,
+        dyPx: 0,
+        free: false,
+        range: MAX_RANGE,
+        fps,
+        playheadMs: -1_000_000,
+        trackPitch: TRACK_PITCH,
+      });
+      if (plan.kind !== "move") continue;
+
+      const next = moveClips(base, ["a", "v"], plan.appliedMs, 0);
+      if (next === base) continue;
+
+      // The picture lands a whole number of frames from where it was, and is
+      // drawn on exactly as many export frames as before.
+      const after = visibleFrames(next.elements.v, fps, 400);
+      expect(after.length).toBe(before.length);
+      expect(after[0] - before[0]).toBe(
+        msToFrame(next.elements.v.startTime, fps) - 60,
+      );
+      expect(isFrameAligned(next.elements.v.startTime, fps)).toBe(true);
+    }
+  });
+
   it("stays on the grid after moveClips has applied it", () => {
     // `resolveMove` produces an exact target, but it reaches the element as
     // `startTime + (target - startTime)`, which IEEE-754 does not promise

@@ -25,6 +25,7 @@
  * under `environment: "node"`.
  */
 
+import type { TimelineElement } from "../../@types/timeline";
 import { msToPxSigned, pxToMsSigned } from "./geometry";
 
 /** Used when a project carries no usable frame rate. */
@@ -251,6 +252,26 @@ export function stepCursorByFrames(
  */
 export function snapMsToFrame(ms: number, fps: number): number {
   return frameToMs(msToFrame(ms, fps), fps);
+}
+
+/**
+ * Whether the frame grid applies to this clip at all.
+ *
+ * Frame alignment is a *picture* constraint. The invariant at the top of this
+ * file exists because an edge falling between two frame instants shows one
+ * frame of whatever is behind it — a sliver of background at every cut. Sound
+ * has no frames: it is sampled some 800 times finer than 60fps, nothing is
+ * drawn for it, and an audio clip starting mid-frame is not a defect the
+ * exporter can even express. Holding one on the grid buys nothing and costs
+ * the user sync precision they can hear, so the grid lets audio go.
+ *
+ * A `video` stays locked even when it is the noisiest thing in the project:
+ * the question is whether the clip *draws*, not whether it is audible. That is
+ * what separates this from `audio.ts#isAudibleElement`, which answers the
+ * opposite question and would give a video the wrong answer here.
+ */
+export function isFrameLocked(element: TimelineElement): boolean {
+  return element.filetype !== "audio";
 }
 
 /**

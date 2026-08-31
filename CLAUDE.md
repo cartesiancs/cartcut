@@ -199,6 +199,23 @@ change of grid, not a re-cut; off-grid clips are pulled onto the new grid the
 next time they are dragged, which is what every NLE does and the only choice
 that cannot lose work.
 
+**The grid does not apply to audio.** Frame alignment is a picture constraint —
+an edge between two frame instants shows one frame of whatever is behind it — and
+sound has no frames, so `frames.ts#isFrameLocked` lets an audio clip drag freely,
+to the millisecond. This is drag only (`resolveMove`); trims, drops and the MCP
+`move_clips` still quantize everything. Two consequences are easy to get wrong
+and both are pinned by `dragResolve.test.ts`:
+
+- **One gesture is one delta**, so the grid is all-or-nothing across a selection:
+  one picture clip in the drag keeps it on, which is what stops a video and its
+  detached audio drifting apart.
+- **With audio under the pointer and picture along for the ride, the *distance*
+  is quantized rather than the destination** — the anchor cannot be corrected onto
+  a grid it is exempt from, so whole-frame travel is what leaves the picture as
+  aligned as it started. That path outranks the edge snap, the only place in the
+  module where anything does, and it suppresses the snap guide when it rounds
+  away from the line.
+
 The baked animation lanes (`ax`/`ay`) are a *cache* read by nearest-sample
 lookup, so their rate has to be at least the project's — `keyframes.ts#bakeRateFor`
 is `max(BAKE_HZ, fps)`, keeping a 60Hz floor so nothing at or below 60 changes.

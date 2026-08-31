@@ -6,7 +6,12 @@ import {
   normalizeDocument,
   type TimelineDocument,
 } from "./tracks";
-import { imageElement, videoElement, mulberry32 } from "../renderer/testing";
+import {
+  audioElement,
+  imageElement,
+  videoElement,
+  mulberry32,
+} from "../renderer/testing";
 import { msToPxSigned, pxToMsSigned, spanEnd, spanStart } from "./geometry";
 import { frameToMs, framePx, isFrameAligned, msToFrame } from "./frames";
 import { moveClips, splitClip, trimClipEnd, trimClipStart } from "./clipOps";
@@ -22,7 +27,11 @@ const WIDE = 0.9;
 function doc(elements: Record<string, any>): TimelineDocument {
   return normalizeDocument({
     schemaVersion: SCHEMA_VERSION,
-    tracks: [createTrack("v1", "video", 0), createTrack("v2", "video", 1)],
+    tracks: [
+      createTrack("v1", "video", 0),
+      createTrack("v2", "video", 1),
+      createTrack("a1", "audio", 2),
+    ],
     elements,
   });
 }
@@ -440,5 +449,268 @@ describe("the render-sample invariant", () => {
       const start = spanStart(base.elements.a) + plan.appliedMs;
       expect(start).toBeCloseTo((msToFrame(start, fps) / fps) * 1000, 6);
     }
+  });
+});
+
+describe("resolveMove — audio is not on the frame grid", () => {
+  /** One frame, in pixels, at the zoom these tests use. */
+  const CELL = framePx(ZOOMED, FPS);
+  /** A drag too short to survive rounding to a frame — a third of one. */
+  const SUB_FRAME_PX = CELL / 3;
+
+  /** An audio clip on the audio row, aligned unless a test says otherwise. */
+  function audioClip(startFrame: number, over = {}) {
+    return audioElement({
+      trackId: "a1",
+      startTime: frameToMs(startFrame, FPS),
+      duration: 2000,
+      trim: { startTime: 0, endTime: 2000 },
+      ...over,
+    });
+  }
+
+  it("moves by less than a frame, where a picture clip does not move at all", () => {
+    // The report, and the fix, in one comparison. The same gesture on the same
+    // row of pixels: sound follows the pointer, picture waits for the next cell.
+    const heard = move(doc({ a: audioClip(60) }), { dxPx: SUB_FRAME_PX });
+    expect(heard.kind).toBe("move");
+    if (heard.kind !== "move") return;
+    expect(heard.appliedMs).not.toBe(0);
+
+    const seen = move(doc({ a: alignedClip(60, 120) }), { dxPx: SUB_FRAME_PX });
+    expect(seen.kind).toBe("none");
+  });
+
+  it("comes to rest between frames", () => {
+    const base = doc({ a: audioClip(60) });
+    const offGrid = [1, 2, 4, 5, 7, 8].map((thirds) => {
+      const plan = move(base, { dxPx: (CELL * thirds) / 3 });
+      if (plan.kind !== "move") return null;
+      return isFrameAligned(spanStart(base.elements.a) + plan.appliedMs, FPS);
+    });
+    // Not "some of them are off-grid" — every one of these lands a third or two
+    // thirds of a frame along, so none of them may be aligned.
+    expect(offGrid).toEqual([false, false, false, false, false, false]);
+  });
+
+  it("lands on a whole millisecond", () => {
+    const base = doc({ a: audioClip(60) });
+    const random = mulberry32(23);
+    for (let i = 0; i < 200; i++) {
+      const dxPx = (random() - 0.5) * 600;
+      const plan = move(base, { dxPx });
+      if (plan.kind !== "move") continue;
+
+      const next = moveClips(base, ["a"], plan.appliedMs, 0);
+      const landed = spanStart(next.elements.a);
+      expect(Number.isInteger(landed)).toBe(true);
+      expect(landed).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("is not dragged onto the grid on its way somewhere else", () => {
+    // The mirror of "pulls a legacy off-grid clip onto the grid, once". An
+    // audio clip the user placed at 1988.888 is where they put it; a drag moves
+    // it, it does not correct it.
+    const base = doc({ a: audioClip(0, { startTime: 1988.888 }) });
+    const plan = move(base, { dxPx: CELL * 3 });
+    expect(plan.kind).toBe("move");
+    if (plan.kind !== "move") return;
+    expect(isFrameAligned(1988.888 + plan.appliedMs, FPS)).toBe(false);
+    // Whole milliseconds are counted from where it already was, so the phase it
+    // arrived with survives the move.
+    expect((1988.888 + plan.appliedMs) % 1).toBeCloseTo(0.888, 9);
+  });
+
+  it("still snaps to a neighbour's edge, exactly", () => {
+    // Losing the grid must not lose the magnet: lining sound up with a cut is
+    // the thing an audio drag most often means, and the edge is taken verbatim
+    // rather than rounded to the nearest millisecond beside it.
+    const neighbourEnd = 1988.888;
+    const base = doc({
+      a: audioClip(0, { startTime: 6000 }),
+      n: audioElement({
+        trackId: "a1",
+        startTime: 988.888,
+        duration: 1000,
+        trim: { startTime: 0, endTime: 1000 },
+      }),
+    });
+    const wanted = neighbourEnd - spanStart(base.elements.a);
+    const plan = move(base, { dxPx: msToPxSigned(wanted, ZOOMED) + 3 });
+    expect(plan).toMatchObject({ kind: "move", snapGuideMs: neighbourEnd });
+    if (plan.kind !== "move") return;
+
+    const next = moveClips(base, ["a"], plan.appliedMs, 0);
+    expect(spanStart(next.elements.a)).toBe(spanEnd(base.elements.n));
+  });
+
+  it("keeps the grid when a picture clip is dragged along with it", () => {
+    // One gesture is one delta, so the grid is all-or-nothing. A video and its
+    // detached audio moving together must share a delta or lose sync, and it is
+    // the video that has a say in what the delta may be.
+    //
+    // The audio deliberately starts off-grid — which, now that audio drags
+    // freely, is its ordinary state rather than a legacy accident. Grabbing it
+    // and quantizing *its* destination would drag the video off the grid with
+    // it, so the delta is what gets quantized when the anchor is audio.
+    const base = doc({
+      v: videoElement({
+        trackId: "v1",
+        startTime: frameToMs(60, FPS),
+        duration: 2000,
+        trim: { startTime: 0, endTime: 2000 },
+        audioDetached: true,
+      }),
+      a: audioClip(0, { startTime: 1013.4 }),
+    });
+    const offset = spanStart(base.elements.a) - spanStart(base.elements.v);
+
+    for (const primaryId of ["v", "a"]) {
+      const plan = move(base, {
+        primaryId,
+        dragIds: ["v", "a"],
+        dxPx: CELL * 2.4,
+      });
+      expect(plan.kind).toBe("move");
+      if (plan.kind !== "move") return;
+
+      const next = moveClips(base, ["v", "a"], plan.appliedMs, 0);
+      // The picture is on the grid whichever clip the pointer was holding.
+      expect(isFrameAligned(spanStart(next.elements.v), FPS)).toBe(true);
+      // The pair has not drifted apart, which is the whole reason they share
+      // a delta.
+      expect(
+        spanStart(next.elements.a) - spanStart(next.elements.v),
+      ).toBeCloseTo(offset, 9);
+    }
+  });
+
+  it("travels a whole number of frames when audio anchors a mixed drag", () => {
+    // The delta itself, stated directly: dragging by 2.4 cells with an
+    // off-grid audio clip under the pointer moves everything exactly two
+    // frames, not "two frames plus the audio's phase error".
+    const base = doc({
+      v: alignedClip(60, 120),
+      a: audioClip(0, { startTime: 1013.4 }),
+    });
+    const plan = move(base, {
+      primaryId: "a",
+      dragIds: ["a", "v"],
+      dxPx: CELL * 2.4,
+    });
+    expect(plan.kind).toBe("move");
+    if (plan.kind !== "move") return;
+    expect(plan.appliedMs).toBeCloseTo(frameToMs(2, FPS), 9);
+
+    // ...and the audio keeps the phase it had, rather than being corrected.
+    const next = moveClips(base, ["a", "v"], plan.appliedMs, 0);
+    expect(isFrameAligned(spanStart(next.elements.a), FPS)).toBe(false);
+  });
+
+  it("draws no snap guide it is about to round away from", () => {
+    // A mixed drag aims at an off-grid edge and then rounds the travel to a
+    // whole frame, so the clip comes to rest beside the line rather than on it.
+    // Drawing the line anyway is how a correct edit reads as a broken one.
+    const base = doc({
+      v: alignedClip(300, 60),
+      a: audioClip(0, { startTime: 6013.4 }),
+      n: audioElement({
+        trackId: "a1",
+        startTime: 988.888,
+        duration: 1000,
+        trim: { startTime: 0, endTime: 1000 },
+      }),
+    });
+    const wanted = 1988.888 - spanStart(base.elements.a);
+    const plan = move(base, {
+      primaryId: "a",
+      dragIds: ["a", "v"],
+      dxPx: msToPxSigned(wanted, ZOOMED) + 3,
+    });
+    expect(plan.kind).toBe("move");
+    if (plan.kind !== "move") return;
+
+    expect(spanStart(base.elements.a) + plan.appliedMs).not.toBe(1988.888);
+    expect(plan.snapGuideMs).toBe(null);
+    // The picture is what the rounding was for.
+    expect(isFrameAligned(spanStart(base.elements.v) + plan.appliedMs, FPS)).toBe(
+      true,
+    );
+  });
+
+  it("still draws the guide when audio drags alone and lands on the edge", () => {
+    // The counterpart: nothing was rounded away, so the line is honest.
+    const base = doc({
+      a: audioClip(0, { startTime: 6000 }),
+      n: audioElement({
+        trackId: "a1",
+        startTime: 988.888,
+        duration: 1000,
+        trim: { startTime: 0, endTime: 1000 },
+      }),
+    });
+    const wanted = 1988.888 - spanStart(base.elements.a);
+    const plan = move(base, { dxPx: msToPxSigned(wanted, ZOOMED) + 3 });
+    expect(plan).toMatchObject({ kind: "move", snapGuideMs: 1988.888 });
+  });
+
+  it("does not push an audio anchor before zero", () => {
+    // The whole-frame travel is clamped by taking the shortest journey that
+    // still lands at or after zero, so the property survives the clamp.
+    const base = doc({
+      v: alignedClip(6, 12),
+      a: audioClip(0, { startTime: 60.4 }),
+    });
+    const plan = move(base, {
+      primaryId: "a",
+      dragIds: ["a", "v"],
+      dxPx: -10_000,
+    });
+    expect(plan.kind).toBe("move");
+    if (plan.kind !== "move") return;
+
+    expect(60.4 + plan.appliedMs).toBeGreaterThanOrEqual(0);
+    expect(isFrameAligned(spanStart(base.elements.v) + plan.appliedMs, FPS)).toBe(
+      true,
+    );
+  });
+
+  it("still declines a gesture that moves nothing", () => {
+    // The identity contract `withCheckpoint` relies on: no grid to round a
+    // wiggle away means the millisecond floor has to do it instead, or an audio
+    // clip would record an undo step for every pointer event.
+    const base = doc({ a: audioClip(60) });
+    expect(move(base, { dxPx: 0 }).kind).toBe("none");
+    // A third of a pixel is a third of a millisecond at this zoom.
+    expect(move(base, { dxPx: 0.3 }).kind).toBe("none");
+  });
+
+  it("holds the two rules apart across arbitrary drags", () => {
+    const audio = doc({ a: audioClip(60) });
+    const picture = doc({ a: alignedClip(60, 120) });
+    const random = mulberry32(31);
+    let everOffGrid = false;
+
+    for (let i = 0; i < 200; i++) {
+      const dxPx = (random() - 0.5) * 600;
+
+      const heard = move(audio, { dxPx });
+      if (heard.kind === "move") {
+        const landed = spanStart(audio.elements.a) + heard.appliedMs;
+        expect(Number.isInteger(landed)).toBe(true);
+        everOffGrid ||= !isFrameAligned(landed, FPS);
+      }
+
+      const seen = move(picture, { dxPx });
+      if (seen.kind === "move") {
+        const landed = spanStart(picture.elements.a) + seen.appliedMs;
+        expect(isFrameAligned(landed, FPS)).toBe(true);
+      }
+    }
+
+    // Guards the assertion above from passing vacuously: if audio were still
+    // quantized, every landing would be aligned and nothing here would fail.
+    expect(everOffGrid).toBe(true);
   });
 });
