@@ -8,7 +8,7 @@ CartCut
 The finest AI video editor
 </p>
 
-![plot](./.github/screenshotv1.png)
+![plot](./.github/screenshotv5.webp)
 
 <p align='center'>
 
@@ -38,9 +38,6 @@ In addition to essential features like basic cut editing, animation, sound mixin
 
 It also supports layer-based editing, which differs from traditional track-based editing. This approach makes it easier to apply multiple effects to individual assets, providing greater flexibility and creative control.
 
-> [!IMPORTANT]
-> 📢 <strong>Currently, the 0.4.x version is being refactored.</strong> It can be a little unstable.
-
 ## About The Project
 
 https://github.com/user-attachments/assets/922a8a7d-ec58-4141-bb4a-5b016da268a8
@@ -67,8 +64,8 @@ You can check out a limited demo of the website at the [following link](https://
 - Chromakey
 - AI Auto Caption (whisper)
 - Blur Effect (WebGL)
-- GIF Api
 - Draw shape
+- Effects and Transitions
 - and more...
 
 ## Installation
