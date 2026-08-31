@@ -23,8 +23,25 @@ import type {
   AudioElementType,
 } from "../../@types/timeline";
 import { emptyAnimation, type Keyframe } from "../animation/keyframes";
+import { setSurfaceFactory, type Surface } from "./surface";
 
 export type Rgba = { r: number; g: number; b: number; a: number };
+
+/**
+ * Where blend-mode isolation layers come from under `environment: "node"`.
+ *
+ * Installed on import — every renderer suite imports this module — so the
+ * suites exercise the *shipping* isolation path rather than the degraded
+ * fallback `renderElement` takes when no surface can be made. Without it a
+ * blended text clip would test as correct here and be wrong in the app.
+ */
+setSurfaceFactory((width, height): Surface => {
+  const canvas = createCanvas(width, height);
+  return {
+    canvas: canvas as unknown as Surface["canvas"],
+    ctx: canvas.getContext("2d") as unknown as CanvasRenderingContext2D,
+  };
+});
 
 /** A canvas plus its 2D context, typed as the renderers expect. */
 export function scene(w: number, h: number, background?: string) {

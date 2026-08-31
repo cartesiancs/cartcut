@@ -122,6 +122,51 @@ host platform, which is the wrong one half the time here, and webpack has no
 `"posix" | "win32"` parameter, the same rule `utils/platform.ts` states for
 `isMac` and for the same reason: both branches have to be covered on one CI host.
 
+## Compositing and blend modes
+
+Everything visual is composited in the **renderer, on a 2D canvas**, by one
+function: `renderTimelineAtTime` -> `paint` -> `renderElement`. The preview, the
+in-app export, the offscreen export window, the agent's contact sheet and the
+e2e reference render all call it, which is why parity between preview and
+export is structural rather than something anyone maintains.
+
+FFmpeg does **no** video compositing on the v2 path. `renderTimeline.ts` hands
+it finished frames as raw RGBA over a pipe and the video half of the filter
+graph is `[0:v]null[vout]` — a pass-through, not a discard. So a new visual
+property is a change to `renderElement` and to nothing in `electron/render/`.
+
+A clip carries an optional `blend`
+(`@types/timeline.ts#BLEND_MODES`, seventeen values, Canvas2D vocabulary), on
+video, image, gif, shape and text. Absent means `"source-over"`, resolved by
+`renderer/blend.ts#blendOf` on every read; `coerceBlend` validates writes. The
+same `normalizeFps`/`coerceFps` split, for the same reason. **A blend of
+`"source-over"` deletes the key** rather than storing it, so a project nobody
+has blended saves byte-identically to one written before the feature — and
+`SCHEMA_VERSION` did not move.
+
+Three things about it that are easy to get wrong:
+
+- **A blended clip is drawn in isolation.** `renderElement` paints it whole onto
+  a scratch layer and composites that once. Not tidiness: `renderText` issues up
+  to five overlapping draws per line — background box, glow, shadow, outline
+  stroke, fill — and with the mode set on the shared context those blend against
+  *each other*. The layer comes from an injected factory
+  (`renderer/surface.ts`), because the node suites have no `document`; omit the
+  factory and it degrades to setting `globalCompositeOperation` directly, which
+  is still exact for the single-draw element types.
+- **Blend is suspended inside a transition.** `fx/compositor.ts#renderClip`
+  draws each half into a cleared *transparent* buffer, so there is nothing to
+  blend against and `multiply` would erase the clip. `paint` marks that context
+  `isolated`. A transition is an operation on a pair, not a property of one clip.
+- **The backdrop is the whole stack, including the project background.** A
+  `multiply` clip on the bottom track multiplies with the background colour, so
+  on black it goes black. That is correct and matches every NLE; it is also the
+  first thing anyone reports as a bug.
+
+`tests/e2e/specs/blend.spec.ts` checks the modes against the blend arithmetic
+restated independently in that file, through a real export — not against a
+reference render, which would use the same code and prove nothing.
+
 ## The frame rate
 
 A project setting, sitting on `renderOptionStore.options` next to `previewSize`
@@ -170,7 +215,7 @@ step, as the user's own mouse.
 
 ```
 electron/mcp/server.ts      transport, sessions, auth
-electron/mcp/tools.ts       barrel: assembles the 36 tools Claude Code sees
+electron/mcp/tools.ts       barrel: assembles the 51 tools Claude Code sees
 electron/mcp/tools/define.ts  the erased Registrar, shared zod fragments
 electron/mcp/tools/*.ts     one module per family (read, cut, media, tracks, …)
 electron/mcp/bridge.ts      main -> renderer request/response
@@ -246,8 +291,14 @@ npm run test:e2e:check      # typecheck the suite on its own
   `VideoFilterPipeline` whenever `filter.enable` is set. So `null` is a
   pass-through of already-filtered frames rather than a discard. The stale note
   does still hold for `electron/render/renderMain.ts`, the legacy `RENDER` ipc
-  path, which nothing in the renderer calls any more. Traced through the source,
-  not yet confirmed by running an export — do that before relying on it.
+  path, which nothing in the renderer calls any more.
+
+  The *pipe* half of that reading is now confirmed by a run:
+  `tests/e2e/specs/blend.spec.ts` exports through the real Render button and
+  decodes back per-clip compositing the renderer did, landing within one byte
+  per channel. So renderer-side picture work does reach the delivered file. The
+  filters specifically are still untested end to end — they go through WebGL
+  rather than the 2D context — so confirm `chromakey` before relying on it.
 - Transitions and effects are **finished everywhere except the agent surface**.
   `TransitionElementType` and `EffectElementType` are real, `transitionOps.ts`
   and `effectOps.ts` hold every mutator, `transitionRepair.ts` keeps them honest

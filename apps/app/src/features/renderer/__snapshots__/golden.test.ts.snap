@@ -9,3 +9,13 @@ exports[`golden frames > composites a stable frame at each sampled timecode 1`] 
   "3999": "bd2b9e44",
 }
 `;
+
+exports[`golden frames — blended > composites a stable frame at each sampled timecode 1`] = `
+{
+  "0": "47ed7dee",
+  "1000": "47ed7dee",
+  "2000": "a1121a50",
+  "3000": "976dfa17",
+  "3999": "28c3cd11",
+}
+`;

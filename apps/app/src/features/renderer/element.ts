@@ -10,7 +10,9 @@ import {
   parentMatrixOf,
   type TransformMemo,
 } from "../timeline/transform";
+import { blendOf, DEFAULT_BLEND, isBlendIsolating } from "./blend";
 import { renderControlOutline } from "./controlOutline";
+import { layerFor } from "./surface";
 import type { ElementRenderFunction } from "./type";
 
 /**
@@ -27,6 +29,22 @@ import type { ElementRenderFunction } from "./type";
 export type ElementRenderContext = {
   elements: Timeline;
   memo?: TransformMemo;
+  /**
+   * True while drawing into a buffer that holds this element alone.
+   *
+   * A transition renders each of its two clips into its own cleared,
+   * *transparent* canvas before mixing them in GL — see
+   * `fx/compositor.ts#renderClip`. There is nothing beneath a clip there, so a
+   * blend mode has nothing to blend with: `multiply` against transparent black
+   * would annihilate the clip and the dissolve would play into a hole.
+   *
+   * So blend is suspended for the length of the transition. That matches what
+   * every NLE does, and it follows from what a transition is — an operation on
+   * a *pair* of clips, not a property of one of them. The clip's own transform,
+   * opacity, keyframes and group parenting all still apply, because those are
+   * properties of the clip alone.
+   */
+  isolated?: boolean;
 };
 
 /**
@@ -80,6 +98,104 @@ export function applyParentTransform(
 }
 
 export function renderElement<T extends VisualTimelineElement>(
+  ctx: CanvasRenderingContext2D,
+  elementId: string,
+  element: T,
+  timelineCursor: number,
+  controlOutlineEnabled: boolean,
+  renderFunction: ElementRenderFunction<T>,
+  context?: ElementRenderContext,
+): void {
+  const blend = context?.isolated === true ? DEFAULT_BLEND : blendOf(element);
+
+  // The path every clip took before blend modes existed, and the one almost
+  // every clip still takes. Byte-for-byte what it was: no layer is allocated,
+  // no extra blit is issued, and `golden.test.ts`'s digests are the proof.
+  if (!isBlendIsolating(blend)) {
+    drawDirect(
+      ctx,
+      elementId,
+      element,
+      timelineCursor,
+      controlOutlineEnabled,
+      renderFunction,
+      context,
+    );
+    return;
+  }
+
+  const layer = layerFor(ctx);
+
+  if (layer != null) {
+    // Isolation: the clip is drawn whole — every sub-draw its renderer makes,
+    // in order, against transparency — and then composited once. Anything less
+    // blends a text clip's outline against its own fill.
+    layer.ctx.setTransform(ctx.getTransform());
+    // Inherited from the caller rather than reset: `globalAlpha` is a *group*
+    // multiplier here, and the FX compositor draws through this function with
+    // one already set. Baking it into the layer and blitting at 1 is also what
+    // gives "layer opacity, then blend" — the order Photoshop uses — instead of
+    // opacity fighting the blend per sub-draw.
+    layer.ctx.globalAlpha = ctx.globalAlpha;
+
+    drawDirect(
+      layer.ctx,
+      elementId,
+      element,
+      timelineCursor,
+      false,
+      renderFunction,
+      context,
+    );
+
+    ctx.save();
+    // Identity, because the layer is already in the destination's pixel space —
+    // it was drawn under the destination's own transform.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = blend;
+    ctx.drawImage(layer.canvas, 0, 0);
+    ctx.restore();
+  } else {
+    // No surface to isolate onto — a host with no `document` and no factory
+    // installed. Set the mode and draw straight through: exact for the element
+    // types that issue a single `drawImage` or a single `fill`, which is all of
+    // them except text, and never a blank frame.
+    ctx.save();
+    ctx.globalCompositeOperation = blend;
+    drawDirect(
+      ctx,
+      elementId,
+      element,
+      timelineCursor,
+      false,
+      renderFunction,
+      context,
+    );
+    ctx.restore();
+  }
+
+  // Deliberately outside the blend. The selection outline is chrome, not
+  // picture: under `difference` a blended one would render as its own inverse
+  // and become invisible on exactly the clip the user just selected.
+  if (controlOutlineEnabled) {
+    ctx.save();
+    if (context != null) {
+      applyParentTransform(ctx, elementId, timelineCursor, context);
+    }
+    applyElementTransform(ctx, element, timelineCursor);
+    renderControlOutline(ctx, 0, 0, element.width, element.height);
+    ctx.restore();
+  }
+}
+
+/**
+ * Place the element and draw it, straight into `ctx`.
+ *
+ * This is `renderElement`'s original body, unchanged. It is a separate function
+ * only so that the blended path can aim it at a layer instead of at the frame.
+ */
+function drawDirect<T extends VisualTimelineElement>(
   ctx: CanvasRenderingContext2D,
   elementId: string,
   element: T,

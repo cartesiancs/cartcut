@@ -5,6 +5,7 @@
 import { z } from "zod";
 import { requestEditor } from "../bridge";
 import {
+  BLEND_MODES,
   Z_ORDER_NOTE,
   mutating,
   subtitleStyle,
@@ -125,6 +126,31 @@ export function registerTextTools(define: Registrar) {
       annotations: mutating,
     },
     tool((args) => requestEditor("rasterize_text", args)),
+  );
+
+  define(
+    "set_blend_mode",
+    {
+      title: "Set how a clip combines with what is under it",
+      description:
+        "Composite a clip with a blend mode instead of stacking it plainly — multiply, screen, overlay, " +
+        "lighten, darken and the rest of the standard set. The layer beneath is everything already drawn: " +
+        "the clips on lower tracks and then the project background, so a blended clip on the bottom track " +
+        'blends with the background colour alone. Pass "source-over" for normal. ' +
+        "Two common uses: `multiply` a video over white lettering on a black card puts the picture inside " +
+        "the letters, and `screen` lays a light leak, dust or smoke plate over the shot without a matte. " +
+        "Video, image, gif, shape and text clips only — audio and groups paint no layer. " +
+        "Suspended for the length of a transition, which mixes its two clips itself. " +
+        "Applies in both the preview and the exported file.",
+      inputSchema: {
+        elementIds: z.array(z.string()).min(1),
+        blend: z
+          .enum(BLEND_MODES)
+          .describe('How to composite. "source-over" is normal stacking.'),
+      },
+      annotations: mutating,
+    },
+    tool((args) => requestEditor("set_blend_mode", args)),
   );
 
   define(

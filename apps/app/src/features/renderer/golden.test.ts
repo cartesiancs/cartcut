@@ -127,12 +127,12 @@ function digest(data: Uint8ClampedArray): string {
   return h.toString(16).padStart(8, "0");
 }
 
-function frameDigest(timeInMs: number): string {
+function frameDigest(timeInMs: number, scene: Timeline = timeline()): string {
   const canvas = createCanvas(SIZE, SIZE);
   const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
   renderTimelineAtTime(
     ctx,
-    timeline(),
+    scene,
     timeInMs,
     renderers,
     "#101020",
@@ -140,6 +140,23 @@ function frameDigest(timeInMs: number): string {
     SIZE,
   );
   return digest(canvas.getContext("2d").getImageData(0, 0, SIZE, SIZE).data);
+}
+
+/**
+ * The same scene with a blend mode on each layer.
+ *
+ * A separate scene rather than blends added to `timeline()`, deliberately: the
+ * digests above are the proof that introducing blend modes changed nothing for
+ * a project that does not use them, and folding blends into that scene would
+ * throw that proof away.
+ */
+function blendedTimeline(): Timeline {
+  const base = timeline();
+  return {
+    ...base,
+    flyer: { ...base.flyer, blend: "screen" },
+    badge: { ...base.badge, blend: "multiply" },
+  } as Timeline;
 }
 
 describe("golden frames", () => {
@@ -176,5 +193,31 @@ describe("golden frames", () => {
     );
 
     expect(drawn).toEqual(["backdrop", "flyer", "badge"]);
+  });
+});
+
+describe("golden frames — blended", () => {
+  it("composites a stable frame at each sampled timecode", () => {
+    const frames = Object.fromEntries(
+      [0, 1000, 2000, 3000, 3999].map((t) => [
+        t,
+        frameDigest(t, blendedTimeline()),
+      ]),
+    );
+    expect(frames).toMatchSnapshot();
+  });
+
+  it("is deterministic — the same timecode digests identically", () => {
+    expect(frameDigest(2000, blendedTimeline())).toBe(
+      frameDigest(2000, blendedTimeline()),
+    );
+  });
+
+  // Without this the snapshot above could be pinning a scene in which the blend
+  // fields were silently ignored, and would keep passing if they ever were.
+  it("differs from the same scene composited normally", () => {
+    for (const t of [0, 1000, 2000, 3000]) {
+      expect(frameDigest(t, blendedTimeline())).not.toBe(frameDigest(t));
+    }
   });
 });

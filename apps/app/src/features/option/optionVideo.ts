@@ -19,6 +19,7 @@ import {
 } from "../timeline/filterOps";
 import type { FilterInput } from "../renderer/filter/params";
 import "./controlAudioVolume";
+import "./controlBlendMode";
 
 @customElement("option-video")
 export class OptionVideo extends LitElement {
@@ -136,6 +137,11 @@ export class OptionVideo extends LitElement {
         .timelineState=${this.timelineState}
         .isShow=${this.isShow}
       ></default-transform>
+
+      <blend-mode
+        .elementId=${this.elementId}
+        .isShow=${this.isShow}
+      ></blend-mode>
 
       <audio-volume
         class=${this.hasAudio() ? "" : "d-none"}

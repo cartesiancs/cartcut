@@ -472,6 +472,136 @@ describe("set_clip_speed", () => {
 
 // ------------------------------------------------------------------ appearance
 
+describe("set_blend_mode", () => {
+  function threeClips() {
+    seed({
+      a: clip(),
+      b: imageElement({ trackId: "v1", startTime: 0, duration: 1000 }),
+      c: textElement({ trackId: "v1", startTime: 1000, duration: 1000 }),
+    });
+  }
+
+  it("applies one mode across video, image and text clips", async () => {
+    threeClips();
+    await run("set_blend_mode", {
+      elementIds: ["a", "b", "c"],
+      blend: "multiply",
+    });
+
+    expect((doc().elements.a as any).blend).toBe("multiply");
+    expect((doc().elements.b as any).blend).toBe("multiply");
+    expect((doc().elements.c as any).blend).toBe("multiply");
+  });
+
+  it("costs a single undo step for the whole batch", async () => {
+    threeClips();
+
+    const steps = await stepsToUndo(() =>
+      run("set_blend_mode", { elementIds: ["a", "b", "c"], blend: "multiply" }),
+    );
+
+    expect(steps).toBe(1);
+  });
+
+  it("removes the field when set back to source-over", async () => {
+    seed({ a: clip() });
+    await run("set_blend_mode", { elementIds: ["a"], blend: "screen" });
+    await run("set_blend_mode", { elementIds: ["a"], blend: "source-over" });
+
+    expect("blend" in doc().elements.a).toBe(false);
+  });
+
+  it("records nothing when the clips already have that mode", async () => {
+    seed({ a: clip() });
+    await run("set_blend_mode", { elementIds: ["a"], blend: "screen" });
+
+    const before = historyLength();
+    const result = await run("set_blend_mode", {
+      elementIds: ["a"],
+      blend: "screen",
+    });
+
+    expect(historyLength()).toBe(before);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/already/i);
+  });
+
+  it("does not mutate the element in place", async () => {
+    seed({ a: clip() });
+    const before = doc().elements.a;
+
+    await run("set_blend_mode", { elementIds: ["a"], blend: "multiply" });
+
+    expect("blend" in before).toBe(false);
+  });
+
+  it("rejects a mode the compositor does not know, and names the set", async () => {
+    seed({ a: clip() });
+    await expect(
+      run("set_blend_mode", { elementIds: ["a"], blend: "vivid-light" }),
+    ).rejects.toThrow(/Unknown blend mode.*multiply/s);
+  });
+
+  it("rejects a canvas operation that would erase what is beneath", async () => {
+    seed({ a: clip() });
+    await expect(
+      run("set_blend_mode", { elementIds: ["a"], blend: "destination-out" }),
+    ).rejects.toThrow(/Unknown blend mode/);
+  });
+
+  it("refuses a clip type that paints no layer", async () => {
+    seed(
+      {
+        a: clip(),
+        s: audioElement({ trackId: "a1", startTime: 0, duration: 1000 }),
+      },
+      [
+        ["v1", "video"],
+        ["a1", "audio"],
+      ],
+    );
+
+    await expect(
+      run("set_blend_mode", { elementIds: ["a", "s"], blend: "multiply" }),
+    ).rejects.toThrow(/audio/);
+  });
+
+  it("writes nothing when one id in the batch is the wrong type", async () => {
+    seed(
+      {
+        a: clip(),
+        s: audioElement({ trackId: "a1", startTime: 0, duration: 1000 }),
+      },
+      [
+        ["v1", "video"],
+        ["a1", "audio"],
+      ],
+    );
+
+    await expect(
+      run("set_blend_mode", { elementIds: ["a", "s"], blend: "multiply" }),
+    ).rejects.toThrow();
+    // The whole call is refused, not applied to the half that could take it.
+    expect("blend" in doc().elements.a).toBe(false);
+  });
+
+  it("needs at least one id", async () => {
+    seed({ a: clip() });
+    await expect(
+      run("set_blend_mode", { elementIds: [], blend: "multiply" }),
+    ).rejects.toThrow(/at least one id/);
+  });
+
+  it("undo restores the previous mode rather than clearing it", async () => {
+    seed({ a: clip() });
+    await run("set_blend_mode", { elementIds: ["a"], blend: "screen" });
+    await run("set_blend_mode", { elementIds: ["a"], blend: "multiply" });
+    await run("undo");
+
+    expect((doc().elements.a as any).blend).toBe("screen");
+  });
+});
+
 describe("set_video_filters", () => {
   it("applies a chromakey in one undo step, structured", async () => {
     seed({ a: clip() });

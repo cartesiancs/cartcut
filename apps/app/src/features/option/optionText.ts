@@ -5,6 +5,7 @@ import { ensureFontFace } from "../font/fontFaces";
 import { resolveTextStyle } from "../text/style";
 import { setIn } from "../../utils/immutable";
 import { rasterizeTextElements } from "../element/rasterizeText";
+import "./controlBlendMode";
 
 @customElement("option-text")
 export class OptionText extends LitElement {
@@ -85,6 +86,11 @@ export class OptionText extends LitElement {
         .timelineState=${this.timelineState}
         .isShow=${this.isShow}
       ></default-transform>
+
+      <blend-mode
+        .elementId=${this.elementId}
+        .isShow=${this.isShow}
+      ></blend-mode>
 
       <div class="mb-2">
         <label class="form-label text-light">Text</label>

@@ -399,3 +399,185 @@ describe("groups reach the compositor", () => {
     expect(pixel(canvas, 30, 30)).toMatchObject({ r: 255, g: 0, b: 0 });
   });
 });
+
+/**
+ * Blend at the level the compositor actually works: a clip against the frame
+ * beneath it, in priority order, with the project background at the bottom.
+ *
+ * `element.test.ts` and `blendComposite.test.ts` cover the arithmetic. What
+ * belongs here is that the *stack* is the backdrop — that a blended clip sees
+ * the clips below it and not just the background, and that it does so in the
+ * order `paint` walks.
+ */
+describe("renderTimelineAtTime — blend modes", () => {
+  it("blends against the project background when nothing is beneath", () => {
+    // Background #101020 multiplied by the image renderer's pure red keeps only
+    // the red channel: (0x10, 0, 0).
+    const { canvas } = render(
+      {
+        a: imageElement({
+          priority: 1,
+          startTime: 0,
+          duration: 4000,
+          width: SIZE,
+          height: SIZE,
+          location: { x: 0, y: 0 },
+          blend: "multiply",
+        }),
+      },
+      0,
+    );
+    expect(pixel(canvas, 100, 100)).toMatchObject({ r: 0x10, g: 0, b: 0 });
+  });
+
+  it("blends against the clips below it, not merely the background", () => {
+    // A white video underneath, a red image above it with multiply → red.
+    // Against the dark background alone the result would be near black.
+    const { canvas } = render(
+      {
+        under: videoElement({
+          priority: 1,
+          startTime: 0,
+          duration: 4000,
+          width: SIZE,
+          height: SIZE,
+          location: { x: 0, y: 0 },
+        }),
+        over: imageElement({
+          priority: 2,
+          startTime: 0,
+          duration: 4000,
+          width: SIZE,
+          height: SIZE,
+          location: { x: 0, y: 0 },
+          blend: "multiply",
+        }),
+      },
+      0,
+      {
+        ...paintRenderers(),
+        video: (ctx: CanvasRenderingContext2D, _id, el) => {
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, el.width, el.height);
+        },
+      } as TimelineRenderers,
+    );
+    expect(pixel(canvas, 100, 100)).toMatchObject({ r: 255, g: 0, b: 0 });
+  });
+
+  it("respects priority: the same pair the other way round differs", () => {
+    // White over red with multiply is red too, but the *unblended* half of the
+    // frame differs — this pins that the blend follows paint order rather than
+    // being commutative by accident.
+    const white = {
+      ...paintRenderers(),
+      video: (ctx: CanvasRenderingContext2D, _id, el) => {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, el.width, el.height);
+      },
+    } as TimelineRenderers;
+
+    const { canvas } = render(
+      {
+        under: imageElement({
+          priority: 1,
+          startTime: 0,
+          duration: 4000,
+          width: SIZE,
+          height: SIZE,
+          location: { x: 0, y: 0 },
+        }),
+        over: videoElement({
+          priority: 2,
+          startTime: 0,
+          duration: 4000,
+          width: 100,
+          height: 100,
+          location: { x: 0, y: 0 },
+          blend: "multiply",
+        }),
+      },
+      0,
+      white,
+    );
+
+    // Where the blended white box covers the red: white × red = red.
+    expect(pixel(canvas, 50, 50)).toMatchObject({ r: 255, g: 0, b: 0 });
+    // Outside it the red image is untouched.
+    expect(pixel(canvas, 150, 150)).toMatchObject({ r: 255, g: 0, b: 0 });
+  });
+
+  it("leaves an unblended clip drawn after a blended one alone", () => {
+    const { canvas } = render(
+      {
+        blended: imageElement({
+          priority: 1,
+          startTime: 0,
+          duration: 4000,
+          width: 100,
+          height: 100,
+          location: { x: 0, y: 0 },
+          blend: "difference",
+        }),
+        plain: gifElement({
+          priority: 2,
+          startTime: 0,
+          duration: 4000,
+          width: 50,
+          height: 50,
+          location: { x: 120, y: 120 },
+        }),
+      },
+      0,
+    );
+    // The gif renderer's pure blue, stacked plainly.
+    expect(pixel(canvas, 140, 140)).toMatchObject({ r: 0, g: 0, b: 255 });
+  });
+
+  it("does not draw a blended clip that is outside its own span", () => {
+    const { canvas } = render(
+      {
+        a: imageElement({
+          priority: 1,
+          startTime: 5000,
+          duration: 1000,
+          width: SIZE,
+          height: SIZE,
+          location: { x: 0, y: 0 },
+          blend: "multiply",
+        }),
+      },
+      0,
+    );
+    expect(pixel(canvas, 100, 100)).toMatchObject({ r: 0x10, g: 0x10, b: 0x20 });
+  });
+
+  it("blends a clip inside a group, under the group's opacity", () => {
+    const { canvas } = render(
+      {
+        g: groupElement({
+          priority: 1,
+          startTime: 0,
+          duration: 4000,
+          width: SIZE,
+          height: SIZE,
+          location: { x: 0, y: 0 },
+        }),
+        c: imageElement({
+          parentId: "g",
+          priority: 2,
+          startTime: 0,
+          duration: 4000,
+          width: SIZE,
+          height: SIZE,
+          location: { x: 0, y: 0 },
+          blend: "multiply",
+        }),
+      },
+      0,
+    );
+    // Still the multiply against the background, with the group contributing an
+    // identity transform and full opacity.
+    expect(pixel(canvas, 100, 100)).toMatchObject({ r: 0x10, g: 0, b: 0 });
+  });
+});

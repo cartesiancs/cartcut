@@ -12,6 +12,65 @@ export type VideoFilterType = {
   value: string; //  if chromakey => r=0:g=0:b=0. 구분자는 : 로 구분합니다.
 };
 
+/**
+ * How a clip combines with everything painted beneath it.
+ *
+ * Stored in the **Canvas2D vocabulary** rather than the CSS one, for the same
+ * reason `EffectElementType.blend` is: fifteen of these are spelled identically
+ * in both, the compositor sets the string straight onto
+ * `globalCompositeOperation`, and inventing a second name for "normal" would
+ * mean a translation table that can only ever be wrong in one direction.
+ *
+ * A closed union rather than the built-in `GlobalCompositeOperation`, which
+ * also contains `copy`, `xor` and the `destination-*` family — operations that
+ * *erase* what is already on the canvas. Those are legitimate tools for a
+ * compositor to use internally; they are not something a project file should be
+ * able to say about a clip. Narrowing here is the same rule the frame rate
+ * follows: make an unusable value unrepresentable at the point it is stored.
+ *
+ * Ordered as the panel groups them — darken, lighten, contrast, comparative,
+ * component — so the dropdown can be built from this array without a second
+ * ordering to keep in sync.
+ */
+export const BLEND_MODES = [
+  "source-over",
+  "darken",
+  "multiply",
+  "color-burn",
+  "lighten",
+  "screen",
+  "color-dodge",
+  "lighter",
+  "overlay",
+  "soft-light",
+  "hard-light",
+  "difference",
+  "exclusion",
+  "hue",
+  "saturation",
+  "color",
+  "luminosity",
+] as const;
+
+export type BlendMode = (typeof BLEND_MODES)[number];
+
+/**
+ * A clip that can be composited with something other than plain stacking.
+ *
+ * A mixin rather than a field on `Visual`, because `GroupElementType` shares
+ * `Visual` and a group paints nothing — it exists only to hold a transform for
+ * its children. A blend mode on it would be a field the renderer is structurally
+ * unable to honour, and the sidebar would offer a control that does nothing.
+ *
+ * Absent means `"source-over"`, answered by
+ * `features/renderer/blend.ts#blendOf` on the read side. Optional is
+ * load-bearing: `.ngt` load is a compatibility check and not a migrator, so a
+ * new field must never move `SCHEMA_VERSION`.
+ */
+type Blendable = {
+  blend?: BlendMode;
+};
+
 type TimelineElementType =
   | "video"
   | "image"
@@ -163,18 +222,21 @@ type Leveled = {
 
 export type ImageElementType = TimelinePlaced &
   Visual &
-  Animatable & {
+  Animatable &
+  Blendable & {
     filetype: "image";
   };
 
 export type GifElementType = TimelinePlaced &
-  Visual & {
+  Visual &
+  Blendable & {
     filetype: "gif";
   };
 
 export type ShapeElementType = TimelinePlaced &
   Visual &
-  Animatable & {
+  Animatable &
+  Blendable & {
     filetype: "shape";
     oWidth: number; // 원래 shape 사이즈
     oHeight: number;
@@ -187,7 +249,8 @@ export type ShapeElementType = TimelinePlaced &
 export type VideoElementType = TimelinePlaced &
   Visual &
   Animatable &
-  Leveled & {
+  Leveled &
+  Blendable & {
     filetype: "video";
     /**
      * Window into the *source file*, in source milliseconds — never a timeline
@@ -283,7 +346,8 @@ export type TextFill =
  */
 export type TextElementType = TimelinePlaced &
   Visual &
-  Animatable & {
+  Animatable &
+  Blendable & {
     filetype: "text";
     text: string;
     textcolor: string;

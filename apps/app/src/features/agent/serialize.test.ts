@@ -234,3 +234,54 @@ describe("paginate", () => {
     expect(page.truncated).toBe(false);
   });
 });
+
+/**
+ * Blend on the two projections.
+ *
+ * `clipRow` reports it only when it is set, the same rule `speed` and
+ * `volumeDb` follow — a list where every clip announces "source-over" is noise
+ * against the 25,000-token cap. `clipDetail` always reports it for a clip that
+ * can carry one, so an agent reading a detail view can tell "stacks normally"
+ * from "this kind of clip has no blend mode".
+ */
+describe("blend", () => {
+  it("is absent from a row when the clip stacks normally", () => {
+    const d = doc({ a: videoElement({ trackId: "v1" }) });
+    expect(clipRow("a", d.elements.a)).not.toHaveProperty("blend");
+  });
+
+  it("appears on a row when the clip carries one", () => {
+    const d = doc({ a: videoElement({ trackId: "v1", blend: "multiply" }) });
+    expect(clipRow("a", d.elements.a)).toMatchObject({ blend: "multiply" });
+  });
+
+  it("is reported on a detail view whatever its value", () => {
+    const d = doc({
+      plain: videoElement({ trackId: "v1" }),
+      blended: imageElement({ trackId: "v1", blend: "screen" }),
+    });
+    expect(clipDetail("plain", d.elements.plain)).toMatchObject({
+      blend: "source-over",
+    });
+    expect(clipDetail("blended", d.elements.blended)).toMatchObject({
+      blend: "screen",
+    });
+  });
+
+  it("is absent from a detail view for a clip that paints no layer", () => {
+    const d = doc({ s: audioElement({ trackId: "v1" }) });
+    expect(clipDetail("s", d.elements.s)).not.toHaveProperty("blend");
+  });
+
+  it("survives a clip whose stored mode this build does not know", () => {
+    // A project written by a newer build. The whitelist must report the mode the
+    // compositor will actually use, not echo a value it is going to ignore.
+    const d = doc({
+      a: videoElement({ trackId: "v1", blend: "vivid-light" as never }),
+    });
+    expect(clipRow("a", d.elements.a)).not.toHaveProperty("blend");
+    expect(clipDetail("a", d.elements.a)).toMatchObject({
+      blend: "source-over",
+    });
+  });
+});

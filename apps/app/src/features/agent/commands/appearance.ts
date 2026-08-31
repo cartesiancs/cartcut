@@ -1,11 +1,18 @@
 /**
- * Appearance edits with a coupled second field.
+ * Appearance edits that `update_clip` cannot express.
  *
- * Both of these could look like `update_clip` patches and neither can be one:
+ * Each of these could look like an `update_clip` patch and none of them can be
+ * one:
  *
  *  - a font is three fields that have to agree, plus an `@font-face` the canvas
  *    needs or it draws in the fallback;
- *  - a filter's parameters are a positional `k=v:k=v` string.
+ *  - a filter's parameters are a positional `k=v:k=v` string;
+ *  - a blend mode is a closed vocabulary that only some filetypes carry.
+ *    `update_clip`'s whitelist is keyed by filetype with a shared `common`
+ *    bucket, and blend fits neither: in `common` it would be writable on audio
+ *    and on a group, both of which paint no layer, and spread across the five
+ *    per-type lists it would report "that clip does not accept `blend`" for a
+ *    clip whose real problem is that it is a group.
  *
  * `set_video_filters` shares its ops with the option panel rather than
  * reimplementing them: `setVideoFilter` and `setFilterEnabled` in
@@ -17,8 +24,14 @@
 
 import { useTimelineStore } from "../../../states/timelineStore";
 import { setIn } from "../../../utils/immutable";
-import type { TimelineElement } from "../../../@types/timeline";
+import { BLEND_MODES, type TimelineElement } from "../../../@types/timeline";
+import { coerceBlend } from "../../renderer/blend";
 import type { FilterInput } from "../../renderer/filter/params";
+import {
+  BLENDABLE_FILETYPES,
+  isBlendable,
+  setClipBlendMany,
+} from "../../timeline/blendOps";
 import {
   setFilterEnabled,
   setVideoFilter,
@@ -64,6 +77,44 @@ registerCommands({
           d,
         ),
       "Those clips already have that filter.",
+    );
+  },
+
+  set_blend_mode: (params: { elementIds: string[]; blend: string }) => {
+    const doc = currentDoc();
+    const ids = params.elementIds ?? [];
+    if (ids.length === 0) {
+      throw new Error("set_blend_mode needs at least one id in `elementIds`.");
+    }
+
+    // Validated here rather than in the op, which takes a `BlendMode`. This is
+    // the boundary an unchecked string arrives at, and the only place that can
+    // say what was wrong with it — a mode the renderer does not know is not an
+    // error to `globalCompositeOperation`, it is silently ignored.
+    const blend = coerceBlend(params.blend);
+    if (blend == null) {
+      throw new Error(
+        `Unknown blend mode ${JSON.stringify(params.blend)}. ` +
+          `Use one of: ${BLEND_MODES.join(", ")}.`,
+      );
+    }
+
+    const wrongType = ids
+      .map((id) => requireElement(doc, id))
+      .filter((element) => !isBlendable(element));
+
+    if (wrongType.length > 0) {
+      throw new Error(
+        `Only ${BLENDABLE_FILETYPES.join(", ")} clips are composited as a layer ` +
+          `and can carry a blend mode; got ${wrongType
+            .map((element) => element.filetype)
+            .join(", ")}.`,
+      );
+    }
+
+    return commit(
+      (d) => setClipBlendMany(d, ids, blend),
+      "Those clips are already in that blend mode.",
     );
   },
 

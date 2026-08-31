@@ -2,6 +2,7 @@ import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import "./controlDefaultTransform";
+import "./controlBlendMode";
 
 @customElement("option-shape")
 export class OptionShape extends LitElement {
@@ -44,6 +45,11 @@ export class OptionShape extends LitElement {
         .timelineState=${this.timelineState}
         .isShow=${this.isShow}
       ></default-transform>
+
+      <blend-mode
+        .elementId=${this.elementId}
+        .isShow=${this.isShow}
+      ></blend-mode>
 
       <div class="mb-2">
         <label class="form-label text-light">Fill Color</label>

@@ -4,6 +4,7 @@ import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { LocaleController } from "../../controllers/locale";
 import "../filter/backgroundRemove";
 import "./controlDefaultTransform";
+import "./controlBlendMode";
 
 @customElement("option-image")
 export class OptionImage extends LitElement {
@@ -50,6 +51,11 @@ export class OptionImage extends LitElement {
         .timelineState=${this.timelineState}
         .isShow=${this.isShow}
       ></default-transform>
+
+      <blend-mode
+        .elementId=${this.elementId}
+        .isShow=${this.isShow}
+      ></blend-mode>
 
       <background-remove
         imagePath=${this.bgRemoveImagePath}

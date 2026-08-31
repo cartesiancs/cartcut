@@ -154,12 +154,24 @@ function paint(
   const context = { elements: timeline, memo };
 
   /**
+   * The same context, marked as drawing into a buffer holding one clip alone.
+   *
+   * Built once per frame rather than spread at each `drawOne` call, so the
+   * transform memo is shared with the main loop instead of being rebuilt.
+   */
+  const isolatedContext = { ...context, isolated: true };
+
+  /**
    * Draw one element by itself into some other context.
    *
    * Handed to the compositor so a transition can render its two clips into
    * separate buffers. It goes through the same `renderElement` as the main loop,
    * which is what makes a clip's own transform, opacity, keyframes and group
    * parenting apply inside a transition exactly as they do outside one.
+   *
+   * Blend is the one thing that does *not* carry across — see
+   * `ElementRenderContext.isolated`. The buffer it draws into is transparent and
+   * empty, so there is nothing under the clip to blend with.
    */
   const drawOne = (into: CanvasRenderingContext2D, elementId: string): void => {
     const element = timeline[elementId];
@@ -173,7 +185,7 @@ function paint(
       timeInMs,
       false,
       renderers[element.filetype] as ElementRenderFunction<typeof element>,
-      context,
+      isolatedContext,
     );
   };
 

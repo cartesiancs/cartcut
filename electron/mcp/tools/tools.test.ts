@@ -12,7 +12,13 @@
 
 import { describe, it, expect } from "vitest";
 import { registerToolsWith } from "../tools";
-import { EASINGS, PRESETS, type Registrar, type ToolConfig } from "./define";
+import {
+  BLEND_MODES,
+  EASINGS,
+  PRESETS,
+  type Registrar,
+  type ToolConfig,
+} from "./define";
 
 /** Every tool the MCP server exposes, in registration order. */
 const EXPECTED = [
@@ -43,6 +49,7 @@ const EXPECTED = [
   "update_clip",
   "set_text_font",
   "rasterize_text",
+  "set_blend_mode",
   "set_video_filters",
   // tracks
   "add_track",
@@ -155,6 +162,17 @@ describe("every tool is usable as declared", () => {
       "../../../apps/app/src/features/animation/easing"
     );
     expect([...EASINGS].sort()).toEqual([...easingNames()].sort());
+  });
+
+  it("advertises exactly the blend modes the compositor knows", async () => {
+    // Pinned the same way, and it matters more here than for a preset: an
+    // unknown value assigned to `globalCompositeOperation` does not throw, it is
+    // silently ignored. Drift would ship a mode the schema offers, the op
+    // stores, and the picture never shows.
+    const { BLEND_MODES: renderer } = await import(
+      "../../../apps/app/src/@types/timeline"
+    );
+    expect([...BLEND_MODES].sort()).toEqual([...renderer].sort());
   });
 
   it("keeps descriptions short enough to live in every request's context", () => {

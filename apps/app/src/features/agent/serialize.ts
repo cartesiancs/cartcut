@@ -29,6 +29,8 @@ import {
   speedOf,
 } from "../timeline/geometry";
 import { describeFilter } from "../renderer/filter/params";
+import { blendOf, DEFAULT_BLEND } from "../renderer/blend";
+import { isBlendable } from "../timeline/blendOps";
 import type { TimelineDocument, TimelineTrack } from "../timeline/tracks";
 import { resolveTextStyle } from "../text/style";
 
@@ -140,6 +142,14 @@ export function clipRow(
     if (volumeDb !== 0) {
       row.volumeDb = volumeDb;
     }
+  }
+
+  // Same rule as `speed` and `volumeDb`: only when it is not the default. A
+  // blended clip is unusual and worth seeing in a list — every clip announcing
+  // "source-over" would be noise against the tool-output cap.
+  const blend = blendOf(element);
+  if (blend !== DEFAULT_BLEND) {
+    row.blend = blend;
   }
 
   switch (element.filetype) {
@@ -263,6 +273,17 @@ export function clipDetail(
     detail.height = (element as any).height;
     detail.opacity = (element as any).opacity;
     detail.rotation = (element as any).rotation;
+  }
+
+  // Unlike `clipRow`, reported whatever its value — and through the resolver,
+  // so a clip written before the field existed reports its effective
+  // "source-over" rather than nothing at all. `clipRow` reports it only when
+  // set, which leaves an agent reading a detail view unable to tell "stacks
+  // normally" from "this kind of clip has no blend mode". The guard answers
+  // that second case: audio and groups paint no layer, so for them the field is
+  // absent rather than "source-over".
+  if (isBlendable(element)) {
+    detail.blend = blendOf(element);
   }
 
   if (element.filetype === "shape") {

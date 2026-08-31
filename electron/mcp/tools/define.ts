@@ -153,6 +153,37 @@ export const FILETYPES = [
   "effect",
 ] as const;
 
+/**
+ * How a clip can be composited with what is beneath it.
+ *
+ * A copy of `@types/timeline.ts`'s `BLEND_MODES`, for the same reason
+ * `ANIMATABLE` and `PRESETS` are copies: `.tsconfig` pins `rootDir` to
+ * `electron/`, so nothing here can import from `apps/app/src`.
+ * `tools.test.ts` asserts the two against each other, so drift is a failing
+ * test rather than a mode the schema advertises and the compositor ignores —
+ * which is the failure mode that matters here, because an unknown value
+ * assigned to `globalCompositeOperation` does not throw.
+ */
+export const BLEND_MODES = [
+  "source-over",
+  "darken",
+  "multiply",
+  "color-burn",
+  "lighten",
+  "screen",
+  "color-dodge",
+  "lighter",
+  "overlay",
+  "soft-light",
+  "hard-light",
+  "difference",
+  "exclusion",
+  "hue",
+  "saturation",
+  "color",
+  "luminosity",
+] as const;
+
 /** The properties that carry a keyframe track. */
 export const ANIMATABLE = [
   "position",

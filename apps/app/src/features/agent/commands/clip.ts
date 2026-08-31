@@ -39,7 +39,8 @@ registerCommands({
         `update_clip cannot write ${rejected.join(", ")} on a ${element.filetype} clip. ` +
           `Writable: ${allowed.map((p) => p.join(".")).join(", ")}. ` +
           `Use trim_clip or move_clips to change timing, set_clip_speed for speed, ` +
-          `set_text_font for fonts, and set_video_filters for filters.`,
+          `set_text_font for fonts, set_video_filters for filters, and ` +
+          `set_blend_mode for blend modes.`,
       );
     }
 
