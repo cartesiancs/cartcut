@@ -106,8 +106,13 @@ export const ipcFilesystem = {
    * its temp directory, with `renderImage` drawing nothing and saying nothing.
    *
    * `userData/generated/` survives that, and survives a reboot. It does not
-   * survive the project being carried to another machine, but no media in this
-   * app does — everything is referenced by absolute path.
+   * survive the project being carried to another machine — and that used to be
+   * true of all media, but is not any more: `features/project/assetsFile.ts`
+   * records a relative path for anything sitting inside the `.ngt`'s own
+   * folder, so a project folder can now be handed to someone else intact.
+   * Nothing written here is ever inside that folder, so a rasterised title is
+   * specifically what a carried project still loses. That makes this the first
+   * thing a "collect files" feature would have to move.
    */
   saveGeneratedAsset: async (event, buffer, ext = "png") => {
     try {

@@ -102,3 +102,39 @@ export function ensureFontFace(entry: FontEntry): void {
 export function loadedFontFamilies(): string[] {
   return [...registered];
 }
+
+/**
+ * Register every font a loaded document refers to.
+ *
+ * Opening a `.ngt` used to inject nothing at all: the only callers of
+ * `ensureFontFace` are the font *picker* paths, so a text element that named a
+ * font nobody had picked this session drew in the fallback — in the preview and
+ * in the export, and on the machine that authored it, not just after the
+ * project was carried somewhere else. The element kept the right `fontname`
+ * and there was simply no `@font-face` for the canvas to resolve it against,
+ * which is what made it silent.
+ *
+ * Returns how many families it added, which is only useful for tests —
+ * `ensureFontFace` is idempotent, so calling this twice is free.
+ */
+export function registerDocumentFonts(
+  elements: Record<string, unknown>,
+): number {
+  const before = registered.size;
+
+  for (const element of Object.values(elements ?? {})) {
+    if (element == null || typeof element !== "object") {
+      continue;
+    }
+    const { filetype, fontpath } = element as {
+      filetype?: string;
+      fontpath?: unknown;
+    };
+    if (filetype !== "text" || typeof fontpath !== "string") {
+      continue;
+    }
+    ensureFontFace(parseFontPath(fontpath));
+  }
+
+  return registered.size - before;
+}

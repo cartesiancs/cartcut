@@ -18,6 +18,7 @@ import type {
   ImageElementType,
   ShapeElementType,
   TextElementType,
+  TransitionElementType,
   VideoElementType,
   AudioElementType,
 } from "../../@types/timeline";
@@ -114,7 +115,12 @@ export function mulberry32(seed: number): () => number {
 
 const placed = {
   key: "el",
-  localpath: "/tmp/asset",
+  // A `file://` URL, because that is what `element/mediaProbe.ts#toLocalPath`
+  // mints and therefore what nearly every real element carries. The bare path
+  // this used to be is a shape only the screen recorders and rasterised text
+  // produce, so suites that care about path handling were exercising the
+  // uncommon case.
+  localpath: "file:///tmp/asset.mp4",
   trackId: "track-1",
   priority: 1,
   blob: "",
@@ -227,6 +233,31 @@ export function effectElement(
     animation: emptyAnimation("effect"),
     ...over,
   } as EffectElementType;
+}
+
+/**
+ * A transition laid over the cut between `fromId` and `toId`.
+ *
+ * Built by hand rather than through `transitionOps.addTransition`, so a suite
+ * can hold one without also having to construct the two neighbouring clips and
+ * a track for them to sit on.
+ */
+export function transitionElement(
+  over: Partial<TransitionElementType> = {},
+): TransitionElementType {
+  return {
+    ...placed,
+    key: "tr",
+    localpath: "TRANSITION",
+    duration: 1000,
+    filetype: "transition",
+    presetId: "crossfade",
+    params: {},
+    fromId: "a",
+    toId: "b",
+    alignment: "center",
+    ...over,
+  } as TransitionElementType;
 }
 
 export function videoElement(

@@ -1,10 +1,27 @@
 /**
  * The one conversion between the renderer's paths and the filesystem's.
  *
- * A clip's `localpath` is a **`file://` URL**, not a path, and deliberately so:
- * `loadedAssetStore` reads it directly and in Electron the loaders need a URL
- * (`features/element/mediaProbe.ts#toLocalPath` is where it is minted). It is
- * also percent-encoded, so a file with a space in its name arrives as `%20`.
+ * A clip's `localpath` is usually a **`file://` URL**, not a path, and
+ * deliberately so: `loadedAssetStore` reads it directly and in Electron the
+ * loaders need a URL (`features/element/mediaProbe.ts#toLocalPath` is where it
+ * is minted).
+ *
+ * It is **not** percent-encoded, despite looking like a URL. `functions/path.ts
+ * #encode` escapes `#` and nothing else, so a space arrives as a space and a
+ * file named `100%.mp4` arrives with a bare `%`.
+ *
+ * Which means `fileURLToPath` is not quite the right tool, and two filenames
+ * defeat it — both pre-existing, neither fixed here:
+ *
+ *  - `100%.mp4` makes it throw `URI malformed`. The `catch` below hands the
+ *    URL back, so `fs` is then asked for a path with `file://` on the front.
+ *  - `a?b.mp4` it *truncates* to `/U/a`, silently and without throwing, so
+ *    the caller stats a file that was never named.
+ *
+ * `features/project/assetPaths.ts#toFsPath` is the renderer's version of this
+ * conversion and handles both, by doing the only decoding there is anything to
+ * undo: `%23` → `#`. It cannot be shared — it is renderer-side and this is
+ * main — but it is the reference for what the answer should be.
  *
  * Main-process code that takes a `localpath` and hands it to `fs` therefore has
  * to convert, and the failure when it does not is quiet in an unhelpful way:

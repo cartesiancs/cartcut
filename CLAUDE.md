@@ -72,6 +72,56 @@ Two things about time that are easy to get wrong:
 
 `priority` is derived from track order, never authored.
 
+## The project file
+
+A `.ngt` is a zip of five JSON entries, written and read entirely in the
+renderer by `functions/project.ts`: `project.json` (`{ schemaVersion }`),
+`timeline.json` (the element map), `tracks.json`, `renderOptions.json`
+(`features/project/renderOptionsFile.ts`) and `assetPaths.json`
+(`features/project/assetsFile.ts`).
+
+Load **refuses to open** on a `schemaVersion` mismatch — it is a compatibility
+check, not a migrator. So **a new field never moves the version**: absent means
+default, answered on the way in. Both file modules state this at the top.
+
+Media is referenced by absolute path, *and* — for anything sitting inside the
+`.ngt`'s own folder — by a relative one recorded alongside it in
+`assetPaths.json`. That is what makes a project folder portable: hand someone
+the folder and the relative paths still name the files. The absolute paths stay
+in `timeline.json` as the fallback for a `.ngt` moved on its own, away from its
+media, so relinking is a *preference* and never a *replacement*.
+
+One invariant carries the whole feature:
+
+> **The in-memory `TimelineDocument` is always absolute.** A relative path
+> exists only inside the archive.
+
+`loadedAssetStore`, `ffmpegArgs`, the MCP tools, the preview and the export all
+read `localpath` directly and all needed no changes because of it. Conversion
+happens at the two file boundaries and nowhere else. A relative path must not
+become a field on the element: it would enter `normalizeDocument`, every undo
+snapshot and the agent serializer, and go stale the moment `localpath` changes.
+
+Two things that make the path arithmetic (`features/project/assetPaths.ts`)
+fussier than it looks, both pinned by tests:
+
+- **`localpath` is not percent-encoded**, despite usually being a `file://`
+  URL. `functions/path.ts#encode` escapes `#` and nothing else, so
+  `decodeURIComponent` throws on a file named `100%.mp4` and `new URL` truncates
+  `a?b.mp4` at the `?`. The exact inverse is `%23` → `#`.
+- **On Windows the URL is malformed** — `toLocalPath` concatenates, so it mints
+  `file://C:\Users\me\a.mp4`, drive letter where a URL host goes. Chromium
+  accepts it, which is why it survives. Anything reading these must tolerate it,
+  and anything writing one must reproduce it: minting the tidy form instead
+  would give one file two spellings, and `mergeOps` compares these strings to
+  decide two clips share a source.
+
+`assetPaths.ts` has **no imports at all**. `node:path` only ever answers for the
+host platform, which is the wrong one half the time here, and webpack has no
+`resolve.fallback` so it would not resolve anyway. Path flavour is an explicit
+`"posix" | "win32"` parameter, the same rule `utils/platform.ts` states for
+`isMac` and for the same reason: both branches have to be covered on one CI host.
+
 ## The frame rate
 
 A project setting, sitting on `renderOptionStore.options` next to `previewSize`

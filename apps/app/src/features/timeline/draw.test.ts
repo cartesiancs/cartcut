@@ -830,6 +830,12 @@ describe("keyframe diamonds", () => {
       trackId: "v1",
       startTime: 0,
       duration: 4000,
+      // Same problem the playhead note below describes: `isDiamond` is really
+      // "is this pixel light", and the clip label is light too. The label is
+      // the localpath's basename, so pinning a short one here keeps these
+      // assertions about diamonds rather than about how long the shared
+      // fixture's filename happens to be.
+      localpath: "file:///a.png",
       timelineOptions: { color: "#0000ff" },
       animation: {
         ...(base.animation as any),

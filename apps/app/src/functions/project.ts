@@ -9,6 +9,11 @@ import {
   serializeRenderOptions,
 } from "../features/project/renderOptionsFile";
 import { projectBakeHz } from "../features/editor/frameRate";
+import {
+  relinkAssets,
+  serializeAssetPaths,
+} from "../features/project/assetsFile";
+import { registerDocumentFonts } from "../features/font/fontFaces";
 
 const arrayBufferToBase64 = (buffer) => {
   var binary = "";
@@ -112,14 +117,47 @@ const project = {
             ? JSON.parse(await tracksEntry.async("string"))
             : [];
 
+          const assetsEntry = zip.file("assetPaths.json");
+          const rawAssets = assetsEntry
+            ? JSON.parse(await assetsEntry.async("string"))
+            : null;
+
+          // Point every asset at a file that is actually there: the path
+          // recorded relative to *this* copy of the project folder first, then
+          // the absolute one the document already carried. A project written
+          // by an older build has no entry and comes through untouched.
+          //
+          // This runs BEFORE `patchDocument`, and the order is load-bearing in
+          // two ways. The document reaching the store is the one the user will
+          // see, so relinking afterwards would be a second, visible mutation;
+          // and `appendCheckpointInHashTable` below hashes the store's
+          // timeline to baseline the change detector, so a relink landing
+          // after it would make a freshly opened project read as "modified"
+          // and refuse to let another one be opened.
+          const relink = await relinkAssets(
+            elements,
+            rawAssets,
+            filepath,
+            // `existFile` takes a real filesystem path, which is why
+            // `relinkAssets` converts before it probes — handing it a
+            // `file://` URL makes `fsp.access` report a present file as
+            // missing.
+            (fsPath) => window.electronAPI.req.filesystem.existFile(fsPath),
+          );
+
           timelineStore.patchDocument(
             {
               schemaVersion: SCHEMA_VERSION,
               tracks,
-              elements,
+              elements: relink.elements,
             },
             { bakeHz: projectBakeHz() },
           );
+
+          // Nothing else on the load path does this, so a text element naming
+          // a font the user has not picked this session would draw in the
+          // fallback — in the preview and in the export.
+          registerDocumentFonts(relink.elements);
 
           project.changeProjectFileValue({ projectDestination: filepath });
 
@@ -127,6 +165,18 @@ const project = {
           // Without this the freshly opened project immediately reads as
           // "modified" and blocks opening another one.
           elementTimeline.appendCheckpointInHashTable();
+
+          if (relink.missing > 0) {
+            // Counted in files rather than clips: twenty cuts of one missing
+            // video are one thing to go and find.
+            document.querySelector("toast-box")?.showToast({
+              message:
+                relink.missing === 1
+                  ? `1 media file could not be found.`
+                  : `${relink.missing} media files could not be found.`,
+              delay: "5000",
+            });
+          }
         });
       });
     });
@@ -156,6 +206,19 @@ const project = {
     zip.file("timeline.json", JSON.stringify(elements));
     zip.file("tracks.json", JSON.stringify(tracks));
     zip.file("renderOptions.json", JSON.stringify(options));
+
+    // Relative paths for whatever sits inside this project's own folder, so
+    // the folder can be handed to someone else and still find its media.
+    // `timeline.json` keeps its absolute paths either way — they are the
+    // fallback for a `.ngt` moved on its own, away from its assets.
+    //
+    // Anchored on `projectDestination` rather than on the previously opened
+    // `#projectFile`: saving a template that was opened from somewhere else
+    // has to re-relativize against where it is going now.
+    zip.file(
+      "assetPaths.json",
+      JSON.stringify(serializeAssetPaths(elements, projectDestination)),
+    );
 
     zip.generateAsync({ type: "blob" }).then(async function (content) {
       const buffer = arrayBufferToBase64(await content.arrayBuffer());
