@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.hlg-rec709",
+  "kind": "lut",
+  "name": "HLG to Rec.709",
+  "category": "log-convert",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "BT.2100 HLG rolled down to an SDR Rec.709 picture.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

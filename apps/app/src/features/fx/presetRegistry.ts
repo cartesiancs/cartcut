@@ -23,6 +23,7 @@
 import { validatePreset } from "./presetValidate";
 import {
   defaultParamsOf,
+  type FxKind,
   type FxParamValues,
   type FxPreset,
   type RawPresetPayload,
@@ -163,7 +164,7 @@ export function presetById(id: string): FxPreset | null {
 }
 
 /** Everything of one kind, in display order. */
-export function presetsOfKind(kind: "effect" | "transition"): FxPreset[] {
+export function presetsOfKind(kind: FxKind): FxPreset[] {
   return [...presets.values()]
     .filter((preset) => preset.kind === kind)
     .sort(

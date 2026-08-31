@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.landscape",
+  "kind": "lut",
+  "name": "Landscape",
+  "category": "vivid",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Greens and blues lifted, everything else steady.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

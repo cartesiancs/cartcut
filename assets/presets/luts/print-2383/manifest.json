@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.print-2383",
+  "kind": "lut",
+  "name": "Print 2383",
+  "category": "film",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Dense print stock: deep neutral blacks, warm highlight roll-off.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

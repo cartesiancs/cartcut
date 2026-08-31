@@ -29,6 +29,16 @@ export const FILES_MIME = "Files";
  */
 export const FX_PRESET_MIME = "application/x-cartcut-fx-preset";
 
+/**
+ * The custom type a Filter tile carries: a LUT preset id.
+ *
+ * Its own type rather than reusing `FX_PRESET_MIME`, because the drop means
+ * something different: an fx preset dropped on a clip becomes an element of its
+ * own, a LUT dropped on a clip becomes a *property* of that clip. The target
+ * has to know which before it looks the id up.
+ */
+export const LUT_PRESET_MIME = "application/x-cartcut-lut-preset";
+
 export type DropIntent =
   /** Files from the OS. `dataTransfer.files` has them. */
   | "os-files"
@@ -36,6 +46,8 @@ export type DropIntent =
   | "asset"
   /** An effect or transition preset. `getData(FX_PRESET_MIME)` has its id. */
   | "fx-preset"
+  /** A LUT preset. `getData(LUT_PRESET_MIME)` has its id. */
+  | "lut-preset"
   /** Selected text, a link, anything the editor has no use for. */
   | "ignore";
 
@@ -55,6 +67,10 @@ export function dropIntent(types: readonly string[] | undefined): DropIntent {
   // Before the asset check for the same reason the asset check comes before
   // "Files": an internal drag can list several types, and the most specific one
   // is the one that describes what is actually being dragged.
+  if (types.includes(LUT_PRESET_MIME)) {
+    return "lut-preset";
+  }
+
   if (types.includes(FX_PRESET_MIME)) {
     return "fx-preset";
   }

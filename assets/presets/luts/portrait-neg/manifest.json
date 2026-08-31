@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.portrait-neg",
+  "kind": "lut",
+  "name": "Portrait Neg",
+  "category": "film",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Portrait negative: creamy skin, restrained greens, soft highlights.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

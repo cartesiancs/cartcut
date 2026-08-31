@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.sunset-glow",
+  "kind": "lut",
+  "name": "Sunset Glow",
+  "category": "warm",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Orange highlights over a violet sky.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

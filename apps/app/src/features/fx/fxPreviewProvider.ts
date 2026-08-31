@@ -261,6 +261,10 @@ export function createFxPreviewProvider(): FxPreviewProvider {
         PREVIEW_W,
         PREVIEW_H,
         null,
+        // This provider previews effects and transitions only; LUT tiles are
+        // drawn by `lut/lutPreviewProvider.ts`, which grades a frame from the
+        // user's own timeline rather than a sample clip.
+        null,
         timeForStep(request.step),
       );
     }

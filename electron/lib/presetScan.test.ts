@@ -112,6 +112,33 @@ describe("what the scanner refuses to read", () => {
     );
   });
 
+  // The whole reason `.cube` is an *asset* extension and not a shader one: a
+  // shader is read into the payload as a string, and doing that to a LUT would
+  // pull all eighty built-in tables — around 11 MB of text — into memory at
+  // startup, for a project that may grade nothing at all.
+  it("reports a .cube as a path and never reads its bytes", async () => {
+    const body = `LUT_3D_SIZE 2\n${"0.5 0.5 0.5\n".repeat(8)}`;
+    await withTempPreset(
+      {
+        "manifest.json": "{}",
+        "lut.cube": body,
+        "other.3dl": "0 1023\n0 0 0\n",
+      },
+      async (dir) => {
+        const payload = await readPresetDir(dir, "user");
+        expect(Object.keys(payload!.sources)).toEqual([]);
+        expect(Object.keys(payload!.assets).sort()).toEqual([
+          "lut.cube",
+          "other.3dl",
+        ]);
+        // Absolute paths, not contents. A payload carrying the table would be
+        // the startup cost this arrangement exists to avoid.
+        expect(payload!.assets["lut.cube"]).toContain("lut.cube");
+        expect(JSON.stringify(payload)).not.toContain("LUT_3D_SIZE");
+      },
+    );
+  });
+
   it("skips a shader too large to be one", async () => {
     await withTempPreset(
       {

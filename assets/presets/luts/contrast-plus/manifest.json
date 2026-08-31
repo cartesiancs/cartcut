@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.contrast-plus",
+  "kind": "lut",
+  "name": "Contrast +",
+  "category": "utility",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "One stop of S-curve contrast, no colour change at all.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

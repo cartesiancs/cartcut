@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.teal-orange",
+  "kind": "lut",
+  "name": "Teal & Orange",
+  "category": "cinematic",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "The blockbuster separation: warm faces against cool everything else.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

@@ -40,6 +40,7 @@ function baseDoc(): TimelineDocument {
 
 const allShaders = (): PresetMode => "shader";
 const allOverlays = (): PresetMode => "overlay";
+const allLuts = (): PresetMode => "lut";
 const noneInstalled = () => null;
 
 function plan(
@@ -172,6 +173,32 @@ describe("effects", () => {
     const result = plan(doc, 1000, noneInstalled);
     expect(result.empty).toBe(true);
     expect(result.needsScratch).toBe(false);
+  });
+
+  it("asks for a scratch canvas when it is a LUT", () => {
+    // A LUT adjustment layer reads the composited frame back, exactly as a
+    // shader effect does — it is a colour transform of the stack beneath it,
+    // not a composite against it.
+    const result = plan(doc, 1000, allLuts);
+    expect(result.needsScratch).toBe(true);
+    expect(result.effects.get("fx")!.mode).toBe("lut");
+  });
+
+  it("takes a scratch canvas if any one active effect is a LUT", () => {
+    let mixed = addEffect(baseDoc(), "fx1", "overlay-preset", 0, 2000, "e0");
+    mixed = addEffect(mixed, "fx2", "lut-preset", 0, 2000, "e1");
+
+    const result = plan(mixed, 1000, (id) =>
+      id === "overlay-preset" ? "overlay" : "lut",
+    );
+    expect(result.effects.size).toBe(2);
+    expect(result.needsScratch).toBe(true);
+  });
+
+  it("is skipped when the LUT preset is not installed", () => {
+    // The same pass-through a missing shader preset gets: a project that names
+    // a LUT the recipient does not have plays, ungraded.
+    expect(plan(doc, 1000, noneInstalled).empty).toBe(true);
   });
 
   it("takes a scratch canvas if any one active effect is a shader", () => {

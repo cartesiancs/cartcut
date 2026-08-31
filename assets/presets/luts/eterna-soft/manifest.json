@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.eterna-soft",
+  "kind": "lut",
+  "name": "Eterna Soft",
+  "category": "film",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Low-contrast stock look — flat, gentle, easy to grade further.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

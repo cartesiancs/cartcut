@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.honey",
+  "kind": "lut",
+  "name": "Honey",
+  "category": "warm",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Golden midtones with the blues kept quiet.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

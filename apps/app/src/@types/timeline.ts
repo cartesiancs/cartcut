@@ -71,6 +71,55 @@ type Blendable = {
   blend?: BlendMode;
 };
 
+/**
+ * A colour grade applied to one clip, by reference.
+ *
+ * `presetId` names a LUT in the preset registry — the same registry effects and
+ * transitions come from, so a LUT is available both here, as a property of a
+ * clip, and as an adjustment layer (`EffectElementType`) covering everything
+ * beneath its track. That is the Premiere/Final Cut convention: grade the shot
+ * you mean, or grade the stack.
+ *
+ * The **LUT data is deliberately not stored here**, only its id. A 17³ table is
+ * 4,913 nodes, and putting one on the element would send it through
+ * `normalizeDocument`, into every undo snapshot, into the agent serialiser's
+ * output, and into `timeline.json` — where it would be duplicated once per
+ * graded clip. It is the same rule `localpath` follows for media: the document
+ * carries a reference, and the thing referred to is loaded once and shared.
+ *
+ * A LUT that is not installed grades nothing and reports nothing — exactly the
+ * contract a missing effect preset has (`planFrame.ts`). A project that names a
+ * LUT the recipient does not have opens and plays; it simply plays ungraded.
+ */
+export type LutRef = {
+  presetId: string;
+  /**
+   * How much of the grade to apply, 0-100.
+   *
+   * A field rather than a preset parameter, for the reason
+   * `EffectElementType.intensity` is one: trying a different LUT should not
+   * silently reset how strongly the last one was dialled in.
+   */
+  intensity: number;
+};
+
+/**
+ * A clip that can carry a LUT.
+ *
+ * A mixin over exactly the same five element types as `Blendable`, and for the
+ * same reason — a group paints nothing, so a grade on one would be a field the
+ * renderer is structurally unable to honour.
+ *
+ * Absent means ungraded, answered by `features/renderer/lut.ts#lutOf` on the
+ * read side. Optional is load-bearing: `.ngt` load is a compatibility check and
+ * not a migrator, so a new field must never move `SCHEMA_VERSION`, and a
+ * project nobody has graded must save byte-identically to one written before
+ * the feature existed.
+ */
+type Gradable = {
+  lut?: LutRef;
+};
+
 type TimelineElementType =
   | "video"
   | "image"
@@ -223,20 +272,23 @@ type Leveled = {
 export type ImageElementType = TimelinePlaced &
   Visual &
   Animatable &
-  Blendable & {
+  Blendable &
+  Gradable & {
     filetype: "image";
   };
 
 export type GifElementType = TimelinePlaced &
   Visual &
-  Blendable & {
+  Blendable &
+  Gradable & {
     filetype: "gif";
   };
 
 export type ShapeElementType = TimelinePlaced &
   Visual &
   Animatable &
-  Blendable & {
+  Blendable &
+  Gradable & {
     filetype: "shape";
     oWidth: number; // 원래 shape 사이즈
     oHeight: number;
@@ -250,7 +302,8 @@ export type VideoElementType = TimelinePlaced &
   Visual &
   Animatable &
   Leveled &
-  Blendable & {
+  Blendable &
+  Gradable & {
     filetype: "video";
     /**
      * Window into the *source file*, in source milliseconds — never a timeline
@@ -347,7 +400,8 @@ export type TextFill =
 export type TextElementType = TimelinePlaced &
   Visual &
   Animatable &
-  Blendable & {
+  Blendable &
+  Gradable & {
     filetype: "text";
     text: string;
     textcolor: string;

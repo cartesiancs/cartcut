@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.food-fresh",
+  "kind": "lut",
+  "name": "Food Fresh",
+  "category": "vivid",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Warm and appetising: reds and yellows up, greens crisp.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

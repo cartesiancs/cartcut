@@ -50,6 +50,8 @@ const request = {
   preset: {
     list: () => ipcRenderer.invoke("preset:list"),
     userDirectory: () => ipcRenderer.invoke("preset:userDirectory"),
+    installLut: (name, extension, bytes) =>
+      ipcRenderer.invoke("preset:installLut", name, extension, bytes),
   },
   project: {
     save: () => ipcRenderer.invoke("dialog:saveProject"),

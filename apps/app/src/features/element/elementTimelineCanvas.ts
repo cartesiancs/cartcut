@@ -38,6 +38,7 @@ import {
   setTransitionDuration,
 } from "../timeline/transitionOps";
 import { addEffect } from "../timeline/effectOps";
+import { isGradable, setClipLut } from "../timeline/lutOps";
 import { DEFAULT_EFFECT_MS } from "./effectElement";
 import {
   DEFAULT_TRANSITION_MS,
@@ -88,7 +89,12 @@ import { parentOf, withDescendants } from "../timeline/hierarchy";
 import { canDetachAudio } from "../timeline/audio";
 import { detachAudioFrom } from "../timeline/audioOps";
 import { rasterizeTextElements } from "./rasterizeText";
-import { ASSET_MIME, FX_PRESET_MIME, dropIntent } from "../asset/dropIntent";
+import {
+  ASSET_MIME,
+  FX_PRESET_MIME,
+  LUT_PRESET_MIME,
+  dropIntent,
+} from "../asset/dropIntent";
 import { dropTargetAt } from "../asset/dropTarget";
 import { importDroppedFiles, importPathsAt } from "../asset/importDrop";
 import { isTypingEvent } from "../../utils/typingTarget";
@@ -1145,6 +1151,16 @@ export class elementTimelineCanvas extends LitElement {
       this.projectFps(),
     );
 
+    if (intent === "lut-preset") {
+      const presetId = e.dataTransfer?.getData(LUT_PRESET_MIME);
+      if (!presetId) {
+        return;
+      }
+      e.preventDefault();
+      this.dropLutPreset(presetId, target.startMs, x, y);
+      return;
+    }
+
     if (intent === "fx-preset") {
       const presetId = e.dataTransfer?.getData(FX_PRESET_MIME);
       if (!presetId) {
@@ -1286,6 +1302,55 @@ export class elementTimelineCanvas extends LitElement {
    * a track with a cut has nothing to attach to, so it says so rather than
    * silently doing nothing — the failure mode a drop target most easily has.
    */
+  /**
+   * A filter dropped on the timeline.
+   *
+   * On a clip it becomes that clip's own grade; on empty track space it becomes
+   * an adjustment layer over everything beneath. The two are the same decision
+   * the Filter panel's click makes with and without a selection, and they have
+   * to agree — a drag and a click that land in different places for the same
+   * tile is the kind of thing nobody reports and everybody notices.
+   */
+  private dropLutPreset(
+    presetId: string,
+    startMs: number,
+    x: number,
+    y: number,
+  ) {
+    const preset = presetById(presetId);
+    if (preset == null || preset.render.type !== "lut") {
+      this.toast("That filter is no longer installed.");
+      return;
+    }
+
+    const hit = hitTest(this.layout, x, y);
+    if (hit.kind === "clip") {
+      if (!isGradable(this.currentDoc().elements[hit.elementId])) {
+        this.toast("A filter can only go on a picture clip.");
+        return;
+      }
+      this.commit((doc) => setClipLut(doc, hit.elementId, presetId));
+      selectionStore.getState().setIds([hit.elementId]);
+      return;
+    }
+
+    const id = uuidv4();
+    const trackId = uuidv4();
+    this.commit((doc) =>
+      addEffect(
+        doc,
+        id,
+        presetId,
+        Math.max(0, startMs),
+        DEFAULT_EFFECT_MS,
+        trackId,
+        {},
+      ),
+    );
+    selectionStore.getState().setIds([id]);
+    this.toast(`${preset.name} added as an adjustment layer.`);
+  }
+
   private dropFxPreset(
     presetId: string,
     startMs: number,

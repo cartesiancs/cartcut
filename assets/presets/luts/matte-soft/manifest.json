@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.matte-soft",
+  "kind": "lut",
+  "name": "Matte Soft",
+  "category": "matte",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Lifted blacks and lowered whites: the flattest of the set.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

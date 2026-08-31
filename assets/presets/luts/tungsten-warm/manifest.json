@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.tungsten-warm",
+  "kind": "lut",
+  "name": "Tungsten Warm",
+  "category": "warm",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Uncorrected tungsten: amber everything, deep blue windows.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

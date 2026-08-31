@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.matte-faded",
+  "kind": "lut",
+  "name": "Matte Faded",
+  "category": "matte",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Faded print: warm lift, dropped saturation, soft top end.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

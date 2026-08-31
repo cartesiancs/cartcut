@@ -5,6 +5,7 @@ import { LocaleController } from "../../controllers/locale";
 import "../filter/backgroundRemove";
 import "./controlDefaultTransform";
 import "./controlBlendMode";
+import "./optionLutSection";
 
 @customElement("option-image")
 export class OptionImage extends LitElement {
@@ -56,6 +57,16 @@ export class OptionImage extends LitElement {
         .elementId=${this.elementId}
         .isShow=${this.isShow}
       ></blend-mode>
+
+      <!--
+        Next to the blend mode, because the two are the same question asked
+        twice: how this clip's picture is changed before it meets the scene,
+        and how it meets it. Picking *which* filter happens in the Filter tab
+        against thumbnails; what belongs here is how strongly it applies.
+      -->
+      <option-lut-section
+        .elementId=${this.elementId}
+      ></option-lut-section>
 
       <background-remove
         imagePath=${this.bgRemoveImagePath}

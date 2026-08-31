@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.contrast-minus",
+  "kind": "lut",
+  "name": "Contrast −",
+  "category": "utility",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Flatten the curve without lifting the blacks.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

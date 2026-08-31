@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.faded-seventies",
+  "kind": "lut",
+  "name": "Faded Seventies",
+  "category": "vintage",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Warm fade with brown-lifted blacks and dulled blues.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

@@ -152,6 +152,11 @@ ipcMain.handle("font:getPresetFontLists", fontLib.getPresetFontList);
 // of this boundary.
 ipcMain.handle("preset:list", presetLib.list);
 ipcMain.handle("preset:userDirectory", presetLib.userDirectory);
+ipcMain.handle(
+  "preset:installLut",
+  (_event, name: string, extension: string, bytes: Uint8Array) =>
+    presetLib.installLut(name, extension, bytes),
+);
 
 ipcMain.handle("desktopCapturer:getSources", ipcDesktopCapturer.getSources);
 ipcMain.handle("overlayRecord:show", ipcOverlayRecord.show);

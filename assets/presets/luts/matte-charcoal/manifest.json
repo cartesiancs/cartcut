@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.matte-charcoal",
+  "kind": "lut",
+  "name": "Matte Charcoal",
+  "category": "matte",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Cool grey lift: the shadows go to slate rather than to black.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

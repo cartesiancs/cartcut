@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.tungsten-neg",
+  "kind": "lut",
+  "name": "Tungsten Neg",
+  "category": "film",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Tungsten stock shot warm: cyan shadows, amber practicals.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

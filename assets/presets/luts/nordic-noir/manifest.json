@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.nordic-noir",
+  "kind": "lut",
+  "name": "Nordic Noir",
+  "category": "cinematic",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Desaturated cold: grey skies, no warmth anywhere.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.cool-soft",
+  "kind": "lut",
+  "name": "Cool Soft",
+  "category": "cool",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "A quarter-CTB worth of cool and nothing else.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

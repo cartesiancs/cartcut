@@ -12,6 +12,7 @@ import {
 } from "../timeline/transform";
 import { blendOf, DEFAULT_BLEND, isBlendIsolating } from "./blend";
 import { renderControlOutline } from "./controlOutline";
+import { applyLutGrade, lutGradeFor } from "./lut/apply";
 import { layerFor } from "./surface";
 import type { ElementRenderFunction } from "./type";
 
@@ -108,10 +109,27 @@ export function renderElement<T extends VisualTimelineElement>(
 ): void {
   const blend = context?.isolated === true ? DEFAULT_BLEND : blendOf(element);
 
+  /**
+   * The clip's colour grade, or `null` when there is nothing to do.
+   *
+   * Deliberately **not** suspended by `isolated`, which is the one place this
+   * differs from `blend`. A blend mode describes how a clip meets what is
+   * beneath it, and inside a transition there is nothing beneath it — so it is
+   * suspended. A grade is a property of the clip itself, in the same family as
+   * its opacity, its transform and its keyframes, and a cross-dissolve between
+   * two graded shots has to dissolve the *graded* pictures. Suspending it here
+   * would make a clip jump colour for the length of every transition.
+   *
+   * Resolved before the fast-path decision below rather than inside the layer
+   * branch, because a clip whose LUT is not installed must keep the untouched
+   * code path instead of allocating a layer in order to do nothing to it.
+   */
+  const grade = lutGradeFor(element);
+
   // The path every clip took before blend modes existed, and the one almost
   // every clip still takes. Byte-for-byte what it was: no layer is allocated,
   // no extra blit is issued, and `golden.test.ts`'s digests are the proof.
-  if (!isBlendIsolating(blend)) {
+  if (!isBlendIsolating(blend) && grade == null) {
     drawDirect(
       ctx,
       elementId,
@@ -148,6 +166,19 @@ export function renderElement<T extends VisualTimelineElement>(
       context,
     );
 
+    // The clip is finished, alone, at destination resolution and against
+    // transparency — which is exactly the input a colour grade wants. Before
+    // the blend, so the order is "grade the clip, then combine it with the
+    // scene", which is what every NLE does and the only order under which a
+    // `multiply` clip and a graded clip mean independent things.
+    //
+    // Group opacity has already been baked in above, and that is harmless:
+    // `getImageData` and `texImage2D` both hand over *straight* colour, so a
+    // clip at 50% is graded as the colour it is rather than as a darker one.
+    if (grade != null) {
+      applyLutGrade(layer, grade);
+    }
+
     ctx.save();
     // Identity, because the layer is already in the destination's pixel space —
     // it was drawn under the destination's own transform.
@@ -161,6 +192,10 @@ export function renderElement<T extends VisualTimelineElement>(
     // installed. Set the mode and draw straight through: exact for the element
     // types that issue a single `drawImage` or a single `fill`, which is all of
     // them except text, and never a blank frame.
+    //
+    // A grade is simply lost here rather than approximated. There is nowhere to
+    // read the clip's pixels back from without also reading the scene under it,
+    // and grading the scene would be far more wrong than not grading the clip.
     ctx.save();
     ctx.globalCompositeOperation = blend;
     drawDirect(

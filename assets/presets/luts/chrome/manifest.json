@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.chrome",
+  "kind": "lut",
+  "name": "Chrome",
+  "category": "vivid",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Cool, bright and hard — saturated without going warm.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

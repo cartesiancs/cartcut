@@ -70,6 +70,9 @@ const EXPECTED = [
   "add_effect",
   "set_effect",
   "get_fx",
+  // colour filters
+  "list_luts",
+  "set_lut",
   // groups
   "group_clips",
   "ungroup",

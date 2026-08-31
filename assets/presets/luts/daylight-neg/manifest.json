@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.daylight-neg",
+  "kind": "lut",
+  "name": "Daylight Neg",
+  "category": "film",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Daylight-balanced negative: clean neutrals, gentle blue shadows.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

@@ -112,3 +112,11 @@ export {
   previewFxRuntime,
 } from "./features/renderer/fx/createRuntime";
 export { frameCount, frameTimeMs } from "./features/export/frames";
+// Re-reading the preset folders, for the one thing a spec cannot otherwise
+// reach: whether a LUT a *user* dropped into `userData/presets` is picked up by
+// the real scanner, validated by the real validator and graded by the real
+// renderer. Everything else about importing — the file dialog, the copy, the
+// generated manifest — is main-process work with its own suite; this is the
+// half that has to be proved end to end.
+export { loadPresets, presetsOfKind } from "./features/fx/presetRegistry";
+export { preloadLutsForDocument } from "./features/lut/lutRegistry";

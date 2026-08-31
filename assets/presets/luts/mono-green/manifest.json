@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.mono-green",
+  "kind": "lut",
+  "name": "Mono Green",
+  "category": "mono",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Through green glass: foliage separates, skin goes heavy.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

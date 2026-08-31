@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.matte-black",
+  "kind": "lut",
+  "name": "Matte Black",
+  "category": "matte",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Neutral lifted blacks and nothing else changed.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

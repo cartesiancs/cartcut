@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.candlelight",
+  "kind": "lut",
+  "name": "Candlelight",
+  "category": "warm",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Very warm and slightly under: firelight, not daylight.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

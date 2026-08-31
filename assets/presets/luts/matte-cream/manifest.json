@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.matte-cream",
+  "kind": "lut",
+  "name": "Matte Cream",
+  "category": "matte",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Warm cream lift with the highlights kept clean.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

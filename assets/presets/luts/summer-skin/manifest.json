@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.summer-skin",
+  "kind": "lut",
+  "name": "Summer Skin",
+  "category": "warm",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Flattering warmth aimed at faces, greens left alone.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

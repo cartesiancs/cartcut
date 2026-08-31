@@ -27,7 +27,17 @@ import * as fsp from "fs/promises";
 /** Read as text into the payload. Must match `presetValidate.ts`. */
 export const SHADER_EXTENSIONS = [".frag", ".vert", ".glsl"];
 
-/** Exposed as absolute paths. Must match `presetValidate.ts`. */
+/**
+ * Exposed as absolute paths. Must match `presetValidate.ts`.
+ *
+ * `.cube` and `.3dl` are here rather than in `SHADER_EXTENSIONS` even though
+ * they are text, and that is the important part: a shader is read into the
+ * payload as a *string*, and doing that to a LUT would pull every one of the
+ * eighty built-in tables into memory at startup — around 7 MB of text for a
+ * project that may grade nothing at all. As an asset the scanner reports only
+ * where the file is, and the renderer reads it the first time something asks
+ * for that LUT.
+ */
 export const ASSET_EXTENSIONS = [
   ".png",
   ".jpg",
@@ -37,6 +47,8 @@ export const ASSET_EXTENSIONS = [
   ".mp4",
   ".webm",
   ".mov",
+  ".cube",
+  ".3dl",
 ];
 
 /**

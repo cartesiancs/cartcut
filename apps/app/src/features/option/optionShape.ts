@@ -3,6 +3,7 @@ import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import "./controlDefaultTransform";
 import "./controlBlendMode";
+import "./optionLutSection";
 
 @customElement("option-shape")
 export class OptionShape extends LitElement {
@@ -50,6 +51,16 @@ export class OptionShape extends LitElement {
         .elementId=${this.elementId}
         .isShow=${this.isShow}
       ></blend-mode>
+
+      <!--
+        Next to the blend mode, because the two are the same question asked
+        twice: how this clip's picture is changed before it meets the scene,
+        and how it meets it. Picking *which* filter happens in the Filter tab
+        against thumbnails; what belongs here is how strongly it applies.
+      -->
+      <option-lut-section
+        .elementId=${this.elementId}
+      ></option-lut-section>
 
       <div class="mb-2">
         <label class="form-label text-light">Fill Color</label>

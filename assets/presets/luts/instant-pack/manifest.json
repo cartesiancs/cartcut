@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.instant-pack",
+  "kind": "lut",
+  "name": "Instant Pack",
+  "category": "vintage",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Instant film: cyan shadows, cream highlights, nothing fully black.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

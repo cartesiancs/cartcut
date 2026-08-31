@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.tape-transfer",
+  "kind": "lut",
+  "name": "Tape Transfer",
+  "category": "vintage",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Analogue tape colour: smeared magenta, milky blacks, low contrast.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

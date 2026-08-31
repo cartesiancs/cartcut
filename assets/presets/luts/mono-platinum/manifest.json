@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.mono-platinum",
+  "kind": "lut",
+  "name": "Mono Platinum",
+  "category": "mono",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Platinum print: long tonal scale, warm-cool split, open shadows.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

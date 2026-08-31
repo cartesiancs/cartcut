@@ -30,7 +30,9 @@ import {
 } from "../timeline/geometry";
 import { describeFilter } from "../renderer/filter/params";
 import { blendOf, DEFAULT_BLEND } from "../renderer/blend";
+import { DEFAULT_LUT_INTENSITY, lutOf } from "../renderer/lut";
 import { isBlendable } from "../timeline/blendOps";
+import { isGradable } from "../timeline/lutOps";
 import type { TimelineDocument, TimelineTrack } from "../timeline/tracks";
 import { resolveTextStyle } from "../text/style";
 
@@ -150,6 +152,18 @@ export function clipRow(
   const blend = blendOf(element);
   if (blend !== DEFAULT_BLEND) {
     row.blend = blend;
+  }
+
+  // Two scalars, and only when there is a grade at all. The table itself is
+  // emphatically not reported: a 17³ LUT is 4,913 nodes, and an agent listing
+  // fifty clips would blow the 25k output cap on data it cannot use anyway —
+  // it addresses a filter by id, exactly as it addresses a preset.
+  const lut = lutOf(element);
+  if (lut != null) {
+    row.lut = lut.presetId;
+    if (lut.intensity !== DEFAULT_LUT_INTENSITY) {
+      row.lutIntensity = lut.intensity;
+    }
   }
 
   switch (element.filetype) {
@@ -284,6 +298,16 @@ export function clipDetail(
   // absent rather than "source-over".
   if (isBlendable(element)) {
     detail.blend = blendOf(element);
+  }
+
+  // Reported whatever its value on the types that can carry one, and absent on
+  // the types that cannot — the same distinction `blend` makes just above, and
+  // for the same reason: an agent reading a detail view must be able to tell
+  // "ungraded" from "this kind of clip has no filter".
+  if (isGradable(element)) {
+    const lut = lutOf(element);
+    detail.lut = lut == null ? null : lut.presetId;
+    detail.lutIntensity = lut == null ? null : lut.intensity;
   }
 
   if (element.filetype === "shape") {

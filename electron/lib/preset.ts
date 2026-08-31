@@ -16,6 +16,13 @@
  * There is deliberately no "read this file" call. Everything a preset needs is
  * read during enumeration, so the renderer never hands back a path to open and
  * there is no second entry point to traverse out of.
+ *
+ * `installLut` is the one *write*, and it is the same shape: it copies a file
+ * the user chose into a folder of its own and writes a manifest for it, then
+ * says nothing about what is inside. Importing a LUT this way rather than into
+ * a registry of its own means an imported table is a preset like any other —
+ * it survives a restart, it appears in search, it gets a thumbnail, and it can
+ * be used as an adjustment layer — with no second code path anywhere.
  */
 
 import path from "path";
@@ -23,6 +30,7 @@ import * as fsp from "fs/promises";
 import isDev from "electron-is-dev";
 import { app } from "electron";
 import { scanPresetRoot, type RawPresetPayload } from "./presetScan.js";
+import { planLutInstall } from "./lutInstall.js";
 
 export type { RawPresetPayload };
 
@@ -77,5 +85,38 @@ export const presetLib = {
     const dir = userPresetPath();
     await fsp.mkdir(dir, { recursive: true });
     return { path: dir.split(path.sep).join("/") };
+  },
+
+  /**
+   * Copy a LUT file into a preset folder of its own.
+   *
+   * The renderer has already parsed the bytes and knows they are a LUT — this
+   * side stays incurious, as the scanner does. What it decides is *where* the
+   * folder goes and what it is called, and that decision lives in
+   * `lutInstall.ts` so it can be tested: the name arrives with a file someone
+   * downloaded, and a folder name is a path.
+   *
+   * Returns the preset id so the caller can select the new filter immediately.
+   */
+  installLut: async (
+    name: string,
+    extension: string,
+    bytes: Uint8Array,
+  ): Promise<{ id: string; dir: string }> => {
+    const plan = planLutInstall(name, extension);
+
+    const root = userPresetPath();
+    await fsp.mkdir(root, { recursive: true });
+
+    // A second import of the same name replaces the first rather than piling
+    // up `kodak-2`, `kodak-3`: re-importing is overwhelmingly "I fixed that
+    // file", not "I want both".
+    const dir = path.join(root, plan.folder);
+    await fsp.mkdir(dir, { recursive: true });
+
+    await fsp.writeFile(path.join(dir, plan.source), bytes);
+    await fsp.writeFile(path.join(dir, "manifest.json"), plan.manifest, "utf8");
+
+    return { id: plan.id, dir: dir.split(path.sep).join("/") };
   },
 };

@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.print-3513",
+  "kind": "lut",
+  "name": "Print 3513",
+  "category": "film",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Cooler, gentler print: open shadows and restrained saturation.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

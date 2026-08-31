@@ -32,7 +32,7 @@ import { spanOf } from "../../timeline/geometry";
 import { progressOf, windowOf } from "../../timeline/transitionGeometry";
 
 /** How a preset wants to be executed. `null` when it is not installed. */
-export type PresetMode = "overlay" | "shader";
+export type PresetMode = "overlay" | "shader" | "lut";
 
 export type ActiveTransition = {
   id: string;
@@ -68,10 +68,10 @@ export type FramePlan = {
   /**
    * Whether the frame must be composited into a project-resolution canvas.
    *
-   * True only for shader effects. An overlay is a Canvas2D composite operation
-   * against what is already there, which needs no readback; a transition draws
-   * its two clips into buffers of its own and hands back a finished image. Only
-   * a shader effect has to *read* the target.
+   * True for shader and LUT effects, which both *read* the target back. An
+   * overlay is a Canvas2D composite operation against what is already there,
+   * which needs no readback; a transition draws its two clips into buffers of
+   * its own and hands back a finished image.
    */
   needsScratch: boolean;
   /** Nothing to do — the loop should take its original path. */
@@ -183,7 +183,7 @@ export function planFrame(input: PlanFrameInput): FramePlan {
       }
 
       effects.set(id, { id, element, mode });
-      if (mode === "shader") {
+      if (mode === "shader" || mode === "lut") {
         needsScratch = true;
       }
     }

@@ -33,7 +33,11 @@
  * degrades to a pass-through and reports once.
  */
 
-import type { FxPreset, FxParamValues } from "../../fx/presetTypes";
+import type {
+  FxParamValues,
+  FxPreset,
+  FxShaderKind,
+} from "../../fx/presetTypes";
 import {
   colorToVec3,
   entryPointOf,
@@ -41,6 +45,13 @@ import {
   vertexShaderFor,
   wrapFragmentShader,
 } from "../../fx/glslWrap";
+import { toAtlas, toAtlasBytes, toAtlasHalf, type LutAtlas } from "../../lut/atlas";
+import {
+  LUT_GLSL_PRELUDE,
+  LUT_UNIFORM,
+  lutUniformsFor,
+} from "../../lut/glsl";
+import type { LutData } from "../../lut/lutData";
 import type { ActiveEffect, ActiveTransition } from "./planFrame";
 import {
   FxProgram,
@@ -98,6 +109,10 @@ export class FxCompositor {
   private reported = new Set<string>();
 
   private frameTexture: WebGLTexture | null = null;
+  /** The one LUT program, shared by every LUT preset. */
+  private lut: FxProgram | null = null;
+  /** Uploaded colour tables, keyed by preset id. */
+  private lutTextures = new Map<string, { texture: WebGLTexture; atlas: LutAtlas } | null>();
   private fromTarget: RenderTarget;
   private toTarget: RenderTarget;
   private outputTarget: RenderTarget;
@@ -188,6 +203,10 @@ export class FxCompositor {
     if (preset.render.type !== "shader") {
       return null;
     }
+    // `render.type === "shader"` already excludes a LUT preset, which ships no
+    // GLSL at all; the narrowing is for the compiler, which cannot see that
+    // the two facts are linked.
+    const shaderKind = preset.kind as FxShaderKind;
     const name = sourceName ?? preset.render.source;
     const key = preset.id + "|" + name;
 
@@ -200,12 +219,12 @@ export class FxCompositor {
       (texture) => texture.uniform,
     );
     const fragment = wrapFragmentShader({
-      kind: preset.kind,
+      kind: shaderKind,
       source: preset.sources[name] ?? "",
       textureUniforms,
     });
     const vertex = vertexShaderFor(
-      preset.kind,
+      shaderKind,
       preset.render.vertex != null
         ? preset.sources[preset.render.vertex]
         : undefined,
@@ -238,7 +257,7 @@ export class FxCompositor {
           ") did not compile and will render as a pass-through.\n" +
           program.log +
           "\nEntry point expected: vec4 " +
-          entryPointOf(preset.kind) +
+          entryPointOf(shaderKind) +
           "(vec2 uv)",
       );
       return null;
@@ -398,8 +417,19 @@ export class FxCompositor {
     width: number,
     height: number,
     overlayFrame: CanvasImageSource | null,
+    lut: LutData | null,
     timeSeconds: number,
   ): void {
+    if (active.mode === "lut") {
+      // Resolved by the paint loop and `null` until the file has been read,
+      // exactly as `overlayFrame` is — the frame draws ungraded and the next
+      // one has it.
+      if (lut != null) {
+        this.applyLut(target, active, preset, lut, width, height);
+      }
+      return;
+    }
+
     if (active.mode === "overlay") {
       if (overlayFrame == null) {
         return;
@@ -491,6 +521,163 @@ export class FxCompositor {
     runPass(finalProgram, input, this.outputTarget);
 
     this.blitTargetTo(target, this.outputTarget, width, height, "copy");
+  }
+
+  /**
+   * Grade everything drawn so far — the adjustment layer.
+   *
+   * The same shader the per-clip applier runs (`lut/glsl.ts`), against this
+   * compositor's own context and render targets rather than a fourth one. It
+   * reads the scratch canvas back, which is why `planFrame` insisted the frame
+   * be composited at project resolution first.
+   */
+  private applyLut(
+    target: CanvasRenderingContext2D,
+    active: ActiveEffect,
+    preset: FxPreset,
+    lut: LutData,
+    width: number,
+    height: number,
+  ): void {
+    const gl = this.gl;
+    const program = this.lutProgram();
+    if (program == null) {
+      return;
+    }
+
+    this.sizeGlCanvas(width, height);
+    const source = this.uploadFrame(target.canvas);
+    const table = this.lutTextureFor(preset.id, lut);
+    if (source == null || table == null) {
+      return;
+    }
+
+    const amount = Math.max(0, Math.min(1, active.element.intensity / 100));
+    const uniforms = lutUniformsFor(table.atlas);
+
+    this.outputTarget.use(width, height, () => {
+      gl.disable(gl.DEPTH_TEST);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      program.bind([source, table.texture]);
+      gl.uniform2f(
+        program.uniform(LUT_UNIFORM.atlasSize),
+        uniforms.atlasWidth,
+        uniforms.atlasHeight,
+      );
+      gl.uniform1f(program.uniform(LUT_UNIFORM.size), uniforms.size);
+      gl.uniform1f(program.uniform(LUT_UNIFORM.cols), uniforms.cols);
+      gl.uniform3f(
+        program.uniform(LUT_UNIFORM.domainScale),
+        ...uniforms.domainScale,
+      );
+      gl.uniform3f(
+        program.uniform(LUT_UNIFORM.domainOffset),
+        ...uniforms.domainOffset,
+      );
+      gl.uniform1f(program.uniform(LUT_UNIFORM.is1d), uniforms.is1d);
+      gl.uniform1f(program.uniform(LUT_UNIFORM.amount), amount);
+      program.draw();
+    });
+
+    this.blitTargetTo(target, this.outputTarget, width, height, "copy");
+  }
+
+  private lutProgram(): FxProgram | null {
+    if (this.lut != null) {
+      return this.lut.ok ? this.lut : null;
+    }
+    this.lut = new FxProgram(this.gl, {
+      vertexSource: PASSTHROUGH_VERTEX,
+      fragmentSource: [
+        "precision highp float;",
+        "varying vec2 _uv;",
+        "uniform sampler2D source;",
+        LUT_GLSL_PRELUDE,
+        "void main() {",
+        "  gl_FragColor = lutApplyStraight(texture2D(source, _uv));",
+        "}",
+      ].join("\n"),
+      geometry: quadGeometry(),
+      samplers: ["source", LUT_UNIFORM.texture],
+    });
+    if (!this.lut.ok) {
+      this.reportOnce("lut", "fx: the LUT shader did not compile: " + this.lut.log);
+      return null;
+    }
+    return this.lut;
+  }
+
+  /**
+   * A colour table, uploaded once and kept.
+   *
+   * Half float where the extension is available — at `UNSIGNED_BYTE` a node
+   * carries up to 1/510 of error, which is half an output step and enough to
+   * put this path and the per-clip one visibly apart. See `renderer/lut/gpu.ts`,
+   * which makes the same choice for the same reason.
+   */
+  private lutTextureFor(
+    presetId: string,
+    lut: LutData,
+  ): { texture: WebGLTexture; atlas: LutAtlas } | null {
+    const cached = this.lutTextures.get(presetId);
+    if (cached !== undefined) {
+      return cached;
+    }
+    this.lutTextures.set(presetId, null);
+
+    const gl = this.gl;
+    const atlas = toAtlas(lut);
+    const texture = gl.createTexture();
+    if (texture == null) {
+      return null;
+    }
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    // NEAREST: the shader interpolates itself, and hardware filtering here
+    // would bleed across the boundary between two blue slices.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    try {
+      const half = gl.getExtension("OES_texture_half_float") as {
+        HALF_FLOAT_OES: number;
+      } | null;
+      if (half != null) {
+        gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          gl.RGBA,
+          atlas.width,
+          atlas.height,
+          0,
+          gl.RGBA,
+          half.HALF_FLOAT_OES,
+          toAtlasHalf(atlas) as unknown as ArrayBufferView,
+        );
+      } else {
+        gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          gl.RGBA,
+          atlas.width,
+          atlas.height,
+          0,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          toAtlasBytes(atlas),
+        );
+      }
+    } catch (error) {
+      this.reportOnce("lut:" + presetId, "fx: LUT upload failed: " + String(error));
+      gl.deleteTexture(texture);
+      return null;
+    }
+    gl.bindTexture(gl.TEXTURE_2D, null);
+
+    const entry = { texture, atlas };
+    this.lutTextures.set(presetId, entry);
+    return entry;
   }
 
   /** Per-pass uniforms from the manifest's `constants`. */
@@ -713,6 +900,13 @@ export class FxCompositor {
     this.programs.clear();
     this.blit?.dispose();
     this.blit = null;
+    this.lut?.dispose();
+    this.lut = null;
+
+    for (const entry of this.lutTextures.values()) {
+      if (entry != null) this.gl.deleteTexture(entry.texture);
+    }
+    this.lutTextures.clear();
 
     for (const texture of this.textures.values()) {
       if (texture != null) this.gl.deleteTexture(texture);

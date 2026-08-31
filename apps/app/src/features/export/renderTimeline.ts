@@ -5,8 +5,10 @@ import {
   renderTimelineAtTime,
   type TimelineRenderers,
 } from "../renderer/timeline";
+import { preloadLutsForDocument } from "../lut/lutRegistry";
 import { createExportFxRuntime } from "../renderer/fx/createRuntime";
 import { hasFxElements } from "../renderer/fx/planFrame";
+import { setLutBlocking } from "../renderer/lut/apply";
 import { frameCount, frameTimeMs, inFlightWindow } from "./frames";
 import { createFrameProfiler } from "./profile";
 
@@ -91,6 +93,23 @@ export async function renderTimeline(
    * did before this feature — no effects, no transitions, no crash.
    */
   const fx = hasFxElements(timeline) ? createExportFxRuntime(fps) : null;
+
+  /**
+   * Read every LUT this project refers to *before* the first frame.
+   *
+   * The registry loads lazily and answers `null` until a table has arrived,
+   * which is right for the preview — it repaints and picks the grade up on the
+   * next frame — and wrong here. An export's frame loop runs straight through,
+   * so a table that landed on frame three would leave frames one and two
+   * ungraded in the delivered file, and nothing downstream would ever say so.
+   */
+  await preloadLutsForDocument(timeline);
+
+  // The per-clip grade runs on the GPU and `captureFrame` reads the canvas
+  // back with `getImageData` on the next line, so that read has to see the
+  // result. Same split the compositor's `blocking` makes, and the same one
+  // `renderVideoWithWait` makes for a filtered clip.
+  setLutBlocking(true);
 
   // Export never plays the `<audio>` handles — FFmpeg rebuilds the whole audio
   // graph from the timeline itself — so decoding them here buys nothing but
@@ -186,6 +205,9 @@ export async function renderTimeline(
     // this export's context. An export that is cancelled halfway leaks every
     // one of them without this.
     fx?.compositor.dispose();
+    // Restored even on the abort path: leaving it set would make every
+    // subsequent preview frame stall on `gl.finish()` for no benefit.
+    setLutBlocking(false);
     profiler.report();
   }
 }

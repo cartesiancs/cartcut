@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.moonrise",
+  "kind": "lut",
+  "name": "Moonrise",
+  "category": "cool",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Cool and dark with the highlights left silver.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

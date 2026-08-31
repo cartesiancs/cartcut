@@ -12,6 +12,7 @@
 
 import type { EffectElementType } from "../../../@types/timeline";
 import type { FxPreset } from "../../fx/presetTypes";
+import type { LutData } from "../../lut/lutData";
 import type { FxCompositor } from "./compositor";
 import type { PresetMode } from "./planFrame";
 
@@ -29,6 +30,16 @@ export type FxRuntime = {
   modeOf: (presetId: string) => PresetMode | null;
   /** The preset itself, or `null` when it is not installed. */
   presetOf: (presetId: string) => FxPreset | null;
+  /**
+   * The colour table behind a LUT preset, or `null` when it is not ready.
+   *
+   * Injected for the same reason everything else here is: resolving one means
+   * reading a file, and `renderer/timeline.ts` must stay free of both the
+   * registry and the disk. `null` covers "not installed", "not read yet" and
+   * "unreadable" alike — all three draw the frame ungraded, which is the same
+   * pass-through a missing shader preset gets.
+   */
+  lutFor: (presetId: string) => LutData | null;
   /**
    * The current frame of an overlay effect's looping media.
    *

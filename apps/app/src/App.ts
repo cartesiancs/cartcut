@@ -4,6 +4,7 @@ import { IUIStore, uiStore } from "./states/uiStore";
 import { loadPresets } from "./features/fx/presetRegistry";
 import "./features/demo/warningDemoEnv";
 import "./features/gpt/chatSidebar";
+import { installLutResolver } from "./features/lut/lutRegistry";
 
 @customElement("app-root")
 export class App extends LitElement {
@@ -22,11 +23,17 @@ export class App extends LitElement {
       this.topBarTitle = state.topBarTitle;
     });
 
-    // Effect and transition presets, read once at startup — the same shape as
-    // the font preset list. Un-awaited on purpose: nothing on screen depends on
-    // it, a project that references a preset renders as a pass-through until it
-    // arrives, and the first repaint after it lands picks it up. `loadPresets`
-    // never throws, so there is nothing here to catch.
+    // Point the renderer's LUT lookup at the registry. Before `loadPresets`
+    // rather than after: it only installs a function, and doing it first means
+    // there is no window in which a repaint could ask for a grade and find no
+    // resolver at all.
+    installLutResolver();
+
+    // Effect, transition and LUT presets, read once at startup — the same shape
+    // as the font preset list. Un-awaited on purpose: nothing on screen depends
+    // on it, a project that references a preset renders as a pass-through until
+    // it arrives, and the first repaint after it lands picks it up.
+    // `loadPresets` never throws, so there is nothing here to catch.
     void loadPresets();
 
     return this;

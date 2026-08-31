@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.vivid-punch",
+  "kind": "lut",
+  "name": "Vivid Punch",
+  "category": "vivid",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Saturation and contrast together, no protection at all.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

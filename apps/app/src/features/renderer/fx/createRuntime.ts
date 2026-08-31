@@ -14,6 +14,7 @@
 
 import type { EffectElementType } from "../../../@types/timeline";
 import { presetById } from "../../fx/presetRegistry";
+import { lutFor } from "../../lut/lutRegistry";
 import type { FxPreset } from "../../fx/presetTypes";
 import { FxCompositor } from "./compositor";
 import { overlayFrame } from "./overlaySource";
@@ -33,7 +34,10 @@ export function modeOfPreset(presetId: string): PresetMode | null {
   if (preset == null) {
     return null;
   }
-  return preset.render.type === "overlay" ? "overlay" : "shader";
+  if (preset.render.type === "overlay") {
+    return "overlay";
+  }
+  return preset.render.type === "lut" ? "lut" : "shader";
 }
 
 let previewGl: WebGLRenderingContext | null = null;
@@ -74,6 +78,10 @@ function runtimeWith(
     fps,
     modeOf: modeOfPreset,
     presetOf: (presetId: string): FxPreset | null => presetById(presetId),
+    // Synchronous, and `null` until the table has been read off disk. The
+    // preview repaints and picks it up on the next frame; an export cannot
+    // wait like that, which is why `renderTimeline.ts` preloads first.
+    lutFor,
     overlayFrameFor: (
       elementId: string,
       element: EffectElementType,

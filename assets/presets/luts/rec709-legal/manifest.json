@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.rec709-legal",
+  "kind": "lut",
+  "name": "Broadcast Safe",
+  "category": "utility",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Squeeze into 16-235: nothing clips on a broadcast scope.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

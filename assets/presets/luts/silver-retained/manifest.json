@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.silver-retained",
+  "kind": "lut",
+  "name": "Silver Retained",
+  "category": "vintage",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Bleach bypass: contrast up and colour down, together.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

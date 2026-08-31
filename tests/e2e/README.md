@@ -154,6 +154,9 @@ specs/
   agent.spec.ts        the command channel
   export-path.spec.ts  the narrowest end-to-end export, for triage
   blend.spec.ts        blend modes, against arithmetic rather than a reference
+  lut.spec.ts          colour LUTs, the same way — plus adjustment layers,
+                       intensity, and a LUT installed by hand
+  lut-panel.spec.ts    the LUT tab paints its tiles when it is opened
   seek-diagnosis.spec.ts  seek fidelity, with no encoder in the way
   stress.spec.ts       the run
 ```
@@ -188,16 +191,16 @@ clipEdge(main:v07-longgop, out, -1): frame carries index 298, expected 299
   reverse, which is exactly how a stale `renderVideoWithoutWait` frame shows up.
 - **`extreme` has not been run to completion.** 4K raw frames are 33 MB each,
   which halves `inFlightWindow`; expect hours.
-- **`blend.spec.ts` is the one spec that needs no fixtures.** Its scene is
-  solid-colour shapes, so there is nothing to download and nothing to decode on
-  the way in — which is also what lets it assert exact colours instead of
-  metrics. It can be run on its own before `npm run test:e2e:fixtures` has ever
-  been run:
+- **`blend.spec.ts`, `lut.spec.ts` and `lut-panel.spec.ts` need no
+  fixtures.** Their scenes are solid-colour shapes, so there is nothing to
+  download and nothing to decode on the way in — which is also what lets them
+  assert exact colours instead of metrics. They can be run on their own before
+  `npm run test:e2e:fixtures` has ever been run:
 
   ```
   npx playwright test -c tests/e2e/playwright.config.ts \
-    --project=smoke tests/e2e/specs/blend.spec.ts
+    --project=smoke tests/e2e/specs/blend.spec.ts tests/e2e/specs/lut.spec.ts
   ```
 
-  It also sets its own three-second duration rather than taking the profile's,
+  They also set their own three-second duration rather than taking the profile's,
   so it costs about the same under `full` as under `smoke`.

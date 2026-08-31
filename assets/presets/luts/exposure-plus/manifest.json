@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.exposure-plus",
+  "kind": "lut",
+  "name": "Exposure +",
+  "category": "utility",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Two-thirds of a stop brighter, in linear light.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

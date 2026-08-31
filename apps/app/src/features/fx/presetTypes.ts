@@ -216,7 +216,47 @@ export type FxShaderRender = {
   passes?: FxPassSpec[];
 };
 
-export type FxRenderSpec = FxOverlayRender | FxShaderRender;
+/**
+ * A colour lookup table, shipped as a file the preset folder contains.
+ *
+ * There is no GLSL and no entry point: every LUT preset runs the *same*
+ * shader, which lives in `features/lut/glsl.ts`, and differs only in the table
+ * it hands that shader. That is the whole reason LUTs are a third `kind`
+ * rather than eighty effect presets — eighty copies of one shader would defeat
+ * `catalogue.test.ts`'s "no two presets run the same pipeline" rule, and would
+ * be eighty things to fix if the sampling ever changed.
+ *
+ * `source` names a `.cube`, `.3dl` or `.png` inside the folder. It is resolved
+ * to an absolute path by the scanner and **read lazily**: 80 built-in tables at
+ * ~90 KB of text each is 7 MB, and a project that grades nothing should not pay
+ * to load a single one of them.
+ */
+export type FxLutRender = {
+  type: "lut";
+  source: string;
+};
+
+export type FxRenderSpec = FxOverlayRender | FxShaderRender | FxLutRender;
+
+/**
+ * The kinds that carry GLSL.
+ *
+ * `glslWrap.ts` and the compositor's shader plumbing are typed on this rather
+ * than on the full kind union, so a LUT preset cannot be handed to a function
+ * that would ask it for an entry point it does not have.
+ */
+export type FxShaderKind = "effect" | "transition";
+
+/**
+ * Everything a preset folder can be.
+ *
+ * Three kinds and not two, because a LUT differs from an effect in what it
+ * *is*, not only in what it does: it ships data rather than code, it has no
+ * parameters, its panel is a different panel, and it can be applied to a single
+ * clip as well as to a whole stack — which no effect can. Modelling it as an
+ * effect with a texture would have made all four of those into special cases.
+ */
+export type FxKind = FxShaderKind | "lut";
 
 /**
  * What a preset does, at the level a browsing user thinks in.
@@ -248,21 +288,45 @@ export const EFFECT_CATEGORIES = [
   "light",
 ] as const;
 
+/**
+ * How the Filter panel groups eighty tables.
+ *
+ * Chosen so that a user looking for a *look* finds it: the top-level question
+ * a colourist asks is "warm or cool, film or clean, colour or mono", not "which
+ * mathematical operation". `log-convert` is the one technical section, and it
+ * has to exist separately because those tables are not a look at all — they
+ * are the transform that makes log footage viewable before a look is applied.
+ */
+export const LUT_CATEGORIES = [
+  "film",
+  "cinematic",
+  "vintage",
+  "mono",
+  "warm",
+  "cool",
+  "vivid",
+  "matte",
+  "log-convert",
+  "utility",
+] as const;
+
+export type LutCategory = (typeof LUT_CATEGORIES)[number];
 export type TransitionCategory = (typeof TRANSITION_CATEGORIES)[number];
 export type EffectCategory = (typeof EFFECT_CATEGORIES)[number];
-export type FxCategory = TransitionCategory | EffectCategory;
+export type FxCategory = TransitionCategory | EffectCategory | LutCategory;
 
-export function categoriesFor(
-  kind: "effect" | "transition",
-): readonly string[] {
-  return kind === "transition" ? TRANSITION_CATEGORIES : EFFECT_CATEGORIES;
+export function categoriesFor(kind: FxKind): readonly string[] {
+  if (kind === "transition") {
+    return TRANSITION_CATEGORIES;
+  }
+  return kind === "lut" ? LUT_CATEGORIES : EFFECT_CATEGORIES;
 }
 
 /** A validated preset, ready to hand to the compositor. */
 export type FxPreset = {
   schema: 1;
   id: string;
-  kind: "effect" | "transition";
+  kind: FxKind;
   name: string;
   /**
    * Which section of the panel it appears under.

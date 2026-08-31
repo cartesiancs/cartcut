@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.twilight",
+  "kind": "lut",
+  "name": "Twilight",
+  "category": "cool",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "The blue half hour, with a little magenta left in the sky.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

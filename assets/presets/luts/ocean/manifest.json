@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.ocean",
+  "kind": "lut",
+  "name": "Ocean",
+  "category": "cool",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Cyan-green water and a clean sky.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

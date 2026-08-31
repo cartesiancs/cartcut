@@ -6,6 +6,7 @@ import { resolveTextStyle } from "../text/style";
 import { setIn } from "../../utils/immutable";
 import { rasterizeTextElements } from "../element/rasterizeText";
 import "./controlBlendMode";
+import "./optionLutSection";
 
 @customElement("option-text")
 export class OptionText extends LitElement {
@@ -91,6 +92,16 @@ export class OptionText extends LitElement {
         .elementId=${this.elementId}
         .isShow=${this.isShow}
       ></blend-mode>
+
+      <!--
+        Next to the blend mode, because the two are the same question asked
+        twice: how this clip's picture is changed before it meets the scene,
+        and how it meets it. Picking *which* filter happens in the Filter tab
+        against thumbnails; what belongs here is how strongly it applies.
+      -->
+      <option-lut-section
+        .elementId=${this.elementId}
+      ></option-lut-section>
 
       <div class="mb-2">
         <label class="form-label text-light">Text</label>

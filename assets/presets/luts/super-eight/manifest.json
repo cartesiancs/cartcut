@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.super-eight",
+  "kind": "lut",
+  "name": "Super 8",
+  "category": "vintage",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Home-movie stock: yellow-green cast, crushed reds, soft whites.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

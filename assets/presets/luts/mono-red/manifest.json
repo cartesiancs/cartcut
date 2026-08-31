@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.mono-red",
+  "kind": "lut",
+  "name": "Mono Red",
+  "category": "mono",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Shot through red glass: dark dramatic skies, bright skin.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

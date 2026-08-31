@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.golden-hour",
+  "kind": "lut",
+  "name": "Golden Hour",
+  "category": "cinematic",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Low warm sun with the shadows left open.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

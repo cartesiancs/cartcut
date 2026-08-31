@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.slog3-rec709",
+  "kind": "lut",
+  "name": "S-Log3 to Rec.709",
+  "category": "log-convert",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Published S-Log3 transfer function, rendered to Rec.709. Not a vendor look.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

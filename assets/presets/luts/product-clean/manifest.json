@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.product-clean",
+  "kind": "lut",
+  "name": "Product Clean",
+  "category": "vivid",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Neutral whites, hard contrast, no colour cast anywhere.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

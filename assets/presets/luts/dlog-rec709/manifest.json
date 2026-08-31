@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.dlog-rec709",
+  "kind": "lut",
+  "name": "D-Log to Rec.709",
+  "category": "log-convert",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Published D-Log transfer function, rendered to Rec.709.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

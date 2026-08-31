@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.logc3-rec709",
+  "kind": "lut",
+  "name": "LogC3 to Rec.709",
+  "category": "log-convert",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Published LogC3 (EI 800) transfer function, rendered to Rec.709.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.mono-neutral",
+  "kind": "lut",
+  "name": "Mono Neutral",
+  "category": "mono",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Plain Rec.709 luminance. The honest black and white.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

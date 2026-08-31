@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.arctic",
+  "kind": "lut",
+  "name": "Arctic",
+  "category": "cool",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "White and blue, almost no warmth left in the picture.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

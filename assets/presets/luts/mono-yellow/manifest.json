@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.mono-yellow",
+  "kind": "lut",
+  "name": "Mono Yellow",
+  "category": "mono",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Through yellow glass: a gentle sky, close to how the eye reads it.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

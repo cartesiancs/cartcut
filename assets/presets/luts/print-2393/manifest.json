@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.print-2393",
+  "kind": "lut",
+  "name": "Print 2393",
+  "category": "film",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Higher contrast print with punchier reds than Print 2383.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

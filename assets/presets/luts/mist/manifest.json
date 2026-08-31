@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.mist",
+  "kind": "lut",
+  "name": "Mist",
+  "category": "cool",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Low contrast, lifted blacks, colour nearly gone.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

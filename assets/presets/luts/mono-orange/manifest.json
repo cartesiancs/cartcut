@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.mono-orange",
+  "kind": "lut",
+  "name": "Mono Orange",
+  "category": "mono",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Through orange glass: the portrait standard, skies still darkened.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

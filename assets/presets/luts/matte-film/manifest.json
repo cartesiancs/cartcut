@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.matte-film",
+  "kind": "lut",
+  "name": "Matte Film",
+  "category": "matte",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "A print curve over a matte base: soft ends, honest middle.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.blockbuster",
+  "kind": "lut",
+  "name": "Blockbuster",
+  "category": "cinematic",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Teal and orange pushed hard, with contrast to match.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

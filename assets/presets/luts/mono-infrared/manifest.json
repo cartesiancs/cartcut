@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.mono-infrared",
+  "kind": "lut",
+  "name": "Mono Infrared",
+  "category": "mono",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Faux infrared: white leaves, near-black sky, glowing highlights.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

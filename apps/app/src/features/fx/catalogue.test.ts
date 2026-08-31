@@ -81,6 +81,13 @@ function normalize(source: string): string {
  * What must not repeat is the whole chain.
  */
 function pipelineOf(preset: FxPreset): string {
+  if (preset.render.type === "lut") {
+    // Every LUT preset runs the same shader and differs only in its table, so
+    // there is no pipeline here to compare. The equivalent rule — no two
+    // shipped tables grade alike — needs the parsed data and lives in
+    // `lut/lutCatalogue.test.ts`.
+    return "lut:" + preset.id;
+  }
   if (preset.render.type !== "shader") {
     return "overlay:" + preset.render.source;
   }
@@ -145,8 +152,15 @@ describe("the shipped catalogue", () => {
   it("names each preset's folder after its id", () => {
     // What makes `mechanism` mean anything: the folder is the identifier a
     // reviewer sees in a diff, so it has to be the one the manifest uses.
+    //
+    // LUTs carry an extra `lut.` segment because their folder names are shared
+    // vocabulary with the effects — Sepia and Bleach Bypass exist as both, and
+    // they are genuinely different things: one is a shader with parameters, the
+    // other a fixed table. The segment is what keeps the ids distinct without
+    // making either folder name worse.
     for (const { preset, mechanism } of entries) {
-      expect(preset.id, mechanism).toBe("com.cartcut." + mechanism);
+      const prefix = preset.kind === "lut" ? "com.cartcut.lut." : "com.cartcut.";
+      expect(preset.id, mechanism).toBe(prefix + mechanism);
     }
   });
 
@@ -192,7 +206,7 @@ describe("the shipped catalogue", () => {
       const key = preset.kind + "/" + preset.category;
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-    for (const kind of ["effect", "transition"] as const) {
+    for (const kind of ["effect", "transition", "lut"] as const) {
       for (const category of categoriesFor(kind)) {
         const count = counts.get(kind + "/" + category) ?? 0;
         expect(count, kind + "/" + category).toBeGreaterThanOrEqual(3);

@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.mono-contrast",
+  "kind": "lut",
+  "name": "Mono Contrast",
+  "category": "mono",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Hard black and white: closed blacks, bright whites.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

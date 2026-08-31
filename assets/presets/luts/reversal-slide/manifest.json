@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.reversal-slide",
+  "kind": "lut",
+  "name": "Reversal Slide",
+  "category": "film",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Slide film: high contrast, saturated, and unforgiving of highlights.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

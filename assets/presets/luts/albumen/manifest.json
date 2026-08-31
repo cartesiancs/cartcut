@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.albumen",
+  "kind": "lut",
+  "name": "Albumen",
+  "category": "vintage",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Early photographic print: pale, yellowed, low in contrast.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

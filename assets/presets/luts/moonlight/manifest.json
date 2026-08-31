@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.moonlight",
+  "kind": "lut",
+  "name": "Moonlight",
+  "category": "cinematic",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Day for night: dark, blue, and still readable.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

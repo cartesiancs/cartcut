@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.amber-dusk",
+  "kind": "lut",
+  "name": "Amber Dusk",
+  "category": "cinematic",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "The last twenty minutes of light, held.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

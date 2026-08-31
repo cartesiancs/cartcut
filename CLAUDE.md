@@ -232,7 +232,7 @@ step, as the user's own mouse.
 
 ```
 electron/mcp/server.ts      transport, sessions, auth
-electron/mcp/tools.ts       barrel: assembles the 51 tools Claude Code sees
+electron/mcp/tools.ts       barrel: assembles the 53 tools Claude Code sees
 electron/mcp/tools/define.ts  the erased Registrar, shared zod fragments
 electron/mcp/tools/*.ts     one module per family (read, cut, media, tracks, …)
 electron/mcp/bridge.ts      main -> renderer request/response
@@ -267,6 +267,122 @@ Two constraints shape every tool:
 
 Connect with the command shown under the ⚡ icon at the bottom right of the app,
 or set `CARTCUT_MCP_TOKEN` and use the committed `.mcp.json`.
+
+## LUTs
+
+**Called a LUT, never a "filter".** `VideoElementType.filter` and
+`set_video_filters` already own that word for the chroma key and the two blurs,
+and this feature is a different thing that would sit next to it in the same
+sidebar and the same tool list. Two things called a filter is a UI nobody can
+describe and a tool surface an agent will pick wrongly from. The sidebar tab
+says "LUTs", the MCP tools are `list_luts` and `set_lut`, and the word "filter"
+appears in this feature's code only where it means texture filtering or
+`Array.prototype.filter`.
+
+A **LUT is a third preset kind**, alongside `effect` and `transition`, living in
+the same registry and scanned by the same `presetScan.ts`. It ships data rather
+than GLSL: every LUT preset runs one shader, and eighty copies of that shader
+would have defeated `catalogue.test.ts`'s "no two presets run the same
+pipeline" rule outright.
+
+```
+assets/presets/luts/<slug>/{manifest.json,lut.cube}   80 built-ins, 17³, ~11 MB
+apps/app/src/features/lut/cube.ts        the .cube reader — the compatibility promise
+apps/app/src/features/lut/sample.ts      tetrahedral + trilinear. The reference oracle
+apps/app/src/features/lut/glsl.ts        the same maths in GLSL, for both GPU call sites
+apps/app/src/features/lut/atlas.ts       cube -> tiled 2D texture (WebGL 1 has no TEXTURE_3D)
+apps/app/src/features/lut/colorMath.ts   the operations the built-ins are composed from
+apps/app/src/features/lut/recipes.ts     the eighty, as formulas
+apps/app/src/features/lut/lutRegistry.ts lazy load, and the renderer's resolver
+apps/app/src/features/lut/sampleImage.ts the fixed picture every tile shows
+apps/app/src/features/lut/ffmpegParity.test.ts  us against ffmpeg's own lut3d
+apps/app/src/features/timeline/lutOps.ts setClipLut / setClipLutIntensity
+apps/app/src/features/renderer/lut/      apply.ts (injection), gpu.ts, cpu.ts
+scripts/generateLuts.ts                  npx vite-node scripts/generateLuts.ts
+```
+
+A LUT reaches the picture **two ways**, which is the Premiere/Final Cut
+arrangement and not two implementations of one thing:
+
+- **On a clip**, as `element.lut = { presetId, intensity }` — a `Gradable`
+  mixin over the same five types `Blendable` covers. Applied in
+  `renderElement`, on the blend-isolation layer, *before* the blend: grade the
+  clip, then combine it with the scene.
+- **On an adjustment layer**, as an ordinary `EffectElementType` whose
+  `presetId` names a LUT. No new element type, no new MCP tool — `add_effect`
+  already does it, and track order already decides what it covers.
+
+Absent means ungraded and **`SCHEMA_VERSION` did not move**; clearing deletes
+the key, so an ungraded project saves byte-identically to one written before
+the feature. Same rule `blend` follows.
+
+Four things about it that are easy to get wrong:
+
+- **`.cube` is red-fastest; `.3dl` is blue-fastest.** Reading one as the other
+  produces a *plausible* wrong grade, not a broken picture. Both are pinned by
+  hand-built 2³ tables.
+- **A missing LUT grades nothing and reports nothing.** `lutFor` answers `null`
+  for "not installed", "not read yet" and "unreadable" alike, and all three
+  render as a pass-through — the contract `planFrame.ts` already gives a
+  missing shader preset. The one consequence: `renderTimeline.ts` must
+  `preloadLutsForDocument` before the first frame, because an export's loop
+  cannot wait for the next repaint the way the preview does.
+- **The grade is applied to straight, not premultiplied, colour.** Both GPU
+  call sites rely on `premultipliedAlpha: false` and the default
+  `UNPACK_PREMULTIPLY_ALPHA_WEBGL`; flipping either silently darkens every
+  soft edge. `getImageData` is already straight, so the CPU applier needs
+  nothing.
+- **Interpolation is tetrahedral**, as in Resolve, Lumetri and `ffmpeg -vf
+  lut3d`. Trilinear is implemented only as the cross-check: the two agree
+  exactly at grid nodes and differ between them, which is what catches an
+  off-by-one in the index arithmetic.
+- **The LUT panel's thumbnails never change.** They grade one fixed sample
+  (`sampleImage.ts`), not the project at the playhead. A grid of eighty tiles is
+  a *comparison*, and a thumbnail sourced from the timeline moves under the user
+  every time the playhead does — so two LUTs looked at a few seconds apart
+  would have been judged against different pictures, with nothing on screen
+  saying so. Drawn in code, so it cannot go missing and a screenshot of the
+  panel stays comparable across builds.
+
+### How it is known to be right
+
+Every check above is ultimately a check against *ourselves*, and a LUT that is
+subtly wrong does not look broken — it looks like a slightly different grade,
+which is what a LUT is. So the load-bearing verification is external:
+
+**`lut/ffmpegParity.test.ts` runs the bundled ffmpeg's own `lut3d` filter over
+4,096 colours and compares it to `sampleLut` on the same `.cube`.** Raw `rgb24`
+in and out, no codec. It agrees to within **one 8-bit step** on the shipped
+tables and on hand-written spec corners, under *both* tetrahedral and trilinear
+— two separate code paths in both implementations, which is what rules out an
+axis transposition that one scheme could hide by coincidence. The suite also
+proves it is measuring something: hand the two sides different tables and it
+must diverge by >200.
+
+`tests/e2e/specs/lut.spec.ts` closes the last gap, tying the **shader that
+actually ships** to ffmpeg: it renders patches on the GPU with no codec in the
+way and compares them to `lut3d` on the same files. Currently within 1/255 on
+every case.
+
+Between them the chain is: ffmpeg ↔ `sample.ts` ↔ (`glsl.test.ts` parses the
+GLSL and evaluates its six tetrahedra) ↔ the GPU ↔ ffmpeg again. Nothing in it
+rests on our own idea of what a LUT means.
+
+Add to that: `lutComposite.test.ts` drives the real `renderElement` with the CPU
+applier and asserts bytes, and the e2e spec checks the delivered `.mp4` after a
+real Render.
+
+The built-ins are generated, never traced. `recipes.ts` composes them from
+published colour science, and `lutCatalogue.test.ts` regenerates them and
+compares byte for byte, so the files and the recipes cannot drift. Its other
+rules are the LUT translation of the catalogue rules: no two tables closer than
+eight 8-bit steps, every category at least six deep, and every table smooth
+enough that a 17-node grid reconstructs it — that last one is a real constraint
+on the recipes, and it is why `hueBand` has no plateau and `vibrance` measures
+chroma as an RMS distance rather than as `max - min`. **The `log-convert` six
+apply the published transfer function and a neutral Rec.709 render only**: no
+camera primaries matrix and no manufacturer look, so they are a correct base
+grade and not a substitute for a vendor conversion LUT.
 
 ## Testing
 
@@ -316,16 +432,28 @@ npm run test:e2e:check      # typecheck the suite on its own
   per channel. So renderer-side picture work does reach the delivered file. The
   filters specifically are still untested end to end — they go through WebGL
   rather than the 2D context — so confirm `chromakey` before relying on it.
-- Transitions and effects are **finished everywhere except the agent surface**.
+  Note that the *LUT* path is a separate thing and is confirmed end to end:
+  `tests/e2e/specs/lut.spec.ts` decodes a graded export and matches it to the
+  arithmetic within one 8-bit step. See "LUTs".
+- Transitions and effects are finished, and this entry is the least
+  trustworthy thing in this file.
   `TransitionElementType` and `EffectElementType` are real, `transitionOps.ts`
   and `effectOps.ts` hold every mutator, `transitionRepair.ts` keeps them honest
   from `normalizeDocument`, and both the WebGL preview and the v2 export render
   them — 37 transition presets and 39 effect presets ship under
-  `assets/presets/`. What is missing is MCP: no tool creates or reads either,
-  `FILETYPES` in `electron/mcp/tools/define.ts` omits both, and `add_track`'s
-  enum has no `"effect"`, so an agent cannot even make the row an effect needs.
-  An earlier version of this file said transitions did not exist at all; that
-  was wrong, and it made agents refuse work the renderer could do.
+  `assets/presets/`.
+
+  This entry has been wrong twice, in opposite directions. It first said
+  transitions did not exist at all, which made agents refuse work the renderer
+  could do. It then said MCP was missing entirely — also no longer true:
+  `electron/mcp/tools/fx.ts` ships `add_transition`, `set_transition`,
+  `remove_transition`, `add_effect`, `set_effect`, `get_fx` and both
+  `list_*_presets`, and `add_track`'s enum does include `"effect"`.
+
+  What is actually left is narrower: **`FILETYPES` in
+  `electron/mcp/tools/define.ts` still omits `effect` and `transition`**, so a
+  tool that filters by filetype cannot name either. That is the thing to check
+  before believing any claim in this bullet — including this one.
 - **`fluent-ffmpeg` cannot read this ffmpeg's capabilities.** The bundled
   binary is ffmpeg 9, whose `-formats` output puts *two* spaces between the flag
   column and the name (it gained a third flag for devices); `fluent-ffmpeg`

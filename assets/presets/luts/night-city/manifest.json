@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.night-city",
+  "kind": "lut",
+  "name": "Night City",
+  "category": "cinematic",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Deep blue night with sodium and neon left burning.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.cyber-neon",
+  "kind": "lut",
+  "name": "Cyber Neon",
+  "category": "cinematic",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Magenta and cyan, pushed until the neutrals pick a side.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

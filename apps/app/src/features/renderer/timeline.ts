@@ -224,6 +224,7 @@ function paint(
             effect.mode === "overlay"
               ? fx.overlayFrameFor(elementId, effect.element, timeInMs)
               : null,
+            effect.mode === "lut" ? fx.lutFor(effect.element.presetId) : null,
             // Element-local and frame-snapped, so an animated effect runs the
             // same in the preview as in the render. See `fx/effectTime.ts`.
             effectTimeOf(effect.element, timeInMs, fx.fps),

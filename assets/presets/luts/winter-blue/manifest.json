@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.winter-blue",
+  "kind": "lut",
+  "name": "Winter Blue",
+  "category": "cool",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Cold daylight: blue shadows, neutral highlights, low saturation.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

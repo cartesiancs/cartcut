@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.warm-punch",
+  "kind": "lut",
+  "name": "Warm Punch",
+  "category": "warm",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Warm with contrast and saturation to carry it.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

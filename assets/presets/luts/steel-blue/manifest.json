@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.steel-blue",
+  "kind": "lut",
+  "name": "Steel Blue",
+  "category": "cinematic",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Cold industrial: hard contrast, blue-grey neutrals.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

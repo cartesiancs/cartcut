@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.scan-neutral",
+  "kind": "lut",
+  "name": "Scan Neutral",
+  "category": "film",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "A flat film scan: everything present, nothing decided yet.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

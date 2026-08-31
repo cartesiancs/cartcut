@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.neon-pop",
+  "kind": "lut",
+  "name": "Neon Pop",
+  "category": "vivid",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Saturated magenta and cyan against a dark, contrasty base.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

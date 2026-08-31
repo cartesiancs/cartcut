@@ -20,6 +20,7 @@ import {
 import type { FilterInput } from "../renderer/filter/params";
 import "./controlAudioVolume";
 import "./controlBlendMode";
+import "./optionLutSection";
 
 @customElement("option-video")
 export class OptionVideo extends LitElement {
@@ -138,20 +139,28 @@ export class OptionVideo extends LitElement {
         .isShow=${this.isShow}
       ></default-transform>
 
-      <blend-mode
-        .elementId=${this.elementId}
-        .isShow=${this.isShow}
-      ></blend-mode>
-
       <audio-volume
         class=${this.hasAudio() ? "" : "d-none"}
         .elementId=${this.elementId}
         .isShow=${this.isShow && this.hasAudio()}
       ></audio-volume>
 
+      <blend-mode
+        .elementId=${this.elementId}
+        .isShow=${this.isShow}
+      ></blend-mode>
+
+      <!--
+        Next to the blend mode, because the two are the same question asked
+        twice: how this clip's picture is changed before it meets the scene,
+        and how it meets it. Picking *which* filter happens in the Filter tab
+        against thumbnails; what belongs here is how strongly it applies.
+      -->
+      <option-lut-section .elementId=${this.elementId}></option-lut-section>
+
       <button
         type="button"
-        class="btn btn-sm mb-2 ${this.enableFilter
+        class="btn btn-sm mb-2 mt-2 ${this.enableFilter
           ? "btn-primary"
           : "btn-default"}  text-light"
         @click=${this.handleClickEnableFilter}
@@ -184,14 +193,13 @@ export class OptionVideo extends LitElement {
         </button>
       </div>
 
-      <div class="mb-4">
+      <!-- <div class="mb-4">
         <label class="form-label text-light">Animate Preset</label>
 
         <button
           type="button"
           class="btn btn-sm mt-2 w-100 bg-dark text-light"
-          @click=${() =>
-            this.handleClickAddAnimatePreset("fade_in")}
+          @click=${() => this.handleClickAddAnimatePreset("fade_in")}
         >
           Fade In
         </button>
@@ -199,12 +207,11 @@ export class OptionVideo extends LitElement {
         <button
           type="button"
           class="btn btn-sm mt-2 w-100 bg-dark text-light"
-          @click=${() =>
-            this.handleClickAddAnimatePreset("zoom_in")}
+          @click=${() => this.handleClickAddAnimatePreset("zoom_in")}
         >
           Zoom In
         </button>
-      </div>
+      </div> -->
 
       <!-- <div class="mb-2">
         <label class="form-label text-light">Speed</label>
@@ -264,7 +271,9 @@ export class OptionVideo extends LitElement {
 
   /** Whether this clip's filters are switched on, per the store. */
   private get enableFilter(): boolean {
-    return isFilterEnabled(useTimelineStore.getState().timeline[this.elementId]);
+    return isFilterEnabled(
+      useTimelineStore.getState().timeline[this.elementId],
+    );
   }
 
   /**
@@ -372,7 +381,9 @@ export class OptionVideo extends LitElement {
     const bakeHz = bakeRateFor(renderOptionStore.getState().options.fps);
     useTimelineStore
       .getState()
-      .withCheckpoint((doc) => applyPreset(doc, elementId, preset, 250, bakeHz));
+      .withCheckpoint((doc) =>
+        applyPreset(doc, elementId, preset, 250, bakeHz),
+      );
 
     this.requestUpdate();
   }

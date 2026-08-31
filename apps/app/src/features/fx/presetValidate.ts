@@ -39,11 +39,13 @@ import {
 } from "./presetTypes";
 import type {
   FxCategory,
+  FxKind,
   FxParamSpec,
   FxPassSpec,
   FxPreset,
   FxRenderSpec,
   FxSelectOption,
+  FxShaderKind,
   MeshSpec,
   PrecomputeKind,
   PrecomputeSpec,
@@ -52,6 +54,9 @@ import type {
 
 /** The manifest schema this build understands. */
 export const PRESET_SCHEMA_VERSION = 1;
+
+/** Everything a `kind` may say. See `presetTypes.ts#FxKind`. */
+const KNOWN_KINDS: FxKind[] = ["effect", "transition", "lut"];
 
 /** Analyses the app can actually run. See `presetTypes.ts#PrecomputeKind`. */
 const KNOWN_PRECOMPUTE: PrecomputeKind[] = ["luma", "opticalFlow", "edge"];
@@ -74,6 +79,8 @@ export const ASSET_EXTENSIONS = [
   ".mp4",
   ".webm",
   ".mov",
+  ".cube",
+  ".3dl",
 ];
 
 export type ValidationResult =
@@ -451,7 +458,7 @@ function validatePasses(
 
 function validateRender(
   raw: unknown,
-  kind: "effect" | "transition",
+  kind: FxKind,
   payload: RawPresetPayload,
   errors: string[],
 ): FxRenderSpec | null {
@@ -467,6 +474,36 @@ function validateRender(
   const hasFile = (name: string) => hasShader(name) || hasAsset(name);
 
   const type = raw.type;
+
+  if (kind === "lut") {
+    // A LUT preset is data. It runs the app's own shader, so it has no source
+    // to compile, no entry point, no textures and no parameters — and saying
+    // so here is what keeps the cross-checks further down from having to know
+    // about a kind that would fail all of them.
+    if (type !== "lut") {
+      errors.push("render.type: a lut preset must be `lut`");
+      return null;
+    }
+    const source = raw.source;
+    if (typeof source !== "string" || !isSafeRelativePath(source)) {
+      errors.push("render.source: must be a path inside the preset");
+      return null;
+    }
+    if (!hasAsset(source)) {
+      errors.push(
+        "render.source: `" +
+          source +
+          "` is not a .cube, .3dl or image file here",
+      );
+      return null;
+    }
+    return { type: "lut", source };
+  }
+
+  if (type === "lut") {
+    errors.push("render.type: only a `lut` preset may render a lut");
+    return null;
+  }
 
   if (type === "overlay") {
     // A transition mixes two inputs; an overlay has one source and no notion of
@@ -663,19 +700,20 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
   if (typeof id !== "string" || !ID_PATTERN.test(id)) {
     errors.push("id: must be a name like `com.example.rain`");
   }
-  if (kind !== "effect" && kind !== "transition") {
-    errors.push("kind: must be `effect` or `transition`");
+  if (!KNOWN_KINDS.includes(kind as FxKind)) {
+    errors.push("kind: must be `effect`, `transition` or `lut`");
   }
   if (typeof name !== "string" || name.trim() === "") {
     errors.push("name: must be a non-empty string");
   }
 
   // Everything below needs a known kind to check against.
-  if (kind !== "effect" && kind !== "transition") {
+  if (!KNOWN_KINDS.includes(kind as FxKind)) {
     return { ok: false, errors };
   }
+  const presetKind = kind as FxKind;
 
-  const allowedCategories = categoriesFor(kind);
+  const allowedCategories = categoriesFor(presetKind);
   const category = manifest.category;
   if (
     typeof category !== "string" ||
@@ -685,7 +723,7 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
       "category: must be one of " +
         allowedCategories.join(", ") +
         " for a " +
-        kind,
+        presetKind,
     );
   }
 
@@ -700,9 +738,12 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
     }
   }
 
-  const render = validateRender(manifest.render, kind, payload, errors);
+  const render = validateRender(manifest.render, presetKind, payload, errors);
 
-  const reserved = reservedUniformsFor(kind);
+  // A LUT declares no parameters, so it reserves nothing; `reservedUniformsFor`
+  // is typed on the shader kinds and has no answer for it.
+  const reserved =
+    presetKind === "lut" ? [] : reservedUniformsFor(presetKind);
   const params: FxParamSpec[] = [];
   const rawParams = manifest.params;
   if (rawParams != null && !Array.isArray(rawParams)) {
@@ -735,7 +776,7 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
   // silently ignores one of its own controls.
   if (render != null && render.type === "shader") {
     const sourceOf = (name: string) => payload.sources[name] ?? "";
-    const entry = entryPointOf(kind);
+    const entry = entryPointOf(presetKind as FxShaderKind);
 
     // Every fragment stage the compositor will compile, not only the last one.
     // `programFor` wraps each pass with the same preamble and epilogue, so a
@@ -837,7 +878,7 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
     preset: {
       schema: PRESET_SCHEMA_VERSION,
       id: id as string,
-      kind,
+      kind: presetKind,
       name: name as string,
       category: category as FxCategory,
       ...(typeof author === "string" ? { author } : {}),

@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.terracotta",
+  "kind": "lut",
+  "name": "Terracotta",
+  "category": "warm",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Earthy red-brown: warm shadows, restrained highlights.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

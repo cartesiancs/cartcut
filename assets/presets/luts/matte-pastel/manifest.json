@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.matte-pastel",
+  "kind": "lut",
+  "name": "Matte Pastel",
+  "category": "matte",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Everything pulled toward the middle: pale, soft, low contrast.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

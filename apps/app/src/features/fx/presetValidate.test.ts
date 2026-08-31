@@ -872,3 +872,102 @@ describe("category", () => {
     expect(errors.join()).toContain("must be one of");
   });
 });
+
+describe("the lut kind", () => {
+  function lutManifest(over: Record<string, unknown> = {}) {
+    return {
+      schema: 1,
+      id: "com.example.grade",
+      kind: "lut",
+      name: "Grade",
+      category: "film",
+      render: { type: "lut", source: "lut.cube" },
+      ...over,
+    };
+  }
+
+  /** What the scanner reports for a LUT: the file as a path, unread. */
+  const lutPayload = (manifest: unknown, over: Record<string, unknown> = {}) =>
+    payload(manifest, {
+      sources: {},
+      assets: { "lut.cube": "/presets/test/lut.cube" },
+      ...over,
+    });
+
+  it("validates with no shader, no entry point and no parameters", () => {
+    // The point of a third kind: every LUT preset runs the app's own shader, so
+    // there is nothing here to compile and nothing to cross-check against.
+    const result = validatePreset(lutPayload(lutManifest()));
+    expect(result.ok ? [] : result.errors).toEqual([]);
+    if (!result.ok) return;
+    expect(result.preset.kind).toBe("lut");
+    expect(result.preset.render).toEqual({ type: "lut", source: "lut.cube" });
+    expect(result.preset.params).toEqual([]);
+  });
+
+  it("accepts an image LUT as its source", () => {
+    const result = validatePreset(
+      lutPayload(lutManifest({ render: { type: "lut", source: "hald.png" } }), {
+        assets: { "hald.png": "/presets/test/hald.png" },
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses a source that is not in the folder", () => {
+    const errors = expectErrors(
+      validatePreset(lutPayload(lutManifest(), { assets: {} })),
+    );
+    expect(errors.join(" ")).toMatch(/not a \.cube, \.3dl or image file here/);
+  });
+
+  it("refuses a source that tries to leave the folder", () => {
+    // The same rule every other path in a manifest follows.
+    const errors = expectErrors(
+      validatePreset(
+        lutPayload(
+          lutManifest({ render: { type: "lut", source: "../../../etc/passwd" } }),
+        ),
+      ),
+    );
+    expect(errors.join(" ")).toMatch(/must be a path inside the preset/);
+  });
+
+  it("refuses a lut preset that renders a shader", () => {
+    const errors = expectErrors(
+      validatePreset(
+        lutPayload(lutManifest({ render: { type: "shader", source: "shader.frag" } })),
+      ),
+    );
+    expect(errors.join(" ")).toMatch(/a lut preset must be `lut`/);
+  });
+
+  it("refuses an effect preset that renders a lut", () => {
+    const errors = expectErrors(
+      validatePreset(
+        lutPayload(
+          lutManifest({
+            kind: "effect",
+            category: "color",
+            render: { type: "lut", source: "lut.cube" },
+          }),
+        ),
+      ),
+    );
+    expect(errors.join(" ")).toMatch(/only a `lut` preset may render a lut/);
+  });
+
+  it("holds a lut to the lut categories, not the effect ones", () => {
+    const errors = expectErrors(
+      validatePreset(lutPayload(lutManifest({ category: "stylize" }))),
+    );
+    expect(errors.join(" ")).toMatch(/must be one of .*log-convert/);
+  });
+
+  it("names all three kinds when it does not recognise one", () => {
+    const errors = expectErrors(
+      validatePreset(lutPayload(lutManifest({ kind: "colour" }))),
+    );
+    expect(errors.join(" ")).toMatch(/`effect`, `transition` or `lut`/);
+  });
+});

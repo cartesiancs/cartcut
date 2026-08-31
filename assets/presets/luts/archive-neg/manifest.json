@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.archive-neg",
+  "kind": "lut",
+  "name": "Archive Neg",
+  "category": "film",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Aged negative: dye shift toward yellow, blacks never quite closing.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

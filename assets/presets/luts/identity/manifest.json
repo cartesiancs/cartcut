@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.lut.identity",
+  "kind": "lut",
+  "name": "None (Identity)",
+  "category": "utility",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "note": "Changes nothing. Useful for checking a pipeline end to end.",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}
