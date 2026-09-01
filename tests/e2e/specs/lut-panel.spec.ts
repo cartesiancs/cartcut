@@ -10,9 +10,15 @@
  * skipped painting, and was never asked again — because clicking a tab changes
  * no property Lit is watching. Eighty tiles, all blank, no error anywhere.
  *
- * So this spec asserts the thing that was broken: open the tab, and the tiles
+ * So this spec asserts the thing that was broken: open the panel, and the tiles
  * have pictures in them. It is deliberately cheap — no export, no media — and
  * it is the only test in the suite that would have caught it.
+ *
+ * The panel is reached in two clicks: the "Fx" sidebar pill, then the "LUTs"
+ * toggle inside `<control-ui-fx>`, which shares that tab with the effect and
+ * transition grids. The hidden-at-startup problem above survives the move — the
+ * grid mounts inside a `d-none` div and is still un-painted until the toggle
+ * reveals it — so this is the same test, aimed one level deeper.
  */
 
 import path from "node:path";
@@ -30,18 +36,30 @@ test("the LUT panel paints every tile when its tab is opened", async ({
 
   await test.step("the tab exists and the pane is wired to it", async () => {
     const wiring = await page.evaluate(() => ({
-      button: document.querySelector('button[data-bs-target="#nav-lut"]') != null,
-      pane: document.querySelector("#nav-lut") != null,
-      browser: document.querySelector("#nav-lut lut-browser") != null,
+      button: document.querySelector('button[data-bs-target="#nav-fx"]') != null,
+      pane: document.querySelector("#nav-fx") != null,
+      toggle:
+        document.querySelector('control-ui-fx button[data-panel="lut"]') != null,
+      browser: document.querySelector("#nav-fx lut-browser") != null,
     }));
-    expect(wiring).toEqual({ button: true, pane: true, browser: true });
+    expect(wiring).toEqual({
+      button: true,
+      pane: true,
+      toggle: true,
+      browser: true,
+    });
   });
 
   await test.step("opening it lays out all eighty, under their headings", async () => {
     await page.evaluate(() => {
       (
         document.querySelector(
-          'button[data-bs-target="#nav-lut"]',
+          'button[data-bs-target="#nav-fx"]',
+        ) as HTMLElement | null
+      )?.click();
+      (
+        document.querySelector(
+          'control-ui-fx button[data-panel="lut"]',
         ) as HTMLElement | null
       )?.click();
     });
@@ -229,10 +247,13 @@ test("the LUT panel paints every tile when its tab is opened", async ({
           })
           .join(" ");
       return {
-        panel: read("#nav-lut, #nav-lut *"),
+        // Scoped to the grid itself, not to the whole `#nav-fx` pane: the pane
+        // now also holds the effect and transition browsers, and that feature
+        // is allowed the word "filter" this check refuses.
+        panel: read("#nav-fx lut-browser, #nav-fx lut-browser *"),
         inspector: read("option-lut-section, option-lut-section *"),
-        // The sidebar tab's own tooltip and label.
-        tab: read('button[data-bs-target="#nav-lut"]'),
+        // The panel toggle's own tooltip and label.
+        tab: read('control-ui-fx button[data-panel="lut"]'),
       };
     });
 

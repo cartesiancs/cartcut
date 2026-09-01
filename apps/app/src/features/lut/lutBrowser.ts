@@ -3,9 +3,9 @@
  *
  * Deliberately shaped like `fx/fxPresetBrowser.ts` — same tile markup, same
  * `.asset` hover, same search box, same uppercase category headings in enum
- * order — because it sits one tab away from it and two grids that browse alike
- * should look alike. What differs is what a click *does*, and that is the whole
- * design of the feature:
+ * order — because it sits one toggle away from it, inside the same "Fx" tab,
+ * and two grids that browse alike should look alike. What differs is what a
+ * click *does*, and that is the whole design of the feature:
  *
  * | gesture | result |
  * |---|---|
@@ -403,16 +403,6 @@ export class LutBrowser extends LitElement {
             @click=${() => void this.handleImport()}
           >
             Import
-          </button>
-        </div>
-
-        <div class="px-2 pt-1 d-flex gap-1">
-          <button
-            class="btn btn-sm btn-outline-secondary w-100"
-            style="font-size: 11px;"
-            @click=${() => this.clear()}
-          >
-            None — remove the LUT
           </button>
         </div>
 

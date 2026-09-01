@@ -7,7 +7,6 @@ import "./ControlRender";
 import "./ControlUtilities";
 import "./ControlFilter";
 import "./ControlFx";
-import "./ControlLut";
 import "../../features/preview/previewTopBar";
 import "../../features/record/screenRecord";
 import "../../features/record/audioRecord";
@@ -236,25 +235,6 @@ export class Control extends LitElement {
               <button
                 class="btn-nav"
                 data-bs-toggle="pill"
-                data-bs-target="#nav-lut"
-                type="button"
-                role="tab"
-                aria-selected="false"
-              >
-                <!--
-                  "gradient", not "photo_filter". A Material Symbols ligature is
-                  the element's own text content, so that name would put the
-                  word "filter" into the DOM beside a feature that must not be
-                  called one. It is the better icon anyway: photo_filter is a
-                  sparkle, which is what the Fx tab directly above already uses,
-                  and the two were near-indistinguishable in a 2.5rem column.
-                -->
-                <span class="material-symbols-outlined"> gradient</span>
-              </button>
-
-              <button
-                class="btn-nav"
-                data-bs-toggle="pill"
                 data-bs-target="#nav-output"
                 type="button"
                 role="tab"
@@ -293,10 +273,6 @@ export class Control extends LitElement {
 
               <div class="tab-pane fade" id="nav-fx" role="tabpanel">
                 <control-ui-fx></control-ui-fx>
-              </div>
-
-              <div class="tab-pane fade" id="nav-lut" role="tabpanel">
-                <control-ui-lut></control-ui-lut>
               </div>
 
               <!--
