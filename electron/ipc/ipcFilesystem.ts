@@ -54,9 +54,18 @@ export const ipcFilesystem = {
   },
 
   removeDirectory: async (event, path) => {
-    fs.rmSync(path, { recursive: true, force: true });
-
-    return status;
+    try {
+      fs.rmSync(path, { recursive: true, force: true });
+      return true;
+    } catch (error) {
+      // `force` already swallows a missing path; anything left is a real
+      // failure — a busy handle on Windows, say. The caller is the export's
+      // "finish" handler cleaning up `renderAnimation/`, and a leftover temp
+      // directory is not worth failing a finished render over, so report it
+      // rather than rejecting the invoke.
+      console.error("filesystem:removeDirectory", path, error);
+      return false;
+    }
   },
 
   writeFile: async (event, filename, data, options) => {
