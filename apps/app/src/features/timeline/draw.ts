@@ -204,7 +204,11 @@ export function truncateText(
 /** What to write on a clip: its words if it has any, otherwise its file. */
 export function clipLabel(element: TimelineElement): string {
   if (element.filetype === "text") {
-    return (element as any).text ?? "text";
+    // Folded onto one line. The label is a single `fillText` on the clip bar,
+    // which draws no line break at all, while `truncateText`'s binary search
+    // would still be measuring the break characters — so a two-line title would
+    // silently lose half of itself and be sized wrong for what was left.
+    return ((element as any).text ?? "text").replace(/\s*[\r\n]+\s*/g, " ");
   }
   // A group has no source file to be named after, so it carries its own name.
   if (element.filetype === "group") {

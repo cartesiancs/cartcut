@@ -425,6 +425,16 @@ export type TextElementType = TimelinePlaced &
       shadow?: TextShadow;
       glow?: TextGlow;
       textTransform?: "none" | "uppercase" | "lowercase";
+      /**
+       * Leading, as a multiple of the font size. Absent means
+       * `text/metrics.ts#DEFAULT_LINE_HEIGHT`.
+       *
+       * This is where line spacing lives. It used to be `height`, which meant
+       * the box and the leading were one number — resizing the box pushed the
+       * lines apart. `height` is now a consequence of the text, written back by
+       * `element/textFit.ts`, and never read by the layout.
+       */
+      lineHeight?: number;
     };
     background: {
       enable: boolean;

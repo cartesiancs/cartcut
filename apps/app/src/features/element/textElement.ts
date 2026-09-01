@@ -19,6 +19,7 @@ import type {
   TextGlow,
   TextShadow,
 } from "../../@types/timeline";
+import { defaultTextHeight } from "../text/metrics";
 
 export type TextElementOptions = {
   text?: string;
@@ -70,7 +71,7 @@ export function createTextElement({
   backgroundEnable = false,
   locationX = 0,
   locationY = 0,
-  height = 66,
+  height,
   width = 500,
   startTime = 0,
   duration = 1000,
@@ -87,6 +88,11 @@ export function createTextElement({
   fill,
   textOpacity,
 }: TextElementOptions): TextElementType {
+  // The box is a consequence of the type, so an unspecified height is derived
+  // from the size rather than being a literal. `element/textFit.ts` corrects it
+  // against the real font on the first edit that can measure one.
+  const boxHeight = height ?? defaultTextHeight(fontsize);
+
   return {
     startTime: startTime,
     duration: duration,
@@ -124,7 +130,7 @@ export function createTextElement({
     rotation: 0,
     localpath: "/TEXTELEMENT",
     filetype: "text",
-    height: height,
+    height: boxHeight,
     width: width,
     widthInner: 200,
     opacity: 100,

@@ -11,6 +11,7 @@ import {
 import { addKeyframe } from "../animation/keyframeOps";
 import { setIn } from "../../utils/immutable";
 import { GestureCommit } from "./gestureCommit";
+import { withFittedTextHeights } from "../element/textFit";
 import type { AnimatableProperty } from "../../@types/timeline";
 import "../filter/backgroundRemove";
 
@@ -402,10 +403,23 @@ export class OptionImage extends LitElement {
       return;
     }
 
+    // Both fields are written on every change — this handler cannot tell which
+    // one the user touched, so it compares against what is stored.
+    const widthChanged = this.timeline?.[this.elementId]?.width !== w;
+
     // Size carries no animation track, so this is a plain value change.
     this.commitValue([
       { path: ["width"], value: w },
       { path: ["height"], value: h },
     ]);
+
+    // A text clip's width is its wrapping width, so changing it changes how
+    // many lines there are and the box has to be re-measured. A typed *height*
+    // is left exactly as typed: it holds until the next edit that moves the
+    // text, which is how an auto-sizing text box behaves everywhere else.
+    if (widthChanged) {
+      const elementId = this.elementId;
+      this.gesture.apply((doc) => withFittedTextHeights(doc, [elementId]));
+    }
   }
 }

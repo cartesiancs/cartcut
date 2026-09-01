@@ -5,6 +5,8 @@ import { ensureFontFace } from "../font/fontFaces";
 import { resolveTextStyle } from "../text/style";
 import { setIn } from "../../utils/immutable";
 import { rasterizeTextElements } from "../element/rasterizeText";
+import { affectsTextBlock, withFittedTextHeights } from "../element/textFit";
+import { DEFAULT_LINE_HEIGHT, coerceLineHeight } from "../text/metrics";
 import "./controlBlendMode";
 import "./optionLutSection";
 
@@ -29,6 +31,13 @@ export class OptionText extends LitElement {
   isShow = false;
   updateOnce: any;
   selectedFont: string;
+
+  /**
+   * The text last written into history, and the only thing that decides whether
+   * there is anything to commit. Not a `@property`: it tracks the *field*, not
+   * the document, and re-rendering must not disturb it.
+   */
+  private committedText: string | null = null;
 
   constructor() {
     super();
@@ -103,17 +112,28 @@ export class OptionText extends LitElement {
         .elementId=${this.elementId}
       ></option-lut-section>
 
+      <!--
+        A textarea, not an input: a title that breaks over two lines is a thing
+        the renderer can draw (text/lines.ts), and a single-line field cannot
+        even hold the string — assigning one strips the break, and the next
+        keystroke writes the flattened version back over the element.
+
+        Deliberately not value-bound. The store subscription in
+        createRenderRoot re-renders this panel on every change, including the
+        ones this field itself makes, so a bound value would put the caret back
+        at the end on every keystroke. resetValue() fills it in instead.
+      -->
       <div class="mb-2">
         <label class="form-label text-light">Text</label>
-        <input
+        <textarea
           @click=${this.handleClickTextForm}
-          @input=${this.handleChangeText}
-          @change=${this.handleChangeText}
+          @input=${this.handleInputText}
+          @change=${this.handleCommitText}
           aria-event="text"
-          type="text"
+          rows="3"
           class="form-control bg-default text-light"
-          value="TITLE"
-        />
+          style="resize: vertical; min-height: 64px;"
+        ></textarea>
       </div>
 
       <div class="mb-2">
@@ -136,6 +156,30 @@ export class OptionText extends LitElement {
           type="number"
           class="form-control bg-default text-light"
           value="52"
+        />
+      </div>
+
+      <!--
+        Leading, as a multiple of the font size. It lives next to Font Size
+        because that is what it is measured in, and because between them they
+        are the whole of a line's vertical rhythm.
+
+        This used to be the Size panel's height field by accident: height was
+        the line advance, so growing a text box spread its lines instead of
+        resizing it. Now the box follows the text and this is where the spacing
+        is asked for.
+      -->
+      <div class="mb-2">
+        <label class="form-label text-light">Line Spacing</label>
+        <input
+          @change=${this.handleChangeLineHeight}
+          aria-event="line-height"
+          type="number"
+          min="0.5"
+          max="4"
+          step="0.1"
+          class="form-control bg-default text-light"
+          .value=${String(this.textStyle.lineHeight)}
         />
       </div>
 
@@ -291,9 +335,16 @@ export class OptionText extends LitElement {
           next = setIn(next, ["elements", id, ...write.path], write.value);
         }
       }
+      // The box follows the type — but only for the writes that change how tall
+      // the block is. Alignment, colour and every effect repaint the same shape,
+      // and re-fitting on those would throw away a height the user typed.
+      // Folding the fit in here means it shares this edit's undo step.
+      //
       // Nothing applicable in the selection: hand the document back by
       // identity so `withCheckpoint` records no step.
-      return next;
+      return affectsTextBlock(writes.map((write) => write.path))
+        ? withFittedTextHeights(next, this.elementId)
+        : next;
     });
   }
 
@@ -514,12 +565,20 @@ export class OptionText extends LitElement {
   }
 
   setElementId({ elementId }) {
+    // Before the selection moves off it: clicking another clip does not blur
+    // the field in a way that fires `change`, so without this the typing that
+    // was still uncommitted would live on in the store with no undo step of
+    // its own.
+    this.handleCommitText();
+
     this.elementId = [elementId];
 
     this.resetValue();
   }
 
   setElementIds({ elementIds }) {
+    this.handleCommitText();
+
     this.elementId = elementIds;
 
     this.resetValue();
@@ -595,14 +654,19 @@ export class OptionText extends LitElement {
     const timeline = document.querySelector("element-timeline").timeline;
     const fontColor: any = this.querySelector("input[aria-event='font-color'");
     const fontSize: any = this.querySelector("input[aria-event='font-size'");
-    const text: any = this.querySelector("input[aria-event='text'");
+    const text = this.textField();
     const letterSpacing: any = this.querySelector(
       "input[aria-event='letter-spacing'",
     );
 
     fontColor.value = timeline[this.elementId[0]].textcolor;
     fontSize.value = timeline[this.elementId[0]].fontsize;
-    text.value = timeline[this.elementId[0]].text;
+    if (text != null) {
+      text.value = timeline[this.elementId[0]].text ?? "";
+      // The baseline `handleCommitText` compares against, so simply focusing
+      // and leaving the field records nothing.
+      this.committedText = text.value;
+    }
     letterSpacing.value = timeline[this.elementId[0]].letterSpacing;
     this.align = timeline[this.elementId[0]].options.align;
     this.isBold = timeline[this.elementId[0]].options.isBold;
@@ -610,51 +674,63 @@ export class OptionText extends LitElement {
     this.selectedFont = timeline[this.elementId[0]].fontname;
   }
 
-  handleClickAlign(align) {
-    this.timelineState.updateTimeline(
-      this.elementId[0],
-      ["options", "align"],
-      align,
+  /**
+   * Leading, as a multiple of the font size.
+   *
+   * `coerceLineHeight` runs here rather than at read time so an unusable value
+   * — an emptied field arrives as `""` -> `NaN` — is never what gets stored.
+   */
+  handleChangeLineHeight(event: Event) {
+    const value = coerceLineHeight((event.target as HTMLInputElement).value);
+    // The default is stored as absence, the same rule `blend` and `lut` follow:
+    // a project set back to normal leading saves byte-identically to one that
+    // never had the field. `JSON.stringify` drops an `undefined` value, so the
+    // key does not reach `timeline.json` at all.
+    this.set(
+      ["options", "lineHeight"],
+      value === DEFAULT_LINE_HEIGHT ? undefined : value,
     );
+    this.requestUpdate();
+  }
+
+  /*
+   * The four below used to write through `updateTimeline`, which records no
+   * history at all — so bolding a caption, or aligning it, was not undoable and
+   * most of them silently dropped everything but the first clip in the
+   * selection. They go through `commitStyle` now, which writes the whole
+   * selection as one checkpoint and re-fits the boxes: all four change how tall
+   * the wrapped block is.
+   */
+
+  handleClickAlign(align) {
+    this.set(["options", "align"], align);
 
     this.align = align;
     this.requestUpdate();
   }
 
   handleClickEnableBold() {
-    const state = useTimelineStore.getState();
-    const textElement = state.timeline[this.elementId[0]];
-    if (textElement.filetype !== "text") {
+    const textElement = useTimelineStore.getState().timeline[this.elementId[0]];
+    if (textElement?.filetype !== "text") {
       return;
     }
 
-    for (let index = 0; index < this.elementId.length; index++) {
-      const element = this.elementId[index];
-      this.isBold = !textElement.options.isBold;
-
-      this.timelineState.updateTimeline(
-        element,
-        ["options", "isBold"],
-        !textElement.options.isBold,
-      );
-    }
+    // The first clip's state decides the direction, so a mixed selection lands
+    // all on the same value rather than each flipping its own way.
+    this.isBold = !textElement.options.isBold;
+    this.set(["options", "isBold"], this.isBold);
 
     this.requestUpdate();
   }
 
   handleClickEnableItalic() {
-    const state = useTimelineStore.getState();
-    const textElement = state.timeline[this.elementId[0]];
-    if (textElement.filetype !== "text") {
+    const textElement = useTimelineStore.getState().timeline[this.elementId[0]];
+    if (textElement?.filetype !== "text") {
       return;
     }
-    this.isItalic = !textElement.options?.isItalic;
 
-    this.timelineState.updateTimeline(
-      this.elementId[0],
-      ["options", "isItalic"],
-      !textElement.options?.isItalic,
-    );
+    this.isItalic = !textElement.options?.isItalic;
+    this.set(["options", "isItalic"], this.isItalic);
 
     this.requestUpdate();
   }
@@ -663,19 +739,19 @@ export class OptionText extends LitElement {
     this.timelineState.setCursorType("text");
   }
 
-  handleChangeLetterSpacing(e) {
+  handleChangeLetterSpacing() {
     const letterSpacing: any = this.querySelector(
-      "input[aria-event='letter-spacing'",
+      "input[aria-event='letter-spacing']",
     );
 
-    for (let index = 0; index < this.elementId.length; index++) {
-      const element = this.elementId[index];
-      this.timelineState.updateTimeline(
-        element,
-        ["letterSpacing"],
-        parseInt(letterSpacing.value),
-      );
+    const value = parseInt(letterSpacing.value, 10);
+    if (!Number.isFinite(value)) {
+      return;
     }
+
+    // Wider tracking makes lines wrap sooner, so this changes the block height
+    // too — `commitStyle` re-fits.
+    this.set(["letterSpacing"], value);
   }
 
   handleChangeTextColor() {
@@ -688,17 +764,62 @@ export class OptionText extends LitElement {
     }
   }
 
-  handleChangeText(e) {
-    // e.preventDefault();
-    // e.stopPropagation();
+  /** The text field itself. Absent until the panel has rendered once. */
+  private textField(): HTMLTextAreaElement | null {
+    return this.querySelector("textarea[aria-event='text']");
+  }
+
+  /**
+   * Typing: update the store so the preview follows, but record no history.
+   *
+   * This used to go straight to `changeTextValue`, which checkpoints — so every
+   * keystroke was its own undo step. That was already awkward for a one-line
+   * title and unusable for a textarea, where a paragraph is several hundred
+   * steps to press Cmd+Z through.
+   */
+  handleInputText() {
+    const elementId = this.elementId[0];
+    const element = useTimelineStore.getState().timeline[elementId];
+    if (element?.filetype !== "text") {
+      return;
+    }
+
+    const field = this.textField();
+    if (field == null) {
+      return;
+    }
+
+    this.timelineState.updateTimeline(elementId, ["text"], field.value);
+  }
+
+  /**
+   * Leaving the field: turn everything typed since arriving into one undo step.
+   *
+   * `handleInputText` has already put the final string in the store, so this
+   * commit is really "make the current state a history entry" — undo then lands
+   * on the snapshot from before the typing began, which is the whole point.
+   *
+   * The equality guard is load-bearing. `setIn` rebuilds the path whether or
+   * not the value changed, so `withCheckpoint` would see a new document and
+   * record an empty step for a field that was merely clicked into.
+   */
+  handleCommitText() {
+    const elementId = this.elementId[0];
+    if (elementId == null) {
+      return;
+    }
+
+    const field = this.textField();
+    if (field == null || field.value === this.committedText) {
+      return;
+    }
+
+    this.committedText = field.value;
 
     const elementControl = document.querySelector("element-control");
-    const text: any = this.querySelector("input[aria-event='text'");
-
-    const textValue = text.value;
     elementControl.changeTextValue({
-      elementId: this.elementId[0],
-      value: textValue,
+      elementId,
+      value: field.value,
     });
   }
 

@@ -23,6 +23,7 @@ import type {
   TextGlow,
   TextShadow,
 } from "../../@types/timeline";
+import { normalizeLineHeight } from "./metrics";
 
 export type ResolvedOutline = {
   enable: boolean;
@@ -47,6 +48,8 @@ export type ResolvedTextStyle = {
   fill: TextFill;
   textOpacity: number;
   textTransform: "none" | "uppercase" | "lowercase";
+  /** Leading, as a multiple of the font size. See `text/metrics.ts`. */
+  lineHeight: number;
 };
 
 /**
@@ -171,6 +174,7 @@ export function resolveTextStyle(element: TextElementType): ResolvedTextStyle {
       options.textTransform === "lowercase"
         ? options.textTransform
         : "none",
+    lineHeight: normalizeLineHeight(options.lineHeight),
   };
 }
 

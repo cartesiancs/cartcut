@@ -18,6 +18,7 @@ import { currentDoc, requireElement } from "../context";
 import { registerCommands } from "../registry";
 import { clipRow } from "../serialize";
 import { flatten, rejectionFor, writablePaths } from "./writable";
+import { affectsTextBlock, withFittedTextHeights } from "../../element/textFit";
 
 registerCommands({
   update_clip: (params: { elementId: string; patch: Record<string, any> }) => {
@@ -54,16 +55,26 @@ registerCommands({
       throw new Error(outOfRange.join(" "));
     }
 
+    // A text clip's box is measured from its text, so anything that changes
+    // what the block looks like invalidates the stored height. An explicit
+    // `height` in the same patch is the caller asking for a box, and wins.
+    const rewraps =
+      affectsTextBlock(writes.map(([path]) => path)) &&
+      !writes.some(([path]) => path.join(".") === "height");
+
     ensureUndoBaseline();
     useTimelineStore.getState().withCheckpoint((d) => {
       let updated: TimelineElement = d.elements[params.elementId];
       for (const [path, value] of writes) {
         updated = setIn(updated, path, value);
       }
-      return {
+      const next = {
         ...d,
         elements: { ...d.elements, [params.elementId]: updated },
       };
+      return rewraps
+        ? withFittedTextHeights(next, [params.elementId])
+        : next;
     });
 
     const after = useTimelineStore.getState().getDocument();

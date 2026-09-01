@@ -370,7 +370,10 @@ export async function buildKitchenSink(ctx: BuildContext): Promise<ScenarioResul
   tracks.text = textTrack;
 
   const title = await agent<any>(session, "add_text", {
-    text: "Cartcut stress export",
+    // Broken over two lines on purpose: an explicit newline has to survive the
+    // agent, the store, a save and the exporter, and this scenario already
+    // checks the delivered file frame by frame.
+    text: "Cartcut stress\nexport",
     startMs: at(0.02),
     durationMs: Math.round(D * 0.12),
     style: {
@@ -381,7 +384,8 @@ export async function buildKitchenSink(ctx: BuildContext): Promise<ScenarioResul
       locationX: Math.round(profile.width * 0.2),
       locationY: Math.round(profile.height * 0.42),
       width: Math.round(profile.width * 0.6),
-      height: Math.round(profile.height / 8),
+      // No `height`: the box is measured from the text now, and this title is
+      // two lines, so leaving it out is what exercises the auto-fit end to end.
     },
   });
   const titleId = title?.created?.[0];

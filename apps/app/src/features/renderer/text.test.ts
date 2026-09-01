@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderText } from "./text";
+import { measureTextBlock, renderText } from "./text";
 import { scene, pixel, inkBounds, textElement } from "./testing";
 
 /**
@@ -63,7 +63,7 @@ describe("renderText", () => {
     expect(ctx.textAlign).toBe("start");
   });
 
-  it("wraps onto further lines, advancing by the element height", () => {
+  it("wraps onto further lines, advancing by the line height", () => {
     const single = scene(400, 400, "#000000");
     renderText(single.ctx, "t", base(), 0);
     const oneLine = inkBounds(single.canvas);
@@ -75,8 +75,8 @@ describe("renderText", () => {
     const many = inkBounds(wrapped.canvas);
 
     expect(many.count).toBeGreaterThan(oneLine.count);
-    // the second line sits a full element height (60) below the first
-    expect(many.maxY).toBeGreaterThan(oneLine.maxY + 40);
+    // the second line sits a full advance (fontsize 40 × 1.2 = 48) lower
+    expect(many.maxY).toBeGreaterThan(oneLine.maxY + 30);
   });
 
   it("draws a background band behind each line when enabled", () => {
@@ -464,5 +464,321 @@ describe("renderText effects", () => {
     renderText(b.ctx, "t", explicit, 0);
 
     expect(inkBounds(b.canvas)).toEqual(inkBounds(a.canvas));
+  });
+});
+
+/**
+ * Explicit line breaks.
+ *
+ * `ctx.fillText` draws no break — it collapses a `\n` and paints the run as one
+ * line — so every assertion here is really asking whether the string reached
+ * the canvas as separate draws. Same discipline as above: two scenes compared
+ * against each other, never an absolute column, because the metrics come from
+ * whichever face the host resolved.
+ */
+describe("renderText hard line breaks", () => {
+  const withText = (text: string, over: Record<string, unknown> = {}) => {
+    const el = base();
+    el.text = text;
+    Object.assign(el, over);
+    return el;
+  };
+
+  const draw = (text: string, over: Record<string, unknown> = {}, size = 400) => {
+    const { canvas, ctx } = scene(size, size, "#000000");
+    renderText(ctx, "t", withText(text, over), 0);
+    return canvas;
+  };
+
+  /** Ink bounds restricted to a horizontal band, for asking about one line. */
+  function inkBandIn(
+    canvas: ReturnType<typeof scene>["canvas"],
+    y0: number,
+    y1: number,
+  ) {
+    const { width } = canvas;
+    const d = canvas.getContext("2d").getImageData(0, y0, width, y1 - y0).data;
+    let count = 0;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    for (let y = 0; y < y1 - y0; y++) {
+      for (let x = 0; x < width; x++) {
+        const i = (y * width + x) * 4;
+        if (d[i] > 40 || d[i + 1] > 40 || d[i + 2] > 40) {
+          count++;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+        }
+      }
+    }
+    return { count, minX, maxX };
+  }
+
+  it("breaks the line at a newline", () => {
+    const one = inkBounds(draw("AB"));
+    const two = inkBounds(draw("A\nB"));
+
+    // The second glyph moved off the first line: narrower, and a full line
+    // advance (fontsize 40 × 1.2 = 48) further down.
+    expect(two.maxX).toBeLessThan(one.maxX);
+    expect(two.maxY).toBeGreaterThan(one.maxY + 30);
+  });
+
+  it("breaks even when both words would have fitted on one line", () => {
+    // "A B" is far narrower than the 200px box, so the greedy wrap leaves it
+    // alone. Only the newline can split this — which is exactly what splitting
+    // on spaces alone can never do.
+    const spaced = inkBounds(draw("A B"));
+    const broken = inkBounds(draw("A\nB"));
+
+    expect(broken.maxY).toBeGreaterThan(spaced.maxY + 30);
+  });
+
+  it("gives a blank line a full line advance of its own", () => {
+    const tight = inkBounds(draw("A\nB"));
+    const spaced = inkBounds(draw("A\n\nB"));
+
+    // One extra advance — fontsize 40 × the default 1.2 line height — and
+    // nothing else. `element.height` is 60 here and must not enter into it.
+    expect(Math.abs(spaced.maxY - tight.maxY - 48)).toBeLessThanOrEqual(4);
+    expect(spaced.minY).toBe(tight.minY);
+  });
+
+  it("reads CRLF and a lone CR as the same break", () => {
+    expect(inkBounds(draw("A\r\nB"))).toEqual(inkBounds(draw("A\nB")));
+    expect(inkBounds(draw("A\rB"))).toEqual(inkBounds(draw("A\nB")));
+  });
+
+  it("still wraps to the box width inside each paragraph", () => {
+    // "AAAA BBBB CCCC" cannot fit a 200px box at 40px, so it wraps on its own.
+    // How many lines that takes depends on the host's face, so the claim is
+    // only that it took more than one — and that the newline then adds one more
+    // on top of whatever the wrap decided.
+    const single = inkBounds(draw("AAAA"));
+    const plain = inkBounds(draw("AAAA BBBB CCCC"));
+    const wrapped = inkBounds(draw("AAAA BBBB CCCC\nDD"));
+
+    expect(plain.maxY).toBeGreaterThan(single.maxY + 30);
+    expect(wrapped.maxY).toBeGreaterThan(plain.maxY + 30);
+  });
+
+  it("applies alignment to each line separately", () => {
+    const canvas = draw("AAAA\nB", { options: { ...base().options, align: "right" } });
+
+    // Both lines end at the box's right edge, so the short one is not left
+    // hanging where the long one ended.
+    const first = inkBandIn(canvas, 0, 60);
+    const second = inkBandIn(canvas, 60, 130);
+    expect(first.count).toBeGreaterThan(0);
+    expect(second.count).toBeGreaterThan(0);
+    expect(Math.abs(200 - first.maxX)).toBeLessThan(6);
+    expect(Math.abs(200 - second.maxX)).toBeLessThan(6);
+  });
+
+  it("centres each line on its own width", () => {
+    const canvas = draw("AAAA\nB", { options: { ...base().options, align: "center" } });
+
+    const second = inkBandIn(canvas, 60, 130);
+    expect(second.count).toBeGreaterThan(0);
+    expect(Math.abs((second.minX + second.maxX) / 2 - 100)).toBeLessThan(8);
+  });
+
+  it("draws no background band behind a blank line", () => {
+    const reds = (text: string) => {
+      const canvas = draw(text, {
+        background: { enable: true, color: "#ff0000", opacity: 100 },
+      });
+      const d = canvas.getContext("2d").getImageData(0, 0, 400, 400).data;
+      let count = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] > 120 && d[i + 1] < 90 && d[i + 2] < 90) count++;
+      }
+      return count;
+    };
+
+    // A line holding a single space has width, so it earns a band; a truly
+    // empty one does not. Both occupy the same three line advances, so the
+    // only difference between these two is the guard.
+    expect(reds("A\n\nB")).toBeLessThan(reds("A\n \nB"));
+  });
+
+  it("runs one gradient down the whole block, not one per line", () => {
+    const canvas = draw("A\nB", {
+      fill: { type: "gradient", from: "#ff0000", to: "#0000ff", angle: 90 },
+    });
+
+    const d = canvas.getContext("2d").getImageData(0, 0, 400, 400).data;
+    let redMaxY = -Infinity;
+    let blueMaxY = -Infinity;
+    let redCount = 0;
+    for (let y = 0; y < 400; y++) {
+      for (let x = 0; x < 400; x++) {
+        const i = (y * 400 + x) * 4;
+        if (d[i] > 30 && d[i] > d[i + 2]) {
+          redCount++;
+          if (y > redMaxY) redMaxY = y;
+        } else if (d[i + 2] > 30 && d[i + 2] > d[i]) {
+          if (y > blueMaxY) blueMaxY = y;
+        }
+      }
+    }
+
+    // 90° runs top to bottom, so the first line sits in the "from" half and the
+    // second entirely in the "to" half. Restarting the ramp per line would put
+    // red at the top of the second line too.
+    expect(redCount).toBeGreaterThan(0);
+    expect(redMaxY).toBeLessThan(60);
+    expect(blueMaxY).toBeGreaterThan(60);
+  });
+
+  it("still draws nothing visible for empty text", () => {
+    const canvas = draw("");
+    expect(inkBounds(canvas).count).toBe(0);
+  });
+});
+
+/**
+ * The block measurement, which sizes the offscreen canvas rasterisation draws
+ * into and is what `element/textFit.ts` writes back as the element's height.
+ * A block is taller than one line by one advance per extra line — get this
+ * wrong and a rasterised PNG slices its own lower lines off.
+ */
+describe("measureTextBlock", () => {
+  const measure = (text: string, over: Record<string, unknown> = {}) => {
+    const { ctx } = scene(400, 400, "#000000");
+    const el = base();
+    el.text = text;
+    Object.assign(el, over);
+    return measureTextBlock(ctx, el);
+  };
+
+  it("counts one line for text with no break", () => {
+    expect(measure("A").lineCount).toBe(1);
+  });
+
+  it("grows by exactly one advance per newline", () => {
+    const one = measure("A");
+    const two = measure("A\nB");
+
+    expect(two.lineCount).toBe(2);
+    // Exactly one advance: fontsize 40 × the default 1.2 line height. The
+    // trailing slack comes from the *font's* descent, which is the same for
+    // both, so this is an equality rather than a window.
+    expect(two.blockHeight - one.blockHeight).toBeCloseTo(48, 5);
+  });
+
+  it("does not depend on the element's height", () => {
+    // The regression this whole change is about.
+    expect(measure("A\nB", { height: 300 }).blockHeight).toBeCloseTo(
+      measure("A\nB", { height: 10 }).blockHeight,
+      5,
+    );
+  });
+
+  it("follows the line height", () => {
+    const single = base();
+    const tight = measure("A\nB", {
+      options: { ...single.options, lineHeight: 1 },
+    });
+    const loose = measure("A\nB", {
+      options: { ...single.options, lineHeight: 2 },
+    });
+
+    expect(loose.blockHeight - tight.blockHeight).toBeCloseTo(40, 5);
+  });
+
+  it("does not jump when the last line gains a descender", () => {
+    // Font metrics, not ink metrics. A box measured from the ink would be
+    // shorter for "oo" than for "gg", so the element would resize itself every
+    // time the last line's letters changed.
+    expect(measure("A\noo").blockHeight).toBeCloseTo(
+      measure("A\ngg").blockHeight,
+      5,
+    );
+  });
+
+  it("counts a trailing newline as a line", () => {
+    // A textarea shows a caret on that line, so the block owns the space.
+    expect(measure("A\n").lineCount).toBe(2);
+  });
+
+  it("counts a blank line between paragraphs", () => {
+    expect(measure("A\n\nB").lineCount).toBe(3);
+  });
+});
+
+/**
+ * Line spacing, now that it is a property of the type rather than of the box.
+ *
+ * This is the bug these tests exist for: growing a text clip's `height` used to
+ * push its lines apart, because `height` *was* the line advance. It no longer
+ * reaches the layout at all.
+ */
+describe("renderText line spacing", () => {
+  const draw = (over: Record<string, unknown> = {}, text = "A\nB") => {
+    const { canvas, ctx } = scene(400, 400, "#000000");
+    const el = base();
+    el.text = text;
+    Object.assign(el, over);
+    renderText(ctx, "t", el, 0);
+    return canvas;
+  };
+
+  it("ignores the element height entirely", () => {
+    // A 5× taller box must draw the identical picture.
+    expect(inkBounds(draw({ height: 300 }))).toEqual(
+      inkBounds(draw({ height: 60 })),
+    );
+    expect(inkBounds(draw({ height: 1 }))).toEqual(
+      inkBounds(draw({ height: 60 })),
+    );
+  });
+
+  it("scales the spacing with the font size", () => {
+    const small = inkBounds(draw({ fontsize: 20 }));
+    const large = inkBounds(draw({ fontsize: 40 }));
+
+    // Twice the size, twice the advance, so the block reaches further down.
+    expect(large.maxY).toBeGreaterThan(small.maxY + 20);
+  });
+
+  it("moves the second line by the line height", () => {
+    const options = base().options;
+    const single = inkBounds(draw({ options }, "A"));
+    const tight = inkBounds(draw({ options: { ...options, lineHeight: 1 } }));
+    const loose = inkBounds(draw({ options: { ...options, lineHeight: 2 } }));
+
+    // The second baseline sits `fontsize × lineHeight` below the first, so the
+    // drop from a one-line block doubles when the leading does.
+    const tightDrop = tight.maxY - single.maxY;
+    const looseDrop = loose.maxY - single.maxY;
+    expect(Math.abs(looseDrop - tightDrop * 2)).toBeLessThanOrEqual(4);
+  });
+
+  it("treats an absent lineHeight as 1.2", () => {
+    const options = base().options;
+    expect(inkBounds(draw({ options: { ...options, lineHeight: 1.2 } }))).toEqual(
+      inkBounds(draw({ options })),
+    );
+  });
+
+  it("draws single-line text identically whatever the height or leading", () => {
+    // The compatibility guarantee: the advance is only consulted from the
+    // second line on, so every existing one-line title is untouched.
+    const options = base().options;
+    const reference = inkBounds(draw({}, "AB"));
+
+    expect(inkBounds(draw({ height: 300 }, "AB"))).toEqual(reference);
+    expect(inkBounds(draw({ options: { ...options, lineHeight: 3 } }, "AB"))).toEqual(
+      reference,
+    );
+  });
+
+  it("survives a nonsense line height rather than stacking the lines", () => {
+    const options = base().options;
+    const broken = inkBounds(
+      draw({ options: { ...options, lineHeight: NaN } }),
+    );
+    expect(broken).toEqual(inkBounds(draw({ options })));
   });
 });

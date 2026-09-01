@@ -44,6 +44,7 @@ import {
   resizedRect,
   resizeSnap,
 } from "./resizeMath";
+import { withFittedTextHeights } from "../element/textFit";
 import { GestureCommit } from "../option/gestureCommit";
 import {
   applyPoint,
@@ -1587,7 +1588,16 @@ export class PreviewCanvas extends LitElement {
           originLocation: this.elementOriginLocation,
           next,
         };
-        this.gesture.apply((doc) => resizedDocument(doc, elementId, commit));
+        // A text clip's width is its wrapping width, so any grip that moves the
+        // left or right edge changes the number of lines and the box has to be
+        // re-measured mid-drag — otherwise the outline lags the text under it.
+        // A pure N/S drag is left alone: that is the user setting the box
+        // height by hand, and it holds until the next edit moves the text.
+        const rewraps = this.moveType !== "stretchN" && this.moveType !== "stretchS";
+        this.gesture.apply((doc) => {
+          const resized = resizedDocument(doc, elementId, commit);
+          return rewraps ? withFittedTextHeights(resized, [elementId]) : resized;
+        });
       }
     }
   }

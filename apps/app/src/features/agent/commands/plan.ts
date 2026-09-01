@@ -43,6 +43,7 @@ import { bakeRateFor } from "../../animation/keyframes";
 import { commit } from "../commit";
 import { currentDoc } from "../context";
 import { registerCommands } from "../registry";
+import { defaultTextHeight } from "../../text/metrics";
 
 type Range = { startMs: number; endMs: number };
 
@@ -98,7 +99,7 @@ type Plan = {
 function defaultLayout(style: CaptionStyle) {
   const { w, h } = renderOptionStore.getState().options.previewSize;
   const fontsize = style.fontsize ?? Math.round(h / 20);
-  const height = style.height ?? Math.round(fontsize * 1.3);
+  const height = style.height ?? defaultTextHeight(fontsize);
   const bottomPadding = Math.round(h / 10);
 
   return {

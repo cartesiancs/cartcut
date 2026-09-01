@@ -43,6 +43,7 @@ export const WRITABLE: Record<string, string[][]> = {
     ["fontsize"],
     ["letterSpacing"],
     ["options", "align"],
+    ["options", "lineHeight"],
     ["options", "isBold"],
     ["options", "isItalic"],
     ["options", "outline", "enable"],
@@ -106,6 +107,9 @@ export const RANGES: Record<string, { min?: number; max?: number }> = {
   textOpacity: { min: 0, max: 100 },
   "fill.angle": { min: 0, max: 360 },
   fontsize: { min: 1, max: 2000 },
+  // Leading, as a multiple of the font size. The same window
+  // `text/metrics.ts#normalizeLineHeight` clamps to.
+  "options.lineHeight": { min: 0.5, max: 4 },
   width: { min: 0 },
   height: { min: 0 },
   // Attenuation only. The ceiling is 0 dB because the preview caps at unity

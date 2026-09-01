@@ -634,25 +634,13 @@ export class ElementControlAsset extends LitElement {
     this.style.height = !h == false ? `${h}px` : this.style.height;
   }
 
-  resizeFont({ px }) {
-    if (!this.querySelector("input-text")) {
-      return 0;
-    }
-
-    const element = this.timeline[this.elementId];
-    if (element.filetype !== "text") {
-      return 0;
-    }
-
-    let targetInput = this.querySelector("input-text");
-
-    this.style.fontSize = `${px}px`;
-
-    this.elementControl.changeTextSize({
-      elementId: this.elementId,
-      size: element.fontsize,
-    });
-  }
+  // `resizeFont` used to live here. It re-committed the element's *existing*
+  // font size through `changeTextSize`, which is a checkpointed store write,
+  // and its only caller was `elementControl.matchAllElementsSizeToPreview` —
+  // driven by a 50ms `setInterval`. It did nothing only because the
+  // `input-text` overlay it guarded on has been commented out; re-enabling that
+  // overlay would have filled the undo history at twenty steps a second.
+  // Nothing about font size belongs on a layout pass.
 
   // rotateMousedown() {
   //   this.isDrag = false;

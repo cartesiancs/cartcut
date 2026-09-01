@@ -10,6 +10,7 @@ import {
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { withAlpha as rgba } from "../../features/text/style";
 import type { TextElementOptions } from "../../features/element/textElement";
+import { defaultTextHeight } from "../../features/text/metrics";
 
 /**
  * The font size a tile's `Aa` is drawn at. Outline widths and letter spacing are
@@ -77,7 +78,7 @@ export class ControlText extends LitElement {
   private layoutFor(style: PresetStyle) {
     const { w, h } = renderOptionStore.getState().options.previewSize;
     const fontsize = Math.round((h / 20) * (style.sizeScale ?? 1));
-    const height = Math.round(fontsize * 1.3);
+    const height = defaultTextHeight(fontsize);
 
     return {
       fontsize,

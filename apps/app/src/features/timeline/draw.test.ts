@@ -101,6 +101,16 @@ describe("clipLabel", () => {
     expect(clipLabel(textElement({ text: "HELLO" }))).toBe("HELLO");
   });
 
+  it("folds a multi-line text clip onto one line", () => {
+    // The label is a single `fillText` on the clip bar: a `\n` would not be
+    // drawn at all, and `truncateText` would still be measuring it.
+    expect(clipLabel(textElement({ text: "TOP\nBOTTOM" }))).toBe("TOP BOTTOM");
+    expect(clipLabel(textElement({ text: "A\r\nB" }))).toBe("A B");
+    expect(clipLabel(textElement({ text: "A\n\nB" }))).toBe("A B");
+    // The spaces around the break go with it, so no double gap appears.
+    expect(clipLabel(textElement({ text: "A \n B" }))).toBe("A B");
+  });
+
   it("uses the file name for media", () => {
     expect(clipLabel(videoElement({ localpath: "/a/b/clip.mp4" }))).toBe(
       "clip.mp4",

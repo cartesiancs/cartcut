@@ -16,6 +16,7 @@ import {
   type TextElementOptions,
 } from "./textElement";
 import { fitToPreview } from "./mediaElement";
+import { affectsTextBlock, withFittedTextHeights } from "./textFit";
 import { setIn } from "../../utils/immutable";
 import { cursorAtElapsed } from "../timeline/playbackClock";
 import { projectFps } from "../editor/frameRate";
@@ -224,28 +225,20 @@ export class ElementControl extends LitElement {
         let elementLeft =
           Number(this.timeline[elementId].location?.x) / this.previewRatio;
 
-        if (this.timeline[elementId].filetype != "text") {
-          targetElement.resizeStyle({
-            x: elementLeft,
-            y: elementTop,
-            w: elementWidth,
-            h: elementHeight,
-          });
-        } else if (this.timeline[elementId].filetype == "text") {
-          let elementTextSize =
-            Number(this.timeline[elementId].fontsize) / this.previewRatio;
-
-          targetElement.resizeStyle({
-            x: elementLeft,
-            y: elementTop,
-            w: elementWidth,
-            h: elementHeight,
-          });
-
-          targetElement.resizeFont({
-            px: elementTextSize,
-          });
-        }
+        // One branch for every filetype. Text used to get a second call,
+        // `resizeFont`, which round-tripped into `changeTextSize` — a
+        // checkpointed store write, from a `setInterval` that fires twenty
+        // times a second. It survived only because `resizeFont` returned early
+        // on the `input-text` component that has been commented out for a
+        // while. Now that `changeTextSize` also re-fits the box, leaving that
+        // path armed would be an undo history filling itself up on a window
+        // resize.
+        targetElement.resizeStyle({
+          x: elementLeft,
+          y: elementTop,
+          w: elementWidth,
+          h: elementHeight,
+        });
       }
     }
   }
@@ -748,7 +741,14 @@ export class ElementControl extends LitElement {
       for (const field of fields) {
         next = setIn(next, ["elements", elementId, ...field.path], field.value);
       }
-      return next;
+      // The box follows the text — but only for edits that change the block.
+      // A colour change repaints the same shape, and re-fitting on it would
+      // discard a height the user set by hand. Folded into the same transform
+      // so the fit shares this edit's undo step rather than adding one, and
+      // `withFittedTextHeights` returns `next` by identity when nothing moved.
+      return affectsTextBlock(fields.map((field) => field.path))
+        ? withFittedTextHeights(next, [elementId])
+        : next;
     });
   }
 
@@ -766,11 +766,12 @@ export class ElementControl extends LitElement {
       return;
     }
 
+    // Only the font size. This used to write `height: fontsize + 16` as well,
+    // because height *was* the line advance — which is exactly the coupling
+    // that made growing a text box push its lines apart. The advance now comes
+    // from `text/metrics.ts`, and `commitTextFields` re-fits the box.
     this.commitTextFields(elementId, [
       { path: ["fontsize"], value: fontsize },
-      // The line advance has always tracked the font size here. Kept so that
-      // resizing text does not silently overlap its own wrapped lines.
-      { path: ["height"], value: fontsize + 16 },
     ]);
   }
 
