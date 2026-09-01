@@ -13,7 +13,7 @@ import {
 import { v4 as uuidv4 } from "uuid";
 import { renderText } from "../renderer/text";
 import { renderImage } from "../renderer/image";
-import { renderShape } from "../renderer/shape";
+import { renderShape, shapeDrawScale } from "../renderer/shape";
 import { renderGif } from "../renderer/gif";
 import { renderVideoWithoutWait } from "../renderer/video";
 import { loadedAssetStore } from "../asset/loadedAssetStore";
@@ -117,6 +117,15 @@ const PEN_STROKE = "#ffffff";
 const PEN_NODE = "#1b6ef3";
 /** The one that closes the path, so it cannot be mistaken for the others. */
 const PEN_FIRST_NODE = "#ffd400";
+
+/**
+ * The polygon tool's chrome reuses the pen's colours and radius on purpose:
+ * both are "a vertex you placed", and two sizes of dot in one preview reads as
+ * two different things. Only the closing edge is its own — dashed, because the
+ * polygon has no closing *gesture*: `renderShape` calls `closePath`, so that
+ * edge exists without ever having been drawn by the user.
+ */
+const SHAPE_CLOSE_DASH: [number, number] = [5, 4];
 
 @customElement("preview-canvas")
 export class PreviewCanvas extends LitElement {
@@ -249,6 +258,16 @@ export class PreviewCanvas extends LitElement {
    * is `features/mask/penSession.ts`; everything here is dispatch.
    */
   private penSession: PenSession | null = null;
+
+  /**
+   * Where the next polygon vertex would land, in **world** coordinates, or
+   * `null` when the pointer is off the canvas.
+   *
+   * Component state like `penSession`, and for the same reason: it is a
+   * pointer position, not something the document should ever be asked to
+   * remember or to undo.
+   */
+  private shapeHover: { x: number; y: number } | null = null;
 
   /**
    * Keydown, in the **capture** phase, installed only while a session is live.
@@ -674,6 +693,7 @@ export class PreviewCanvas extends LitElement {
     ctx.setTransform(...toDevice);
     this.drawActiveOutline(ctx);
     this.drawPenOverlay(ctx);
+    this.drawShapeOverlay(ctx);
     if (this.alignDirection.length > 0) {
       this.drawAlign(ctx, this.alignDirection);
     }
@@ -1013,6 +1033,9 @@ export class PreviewCanvas extends LitElement {
    * outline uses fixed world units instead and visibly shrinks as you zoom out;
    * that is survivable for a box you have already grabbed and not for a target
    * you are trying to hit.
+   *
+   * The polygon overlay divides by it too — same chrome, same problem, and it
+   * is drawn in the same pass under the same transform.
    */
   private penScreenUnit(elementId: string): number {
     const scale =
@@ -1118,6 +1141,97 @@ export class PreviewCanvas extends LitElement {
       // The first node reads as the target because clicking it is what closes
       // the path, and there is nowhere else to say so.
       ctx.fillStyle = i === 0 ? PEN_FIRST_NODE : PEN_NODE;
+      ctx.fill();
+      ctx.strokeStyle = PEN_STROKE;
+      ctx.lineWidth = 1 / scale;
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  /**
+   * The polygon in progress: the vertices placed so far, the edges between
+   * them, and the edge the next click would add.
+   *
+   * Without it the tool draws nothing the user can aim by. The element it is
+   * appending to is a *filled* shape, so one point and two points paint
+   * nothing at all — the first half of every polygon happened on a blank
+   * canvas — and from the third point on the corners are inside the fill,
+   * where they cannot be seen and cannot be counted.
+   *
+   * Chrome pass, beside `drawPenOverlay` and for its two reasons: a node
+   * dimmed by `OUTSIDE_ALPHA` is hard to aim at, and a vertex placed outside
+   * the frame has to stay visible while it is being placed — a polygon is
+   * routinely started off-frame so its fill can bleed past the edge.
+   */
+  private drawShapeOverlay(ctx: CanvasRenderingContext2D): void {
+    if (this.timelineControl.cursorType !== "shape" || this.nowShapeId === "") {
+      return;
+    }
+    const element = this.timeline[this.nowShapeId];
+    if (element == null || element.filetype !== "shape") {
+      return;
+    }
+
+    // The same two factors `renderShape` applies, so a vertex marker sits on
+    // the corner of the fill rather than near it, and keeps sitting there
+    // after the shape has been stretched.
+    const { sx, sy } = shapeDrawScale(element);
+    const world = worldMatrixOf(
+      this.timeline,
+      this.nowShapeId,
+      this.timelineCursor,
+    );
+    const points = element.shape.map((point) =>
+      applyPoint(world, { x: point[0] * sx, y: point[1] * sy }),
+    );
+    if (points.length === 0) {
+      return;
+    }
+
+    // Screen pixels over world pixels — every width and radius below divides
+    // by it, so the chrome is the same size at every zoom.
+    const scale = this.penScreenUnit(this.nowShapeId);
+
+    ctx.save();
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+    if (this.shapeHover != null) {
+      ctx.lineTo(this.shapeHover.x, this.shapeHover.y);
+    }
+    ctx.strokeStyle = PEN_STROKE;
+    ctx.lineWidth = 1.5 / scale;
+    ctx.stroke();
+
+    // The edge `closePath` will supply. Dashed, because it is the only one on
+    // screen the user has not placed.
+    //
+    // Three corners or it is not a closing edge: with two it would be drawn
+    // back along the segment already there, twice over in two dash phases,
+    // which reads as a rendering fault rather than as a hint.
+    const last = this.shapeHover ?? points[points.length - 1];
+    if (points.length + (this.shapeHover == null ? 0 : 1) > 2) {
+      ctx.beginPath();
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(points[0].x, points[0].y);
+      ctx.setLineDash(SHAPE_CLOSE_DASH.map((segment) => segment / scale));
+      ctx.strokeStyle = PEN_STROKE;
+      ctx.lineWidth = 1 / scale;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    for (const point of points) {
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, PEN_NODE_RADIUS_PX / scale, 0, Math.PI * 2);
+      ctx.fillStyle = PEN_NODE;
       ctx.fill();
       ctx.strokeStyle = PEN_STROKE;
       ctx.lineWidth = 1 / scale;
@@ -1333,6 +1447,10 @@ export class PreviewCanvas extends LitElement {
     if (this.nowShapeId == "") {
       const createdElementId = this.createShape(x, y);
       this.nowShapeId = createdElementId;
+      // `createShape` commits, and the store's own subscriber redraws — but it
+      // runs before the line above, so that repaint has no polygon to mark.
+      // Without this the first vertex only appears on the next mouse move.
+      this.scheduleDraw();
 
       return false;
     }
@@ -1424,6 +1542,7 @@ export class PreviewCanvas extends LitElement {
     }
 
     this.nowShapeId = "";
+    this.shapeHover = null;
 
     const sortedTimeline = Object.fromEntries(
       Object.entries(this.timeline).sort(
@@ -1679,6 +1798,12 @@ export class PreviewCanvas extends LitElement {
       this.isRotation ||
       (this.penSession?.dragging ?? -1) >= 0;
     if (!isDragging && !this.isInsideCanvas(e)) {
+      // The rubber band chases the pointer, so it has to stop at the edge
+      // rather than freeze pointing at wherever the pointer was last seen.
+      if (this.shapeHover != null) {
+        this.shapeHover = null;
+        this.scheduleDraw();
+      }
       return;
     }
 
@@ -1695,6 +1820,13 @@ export class PreviewCanvas extends LitElement {
     if (this.timelineControl.cursorType == "shape") {
       this.cursorType = "crosshair";
       this.updateCursor();
+      // Only once a polygon is open: with no vertices placed there is nothing
+      // for the rubber band to run from, so tracking the pointer would repaint
+      // the whole preview on every move for nothing.
+      if (this.nowShapeId !== "") {
+        this.shapeHover = { x: mx, y: my };
+        this.scheduleDraw();
+      }
       return false;
     }
 

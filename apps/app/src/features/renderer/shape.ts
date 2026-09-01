@@ -7,15 +7,9 @@ export const renderShape: ElementRenderFunction<ShapeElementType> = (
   shapeElement,
   timelineCursor,
 ) => {
-  const { width, height, oWidth, oHeight, shape, option } = shapeElement;
+  const { shape, option } = shapeElement;
 
-  // Authoring space to draw space, one factor per axis. Non-uniform is the
-  // point: a stretched shape is stretched. The single `oWidth / width` this
-  // replaces divided *both* coordinates, so `height` was never read at all —
-  // dragging a shape taller grew its selection box, its hit area and its
-  // rotation pivot while the painted polygon stayed exactly where it was.
-  const sx = scaleOf(width, oWidth, oHeight);
-  const sy = scaleOf(height, oHeight, oWidth);
+  const { sx, sy } = shapeDrawScale(shapeElement);
 
   ctx.beginPath();
   // Once, not once per point. Inside the loop it was never set at all for a
@@ -30,6 +24,29 @@ export const renderShape: ElementRenderFunction<ShapeElementType> = (
   ctx.closePath();
   ctx.fill();
 };
+
+/**
+ * Authoring space to draw space, one factor per axis. Non-uniform is the
+ * point: a stretched shape is stretched. The single `oWidth / width` this
+ * replaces divided *both* coordinates, so `height` was never read at all —
+ * dragging a shape taller grew its selection box, its hit area and its
+ * rotation pivot while the painted polygon stayed exactly where it was.
+ *
+ * Exported because the polygon tool's on-canvas vertex overlay has to land on
+ * the same points the fill has its corners at, and deriving that twice is how
+ * the two drift apart.
+ */
+export function shapeDrawScale(shapeElement: {
+  width: number;
+  height: number;
+  oWidth: number;
+  oHeight: number;
+}): { sx: number; sy: number } {
+  return {
+    sx: scaleOf(shapeElement.width, shapeElement.oWidth, shapeElement.oHeight),
+    sy: scaleOf(shapeElement.height, shapeElement.oHeight, shapeElement.oWidth),
+  };
+}
 
 /**
  * Drawn size over authored size, falling back across the axes and then to 1.
