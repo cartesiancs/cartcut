@@ -13,6 +13,7 @@ import {
 import { blendOf, DEFAULT_BLEND, isBlendIsolating } from "./blend";
 import { renderControlOutline } from "./controlOutline";
 import { applyLutGrade, lutGradeFor } from "./lut/apply";
+import { applyMask, clipToMask, destinationMatrix, maskRenderFor } from "./mask";
 import { layerFor } from "./surface";
 import type { ElementRenderFunction } from "./type";
 
@@ -126,10 +127,48 @@ export function renderElement<T extends VisualTimelineElement>(
    */
   const grade = lutGradeFor(element);
 
+  /**
+   * The clip's mask, in device pixels, or `null` when it cuts nothing.
+   *
+   * Resolved here, beside the grade and for the same reason — a clip whose mask
+   * is inert must keep the untouched code path rather than allocate a layer in
+   * order to do nothing to it. `pen` with fewer than three nodes is the case
+   * that matters in practice: it is what the clip looks like between the first
+   * click of a pen stroke and the third, and it must not blink out of existence
+   * while the user is drawing.
+   *
+   * The base matrix is read from `ctx` *now*, before any layer exists, because
+   * the layer inherits this exact transform below and `drawDirect` composes the
+   * element's own on top of it. Taking it from `worldMatrixOf` instead would be
+   * right in every node suite — they all draw at identity — and wrong in the
+   * app at any zoom but 100% on any display but 1x.
+   *
+   * Like the grade and unlike the blend, deliberately **not** suspended by
+   * `isolated`: a masked clip stays masked through a transition, because a mask
+   * is a property of the clip rather than of how it meets what is under it.
+   */
+  const mask =
+    context == null
+      ? maskRenderFor(
+          undefined,
+          elementId,
+          element,
+          timelineCursor,
+          destinationMatrix(ctx),
+        )
+      : maskRenderFor(
+          context.elements,
+          elementId,
+          element,
+          timelineCursor,
+          destinationMatrix(ctx),
+          context.memo,
+        );
+
   // The path every clip took before blend modes existed, and the one almost
   // every clip still takes. Byte-for-byte what it was: no layer is allocated,
   // no extra blit is issued, and `golden.test.ts`'s digests are the proof.
-  if (!isBlendIsolating(blend) && grade == null) {
+  if (!isBlendIsolating(blend) && grade == null && mask == null) {
     drawDirect(
       ctx,
       elementId,
@@ -179,6 +218,16 @@ export function renderElement<T extends VisualTimelineElement>(
       applyLutGrade(layer, grade);
     }
 
+    // After the grade, and the order is unobservable rather than arbitrary: a
+    // LUT is a colour transform and says nothing about coverage, so grading
+    // pixels that are about to be erased and erasing pixels that have just been
+    // graded produce the same layer. It goes here because the GPU applier
+    // finishes by blitting its whole result back with `copy`, which would
+    // refill a region the mask had already cleared.
+    if (mask != null) {
+      applyMask(layer, mask);
+    }
+
     ctx.save();
     // Identity, because the layer is already in the destination's pixel space —
     // it was drawn under the destination's own transform.
@@ -196,7 +245,17 @@ export function renderElement<T extends VisualTimelineElement>(
     // A grade is simply lost here rather than approximated. There is nowhere to
     // read the clip's pixels back from without also reading the scene under it,
     // and grading the scene would be far more wrong than not grading the clip.
+    //
+    // A mask, unlike a grade, survives: a clip region needs no surface to
+    // composite onto, so it can be installed straight onto the destination.
+    // What it cannot express is the feather (a region has no partial coverage)
+    // and `invert` (a region intersects and cannot subtract) — `clipToMask`
+    // states both and drops an inverted mask rather than applying it the wrong
+    // way round, which would hide exactly the half the user meant to keep.
     ctx.save();
+    if (mask != null) {
+      clipToMask(ctx, mask);
+    }
     ctx.globalCompositeOperation = blend;
     drawDirect(
       ctx,

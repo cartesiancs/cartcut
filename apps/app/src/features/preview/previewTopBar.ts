@@ -488,8 +488,19 @@ export class PreviewTopBar extends LitElement {
                     : ""}"
                   @click=${() => this._handleClickButton("shape")}
                 >
-                  <span class="material-symbols-outlined icon-xs"> edit </span>
-                  Pen Tool</a
+                  <span class="material-symbols-outlined icon-xs">
+                    polyline
+                  </span>
+                  <!--
+                    Called "Pen Tool" until masks existed, which was the name of
+                    a different tool: this one click-appends straight segments
+                    to a new *shape element*, and it sits in the create menu
+                    beside Square, Triangle and Circle because that is what it
+                    makes. The pen in the Mask tab cuts the clip that is already
+                    selected and creates nothing. Two tools called a pen is the
+                    "two things called a filter" problem, one tab over.
+                  -->
+                  Polygon</a
                 >
               </li>
             </ul>

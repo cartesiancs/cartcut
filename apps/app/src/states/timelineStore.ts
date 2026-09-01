@@ -17,7 +17,31 @@ import {
   rebakeAnimations,
 } from "../features/animation/keyframeOps";
 
-type TimelineCursorType = "pointer" | "text" | "shape" | "lockKeyboard";
+/**
+ * The editor's modal tool.
+ *
+ * Exported because `features/mask/penSession.ts` and the guards that keep the
+ * pen from fighting the timeline's own bindings all have to name it, and a
+ * second copy of the union is a second thing to keep in step.
+ *
+ * `"shape"` is the polygon tool, which click-appends straight segments to a new
+ * `shape` element. It is *not* the pen: `"pen"` masks the clip that is already
+ * selected and creates nothing. The two were briefly both called a pen in the
+ * UI, which is the "two things called a filter" problem this codebase already
+ * has a rule about.
+ *
+ * Anything other than `"pointer"` disables playback and the playhead-stepping
+ * arrow keys — see `ui/timeline/Timeline.ts` and
+ * `elementTimelineCanvas.stepCursor`/`moveSelectionByTrack`. That is the
+ * mechanism by which a modal tool does not have to enumerate the bindings it is
+ * not using.
+ */
+export type TimelineCursorType =
+  | "pointer"
+  | "text"
+  | "shape"
+  | "pen"
+  | "lockKeyboard";
 
 /**
  * One undo step.

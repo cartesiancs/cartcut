@@ -954,8 +954,16 @@ export function sliceKeyframes(
 
 // -------------------------------------------------------- element helpers
 
-/** Property names that carry a second lane. */
-const VECTOR_PROPERTIES = new Set(["position"]);
+/**
+ * Property names that carry a second lane.
+ *
+ * `maskSize` is here for a reason worth stating: its two lanes are a *width*
+ * and a *height*, not an x and a y. They are paired all the same, because the
+ * pairing is about track structure — which instants carry a keyframe — and a
+ * mask that was 40% wide at one keyframe and had no height keyframe there would
+ * animate along one axis and jump along the other.
+ */
+const VECTOR_PROPERTIES = new Set(["position", "maskPosition", "maskSize"]);
 
 export function lanesOf(property: string): Lane[] {
   return VECTOR_PROPERTIES.has(property) ? ["x", "y"] : ["x"];
@@ -1000,6 +1008,32 @@ export function emptyAnimation(filetype: string): any {
   }
   // gif and audio carry no animation block at all.
   return undefined;
+}
+
+/**
+ * The five empty mask tracks, for a clip that has just been given a mask.
+ *
+ * Deliberately **not** part of `emptyAnimation`. An unmasked clip must carry
+ * exactly the block it carried before this feature existed, so that a project
+ * nobody has masked saves byte-identically — the same rule the `mask` key
+ * itself follows. These are seeded by `timeline/maskOps.ts#setClipMask` and
+ * removed by it, and `normalizeAnimation` collects any that outlive their mask.
+ */
+export function emptyMaskAnimation(): Record<string, unknown> {
+  const scalar = () => ({ isActivate: false, x: [], ax: [] });
+  const vector = () => ({ isActivate: false, x: [], y: [], ax: [], ay: [] });
+  return {
+    maskPosition: vector(),
+    maskSize: vector(),
+    maskRotation: scalar(),
+    maskFeather: scalar(),
+    maskRoundness: scalar(),
+  };
+}
+
+/** Whether a track name belongs to the mask rather than to the clip itself. */
+export function isMaskTrack(property: string): boolean {
+  return property.startsWith("mask");
 }
 
 function normalizeTrackValue(raw: any, lanes: Lane[]): any {
@@ -1096,6 +1130,15 @@ function sameTrack(before: any, after: any, lanes: Lane[]): boolean {
  * Called on ingress — project load and element construction — rather than from
  * `normalizeDocument`, which runs on every edit and every checkpoint and has no
  * business walking keyframe arrays at pointer rate.
+ *
+ * It is also where **orphan mask tracks are collected**. A clip's mask curves
+ * exist only while it has a mask (`animatableProperties`), so a `maskFeather`
+ * track on an unmasked clip is invisible to the curve editor, to the diamond
+ * lane, to `keyframeOps` and to `rebakeElement` — while still being cloned by
+ * every duplicate, sliced by every split and written to every save, going
+ * staler at each frame-rate change it is not re-baked for. Dropping it here
+ * costs one `startsWith` per track on the one pass that already exists for
+ * exactly this kind of repair.
  */
 export function normalizeAnimation<T extends TimelineElement>(element: T): T {
   const animation = (element as any).animation;
@@ -1103,9 +1146,15 @@ export function normalizeAnimation<T extends TimelineElement>(element: T): T {
     return element;
   }
 
+  const masked = (element as any).mask != null;
+
   const next: any = {};
   let changed = false;
   for (const property of Object.keys(animation)) {
+    if (!masked && isMaskTrack(property)) {
+      changed = true;
+      continue;
+    }
     const lanes = lanesOf(property);
     const normalized = normalizeTrackValue(animation[property], lanes);
     next[property] = normalized;

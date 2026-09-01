@@ -47,6 +47,22 @@ import {
 import { withFittedTextHeights } from "../element/textFit";
 import { GestureCommit } from "../option/gestureCommit";
 import {
+  type PenAction,
+  type PenSession,
+  penBegin,
+  penCapturesKey,
+  penCommit,
+  penDown,
+  penKey,
+  penMove,
+  penUp,
+} from "../mask/penSession";
+import {
+  isMaskable,
+  setClipMaskFields,
+  setClipMaskPath,
+} from "../timeline/maskOps";
+import {
   applyPoint,
   applyVector,
   invert,
@@ -86,6 +102,21 @@ const CANVAS_BG = "#101112";
 /** How much of an out-of-frame pixel survives. */
 const OUTSIDE_ALPHA = 0.28;
 const FRAME_GUIDE_COLOR = "rgba(255, 255, 255, 0.35)";
+
+/**
+ * Pen chrome, in **screen** pixels — every use divides by the world scale.
+ *
+ * The grab radius is the distance within which clicking the first node closes
+ * the path. It is larger than the node is drawn, deliberately: closing is the
+ * one gesture the user cannot recover from by clicking again, so it should be
+ * easy to hit and obvious when it is about to happen.
+ */
+const PEN_GRAB_RADIUS_PX = 12;
+const PEN_NODE_RADIUS_PX = 5;
+const PEN_STROKE = "#ffffff";
+const PEN_NODE = "#1b6ef3";
+/** The one that closes the path, so it cannot be mistaken for the others. */
+const PEN_FIRST_NODE = "#ffd400";
 
 @customElement("preview-canvas")
 export class PreviewCanvas extends LitElement {
@@ -209,6 +240,36 @@ export class PreviewCanvas extends LitElement {
   private boundKeydown = (e: KeyboardEvent) => this._handleKeydown(e);
   private boundWheel = (e: WheelEvent) => this._handleWheel(e);
 
+  /**
+   * The mask being drawn, or `null`.
+   *
+   * Component state, never document state: nothing is written until the path
+   * closes, so one drawn mask is one undo step and a Cmd+Z mid-stroke cannot
+   * contradict a document the session has not touched. The state machine itself
+   * is `features/mask/penSession.ts`; everything here is dispatch.
+   */
+  private penSession: PenSession | null = null;
+
+  /**
+   * Keydown, in the **capture** phase, installed only while a session is live.
+   *
+   * Escape, Backspace and Delete all have owners already —
+   * `elementTimelineCanvas._handleKeydown` cancels a timeline gesture on the
+   * first and deletes the selected clip on the other two, and the selected clip
+   * is the one being masked. Capture beats every bubble listener in the app
+   * regardless of registration order, and unmounting it on commit or cancel
+   * means the pen owns those keys for exactly as long as it is drawing.
+   *
+   * The one thing it must not do is out-shout a text field: this runs before
+   * the bubble handlers' own `isTypingEvent` guards, so it has to make that
+   * check itself or a Backspace in the sidebar's feather box would delete a
+   * node instead of a digit.
+   */
+  private boundPenKeydown = (e: KeyboardEvent) => this._handlePenKeydown(e);
+
+  /** A pen session cannot outlive the window losing focus mid-stroke. */
+  private boundWindowBlur = () => this.cancelPen();
+
   renderers: TimelineRenderers = {
     image: renderImage,
     video: renderVideoWithoutWait,
@@ -285,12 +346,32 @@ export class PreviewCanvas extends LitElement {
   viewport = this.viewportStore.viewport;
 
   createRenderRoot() {
+    // The canvas is where the pen tool is used, and `elementTimelineCanvas`
+    // clears the selection on any document mousedown that is not opted out —
+    // which would close the Mask panel out from under the stroke on the first
+    // click. Same attribute, same reason, as `optionLutSection` and
+    // `ControlFx`.
+    this.setAttribute("data-keeps-selection", "");
+
     useTimelineStore.subscribe((state) => {
       this.timeline = state.timeline;
       this.timelineRange = state.range;
       this.timelineCursor = state.cursor;
       this.timelineScroll = state.scroll;
       this.timelineControl = state.control;
+
+      // A session cannot outlive the tool it belongs to or the clip it is
+      // drawing on. Switching tools mid-stroke abandons it — the polygon tool's
+      // precedent is to leave an orphan element behind instead, which is the
+      // behaviour this deliberately does not copy — and so does the clip being
+      // deleted, which would otherwise leave a session that could never commit.
+      if (
+        this.penSession != null &&
+        (state.control.cursorType !== "pen" ||
+          state.timeline[this.penSession.elementId] == null)
+      ) {
+        this.cancelPen();
+      }
 
       // this.setTimelineColor();
       this.drawCanvas(this.canvas);
@@ -333,6 +414,11 @@ export class PreviewCanvas extends LitElement {
     window.removeEventListener("mouseup", this.boundMouseUp);
     window.removeEventListener("keydown", this.boundKeydown);
     this.canvas?.removeEventListener("wheel", this.boundWheel);
+    // A stroke in progress ends with the canvas it was drawn on. Through
+    // `cancelPen` rather than by clearing the field, so the capture-phase
+    // keydown listener comes off with it — a leaked one would keep swallowing
+    // Backspace for the rest of the session.
+    this.cancelPen();
     // A drag interrupted by the panel closing still commits what it did, rather
     // than leaving a previewed document that no checkpoint ever recorded.
     this.gesture.flush();
@@ -587,6 +673,7 @@ export class PreviewCanvas extends LitElement {
     ctx.save();
     ctx.setTransform(...toDevice);
     this.drawActiveOutline(ctx);
+    this.drawPenOverlay(ctx);
     if (this.alignDirection.length > 0) {
       this.drawAlign(ctx, this.alignDirection);
     }
@@ -797,6 +884,247 @@ export class PreviewCanvas extends LitElement {
       element.height ?? 0,
       { worldScale: scaleOf(m) },
     );
+  }
+
+  // ------------------------------------------------------------- the pen tool
+
+  /** Whether a mask is being drawn right now. */
+  private get isPenDrawing(): boolean {
+    return this.penSession != null;
+  }
+
+  /**
+   * A world point in the target clip's own local pixels.
+   *
+   * Through the inverse of the same world matrix the renderer draws with, which
+   * is the rule `hitZoneAt` already follows: drawing and pointing cannot
+   * disagree because they cannot ask separately. It is also what makes a node
+   * land where the user clicked on a clip that is rotated, scaled, animated, or
+   * inside a group — all four are already in that matrix.
+   */
+  private toElementLocal(elementId: string, world: { x: number; y: number }) {
+    return applyPoint(
+      invert(worldMatrixOf(this.timeline, elementId, this.timelineCursor)),
+      world,
+    );
+  }
+
+  /**
+   * Start drawing on `elementId`, or refuse.
+   *
+   * Refuses a clip that cannot carry a mask, so the tool never opens a session
+   * it could not commit. Playback is stopped first: `Timeline.stop()` declines
+   * unless the tool is `pointer`, so entering the pen while playing would leave
+   * the playhead running with Space unable to halt it.
+   */
+  public beginPen(elementId: string): boolean {
+    const element = this.timeline[elementId];
+    if (!isMaskable(element)) {
+      return false;
+    }
+    this.stopPlay();
+    this.penSession = penBegin(elementId);
+    window.addEventListener("keydown", this.boundPenKeydown, true);
+    window.addEventListener("blur", this.boundWindowBlur);
+    this.cursorType = "crosshair";
+    this.updateCursor();
+    this.drawCanvas(this.canvas);
+    return true;
+  }
+
+  /** Tear the session down. Idempotent, so every exit path can just call it. */
+  private endPen(): void {
+    if (this.penSession == null) {
+      return;
+    }
+    this.penSession = null;
+    window.removeEventListener("keydown", this.boundPenKeydown, true);
+    window.removeEventListener("blur", this.boundWindowBlur);
+    this.cursorType = "default";
+    this.updateCursor();
+    this.drawCanvas(this.canvas);
+  }
+
+  /** Abandon the stroke. The document is untouched — nothing was written. */
+  private cancelPen(): void {
+    this.endPen();
+  }
+
+  /** Write the finished path as one undo step, then leave the tool. */
+  private commitPen(session: PenSession): void {
+    const element: any = this.timeline[session.elementId];
+    const commit =
+      element == null
+        ? null
+        : penCommit(session, {
+            width: element.width ?? 0,
+            height: element.height ?? 0,
+          });
+
+    this.endPen();
+    // Back to the pointer whether or not anything was committed: the stroke is
+    // over either way, and leaving the pen armed would make the next click on
+    // the picture start a second one nobody asked for.
+    this.timelineState.setCursorType("pointer");
+
+    if (commit == null) {
+      return;
+    }
+    const elementId = session.elementId;
+    useTimelineStore.getState().withCheckpoint((doc) => {
+      const withPath = setClipMaskPath(doc, elementId, commit.path);
+      // The path first, then the frame it was drawn in — as one document, so
+      // the two cannot be undone apart from each other.
+      return setClipMaskFields(withPath, elementId, {
+        location: commit.location,
+        size: commit.size,
+        rotation: 0,
+      });
+    });
+  }
+
+  /** Apply whatever the state machine decided. */
+  private applyPenAction(action: PenAction): void {
+    switch (action.kind) {
+      case "none":
+        return;
+      case "update":
+        this.penSession = action.session;
+        this.drawCanvas(this.canvas);
+        return;
+      case "commit":
+        this.commitPen(action.session);
+        return;
+      case "cancel":
+        this.cancelPen();
+        this.timelineState.setCursorType("pointer");
+        return;
+    }
+  }
+
+  /**
+   * How many element-local pixels there are to one screen pixel, for the clip
+   * the pen is drawing on.
+   *
+   * The clip's own world scale *and* the preview's zoom, because both stand
+   * between an element pixel and the screen. Every piece of pen chrome divides
+   * by this, and so does the grab radius — through one function, so that what
+   * the user can hit and what they can see cannot drift apart. The selection
+   * outline uses fixed world units instead and visibly shrinks as you zoom out;
+   * that is survivable for a box you have already grabbed and not for a target
+   * you are trying to hit.
+   */
+  private penScreenUnit(elementId: string): number {
+    const scale =
+      scaleOf(worldMatrixOf(this.timeline, elementId, this.timelineCursor)) *
+      this.geometry.scale;
+    return scale > 0 ? scale : 1;
+  }
+
+  /** The radius within which clicking the first node closes the path. */
+  private penGrabRadius(elementId: string): number {
+    return PEN_GRAB_RADIUS_PX / this.penScreenUnit(elementId);
+  }
+
+  private _handlePenKeydown(event: KeyboardEvent): void {
+    const session = this.penSession;
+    if (session == null) {
+      return;
+    }
+    // Before anything else, and it has to be here rather than inherited: this
+    // listener runs in the capture phase, so the bubble handlers' own guards
+    // have not had a chance to let a text field through yet.
+    if (isTypingEvent(event)) {
+      return;
+    }
+    if (!penCapturesKey(event.code)) {
+      return;
+    }
+    event.preventDefault();
+    // Both, deliberately. `preventDefault` stops the browser's own use of the
+    // key; `stopPropagation` is what keeps Backspace from reaching the timeline
+    // canvas and deleting the very clip being masked.
+    event.stopPropagation();
+    this.applyPenAction(penKey(session, event.code));
+  }
+
+  /**
+   * The mask outline and the stroke in progress.
+   *
+   * Drawn in `drawCanvas`'s chrome pass, which is the only one that is neither
+   * dimmed by `OUTSIDE_ALPHA` nor clipped to the frame rectangle. Both matter
+   * here: a half-lit node is hard to aim at, and a node placed just outside the
+   * frame would otherwise be cut away at exactly the moment the user needed to
+   * see it.
+   */
+  private drawPenOverlay(ctx: CanvasRenderingContext2D): void {
+    const session = this.penSession;
+    if (session == null) {
+      return;
+    }
+    const element: any = this.timeline[session.elementId];
+    if (element == null) {
+      return;
+    }
+
+    const world = worldMatrixOf(
+      this.timeline,
+      session.elementId,
+      this.timelineCursor,
+    );
+    const onScreen = (p: { x: number; y: number }) => applyPoint(world, p);
+    // Chrome is measured in screen pixels, so every width and radius below is
+    // divided by the scale the context is already carrying — the clip's own and
+    // the preview's zoom together, which is exactly what the grab radius
+    // divides by. A node drawn smaller than it can be clicked is worse than one
+    // drawn larger, and drawn from a different number is worse than either.
+    const scale = this.penScreenUnit(session.elementId);
+
+    ctx.save();
+    ctx.lineJoin = "round";
+
+    const anchors = session.nodes.map((node) =>
+      onScreen({ x: node.p[0], y: node.p[1] }),
+    );
+
+    if (anchors.length > 0) {
+      ctx.beginPath();
+      ctx.moveTo(anchors[0].x, anchors[0].y);
+      for (let i = 1; i < session.nodes.length; i++) {
+        const from = session.nodes[i - 1];
+        const to = session.nodes[i];
+        const c1 = onScreen({
+          x: from.p[0] + (from.ce?.[0] ?? 0),
+          y: from.p[1] + (from.ce?.[1] ?? 0),
+        });
+        const c2 = onScreen({
+          x: to.p[0] + (to.cs?.[0] ?? 0),
+          y: to.p[1] + (to.cs?.[1] ?? 0),
+        });
+        ctx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, anchors[i].x, anchors[i].y);
+      }
+      if (session.hover != null && session.dragging < 0) {
+        const tip = onScreen(session.hover);
+        ctx.lineTo(tip.x, tip.y);
+      }
+      ctx.strokeStyle = PEN_STROKE;
+      ctx.lineWidth = 1.5 / scale;
+      ctx.stroke();
+    }
+
+    for (let i = 0; i < anchors.length; i++) {
+      ctx.beginPath();
+      ctx.arc(anchors[i].x, anchors[i].y, PEN_NODE_RADIUS_PX / scale, 0, Math.PI * 2);
+      // The first node reads as the target because clicking it is what closes
+      // the path, and there is nowhere else to say so.
+      ctx.fillStyle = i === 0 ? PEN_FIRST_NODE : PEN_NODE;
+      ctx.fill();
+      ctx.strokeStyle = PEN_STROKE;
+      ctx.lineWidth = 1 / scale;
+      ctx.stroke();
+    }
+
+    ctx.restore();
   }
 
   /**
@@ -1074,6 +1402,27 @@ export class PreviewCanvas extends LitElement {
       return false;
     }
 
+    // Beside the polygon tool's branch, above the hit-test loop, and returning
+    // unconditionally — which is what keeps every other gesture off. Nothing
+    // below runs, so no element is selected, no drag is armed, and the
+    // empty-space fallback at the end of this handler cannot clear the
+    // selection or start a pan out from under the stroke.
+    //
+    // The clip is the one the session began on, never whatever is under the
+    // pointer: a mask belongs to a clip, and re-targeting mid-stroke would
+    // silently move half a drawing onto a different picture.
+    if (this.penSession != null) {
+      const session = this.penSession;
+      this.applyPenAction(
+        penDown(
+          session,
+          this.toElementLocal(session.elementId, world),
+          this.penGrabRadius(session.elementId),
+        ),
+      );
+      return false;
+    }
+
     this.nowShapeId = "";
 
     const sortedTimeline = Object.fromEntries(
@@ -1320,7 +1669,15 @@ export class PreviewCanvas extends LitElement {
       return;
     }
 
-    const isDragging = this.isMove || this.isStretch || this.isRotation;
+    // A pen counts as dragging while a handle is being pulled out, so the curve
+    // keeps following the pointer past the edge of the preview instead of
+    // freezing there. Hovering does not, so the rubber band stops chasing a
+    // pointer that has left the canvas entirely.
+    const isDragging =
+      this.isMove ||
+      this.isStretch ||
+      this.isRotation ||
+      (this.penSession?.dragging ?? -1) >= 0;
     if (!isDragging && !this.isInsideCanvas(e)) {
       return;
     }
@@ -1338,6 +1695,16 @@ export class PreviewCanvas extends LitElement {
     if (this.timelineControl.cursorType == "shape") {
       this.cursorType = "crosshair";
       this.updateCursor();
+      return false;
+    }
+
+    if (this.penSession != null) {
+      const session = this.penSession;
+      this.cursorType = "crosshair";
+      this.updateCursor();
+      this.applyPenAction(
+        penMove(session, this.toElementLocal(session.elementId, world)),
+      );
       return false;
     }
 
@@ -1610,6 +1977,16 @@ export class PreviewCanvas extends LitElement {
       return;
     }
 
+    // Above the guard below, which returns for anything that is not an element
+    // drag — so the pen would never see a mouse up at all and every node would
+    // stay armed, turning the next hover into a handle drag. Above the keyframe
+    // write too: that one is for a move gesture, and a pen stroke that reached
+    // it would plant a *position* keyframe on the clip it is masking.
+    if (this.penSession != null) {
+      this.applyPenAction(penUp(this.penSession));
+      return;
+    }
+
     const wasDragging = this.isMove || this.isStretch || this.isRotation;
     if (!wasDragging) {
       // This listener sees every mouseup in the app; without this guard a click
@@ -1728,6 +2105,12 @@ export class PreviewCanvas extends LitElement {
   }
 
   _handleDblClick(e) {
+    // A double click while drawing is two pen clicks, not a request to edit a
+    // caption underneath. (Nothing binds this handler today, so this is a guard
+    // against it being bound later rather than a bug being fixed.)
+    if (this.penSession != null) {
+      return;
+    }
     const world = this.toWorld(e);
     const mx = world.x;
     const my = world.y;

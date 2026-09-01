@@ -13,8 +13,10 @@
 import { describe, it, expect } from "vitest";
 import { registerToolsWith } from "../tools";
 import {
+  ANIMATABLE,
   BLEND_MODES,
   EASINGS,
+  MASK_SHAPES,
   PRESETS,
   type Registrar,
   type ToolConfig,
@@ -73,6 +75,8 @@ const EXPECTED = [
   // colour filters
   "list_luts",
   "set_lut",
+  // masking
+  "set_mask",
   // groups
   "group_clips",
   "ungroup",
@@ -176,6 +180,25 @@ describe("every tool is usable as declared", () => {
       "../../../apps/app/src/@types/timeline"
     );
     expect([...BLEND_MODES].sort()).toEqual([...renderer].sort());
+  });
+
+  it("advertises exactly the properties that carry a keyframe track", async () => {
+    // The divergence this catches is one an agent could only find by being
+    // refused: `get_clip` reports whichever tracks a clip has, so an enum
+    // narrower than the union would name a property in one tool's output and
+    // reject it in another's input.
+    const { MASK_ANIMATABLE_PROPERTIES } = await import(
+      "../../../apps/app/src/@types/timeline"
+    );
+    const union = ["position", "opacity", "scale", "rotation", ...MASK_ANIMATABLE_PROPERTIES];
+    expect([...ANIMATABLE].sort()).toEqual([...union].sort());
+  });
+
+  it("advertises exactly the mask shapes the renderer can draw", async () => {
+    const { MASK_SHAPES: renderer } = await import(
+      "../../../apps/app/src/@types/timeline"
+    );
+    expect([...MASK_SHAPES].sort()).toEqual([...renderer].sort());
   });
 
   it("keeps descriptions short enough to live in every request's context", () => {

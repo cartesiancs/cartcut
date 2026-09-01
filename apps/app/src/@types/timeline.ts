@@ -120,6 +120,110 @@ type Gradable = {
   lut?: LutRef;
 };
 
+/**
+ * The mask shapes a clip can be cut to.
+ *
+ * Three of them are built in and one is drawn: `pen` means "the path in
+ * `MaskType.path`", so the shape name stays a closed union while the geometry
+ * behind it is open. Ordered as the panel shows them.
+ */
+export const MASK_SHAPES = ["rectangle", "star", "heart", "pen"] as const;
+
+export type MaskShape = (typeof MASK_SHAPES)[number];
+
+/**
+ * One node of a closed cubic path, in the mask's own unit square.
+ *
+ * `p` / `cs` / `ce` deliberately echo `CubicKeyframeType` above, so the codebase
+ * has one vocabulary for "an anchor and its two handles" rather than two.
+ * Unlike that type these are *2D positions*, not time-value pairs, and the
+ * handles are stored as **offsets from `p`** — which is what makes moving an
+ * anchor carry its curve with it, and what lets a node with no handles mean
+ * exactly one thing.
+ *
+ * **Both handles absent means a corner.** That is not a shorthand for
+ * `{ cs: [0,0], ce: [0,0] }`; it is the fact `features/mask/round.ts` reads to
+ * decide what round-corners applies to. A heart is all handles and never
+ * rounds; a rectangle is all corners and rounds completely; a pen path rounds
+ * exactly the vertices the user clicked rather than dragged.
+ */
+export type MaskNode = {
+  /** Anchor. The mask box is the unit square [-0.5, 0.5]². */
+  p: [number, number];
+  /** Incoming handle, as an offset from `p`. */
+  cs?: [number, number];
+  /** Outgoing handle, as an offset from `p`. */
+  ce?: [number, number];
+};
+
+/**
+ * The shape a clip's picture is cut to.
+ *
+ * One mask per clip, which is the CapCut arrangement and not an accident of
+ * this type: mask keyframes live in `element.animation` under `maskPosition`,
+ * `maskSize`, `maskRotation`, `maskFeather` and `maskRoundness`, and that record
+ * addresses a track by a single name. A second mask would have nowhere to put
+ * its curves without making every consumer of `animation[property]` — the
+ * curve editor, the diamond lane, `keyframeOps`, the agent commands — learn
+ * about indices.
+ *
+ * **`location` and `size` are percentages of the element box**, not pixels.
+ * Both are read straight into the curve editor as keyframe values, so they have
+ * to be numbers a person can read there; and a mask expressed in element pixels
+ * would stay the same size while the clip under it was resized, which is the one
+ * behaviour no NLE has.
+ *
+ * `feather` is in element-local pixels instead, because it is a distance across
+ * the picture rather than a fraction of the mask, and a feather that grew when
+ * the mask grew could not be dialled in independently of it.
+ *
+ * Absent on the element means unmasked, answered by
+ * `features/mask/maskShape.ts#maskOf` on the read side. Optional is
+ * load-bearing: `.ngt` load is a compatibility check and not a migrator, so a
+ * new field must never move `SCHEMA_VERSION`, and a project nobody has masked
+ * must save byte-identically to one written before the feature existed.
+ */
+export type MaskType = {
+  shape: MaskShape;
+  /** Mask centre, as a percentage of the element box. 50/50 is centred. */
+  location: { x: number; y: number };
+  /** Mask box, as a percentage of the element box. 100/100 fills it. */
+  size: { width: number; height: number };
+  /** Degrees, clockwise, about the mask's own centre. */
+  rotation: number;
+  /** Edge softness in element-local pixels. 0 is a hard edge. */
+  feather: number;
+  /** Corner rounding, 0-100 as a percentage of half the shorter side. */
+  roundness: number;
+  /**
+   * Keep the outside instead of the inside.
+   *
+   * Optional, and absent means "keep the inside" — the same
+   * default-deletes-the-key rule the whole field follows, one level down.
+   */
+  invert?: boolean;
+  /**
+   * `shape === "pen"` only: the drawn path, closed, in the unit square.
+   *
+   * Authored data, so it belongs on the element — unlike `LutRef`, which stores
+   * an id precisely because the table behind it is 4,913 nodes. A pen path is a
+   * handful of points the user drew and nothing else can reproduce.
+   */
+  path?: MaskNode[];
+};
+
+/**
+ * A clip whose picture can be cut to a shape.
+ *
+ * A mixin over exactly the same five element types as `Blendable` and
+ * `Gradable`, and for the same reason: a group paints nothing, and an effect and
+ * a transition are whole-frame operations rather than layers, so a mask on one
+ * would be a field the renderer is structurally unable to honour.
+ */
+type Maskable = {
+  mask?: MaskType;
+};
+
 type TimelineElementType =
   | "video"
   | "image"
@@ -273,14 +377,16 @@ export type ImageElementType = TimelinePlaced &
   Visual &
   Animatable &
   Blendable &
-  Gradable & {
+  Gradable &
+  Maskable & {
     filetype: "image";
   };
 
 export type GifElementType = TimelinePlaced &
   Visual &
   Blendable &
-  Gradable & {
+  Gradable &
+  Maskable & {
     filetype: "gif";
   };
 
@@ -288,7 +394,8 @@ export type ShapeElementType = TimelinePlaced &
   Visual &
   Animatable &
   Blendable &
-  Gradable & {
+  Gradable &
+  Maskable & {
     filetype: "shape";
     oWidth: number; // 원래 shape 사이즈
     oHeight: number;
@@ -303,7 +410,8 @@ export type VideoElementType = TimelinePlaced &
   Animatable &
   Leveled &
   Blendable &
-  Gradable & {
+  Gradable &
+  Maskable & {
     filetype: "video";
     /**
      * Window into the *source file*, in source milliseconds — never a timeline
@@ -401,7 +509,8 @@ export type TextElementType = TimelinePlaced &
   Visual &
   Animatable &
   Blendable &
-  Gradable & {
+  Gradable &
+  Maskable & {
     filetype: "text";
     text: string;
     textcolor: string;
@@ -727,7 +836,45 @@ export function canAnimate(
   );
 }
 
-export type AnimatableProperty = "position" | "opacity" | "scale" | "rotation";
+/**
+ * The mask's own keyframe tracks, which live in `element.animation` beside the
+ * clip's.
+ *
+ * Same record, new names — deliberately, and it is the whole reason masks
+ * animate at all without a second keyframe subsystem. `normalizeAnimation`,
+ * `cloneAnimation`, `rebaseAnimation`, `sliceAnimation` and `rebakeElement` all
+ * walk `Object.keys(animation)` or `animatableProperties(element)`, so split,
+ * trim, duplicate, paste and a project frame-rate change carry mask curves for
+ * free. A parallel `mask.animation` block would have needed all five
+ * reimplemented, and the fifth one anyone forgot would fail silently on one
+ * axis of one property.
+ *
+ * These exist on an element **only while it carries a mask**, and
+ * `keyframes.ts#normalizeAnimation` collects them when it does not — see
+ * `animatableProperties` below.
+ *
+ * Units are the ones `MaskType` stores: percentages of the element box for
+ * position and size, degrees for rotation, element-local pixels for feather,
+ * 0-100 for roundness. That is what makes them readable in the curve editor,
+ * which draws raw track values.
+ */
+export const MASK_ANIMATABLE_PROPERTIES = [
+  "maskPosition",
+  "maskSize",
+  "maskRotation",
+  "maskFeather",
+  "maskRoundness",
+] as const;
+
+export type MaskAnimatableProperty =
+  (typeof MASK_ANIMATABLE_PROPERTIES)[number];
+
+export type AnimatableProperty =
+  | "position"
+  | "opacity"
+  | "scale"
+  | "rotation"
+  | MaskAnimatableProperty;
 
 /**
  * Which properties an element can actually animate.
@@ -740,9 +887,21 @@ export type AnimatableProperty = "position" | "opacity" | "scale" | "rotation";
  *
  * An effect's `intensity` is deliberately not here. `AnimatableProperty` is a
  * closed union that `keyframeOps`, the curve editor and the timeline's diamond
- * lane all switch on, and the `animation` block is a fixed record of four
+ * lane all switch on, and the `animation` block was a fixed record of four
  * named tracks — so a fifth animatable property is a change to the keyframe
  * subsystem, not to this list. `intensity` stays static until that happens.
+ *
+ * **The mask made this a function of the element's state, not just its
+ * filetype**, and that is the one surprising thing about it. A clip's mask
+ * tracks exist only while it has a mask: applying one seeds them, clearing one
+ * removes them, and this gate is what makes both true everywhere at once —
+ * `keyframeOps.resolve` refuses a mask keyframe on an unmasked clip with no
+ * guard of its own, `rebakeElement` skips tracks that should not be there, and
+ * the curve editor and the diamond lane offer nothing to animate until there is
+ * something to animate. The cost is that an *orphan* track — mask curves with
+ * no mask, from a hand-edited file or a partial write — would be invisible to
+ * every one of them while still riding along in the saved project, which is why
+ * `keyframes.ts#normalizeAnimation` deletes those on ingress.
  */
 export function animatableProperties(
   element: TimelineElement,
@@ -753,7 +912,10 @@ export function animatableProperties(
   if (element.filetype === "effect") {
     return ["opacity"];
   }
-  return ["position", "opacity", "scale", "rotation"];
+  const own: AnimatableProperty[] = ["position", "opacity", "scale", "rotation"];
+  return (element as { mask?: unknown }).mask != null
+    ? [...own, ...MASK_ANIMATABLE_PROPERTIES]
+    : own;
 }
 
 export interface Timeline {

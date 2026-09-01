@@ -21,6 +21,9 @@ import type { FilterInput } from "../renderer/filter/params";
 import "./controlAudioVolume";
 import "./controlBlendMode";
 import "./optionLutSection";
+import "./optionMaskSection";
+import "./optionTabBar";
+import type { OptionTab } from "./optionTabBar";
 
 @customElement("option-video")
 export class OptionVideo extends LitElement {
@@ -48,6 +51,14 @@ export class OptionVideo extends LitElement {
 
   @property()
   isShow = false;
+
+  /**
+   * Which pane is showing. Component state, not document state: it is where the
+   * user is looking, not something about the clip, and it must not survive into
+   * the project file or cost an undo step.
+   */
+  @property()
+  tab: OptionTab = "media";
 
   createRenderRoot() {
     useTimelineStore.subscribe((state) => {
@@ -131,6 +142,25 @@ export class OptionVideo extends LitElement {
           </div>`;
 
     return html`
+      <option-tab-bar
+        .active=${this.tab}
+        @tab-change=${(e: CustomEvent<OptionTab>) => {
+          this.tab = e.detail;
+        }}
+      ></option-tab-bar>
+
+      <!--
+        Both panes stay mounted; only one is shown. See optionTabBar.ts - the
+        controls inside subscribe to the document when they mount, and toggling
+        would otherwise drop and re-add those subscriptions on every click.
+      -->
+      <div class=${this.tab === "mask" ? "" : "d-none"}>
+        <option-mask-section
+          .elementIds=${[this.elementId]}
+        ></option-mask-section>
+      </div>
+
+      <div class=${this.tab === "media" ? "" : "d-none"}>
       <default-transform
         .elementId=${this.elementId}
         .timeline=${this.timeline}
@@ -225,6 +255,7 @@ export class OptionVideo extends LitElement {
           max="2"
         />
       </div> -->
+      </div>
     `;
   }
 

@@ -184,13 +184,33 @@ export const BLEND_MODES = [
   "luminosity",
 ] as const;
 
-/** The properties that carry a keyframe track. */
+/**
+ * The properties that carry a keyframe track.
+ *
+ * Another copy, for the `rootDir` reason above, and `tools.test.ts` pins it
+ * against `@types/timeline.ts#AnimatableProperty` so drift is a failing test.
+ * That matters here in a way it does not for a preset name: `get_clip` reports
+ * whichever tracks a clip carries, so an enum narrower than the union would
+ * *advertise* a property in one tool's output and *reject* it in another's
+ * input — a surface an agent can only discover by being refused.
+ *
+ * The five `mask*` entries only exist on a clip that has a mask;
+ * `animatableProperties` is the gate, and the commands decline through it.
+ */
 export const ANIMATABLE = [
   "position",
   "opacity",
   "scale",
   "rotation",
+  "maskPosition",
+  "maskSize",
+  "maskRotation",
+  "maskFeather",
+  "maskRoundness",
 ] as const;
+
+/** The mask shapes a clip can be cut to. A copy of `MASK_SHAPES`. */
+export const MASK_SHAPES = ["rectangle", "star", "heart", "pen"] as const;
 
 /**
  * The animation presets.

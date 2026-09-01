@@ -9,6 +9,9 @@ import { affectsTextBlock, withFittedTextHeights } from "../element/textFit";
 import { DEFAULT_LINE_HEIGHT, coerceLineHeight } from "../text/metrics";
 import "./controlBlendMode";
 import "./optionLutSection";
+import "./optionMaskSection";
+import "./optionTabBar";
+import type { OptionTab } from "./optionTabBar";
 
 @customElement("option-text")
 export class OptionText extends LitElement {
@@ -29,6 +32,13 @@ export class OptionText extends LitElement {
 
   @property()
   isShow = false;
+
+  /**
+   * Which pane is showing. Component state, not document state: it is where the
+   * user is looking, not something about the clip.
+   */
+  @property()
+  tab: OptionTab = "media";
   updateOnce: any;
   selectedFont: string;
 
@@ -85,6 +95,21 @@ export class OptionText extends LitElement {
     }
 
     return html`
+      <option-tab-bar
+        .active=${this.tab}
+        @tab-change=${(e: CustomEvent<OptionTab>) => {
+          this.tab = e.detail;
+        }}
+      ></option-tab-bar>
+
+      <!-- Both panes stay mounted; only one is shown. See optionTabBar.ts -->
+      <div class=${this.tab === "mask" ? "" : "d-none"}>
+        <option-mask-section
+          .elementIds=${this.elementId}
+        ></option-mask-section>
+      </div>
+
+      <div class=${this.tab === "media" ? "" : "d-none"}>
       <span class="text-light ${this.elementId.length > 1 ? "" : "d-none"}"
         >${this.elementId.length} selected</span
       >
@@ -294,6 +319,7 @@ export class OptionText extends LitElement {
       </div>
 
       ${this.renderEffects()}
+      </div>
     `;
   }
 

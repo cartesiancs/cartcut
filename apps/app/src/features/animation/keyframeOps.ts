@@ -20,6 +20,14 @@ import {
   type AnimatableProperty,
   type TimelineElement,
 } from "../../@types/timeline";
+import {
+  DEFAULT_MASK_FEATHER,
+  DEFAULT_MASK_LOCATION,
+  DEFAULT_MASK_ROTATION,
+  DEFAULT_MASK_ROUNDNESS,
+  DEFAULT_MASK_SIZE,
+  maskOf,
+} from "../mask/maskShape";
 import type { TimelineDocument } from "../timeline/tracks";
 import {
   BAKE_HZ,
@@ -460,6 +468,17 @@ export function removeKeyframePaired(
  * Scale is stored in tenths — `renderElement` divides by 10 — so an unscaled
  * element seeds at 10, not 1. That constant is otherwise only visible as a bare
  * `interpolate(10, ...)` in the renderer.
+ *
+ * The mask's five read through `maskOf` rather than off `element.mask`
+ * directly, and that is not defensiveness for its own sake: this value is
+ * planted into a keyframe and then baked, so a `NaN` reaching it from a
+ * hand-edited project would not throw — it would sit in a baked lane and put
+ * the mask off-canvas at every frame after the one the user seeded. The read
+ * guard resolves every field to a usable number, which is exactly its job.
+ *
+ * A mask property on a clip with no mask cannot reach here at all:
+ * `animatableProperties` omits them, and `resolve` and `setTrackActive` both
+ * gate on it.
  */
 function staticValueOf(
   element: TimelineElement,
@@ -476,6 +495,21 @@ function staticValueOf(
       return any.rotation ?? 0;
     case "scale":
       return 10;
+    case "maskPosition": {
+      const mask = maskOf(element);
+      const location = mask?.location ?? DEFAULT_MASK_LOCATION;
+      return lane === "x" ? location.x : location.y;
+    }
+    case "maskSize": {
+      const size = maskOf(element)?.size ?? DEFAULT_MASK_SIZE;
+      return lane === "x" ? size.width : size.height;
+    }
+    case "maskRotation":
+      return maskOf(element)?.rotation ?? DEFAULT_MASK_ROTATION;
+    case "maskFeather":
+      return maskOf(element)?.feather ?? DEFAULT_MASK_FEATHER;
+    case "maskRoundness":
+      return maskOf(element)?.roundness ?? DEFAULT_MASK_ROUNDNESS;
   }
 }
 

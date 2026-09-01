@@ -109,6 +109,7 @@ import {
   splitSelection,
   undo,
 } from "../editor/actions";
+import { penCapturesKey } from "../mask/penSession";
 
 /** What a click on a bare cut reaches for first. */
 const DEFAULT_TRANSITION_PRESET = "com.cartcut.cross-dissolve";
@@ -126,6 +127,17 @@ const ANIMATION_MENU: Record<string, { label: string; icon: string }> = {
   opacity: { label: "Animate opacity", icon: "opacity" },
   scale: { label: "Animate scale", icon: "aspect_ratio" },
   rotation: { label: "Animate rotation", icon: "rotate_90_degrees_cw" },
+  // The mask's five, which `animatableProperties` offers only on a clip that
+  // has one. Listed because the fallback above would otherwise render them as
+  // `Animate maskPosition` — correct, and not English.
+  maskPosition: { label: "Animate mask position", icon: "open_with" },
+  maskSize: { label: "Animate mask size", icon: "aspect_ratio" },
+  maskRotation: {
+    label: "Animate mask rotation",
+    icon: "rotate_90_degrees_cw",
+  },
+  maskFeather: { label: "Animate mask feather", icon: "blur_on" },
+  maskRoundness: { label: "Animate mask roundness", icon: "rounded_corner" },
 };
 
 /**
@@ -1202,6 +1214,25 @@ export class elementTimelineCanvas extends LitElement {
       return;
     }
 
+    // The mask pen owns Escape, Enter, Backspace and Delete while a stroke is
+    // in progress, and this is where it takes them from: Backspace here would
+    // delete the very clip being masked.
+    //
+    // `previewCanvas` also installs a capture-phase listener that calls
+    // `stopPropagation`, and that is what handles a real keystroke — but it is
+    // not sufficient on its own. Capture only beats a bubble listener when the
+    // event's target is *below* `window` in the tree; for one dispatched at
+    // `window` itself both fire in the AT_TARGET phase, in registration order,
+    // and this listener is registered first because the timeline mounts before
+    // the preview. So the ownership is stated here as well, where it cannot
+    // depend on which element happened to have focus.
+    if (
+      this.control.cursorType === "pen" &&
+      penCapturesKey(event.code)
+    ) {
+      return;
+    }
+
     if (event.code === "Escape") {
       this.handleCancelGesture();
       return;
@@ -1281,8 +1312,17 @@ export class elementTimelineCanvas extends LitElement {
    * reorder rows — and which was called with the selection *array* where a
    * single id was expected, so it never matched anything and silently did
    * nothing.
+   *
+   * Gated on the pointer tool, exactly as `stepCursor` is and for the same
+   * reason: while a modal tool is active the arrow keys belong to it, or to
+   * nothing. Without this, pressing Up while drawing a mask moved the clip
+   * being masked to another track — one undo step per press, under a pointer
+   * that was nowhere near the timeline.
    */
   private moveSelectionByTrack(delta: number) {
+    if (this.control.cursorType !== "pointer") {
+      return;
+    }
     this.commit((doc) => moveClips(doc, this.targetId, 0, delta));
   }
 

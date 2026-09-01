@@ -82,8 +82,10 @@ export function registerAnimationTools(define: Registrar) {
       title: "Add keyframes",
       description:
         "Author keyframes on one property, all in one undo step. Activates the track if it is not already on. " +
-        "`position` needs both `x` and `y` on every entry; opacity, scale and rotation take `value`. " +
-        "Units: opacity 0-100, rotation in degrees, and **scale is in tenths — 10 is unscaled, 12 is 120%**. " +
+        "`position`, `maskPosition` and `maskSize` need both `x` and `y` on every entry (on `maskSize`, `x` is " +
+        "the width); the rest take `value`. Units: opacity 0-100, rotation in degrees, **scale in tenths — " +
+        "10 is unscaled, 12 is 120%** — mask position and size in % of the clip, mask feather in clip px. " +
+        "`mask*` needs set_mask first. " +
         "Times are absolute timeline ms and must fall inside the clip; one outside is refused rather than " +
         "clamped, because a keyframe past the clip's end never plays. " +
         "**Set `easing` or the move will be soft.** With none, a keyframe gets handles that leave and arrive " +
@@ -100,9 +102,18 @@ export function registerAnimationTools(define: Registrar) {
           .array(
             z.object({
               atMs: z.number(),
-              value: z.number().optional().describe("opacity / scale / rotation"),
-              x: z.number().optional().describe("position only"),
-              y: z.number().optional().describe("position only"),
+              value: z
+                .number()
+                .optional()
+                .describe("opacity / scale / rotation / maskRotation / maskFeather / maskRoundness"),
+              x: z
+                .number()
+                .optional()
+                .describe("position / maskPosition, and the width of maskSize"),
+              y: z
+                .number()
+                .optional()
+                .describe("position / maskPosition, and the height of maskSize"),
               easing: z
                 .union([z.enum(EASINGS), z.array(z.number()).length(4)])
                 .optional()

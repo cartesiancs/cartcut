@@ -131,6 +131,71 @@ describe("clipRow", () => {
     expect(row.shape).toBeUndefined();
     expect(row.option).toBeUndefined();
   });
+
+  describe("masks", () => {
+    const masked = (over: any = {}) =>
+      imageElement({
+        trackId: "v1",
+        mask: {
+          shape: "rectangle",
+          location: { x: 25, y: 50 },
+          size: { width: 50, height: 100 },
+          rotation: 0,
+          feather: 4,
+          roundness: 0,
+          ...over,
+        },
+      } as any);
+
+    it("names the shape, and only when there is a mask", () => {
+      expect((clipRow("a", masked()) as any).mask).toBe("rectangle");
+      expect(
+        (clipRow("a", imageElement({ trackId: "v1" })) as any).mask,
+      ).toBeUndefined();
+    });
+
+    // Same rule as the shape's point list, and the same reason: unbounded
+    // authored data an agent cannot act on, since `set_mask` deliberately
+    // cannot supply one.
+    it("never carries a drawn path", () => {
+      const element = masked({
+        shape: "pen",
+        path: [{ p: [0, 0] }, { p: [1, 0] }, { p: [0, 1] }],
+      });
+      const row = clipRow("a", element) as any;
+      expect(jsonOf(row)).not.toContain('"path"');
+      const detail = clipDetail("a", element) as any;
+      expect(jsonOf(detail)).not.toContain('"path"');
+      // Its length is the one fact about it that changes what to do: under
+      // three nodes and the mask renders as no mask at all.
+      expect(detail.mask.pathNodeCount).toBe(3);
+    });
+
+    it("reports the placement in the detail view", () => {
+      const detail = clipDetail("a", masked()) as any;
+      expect(detail.mask).toMatchObject({
+        shape: "rectangle",
+        x: 25,
+        y: 50,
+        width: 50,
+        height: 100,
+        feather: 4,
+        invert: false,
+      });
+    });
+
+    // The distinction an agent cannot make from an absent field: "unmasked"
+    // against "this kind of clip has no mask" — the same one `blend` and `lut`
+    // draw a few lines above it.
+    it("says null for an unmasked clip and nothing at all for audio", () => {
+      expect(
+        (clipDetail("a", imageElement({ trackId: "v1" })) as any).mask,
+      ).toBeNull();
+      expect(
+        "mask" in (clipDetail("a", audioElement({ trackId: "v1" })) as any),
+      ).toBe(false);
+    });
+  });
 });
 
 describe("clipDetail", () => {

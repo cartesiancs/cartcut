@@ -50,14 +50,18 @@ export type ShortcutId =
   | "cancel"
   | "previewFit"
   | "previewZoomIn"
-  | "previewZoomOut";
+  | "previewZoomOut"
+  | "maskClosePath"
+  | "maskRemoveNode"
+  | "maskCancel";
 
 export type ShortcutGroup =
   | "edit"
   | "file"
   | "playback"
   | "arrange"
-  | "preview";
+  | "preview"
+  | "mask";
 
 export interface Shortcut {
   id: ShortcutId;
@@ -210,6 +214,35 @@ export const SHORTCUTS: readonly Shortcut[] = [
     group: "preview",
     keys: ["Mod", "-"],
   },
+
+  // Mask pen — `previewCanvas._handlePenKeydown`, and unlike every other entry
+  // in this table those bindings are **capture-phase and live only while a
+  // stroke is in progress**. That is what lets Backspace mean "remove the last
+  // node" here and "delete the selected clip" everywhere else without the two
+  // contradicting each other; listing them says so, which a reader comparing
+  // this row against the `delete` row above will otherwise have to guess.
+  {
+    id: "maskClosePath",
+    label: "Close mask path",
+    description: "Finish the mask being drawn, while the pen is active",
+    group: "mask",
+    keys: ["Enter"],
+  },
+  {
+    id: "maskRemoveNode",
+    label: "Remove last point",
+    description: "Undo the last point of the mask being drawn",
+    group: "mask",
+    keys: ["Backspace"],
+    alternates: [["Delete"]],
+  },
+  {
+    id: "maskCancel",
+    label: "Discard mask",
+    description: "Abandon the mask being drawn",
+    group: "mask",
+    keys: ["Escape"],
+  },
 ];
 
 export const GROUP_TITLES: Record<ShortcutGroup, string> = {
@@ -218,6 +251,7 @@ export const GROUP_TITLES: Record<ShortcutGroup, string> = {
   playback: "Playback",
   arrange: "Arrange",
   preview: "Preview",
+  mask: "Mask pen",
 };
 
 /** The order groups appear in the help modal. */
@@ -227,6 +261,7 @@ const GROUP_ORDER: readonly ShortcutGroup[] = [
   "playback",
   "arrange",
   "preview",
+  "mask",
 ];
 
 const BY_ID = new Map<ShortcutId, Shortcut>(

@@ -7,7 +7,7 @@ import { ImageElementType } from "../../@types/timeline";
 import { KeyframeController } from "../../controllers/keyframe";
 import { applySurface, surfaceSpec } from "../timeline/canvasSurface";
 import { isCollapsedHandle } from "../animation/handleBounds";
-import type { Keyframe, Lane } from "../animation/keyframes";
+import { lanesOf, type Keyframe, type Lane } from "../animation/keyframes";
 import type { TimelineDocument } from "../timeline/tracks";
 import { isTypingEvent } from "../../utils/typingTarget";
 import {
@@ -181,8 +181,13 @@ export class KeyframeEditor extends LitElement {
       return;
     }
 
-    // Position is the only two-lane property; everything else edits one curve.
-    this.lineCount = this.animationType == "position" ? 2 : 1;
+    // Asked of `lanesOf` rather than restated. The answer is the same as the
+    // `animationType == "position"` this replaces for every property that
+    // existed when it was written — and it stays the same as the ops layer's
+    // answer for every property added since, which the hardcoded version could
+    // not: `maskPosition` and `maskSize` are both two-lane, and an editor that
+    // believed otherwise would silently refuse every edit to their second lane.
+    this.lineCount = lanesOf(this.animationType).length;
     if (this.selectLine >= this.lineCount) {
       // A stale `selectLine` of 1 left the editor silently inert on a
       // single-lane property: every read and every edit addressed a `y` lane

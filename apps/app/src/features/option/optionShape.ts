@@ -4,6 +4,9 @@ import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import "./controlDefaultTransform";
 import "./controlBlendMode";
 import "./optionLutSection";
+import "./optionMaskSection";
+import "./optionTabBar";
+import type { OptionTab } from "./optionTabBar";
 
 @customElement("option-shape")
 export class OptionShape extends LitElement {
@@ -20,6 +23,13 @@ export class OptionShape extends LitElement {
 
   @property()
   isShow = false;
+
+  /**
+   * Which pane is showing. Component state, not document state: it is where the
+   * user is looking, not something about the clip.
+   */
+  @property()
+  tab: OptionTab = "media";
 
   constructor() {
     super();
@@ -39,6 +49,21 @@ export class OptionShape extends LitElement {
 
   render() {
     return html`
+      <option-tab-bar
+        .active=${this.tab}
+        @tab-change=${(e: CustomEvent<OptionTab>) => {
+          this.tab = e.detail;
+        }}
+      ></option-tab-bar>
+
+      <!-- Both panes stay mounted; only one is shown. See optionTabBar.ts -->
+      <div class=${this.tab === "mask" ? "" : "d-none"}>
+        <option-mask-section
+          .elementIds=${[this.elementId]}
+        ></option-mask-section>
+      </div>
+
+      <div class=${this.tab === "media" ? "" : "d-none"}>
       <default-transform
         .elementId=${this.elementId}
         .timeline=${this.timeline}
@@ -72,6 +97,7 @@ export class OptionShape extends LitElement {
           value="#ffffff"
           title="Choose your color"
         />
+      </div>
       </div>
     `;
   }

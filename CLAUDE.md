@@ -268,6 +268,93 @@ Two constraints shape every tool:
 Connect with the command shown under the ⚡ icon at the bottom right of the app,
 or set `CARTCUT_MCP_TOKEN` and use the committed `.mcp.json`.
 
+## Masks
+
+**One mask per clip**, cutting its picture to a shape: `rectangle`, `star`,
+`heart`, or `pen` — a bezier path drawn on the preview. `feather` softens the
+edge, `roundness` rounds the corners, `invert` cuts a hole instead. It is an
+optional `mask` field over the same five types `Blendable` and `Gradable` cover,
+absent means unmasked, clearing deletes the key, and **`SCHEMA_VERSION` did not
+move** — the rule `blend` and `lut` both follow.
+
+```
+apps/app/src/features/mask/maskShape.ts   maskOf / coerceMask — the read/write split
+apps/app/src/features/mask/geometry.ts    nodes, segments, true curve bounds, affine mapping
+apps/app/src/features/mask/templates.ts   the three built-ins, normalised onto the unit square
+apps/app/src/features/mask/round.ts       corner rounding, as a rewrite of the node list
+apps/app/src/features/mask/place.ts       unit square -> element-local pixels
+apps/app/src/features/mask/sample.ts      the five animatable values at a cursor
+apps/app/src/features/mask/penSession.ts  the pen tool's state machine, DOM-free
+apps/app/src/features/renderer/mask.ts    device-space resolve, then one destination-in
+apps/app/src/features/timeline/maskOps.ts setClipMask / …Fields / …Path, and their declines
+```
+
+**One mask per clip is a consequence, not a preference.** Mask keyframes live in
+`element.animation` under `maskPosition`, `maskSize`, `maskRotation`,
+`maskFeather` and `maskRoundness`, and that record addresses a track by a single
+name. A second mask would have nowhere to put its curves without teaching every
+consumer of `animation[property]` about indices.
+
+Putting them in that same record is what makes them animate at all:
+`normalizeAnimation`, `cloneAnimation`, `rebaseAnimation`, `sliceAnimation` and
+`rebakeElement` all walk `Object.keys(animation)` or
+`animatableProperties(element)`, so split, trim, duplicate, paste and a
+frame-rate change carry mask curves for free. The tracks exist **only while the
+clip has a mask** — `animatableProperties` became a function of the element's
+state, not just its filetype — so `maskOps` seeds and removes them with the mask
+in one transform, and `normalizeAnimation` collects any orphans on ingress.
+
+Five things about it that are easy to get wrong:
+
+- **The mask matrix is not `worldMatrixOf`.** It is the destination's own
+  transform, read from `ctx` *before* the layer is allocated, composed with the
+  parent chain and the element's local transform — the same three
+  `renderElement` and `drawDirect` apply between them. `worldMatrixOf` maps into
+  *project* space, and the preview's context carries zoom and DPR on top of it.
+  A mask built the wrong way is exact in every node suite, which all draw at
+  identity, and misplaced in the app at any zoom but 100% on any display but 1×.
+- **The stencil is filled under an identity transform**, with the path already
+  mapped to device pixels. `ctx.filter = "blur(Npx)"` is scaled by the current
+  transform in Skia and `shadowBlur` is not, in either engine — and the preview
+  is Chromium while every renderer suite is Skia, so a divergence there would be
+  invisible in the suite and wrong in the app. Mapping the path ourselves means
+  neither engine is asked to scale anything. An affine matrix maps a cubic's
+  control points exactly, so nothing is approximated by doing it.
+- **Everything is a cubic, including a straight edge and a rounded corner.**
+  Corners become quarter-arc beziers (`4/3 · tan(θ/4)` generalises the 0.5523
+  constant to any angle), never `arcTo` or `roundRect`, because those survive
+  only a similarity transform and a stretched mask must give an elliptical
+  corner.
+- **Roundness applies to nodes with no handles.** That one rule is why a
+  rectangle rounds completely, a heart never rounds, and a pen path rounds
+  exactly the vertices the user clicked rather than dragged — with no shape name
+  appearing in `round.ts` at all.
+- **A `pen` mask with fewer than three nodes renders as no mask**, not as a
+  hole. Same contract a LUT that is not installed has, and it is also what stops
+  the clip vanishing between the first click of a stroke and the third.
+
+The mask is applied on the blend-isolation layer, after the grade — the order is
+unobservable, since a LUT does not touch alpha, so it sits next to the blit it
+belongs to. It is **not** suspended by `isolated`: like a grade and unlike a
+blend, it is a property of the clip, so a masked clip stays masked through a
+transition. The no-layer fallback degrades to `ctx.clip()`, which loses the
+feather and drops an inverted mask rather than applying it backwards.
+
+**The pen tool is the one thing that fights the rest of the editor**, and the
+whole conflict matrix is in `penSession.test.ts`. Two guards are load-bearing
+and neither is obvious: `elementTimelineCanvas._handleKeydown` yields explicitly
+on `penCapturesKey`, because a capture-phase listener only beats a bubble one
+when the event's target is *below* `window` — for one dispatched at `window`
+both fire in AT_TARGET order and the timeline, mounting first, would delete the
+clip being masked. And `moveSelectionByTrack` gained the `cursorType` guard
+`stepCursor` already had. The session holds element-local pixels and writes
+nothing until the path closes, so zooming, scrubbing and undo cannot reach it,
+and one drawn mask is one undo step.
+
+The word **pen** means the mask tool and nothing else: the create menu's entry
+that click-appends segments to a new `shape` element was called "Pen Tool" and
+is now "Polygon", for the reason the LUT section gives about "filter".
+
 ## LUTs
 
 **Called a LUT, never a "filter".** `VideoElementType.filter` and
@@ -450,10 +537,12 @@ npm run test:e2e:check      # typecheck the suite on its own
   `remove_transition`, `add_effect`, `set_effect`, `get_fx` and both
   `list_*_presets`, and `add_track`'s enum does include `"effect"`.
 
-  What is actually left is narrower: **`FILETYPES` in
-  `electron/mcp/tools/define.ts` still omits `effect` and `transition`**, so a
-  tool that filters by filetype cannot name either. That is the thing to check
-  before believing any claim in this bullet — including this one.
+  The last narrow claim — that **`FILETYPES` in
+  `electron/mcp/tools/define.ts` still omits `effect` and `transition`** — has
+  now gone the same way. The array holds all nine filetypes; a tool that filters
+  by filetype can name every one of them. Checked 2026-09-01, which is the
+  standing instruction this bullet gives about itself: verify before believing
+  any claim in it, including this one.
 - **`fluent-ffmpeg` cannot read this ffmpeg's capabilities.** The bundled
   binary is ffmpeg 9, whose `-formats` output puts *two* spaces between the flag
   column and the name (it gained a third flag for devices); `fluent-ffmpeg`

@@ -22,10 +22,12 @@
 
 import type {
   ImageElementType,
+  MaskType,
   TextElementType,
   TimelineElement,
 } from "../../@types/timeline";
 import { cloneAnimation } from "../animation/keyframes";
+import { maskOf } from "../mask/maskShape";
 import { normalizeDocument, type TimelineDocument } from "./tracks";
 
 /** The colour `elementControl.addImage` gives an image clip on the timeline. */
@@ -56,6 +58,15 @@ export type RasterBox = {
  * `parentId` **is** carried over, unlike `audioTwinOf`, which drops it: a group
  * is a spatial transform parent, and an image has a `location` for it to
  * transform. A rasterised title inside a group must keep moving with it.
+ *
+ * A `mask` is carried over too, but it cannot simply be copied: it is stored as
+ * a **percentage of the element box**, and the twin's box is not the text's —
+ * it is grown by `styleBleed` on every side so the glow and the outline fit.
+ * Copying the numbers across would slide the mask by the bleed and shrink it by
+ * the growth, so `remapMask` re-expresses it against the new box and the mask
+ * keeps cutting the same pixels. Its `feather` is in element-local pixels
+ * rather than percent and so needs no conversion at all — which is the second
+ * time that choice of unit has paid for itself.
  */
 export function imageTwinOf(
   text: TextElementType,
@@ -90,7 +101,56 @@ export function imageTwinOf(
     twin.parentId = text.parentId;
   }
 
+  const mask = remapMask(text, box);
+  if (mask != null) {
+    twin.mask = mask;
+  }
+
   return twin;
+}
+
+/**
+ * The text clip's mask, re-expressed against the raster box.
+ *
+ * Both boxes describe the same unrotated local space — the raster box is the
+ * text's own, moved up and left by the style bleed and grown by twice it — so
+ * the conversion is a change of origin and of scale, and it is exact.
+ *
+ * Returns `null` when there is no mask, and also when either box has no extent:
+ * a division there would put `NaN` percentages into the document, and a mask
+ * that cannot be placed is better dropped than placed wrongly.
+ */
+function remapMask(text: TextElementType, box: RasterBox): MaskType | null {
+  const mask = maskOf(text);
+  if (mask == null) {
+    return null;
+  }
+  if (!(box.width > 0) || !(box.height > 0)) {
+    return null;
+  }
+
+  // The mask's centre and extent in the text's own pixels...
+  const centreX = (mask.location.x / 100) * text.width;
+  const centreY = (mask.location.y / 100) * text.height;
+  const widthPx = (mask.size.width / 100) * text.width;
+  const heightPx = (mask.size.height / 100) * text.height;
+
+  // ...then the same point, measured from the raster box's origin instead.
+  const offsetX = text.location.x - box.x;
+  const offsetY = text.location.y - box.y;
+
+  return {
+    ...mask,
+    location: {
+      x: ((centreX + offsetX) / box.width) * 100,
+      y: ((centreY + offsetY) / box.height) * 100,
+    },
+    size: {
+      width: (widthPx / box.width) * 100,
+      height: (heightPx / box.height) * 100,
+    },
+    ...(mask.path == null ? {} : { path: mask.path.map((node) => ({ ...node })) }),
+  };
 }
 
 /** Only a text clip can be rasterised. */

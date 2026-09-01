@@ -25,6 +25,7 @@ import "./commands/media";
 import "./commands/tracks";
 import "./commands/appearance";
 import "./commands/lut";
+import "./commands/mask";
 import "./commands/rasterize";
 import "./commands/animation";
 import "./commands/groups";

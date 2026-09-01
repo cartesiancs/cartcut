@@ -33,6 +33,8 @@ import { blendOf, DEFAULT_BLEND } from "../renderer/blend";
 import { DEFAULT_LUT_INTENSITY, lutOf } from "../renderer/lut";
 import { isBlendable } from "../timeline/blendOps";
 import { isGradable } from "../timeline/lutOps";
+import { maskOf } from "../mask/maskShape";
+import { isMaskable } from "../timeline/maskOps";
 import type { TimelineDocument, TimelineTrack } from "../timeline/tracks";
 import { resolveTextStyle } from "../text/style";
 
@@ -164,6 +166,17 @@ export function clipRow(
     if (lut.intensity !== DEFAULT_LUT_INTENSITY) {
       row.lutIntensity = lut.intensity;
     }
+  }
+
+  // The shape name alone, and only when there is a mask. A masked clip is
+  // unusual enough to be worth a word in a list — it explains why a clip an
+  // agent can see in the document is not all there in the picture — and the
+  // shape is the only part of it that reads at a glance. The placement is in
+  // the detail view; the drawn path is in neither, for the reason the LUT table
+  // is in neither.
+  const mask = maskOf(element);
+  if (mask != null) {
+    row.mask = mask.shape;
   }
 
   switch (element.filetype) {
@@ -308,6 +321,37 @@ export function clipDetail(
     const lut = lutOf(element);
     detail.lut = lut == null ? null : lut.presetId;
     detail.lutIntensity = lut == null ? null : lut.intensity;
+  }
+
+  // Reported whatever its value on the types that can carry one, and absent on
+  // the types that cannot — the same distinction `blend` and `lut` make above.
+  //
+  // The drawn path is **never** sent, and `serialize.test.ts` pins its absence
+  // for the same reason it pins `shape`'s point list: it is unbounded authored
+  // data an agent cannot act on, and `set_mask` deliberately cannot supply one.
+  // Its node count is reported instead, which is the one fact about it that
+  // changes what an agent should do — a `pen` mask with fewer than three nodes
+  // renders as no mask at all.
+  if (isMaskable(element)) {
+    const detailMask = maskOf(element);
+    if (detailMask == null) {
+      detail.mask = null;
+    } else {
+      detail.mask = {
+        shape: detailMask.shape,
+        x: detailMask.location.x,
+        y: detailMask.location.y,
+        width: detailMask.size.width,
+        height: detailMask.size.height,
+        rotation: detailMask.rotation,
+        feather: detailMask.feather,
+        roundness: detailMask.roundness,
+        invert: detailMask.invert === true,
+        ...(detailMask.shape === "pen"
+          ? { pathNodeCount: detailMask.path?.length ?? 0 }
+          : {}),
+      };
+    }
   }
 
   if (element.filetype === "shape") {
