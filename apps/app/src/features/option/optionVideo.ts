@@ -20,6 +20,7 @@ import {
 import type { FilterInput } from "../renderer/filter/params";
 import "./controlAudioVolume";
 import "./controlBlendMode";
+import "./controlClipSpeed";
 import "./optionLutSection";
 import "./optionMaskSection";
 import "./optionTabBar";
@@ -175,6 +176,16 @@ export class OptionVideo extends LitElement {
         .isShow=${this.isShow && this.hasAudio()}
       ></audio-volume>
 
+      <!--
+        Between the level and the appearance rows, because speed is the one
+        property here that reaches both halves of the clip: it resizes the
+        picture on the timeline and retimes the sound with it.
+      -->
+      <clip-speed
+        .elementId=${this.elementId}
+        .isShow=${this.isShow}
+      ></clip-speed>
+
       <blend-mode
         .elementId=${this.elementId}
         .isShow=${this.isShow}
@@ -243,18 +254,6 @@ export class OptionVideo extends LitElement {
         </button>
       </div> -->
 
-      <!-- <div class="mb-2">
-        <label class="form-label text-light">Speed</label>
-        <input
-          @change=${this.updateSpeed}
-          aria-event="speed"
-          type="number"
-          class="form-control bg-default text-light"
-          value="1"
-          min="0.5"
-          max="2"
-        />
-      </div> -->
       </div>
     `;
   }
@@ -288,16 +287,6 @@ export class OptionVideo extends LitElement {
   setElementId({ elementId }) {
     this.elementId = elementId;
     this.requestUpdate();
-  }
-
-  updateSpeed() {
-    const speed = this.querySelector("input[aria-event='speed'") as any;
-
-    this.timelineState.updateTimeline(
-      this.elementId,
-      ["speed"],
-      parseFloat(speed.value),
-    );
   }
 
   /** Whether this clip's filters are switched on, per the store. */

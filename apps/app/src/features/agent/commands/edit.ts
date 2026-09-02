@@ -35,7 +35,12 @@ import {
 } from "../../timeline/clipOps";
 import { spanOf } from "../../timeline/geometry";
 import { withDescendants } from "../../timeline/hierarchy";
-import { MAX_SPEED, MIN_SPEED, setClipSpeed } from "../../timeline/speedOps";
+import {
+  MAX_SPEED,
+  MIN_SPEED,
+  isSpeedAdjustable,
+  setClipSpeed,
+} from "../../timeline/speedOps";
 import { trackById } from "../../timeline/tracks";
 import type { TimelineElement } from "../../../@types/timeline";
 import { commit, declined } from "../commit";
@@ -275,9 +280,14 @@ registerCommands({
       throw new Error("set_clip_speed needs at least one id in `elementIds`.");
     }
 
+    // Through the op's own guard rather than a filetype comparison spelled out
+    // here. The two must agree, and the copy did not: `isDynamicElement` counts
+    // `mp4`/`mov`/`mp3` too, so this used to refuse clips `setClipSpeed` would
+    // have accepted. The message still names the two filetypes anyone actually
+    // has, because the aliases are a legacy spelling, not a third kind of clip.
     const wrongType = ids
       .map((id) => requireElement(doc, id))
-      .filter((element) => element.filetype !== "video" && element.filetype !== "audio");
+      .filter((element) => !isSpeedAdjustable(element));
 
     if (wrongType.length > 0) {
       throw new Error(

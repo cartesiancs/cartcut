@@ -47,6 +47,7 @@
     "opacity": "Opacity",
     "audio": "Audio",
     "volume": "Volume",
+    "speed": "Speed",
     "no_selection": "Nothing selected yet. Pick a clip on the timeline to see its options."
   },
   "modal": {

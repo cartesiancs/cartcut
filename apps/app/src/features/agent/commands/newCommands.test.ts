@@ -452,6 +452,20 @@ describe("set_clip_speed", () => {
     ).rejects.toThrow(/Only video and audio/);
   });
 
+  /**
+   * The guard is `isSpeedAdjustable`, which is `isDynamicElement` — and that
+   * counts `mp4`/`mov`/`mp3` as dynamic. The open-coded `filetype !== "video"`
+   * check this replaced turned those away *before* `setClipSpeed`, which would
+   * have accepted them, so the command refused an edit the op could do.
+   */
+  it("accepts the legacy dynamic filetype aliases", async () => {
+    seed({ a: clip({ filetype: "mp4" } as any) });
+    const result = await run("set_clip_speed", { elementIds: ["a"], speed: 2 });
+
+    expect(result.ok).toBe(true);
+    expect(speedOf(doc().elements.a)).toBe(2);
+  });
+
   it("refuses a speed outside the supported range", async () => {
     seed({ a: clip() });
     await expect(
