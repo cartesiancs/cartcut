@@ -9,10 +9,36 @@ import {
   TRACK_GAP,
   TRACK_HEIGHT,
 } from "../timeline/layout";
-import { clipsOnTrack } from "../timeline/tracks";
+import { clipsOnTrack, type TrackKind } from "../timeline/tracks";
 import { addEffectTrack as addEffectTrackOp } from "../timeline/effectOps";
 import { applyMenuPlacement } from "../menu/menuPlacement";
 import { v4 as uuidv4 } from "uuid";
+
+/**
+ * What a track row shows instead of its name.
+ *
+ * The row used to print `track.name` — "V1", "A1" — which spent the header's
+ * whole width restating something the row's own contents already say, and
+ * numbered rows the user cannot address by number anywhere in the UI. The kind
+ * is the only part that carried information, so it is drawn as its icon and the
+ * ordinal is dropped. `track.name` is untouched: the agent and the MCP tools
+ * still name tracks by it.
+ */
+const TRACK_KIND_ICON: Record<TrackKind, string> = {
+  video: "movie",
+  audio: "volume_up",
+  text: "title",
+  group: "folder",
+  effect: "auto_awesome",
+};
+
+const TRACK_KIND_TITLE: Record<TrackKind, string> = {
+  video: "Video track",
+  audio: "Audio track",
+  text: "Text track",
+  group: "Group track",
+  effect: "Effect track",
+};
 
 /**
  * The track header column.
@@ -322,7 +348,11 @@ export class ElementTimelineLeftOption extends LitElement {
           class="track-header"
           style="height: ${TRACK_HEIGHT}px; margin-bottom: ${TRACK_GAP}px;"
         >
-          <span class="track-name">${track.name}</span>
+          <span
+            class="material-symbols-outlined track-icon"
+            title=${TRACK_KIND_TITLE[track.kind] ?? "Track"}
+            >${TRACK_KIND_ICON[track.kind] ?? "layers"}</span
+          >
           <button
             class="btn btn-xxs btn-default text-light track-menu"
             title="Track options"
@@ -350,12 +380,10 @@ export class ElementTimelineLeftOption extends LitElement {
           box-sizing: border-box;
         }
 
-        .track-name {
+        .track-icon {
           color: #ececee;
-          font-size: 13px;
-          font-weight: 600;
-          white-space: nowrap;
-          overflow: hidden;
+          font-size: 16px;
+          flex: 0 0 auto;
         }
 
         .track-menu {
