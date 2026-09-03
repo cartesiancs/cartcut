@@ -3,7 +3,7 @@ import { customElement, property, query } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { uiStore } from "../../states/uiStore";
 import { Buffer } from "buffer";
-import { AssetController } from "../../controllers/asset";
+import { saveAndImportRecording } from "./saveRecording";
 import { projectFps } from "../editor/frameRate";
 
 @customElement("screen-record-panel")
@@ -12,6 +12,8 @@ export class ScreenRecordPanel extends LitElement {
   video: HTMLVideoElement;
   isRecord: boolean;
   mediaRecorder: MediaRecorder | any;
+  /** Held so `stop()` can release it — the OS indicator stays on otherwise. */
+  stream: MediaStream | null;
   recordedChunks: any;
   startTime: number;
   endTime: number;
@@ -26,6 +28,7 @@ export class ScreenRecordPanel extends LitElement {
     this.video = document.createElement("video");
     this.isRecord = false;
     this.mediaRecorder = undefined;
+    this.stream = null;
     this.recordedChunks = undefined;
     this.startTime = 0;
     this.endTime = 0;
@@ -34,8 +37,6 @@ export class ScreenRecordPanel extends LitElement {
     this.selectedValue = "";
     this.selectedText = "";
   }
-
-  private assetControl = new AssetController();
 
   @query("#screenRecordCanvasRef") canvas!: HTMLCanvasElement;
 
@@ -67,9 +68,22 @@ export class ScreenRecordPanel extends LitElement {
   }
 
   stop() {
+    // Re-entrant: the stop button and the track's own `ended` both land here,
+    // and `MediaRecorder.stop()` throws once the recorder is inactive.
+    if (this.isRecord == false) {
+      return;
+    }
+
+    // `isRecord` ends the rAF loop on its next tick.
     this.isRecord = false;
-    console.log(this.mediaRecorder);
-    this.mediaRecorder.stop();
+    this.mediaRecorder?.stop();
+
+    // Releasing the tracks is what turns off the OS screen-share indicator.
+    // Stopping the recorder alone leaves the capture running.
+    this.stream?.getTracks().forEach((track) => track.stop());
+    this.stream = null;
+    this.video.srcObject = null;
+
     this.requestUpdate();
   }
 
@@ -87,8 +101,14 @@ export class ScreenRecordPanel extends LitElement {
         },
       });
 
+      this.stream = stream;
       this.video.srcObject = stream;
       this.video.onloadedmetadata = () => this.video.play();
+
+      // Ending the share from the OS chrome ends the track but tells the
+      // component nothing, which used to leave it believing it was still
+      // recording for the rest of the session.
+      stream.getVideoTracks()[0]?.addEventListener("ended", () => this.stop());
 
       this.mediaRecorder = new MediaRecorder(stream);
       this.recordedChunks = [];
@@ -96,8 +116,6 @@ export class ScreenRecordPanel extends LitElement {
 
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
-          console.log("AAAAf");
-
           this.recordedChunks.push(event.data);
         }
       };
@@ -110,13 +128,13 @@ export class ScreenRecordPanel extends LitElement {
         const arrayBuffer = await blob.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
 
-        window.electronAPI.req.stream.saveBufferToVideo(buffer).then((path) => {
-          console.log(path, duration);
+        await saveAndImportRecording(buffer, "video", duration);
 
-          if (path.status) {
-            this.assetControl.addVideoWithDuration(path.path, duration);
-          }
-        });
+        this.recordedChunks = [];
+        this.mediaRecorder = undefined;
+        this.startTime = 0;
+        this.endTime = 0;
+        this.requestUpdate();
       };
 
       this.mediaRecorder.start();

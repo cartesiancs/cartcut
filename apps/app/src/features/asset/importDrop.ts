@@ -13,7 +13,7 @@ import { useTimelineStore } from "../../states/timelineStore";
 import { normalizeFps } from "../timeline/frames";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { collectDroppedPaths } from "./droppedFiles";
-import { planImport, placeImported } from "./importMedia";
+import { planImport, placeImported, type ImportItem } from "./importMedia";
 import type { DropTarget } from "./dropTarget";
 import { v4 as uuidv4 } from "uuid";
 
@@ -70,9 +70,13 @@ export function pathsFromDataTransfer(dataTransfer: DataTransfer | null): string
  * Awaits the probes before touching the store, so the transform stays pure and
  * the whole run lands in a single `withCheckpoint` — Cmd+Z takes a drop of ten
  * files away the way the user dropped them, together.
+ *
+ * Takes `ImportItem`s as well as bare paths — `planImport` already normalizes
+ * both — so a caller that knows something extra about a file, as the recorders
+ * know a capture's wall-clock length, can say so without a second seam.
  */
 export async function importPathsAt(
-  paths: readonly string[],
+  paths: readonly (string | ImportItem)[],
   target: DropTarget,
 ): Promise<string[]> {
   if (paths.length === 0) {

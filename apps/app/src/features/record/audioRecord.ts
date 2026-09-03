@@ -3,7 +3,7 @@ import { customElement, property, query } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { uiStore } from "../../states/uiStore";
 import { Buffer } from "buffer";
-import { AssetController } from "../../controllers/asset";
+import { saveAndImportRecording } from "./saveRecording";
 
 @customElement("audio-record-panel")
 export class AudioRecordPanel extends LitElement {
@@ -26,8 +26,6 @@ export class AudioRecordPanel extends LitElement {
     this.startTime = 0;
     this.endTime = 0;
   }
-
-  private assetControl = new AssetController();
 
   @property()
   timelineState: ITimelineStore = useTimelineStore.getInitialState();
@@ -72,18 +70,13 @@ export class AudioRecordPanel extends LitElement {
         const arrayBuffer = await blob.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
 
-        window.electronAPI.req.stream.saveBufferToAudio(buffer).then((path) => {
-          this.recordedChunks = [];
+        await saveAndImportRecording(buffer, "audio", duration);
 
-          if (path.status) {
-            this.assetControl.addAudioWithDuration(path.path, duration);
-            this.recordedChunks = [];
-            this.mediaRecorder = undefined;
-            this.startTime = 0;
-            this.endTime = 0;
-            this.requestUpdate();
-          }
-        });
+        this.recordedChunks = [];
+        this.mediaRecorder = undefined;
+        this.startTime = 0;
+        this.endTime = 0;
+        this.requestUpdate();
       };
 
       this.mediaRecorder.start();

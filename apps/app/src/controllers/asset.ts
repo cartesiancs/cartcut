@@ -38,34 +38,9 @@ export class AssetController {
       });
   }
 
-  public addVideoWithDuration(originPath, duration) {
-    const filepath = path.encode(originPath);
-    fetch(`file://${filepath}`)
-      .then((res) => {
-        return res.blob();
-      })
-      .then((blob) => {
-        let blobUrl = URL.createObjectURL(blob);
-        let blobType = mime.lookup(filepath).type;
-        let control: any = document.querySelector("element-control");
-
-        control.addVideoWithDuration(blobUrl, filepath, duration);
-      });
-  }
-
-  public addAudioWithDuration(originPath, duration) {
-    const filepath = path.encode(originPath);
-    fetch(`file://${filepath}`)
-      .then((res) => {
-        return res.blob();
-      })
-      .then((blob) => {
-        let blobUrl = URL.createObjectURL(blob);
-        let blobType = mime.lookup(filepath).type;
-        let control: any = document.querySelector("element-control");
-
-        control.addAudioWithDuration(blobUrl, filepath, duration);
-      });
-  }
-
+  // `addVideoWithDuration`/`addAudioWithDuration` lived here for the two
+  // recorders. Both now go through `features/record/saveRecording.ts` and the
+  // shared import path, which builds the `file://` localpath these two were
+  // missing and skips the whole-file `fetch` they made for an `element.blob`
+  // nothing reads.
 }

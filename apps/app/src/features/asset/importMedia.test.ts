@@ -411,3 +411,74 @@ describe("placeImported", () => {
     expect(image.startTime).toBe(spanEnd(video));
   });
 });
+
+// ------------------------------------------------------------- a recorded file
+
+/**
+ * A `MediaRecorder` capture states no length in its container, so the recorder
+ * hands its wall-clock figure along with the path. These pin that it reaches
+ * the probe, and that a capture nothing can measure fails cleanly instead of
+ * placing an `Infinity`-long clip.
+ */
+describe("a recording's fallback length", () => {
+  /** What a headerless webm looks like to the DOM: no length at all. */
+  const headerless: MediaProber = {
+    ...fakeProber,
+    video: async () => ({
+      width: 1280,
+      height: 720,
+      durationMs: Infinity,
+      hasAudio: true,
+    }),
+    audio: async () => ({ durationMs: Infinity }),
+  };
+
+  it("reaches the probe from the item", async () => {
+    const plan = await planImport(
+      [{ path: "/m/rec.webm", fallbackDurationMs: 4_200 }],
+      headerless,
+    );
+
+    expect(plan.skipped).toHaveLength(0);
+    expect(plan.ready[0].probe.durationMs).toBe(4_200);
+  });
+
+  it("is not used when the file states its own length", async () => {
+    const plan = await planImport(
+      [{ path: "/m/rec.webm", fallbackDurationMs: 999_999 }],
+      fakeProber,
+    );
+
+    expect(plan.ready[0].probe.durationMs).toBe(5_000);
+  });
+
+  it("places a clip whose trim window matches the fallback", async () => {
+    const plan = await planImport(
+      [{ path: "/m/rec.webm", fallbackDurationMs: 4_200 }],
+      headerless,
+    );
+    const result = place(doc(), plan, { startMs: 0 });
+
+    const clip = result.doc.elements[result.createdIds[0]];
+    expect(clip.duration).toBe(4_200);
+    expect(clip.sourceDuration).toBe(4_200);
+    expect(clip.trim.endTime - clip.trim.startTime).toBe(4_200);
+  });
+
+  it("skips a capture with no fallback rather than placing an endless clip", async () => {
+    const plan = await planImport(["/m/rec.webm"], headerless);
+
+    expect(plan.ready).toHaveLength(0);
+    expect(plan.skipped[0].reason).toMatch(/rec\.webm/);
+  });
+
+  it("declines by identity when the only file was a failed capture", async () => {
+    // A recording that could not be read must not cost the user an undo step.
+    const before = doc();
+    const plan = await planImport(["/m/rec.webm"], headerless);
+    const result = place(before, plan);
+
+    expect(result.doc).toBe(before);
+    expect(result.createdIds).toHaveLength(0);
+  });
+});

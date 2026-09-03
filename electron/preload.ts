@@ -197,7 +197,10 @@ const response = {
     stop: (callback) => ipcRenderer.on("overlayRecord:stop:res", callback),
   },
   ffmpeg: {
-    getMetadata: (callback) => ipcRenderer.on("GET_METADATA", callback),
+    // No `getMetadata` here. `GET_METADATA` is an `ipcMain.handle`, reached
+    // through `req.ffmpeg.getMetadata`; the push-event listener that used to
+    // sit here had no sender at all, and the one caller that waited on it
+    // silently never placed its clip.
     extractAudioFromVideoProgress: (callback) =>
       ipcRenderer.on("ffmpeg:extractAudioFromVideo:progress", callback),
     extractAudioFromVideoFinish: (callback) =>

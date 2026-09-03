@@ -450,79 +450,6 @@ export class ElementControl extends LitElement {
     };
   }
 
-  // NOTE: 영상 레코딩시 사용됩니다. 추후 리팩토링 필요합니다.
-  addVideoWithDuration(blob, path, duration) {
-    const elementId = this.generateUUID();
-    const video = document.createElement("video");
-    const toastMetadata = bootstrap.Toast.getInstance(
-      document.getElementById("loadMetadataToast"),
-    );
-    toastMetadata.show();
-
-    video.src = blob;
-    video.preload = "metadata";
-
-    video.onloadedmetadata = () => {
-      let width = video.videoWidth;
-      let height = video.videoHeight;
-
-      window.electronAPI.req.ffmpeg.getMetadata(blob, path);
-
-      window.electronAPI.res.ffmpeg.getMetadata((evt, blobdata, metadata) => {
-        if (blobdata != blob) {
-          return 0;
-        }
-
-        let isExist = false;
-
-        setTimeout(() => {
-          toastMetadata.hide();
-        }, 1000);
-
-        metadata.streams.forEach((element) => {
-          if (element.codec_type == "audio") {
-            isExist = true;
-          }
-        });
-
-        this.timeline[elementId] = {
-          blob: blob,
-          startTime: 0,
-          duration: duration,
-          opacity: 100,
-          location: { x: 0, y: 0 },
-          trim: { startTime: 0, endTime: duration },
-          sourceDuration: duration,
-          rotation: 0,
-          width: width,
-          height: height,
-          ratio: width / height,
-          localpath: path,
-          isExistAudio: isExist,
-          filetype: "video",
-          codec: { video: "default", audio: "default" },
-          speed: 1,
-          filter: {
-            enable: false,
-            list: [],
-          },
-          origin: {
-            width: width,
-            height: height,
-          },
-          animation: emptyAnimation("video"),
-          timelineOptions: {
-            color: "rgb(71, 59, 179)",
-          },
-        };
-
-        this.commitNewElement(elementId);
-
-        // this.showVideo(elementId);
-      });
-    };
-  }
-
   addText(options: TextElementOptions) {
     const elementId = this.generateUUID();
 
@@ -568,28 +495,6 @@ export class ElementControl extends LitElement {
       // this.showAudio(elementId);
       // this.elementTimeline.addElementBar(elementId);
     };
-  }
-
-  addAudioWithDuration(blob, path, duration) {
-    const elementId = this.generateUUID();
-    const audio = document.createElement("audio");
-
-    this.timeline[elementId] = {
-      blob: blob,
-      startTime: 0,
-      duration: duration,
-      location: { x: 0, y: 0 }, // NOT USING
-      trim: { startTime: 0, endTime: duration },
-      sourceDuration: duration,
-      localpath: path,
-      filetype: "audio",
-      speed: 1,
-      timelineOptions: {
-        color: "rgb(133, 179, 59)",
-      },
-    };
-
-    this.commitNewElement(elementId);
   }
 
   // showAnimation(elementId, animationType) {

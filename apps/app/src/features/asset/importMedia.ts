@@ -32,6 +32,16 @@ export type ImportItem = {
   startMs?: number;
   /** Stills only. */
   durationMs?: number;
+  /**
+   * Wall-clock length for a file whose container does not state one — a
+   * `MediaRecorder` capture. Used only when the probe cannot measure it.
+   *
+   * Kept separate from `durationMs` rather than folded into it: that one is
+   * what a still *is*, this one is a guess of last resort for a clip that has a
+   * real length somewhere in it. `buildVideo` ignores `durationMs` by contract,
+   * and one field meaning both would make that contract unreadable.
+   */
+  fallbackDurationMs?: number;
   trackId?: string;
 };
 
@@ -65,7 +75,11 @@ export async function planImport(
   }
 
   const outcomes = await Promise.allSettled(
-    normalized.map((item) => probeMedia(item.path, prober)),
+    normalized.map((item) =>
+      probeMedia(item.path, prober, {
+        fallbackDurationMs: item.fallbackDurationMs,
+      }),
+    ),
   );
 
   const ready: ImportPlan["ready"] = [];

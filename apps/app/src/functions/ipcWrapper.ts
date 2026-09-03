@@ -241,9 +241,7 @@ export function enableIpcWrapper() {
         },
       },
       ffmpeg: {
-        getMetadata: async function (lang) {
-          return "none";
-        },
+        // Mirrors preload: `getMetadata` is request/response only, under `req`.
         extractAudioFromVideoProgress: async function (lang) {
           return "none";
         },

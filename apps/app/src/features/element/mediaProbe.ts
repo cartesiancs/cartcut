@@ -29,6 +29,14 @@ import { mediaKindOf, type MediaKind, type MediaProbe } from "./mediaElement";
  */
 const PROBE_TIMEOUT_MS = 60_000;
 
+/**
+ * Separate, much shorter budget for measuring a length the container does not
+ * state. Deliberately not `PROBE_TIMEOUT_MS`: the caller that needs this has a
+ * wall-clock figure to fall back on, and making a recording wait a minute
+ * before using it is a hang. Expiry falls through rather than failing.
+ */
+const DURATION_SEEK_TIMEOUT_MS = 5_000;
+
 export type MediaProber = {
   image: (src: string) => Promise<{ width: number; height: number }>;
   gif: (src: string) => Promise<{ width: number; height: number }>;
@@ -87,6 +95,79 @@ function withTimeout<T>(promise: Promise<T>, what: string): Promise<T> {
   });
 }
 
+/**
+ * How long the media actually is, for a file that will not say.
+ *
+ * A `MediaRecorder` capture has no Duration in its Segment Info — the recorder
+ * cannot know the length when it writes the header — so Chromium reports
+ * `Infinity`. ffprobe is no help either: the bundled binary answers
+ * `format.duration=N/A` on the same files, because the figure is genuinely not
+ * in the container. Seeking past the end is what makes Chromium demux to the
+ * last cluster and revise `duration` to the final frame's timestamp, and it is
+ * the only mechanism available short of an O(filesize) packet scan.
+ *
+ * Resolves `Infinity` rather than rejecting when that fails: the caller decides
+ * whether it has something better to use. A file that states its length — every
+ * normal import — pays nothing here.
+ */
+function measureDurationMs(el: HTMLMediaElement): Promise<number> {
+  if (Number.isFinite(el.duration)) {
+    return Promise.resolve(el.duration * 1000);
+  }
+
+  return new Promise((resolve) => {
+    const finish = (value: number) => {
+      clearTimeout(timer);
+      el.removeEventListener("durationchange", onDurationChange);
+      resolve(value);
+    };
+
+    const onDurationChange = () => {
+      if (Number.isFinite(el.duration)) {
+        const measured = el.duration * 1000;
+        // Put the head back: the same element is not reused, but a seek left
+        // pending on a large file keeps the decoder busy for no reason.
+        el.currentTime = 0;
+        finish(measured);
+      }
+    };
+
+    const timer = setTimeout(() => finish(Infinity), DURATION_SEEK_TIMEOUT_MS);
+
+    el.addEventListener("durationchange", onDurationChange);
+    el.currentTime = Number.MAX_SAFE_INTEGER;
+  });
+}
+
+/**
+ * Settle on a length, preferring what the file says over what a caller guessed.
+ *
+ * The ordering is the load-bearing part. A recorder's wall clock
+ * (`endTime - startTime`) includes `MediaRecorder` start latency and the final
+ * partial frame, so it overshoots the encoded media by tens of milliseconds — a
+ * clip claiming more than it has grows a tail with no frames in it, and
+ * `sourceDuration` then lies to every trim made afterwards. The file's own last
+ * timestamp is the truth; the wall clock is only what you use when there is no
+ * truth to be had.
+ *
+ * Throws rather than clamping. `planImport` turns that into a `skipped` entry
+ * with a reason the user sees, which is the right failure for a file nothing
+ * can measure — a silent 0 would place a clip that looks fine and is not.
+ */
+export function resolveDurationMs(
+  raw: number,
+  fallback: number | undefined,
+  filepath: string,
+): number {
+  if (Number.isFinite(raw) && raw > 0) {
+    return raw;
+  }
+  if (fallback != null && Number.isFinite(fallback) && fallback > 0) {
+    return fallback;
+  }
+  throw new Error(`Could not read the length of "${filepath}".`);
+}
+
 export const domProber: MediaProber = {
   image: (src) =>
     withTimeout(
@@ -125,12 +206,15 @@ export const domProber: MediaProber = {
         (resolve, reject) => {
           const video = document.createElement("video");
           video.preload = "metadata";
-          video.onloadedmetadata = () =>
-            resolve({
-              width: video.videoWidth,
-              height: video.videoHeight,
-              durationMs: video.duration * 1000,
-            });
+          video.onloadedmetadata = () => {
+            measureDurationMs(video).then((durationMs) =>
+              resolve({
+                width: video.videoWidth,
+                height: video.videoHeight,
+                durationMs,
+              }),
+            );
+          };
           video.onerror = () =>
             reject(new Error(`Could not decode video: ${src}`));
           video.src = src;
@@ -164,8 +248,11 @@ export const domProber: MediaProber = {
       new Promise((resolve, reject) => {
         const audio = document.createElement("audio");
         audio.preload = "metadata";
-        audio.onloadedmetadata = () =>
-          resolve({ durationMs: audio.duration * 1000 });
+        // Same headerless case as video: `saveBufferToAudio` writes a
+        // `MediaRecorder` blob under a `.wav` name, and what is inside is webm.
+        audio.onloadedmetadata = () => {
+          measureDurationMs(audio).then((durationMs) => resolve({ durationMs }));
+        };
         audio.onerror = () => reject(new Error(`Could not decode audio: ${src}`));
         audio.src = src;
       }),
@@ -173,15 +260,27 @@ export const domProber: MediaProber = {
     ),
 };
 
+export type ProbeOptions = {
+  /**
+   * Length to use when the file does not state one and cannot be measured.
+   *
+   * Only a `MediaRecorder` capture needs this, and only its own recorder knows
+   * the figure. See `resolveDurationMs` for why it loses to the file.
+   */
+  fallbackDurationMs?: number;
+};
+
 /**
  * Look at one file and say what it is.
  *
  * Throws for an extension the editor has no renderer for — the caller decides
- * whether that loses the whole batch or just one item.
+ * whether that loses the whole batch or just one item — and for a video or
+ * audio file whose length nothing can establish.
  */
 export async function probeMedia(
   filepath: string,
   prober: MediaProber = domProber,
+  options: ProbeOptions = {},
 ): Promise<MediaProbe> {
   const localpath = toLocalPath(filepath);
   const kind: MediaKind | null = mediaKindOf(filepath);
@@ -195,14 +294,27 @@ export async function probeMedia(
   switch (kind) {
     case "video": {
       const probed = await prober.video(localpath);
-      return { kind, localpath, ...probed };
+      return {
+        kind,
+        localpath,
+        ...probed,
+        durationMs: resolveDurationMs(
+          probed.durationMs,
+          options.fallbackDurationMs,
+          filepath,
+        ),
+      };
     }
     case "audio": {
       const probed = await prober.audio(localpath);
       return {
         kind,
         localpath,
-        durationMs: probed.durationMs,
+        durationMs: resolveDurationMs(
+          probed.durationMs,
+          options.fallbackDurationMs,
+          filepath,
+        ),
         width: 0,
         height: 0,
         hasAudio: true,
