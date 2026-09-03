@@ -232,27 +232,30 @@ export class ControlSetting extends LitElement {
       </button>
 
       <button
-        class="btn btn-sm btn-default text-light mt-1"
+        class="btn btn-sm btn-default text-light mt-1 mb-3"
         @click=${() => this._handleClickResolution(1080, 1920)}
       >
         1080x1920 (mobile)
       </button>
 
-      <button
-        class="btn btn-sm btn-default text-light mt-1"
-        onclick="CARTCUT.project.save()"
-      >
-        ${this.lc.t("setting.save_project")}
-      </button>
-      <button
-        class="btn btn-sm btn-default text-light mt-1"
-        onclick="CARTCUT.project.load()"
-      >
-        ${this.lc.t("setting.load_project")}
-      </button>
-
-      <!-- <button class="btn btn-sm bg-primary text-light mt-1" onclick="window.electronAPI.req.progressBar.test()">PROGRESSBARTEST </button> -->
       <br />
+
+      <label class="form-label text-light">Project</label>
+      <div class="d-flex flex-row bd-highlight mb-2 gap-1">
+        <button
+          class="btn btn-sm btn-default text-light mt-1"
+          onclick="CARTCUT.project.save()"
+        >
+          ${this.lc.t("setting.save_project")}
+        </button>
+        <button
+          class="btn btn-sm btn-default text-light mt-1"
+          onclick="CARTCUT.project.load()"
+        >
+          ${this.lc.t("setting.load_project")}
+        </button>
+      </div>
+      <!-- <button class="btn btn-sm bg-primary text-light mt-1" onclick="window.electronAPI.req.progressBar.test()">PROGRESSBARTEST </button> -->
 
       <button
         type="button"
