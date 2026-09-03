@@ -94,13 +94,13 @@ export class OptionLutSection extends LitElement {
 
     return html`
       <div class="mt-2">
-        <span class="text-secondary" style="font-size: 11px;">LUT</span>
+        <label class="form-label text-light">LUT</label>
         ${ref == null
-          ? html`<div class="text-secondary" style="font-size: 11px;">
+          ? html`<div class="text-secondary mb-3" style="font-size: 11px;">
               None
             </div>`
           : html`
-              <div class="d-flex align-items-center gap-2 mt-1">
+              <div class="d-flex align-items-center gap-2 mb-3">
                 <span
                   class="text-light flex-grow-1"
                   style="font-size: 11px; white-space: nowrap;
