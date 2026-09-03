@@ -21,8 +21,9 @@
     "test:e2e:extreme": "playwright test -c tests/e2e/playwright.config.ts --project=extreme",
     "bundle:prod:src": "webpack --mode=production",
     "build:main": "tsc -p ./.tsconfig",
-    "build:osx": "npm run build:main && npm run bundle:prod:src && electron-builder build --mac --arm64 --x64 -p always",
-    "build:win": "npm run build:main && npm run bundle:prod:src && electron-builder build --win --x64 -p always",
+    "build:overlay": "npm --prefix apps/overlay-record ci && npm --prefix apps/overlay-record run build",
+    "build:osx": "npm run build:main && npm run bundle:prod:src && npm run build:overlay && electron-builder build --mac --arm64 --x64 -p always",
+    "build:win": "npm run build:main && npm run bundle:prod:src && npm run build:overlay && electron-builder build --win --x64 -p always",
     "build": "npm run build:osx && npm run build:win"
   },
   "repository": {
@@ -75,7 +76,13 @@
       ],
       "icon": "assets/icons/mac/icon.icns",
       "asarUnpack": "**/*.node",
-      "notarize": true
+      "notarize": true,
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.plist",
+      "extendInfo": {
+        "NSCameraUsageDescription": "Cartcut uses your camera to record a picture-in-picture bubble alongside your screen.",
+        "NSMicrophoneUsageDescription": "Cartcut uses your microphone to record narration alongside your screen."
+      }
     },
     "dmg": {},
     "win": {

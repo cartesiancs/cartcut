@@ -3,8 +3,14 @@ import project from "./functions/project";
 import fonts from "./functions/fonts";
 import { loadedAssetStore } from "./features/asset/loadedAssetStore";
 import { enableIpcWrapper } from "./functions/ipcWrapper";
+import { watchOverlayRecordings } from "./features/record/saveRecording";
 
 enableIpcWrapper();
+
+// A recording made in the recorder's own windows arrives here as a path, once,
+// when it is finished. Subscribed before anything else mounts so a take that
+// completes while the editor is still painting is not missed.
+watchOverlayRecordings();
 
 import "./App";
 

@@ -26,6 +26,7 @@ import { downloadFfmpeg, validateFFmpeg } from "./validate.js";
 import { ipcStream } from "./ipc/ipcStream.js";
 import { ipcDesktopCapturer } from "./ipc/ipcDesktopCapturer.js";
 import { ipcOverlayRecord } from "./ipc/ipcOverlayRecord.js";
+import { closeRecorder } from "./lib/recorder.js";
 
 import "./render/renderFrame.js";
 import { ipcRenderV2 } from "./render/renderFrame.js";
@@ -159,7 +160,40 @@ ipcMain.handle(
 );
 
 ipcMain.handle("desktopCapturer:getSources", ipcDesktopCapturer.getSources);
+
+// The editor calls only `show`. Everything below it is the recorder's engine
+// renderer asking main for the four things a renderer cannot do: disk, the
+// pointer, FFmpeg, and the tray. See `electron/ipc/ipcOverlayRecord.ts`.
 ipcMain.handle("overlayRecord:show", ipcOverlayRecord.show);
+ipcMain.handle("overlayRecord:close", ipcOverlayRecord.close);
+ipcMain.handle("overlayRecord:sources", ipcOverlayRecord.sources);
+ipcMain.handle("overlayRecord:platform", ipcOverlayRecord.platform);
+ipcMain.handle("overlayRecord:permissions", ipcOverlayRecord.permissions);
+ipcMain.handle(
+  "overlayRecord:requestPermission",
+  ipcOverlayRecord.requestPermission,
+);
+ipcMain.handle("overlayRecord:setTray", ipcOverlayRecord.setTray);
+ipcMain.handle("overlayRecord:setOverlay", ipcOverlayRecord.setOverlay);
+ipcMain.handle("overlayRecord:armDisplayMedia", ipcOverlayRecord.armDisplayMedia);
+ipcMain.handle(
+  "overlayRecord:disarmDisplayMedia",
+  ipcOverlayRecord.disarmDisplayMedia,
+);
+ipcMain.handle("overlayRecord:start", ipcOverlayRecord.start);
+// `handle`, not `on`: `append` resolves only once the pipe has room, and that
+// resolution is the backpressure the encoder awaits — the same arrangement
+// `render:v2:sendFrame` uses for export frames.
+ipcMain.handle("overlayRecord:append", ipcOverlayRecord.append);
+ipcMain.handle("overlayRecord:finishFile", ipcOverlayRecord.finishFile);
+ipcMain.handle("overlayRecord:pause", ipcOverlayRecord.pause);
+ipcMain.handle("overlayRecord:resume", ipcOverlayRecord.resume);
+ipcMain.handle("overlayRecord:stroke", ipcOverlayRecord.stroke);
+ipcMain.handle("overlayRecord:click", ipcOverlayRecord.click);
+ipcMain.handle("overlayRecord:stop", ipcOverlayRecord.stop);
+ipcMain.handle("overlayRecord:deliver", ipcOverlayRecord.deliver);
+ipcMain.handle("overlayRecord:cancel", ipcOverlayRecord.cancel);
+ipcMain.handle("overlayRecord:openFolder", ipcOverlayRecord.openFolder);
 
 ipcMain.handle("extension:open:file", ipcExtension.openFile);
 ipcMain.handle("extension:open:dir", ipcExtension.openDir);
@@ -195,10 +229,6 @@ ipcMain.handle(
   "render:offscreen:finishStream",
   httpFFmpegRenderV2.finishStream,
 );
-
-// ipcMain.on("overlayRecord:stop:res", async (evt) => {
-//   mainWindow.webContents.send("overlayRecord:stop:res", "");
-// });
 
 if (process.defaultApp) {
   if (process.argv.length >= 2) {
@@ -304,4 +334,9 @@ app.on("window-all-closed", function () {
 // Release port 9826 on the way out, so relaunching does not hit EADDRINUSE.
 app.on("will-quit", () => {
   stopMcpServer();
+
+  // Best effort. `ipcApp.forceClose` reaches `app.exit(0)`, which does not run
+  // this — but a tray icon outliving its app is the one leftover a user can
+  // see, so it is worth removing on every path that does.
+  closeRecorder();
 });

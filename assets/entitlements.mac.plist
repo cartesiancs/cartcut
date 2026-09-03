@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened runtime entitlements.
+
+  `mac.notarize` is on, which means the hardened runtime is on, which means a
+  packaged build is denied anything it has not asked for here — silently, with
+  the API simply failing. Three of these are for the recorder and two are for
+  the app as it already stood:
+
+    - device.camera / device.audio-input: the camera bubble and the microphone.
+      Without them `getUserMedia` fails in the packaged app and works perfectly
+      in `npm run start`, which is the worst possible way to find out.
+    - cs.allow-jit: V8. Electron does not run under the hardened runtime
+      without it.
+    - cs.allow-unsigned-executable-memory and cs.disable-library-validation:
+      the bundled FFmpeg and yt-dlp binaries in `resources/bin`, which are
+      signed by us rather than by Apple and are spawned as separate processes.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.device.camera</key>
+    <true/>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+  </dict>
+</plist>

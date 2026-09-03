@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cartcut Recorder Engine</title>
+    <style>
+      /*
+       * This window is never shown. The status line exists for one situation:
+       * `electron/lib/window.ts` opens the devtools on it in development, and a
+       * blank page gives no clue whether the engine came up at all.
+       */
+      body {
+        margin: 0;
+        font: 13px/1.5 system-ui, sans-serif;
+        color: #d6d8db;
+        background: #0f1012;
+        padding: 16px;
+      }
+    </style>
+    <script type="module" src="/src/engine/engineMain.ts"></script>
+  </head>
+  <body>
+    <p id="status">Starting the recorder…</p>
+  </body>
+</html>

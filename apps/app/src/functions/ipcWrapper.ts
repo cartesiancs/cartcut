@@ -82,11 +82,74 @@ export function enableIpcWrapper() {
           return "none";
         },
       },
+      // The recorder is a desktop feature: it needs `desktopCapturer`, a tray,
+      // and a second BrowserWindow, none of which the web build has. Only
+      // `show` is ever reached from shared code — the rest is called by the
+      // recorder's own renderer, which does not exist here at all — but the
+      // surface is mirrored whole so a missing method is a `"none"` rather
+      // than a `TypeError` in whoever added the next call site.
       overlayRecord: {
-        show: async function (lang) {
+        show: async function () {
+          return { status: 0, error: "Recording is only available in the desktop app." };
+        },
+        close: async function () {
           return "none";
         },
-        stop: async function (lang) {
+        sources: async function () {
+          return "none";
+        },
+        platform: async function () {
+          return "none";
+        },
+        permissions: async function () {
+          return "none";
+        },
+        requestPermission: async function (kind) {
+          return "none";
+        },
+        setTray: async function (model) {
+          return "none";
+        },
+        setOverlay: async function (state) {
+          return "none";
+        },
+        armDisplayMedia: async function (sourceId, audio) {
+          return "none";
+        },
+        disarmDisplayMedia: async function () {
+          return "none";
+        },
+        start: async function (request) {
+          return "none";
+        },
+        append: async function (sessionId, key, chunk) {
+          return "none";
+        },
+        finishFile: async function (sessionId, key) {
+          return "none";
+        },
+        pause: async function (sessionId) {
+          return "none";
+        },
+        resume: async function (sessionId) {
+          return "none";
+        },
+        stroke: async function (sessionId, stroke) {
+          return "none";
+        },
+        click: async function (sessionId, click) {
+          return "none";
+        },
+        stop: async function (sessionId) {
+          return "none";
+        },
+        deliver: async function (sessionId, request) {
+          return "none";
+        },
+        cancel: async function () {
+          return "none";
+        },
+        openFolder: async function () {
           return "none";
         },
       },
@@ -236,7 +299,13 @@ export function enableIpcWrapper() {
         },
       },
       overlayRecord: {
-        stop: async function (lang) {
+        complete: async function (callback) {
+          return "none";
+        },
+        tray: async function (callback) {
+          return "none";
+        },
+        overlay: async function (callback) {
           return "none";
         },
       },

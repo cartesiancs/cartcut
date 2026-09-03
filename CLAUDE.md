@@ -28,7 +28,12 @@ npm run start    # electron .   — run in a second terminal
 npm test         # vitest run
 npx tsc --noEmit -p ./.tsconfig    # typecheck the main process
 npx webpack --mode=development     # build the renderer once
+npm run build:overlay              # the screen recorder's own Vite app
 ```
+
+`npm run dev` does **not** build `apps/overlay-record`; it has its own lockfile
+and its own `tsc`. Build it after changing anything under it, or the recorder
+windows load a stale bundle. The release scripts do run it.
 
 FFmpeg and ffprobe binaries live in `./bin/<platform>-<arch>/` — `darwin-arm64`,
 `darwin-x64`, `win32-x64` — and `electron/lib/ffmpeg.ts` picks the directory from
@@ -470,6 +475,96 @@ chroma as an RMS distance rather than as `max - min`. **The `log-convert` six
 apply the published transfer function and a neutral Rec.709 render only**: no
 camera primaries matrix and no manufacturer look, so they are a correct base
 grade and not a substitute for a vendor conversion LUT.
+
+## The screen recorder
+
+A separate application inside the app: two windows and a tray icon, opened from
+Utilities → Screen Recorder and reached by the editor exactly once, at the end,
+with a path to a finished MP4. Nothing about a recording touches the editor's
+renderer — that is the requirement the whole shape follows from.
+
+```
+apps/overlay-record/                 a standalone Vite app, two entry points
+  overlay.html  src/overlay/         the camera bubble, transparent + click-through
+  engine.html   src/engine/          capture, encode, the whole state machine
+apps/app/src/features/record/        the pure logic, so vitest can reach it
+  recordSettings.ts   the schema, normalize/apply read-write split
+  captureSettings.ts  native size, bitrate, H.264 level, the size ladder
+  bubbleLayout.ts     where the bubble goes and what it shows
+  zoomPlan.ts         cursor track -> zoom moves  (planned, not yet wired)
+  strokeRender.ts     pen strokes and click ripples  (planned, not yet wired)
+  trayModel.ts        the menu, as data
+electron/lib/recordSession.ts        disk, the cursor track, delivery
+electron/lib/recorder.ts             the two windows and the routing
+electron/lib/recordTray.ts           Tray lifecycle;  recordTrayMenu.ts renders a model
+electron/lib/recordMux.ts            the one ffmpeg call
+electron/lib/displayMedia.ts         one-shot getDisplayMedia, for system audio
+```
+
+**The encoder is driven by a fixed-rate clock, not by the capturer.** This is
+the decision everything else falls out of. A desktop capturer is variable-rate —
+it produces a frame when something changed and nothing while a page of text sits
+still — so encoding frames as they arrive gives a stream whose timing lives only
+in its timestamps, which needs a container, which needs a muxer in the renderer.
+Encoding on a metronome instead, taking the newest frame each tick and
+re-encoding the previous one when nothing changed, makes frame `n` *be* at
+`n / fps`. The bytes then need no timestamps at all: a bare Annex-B elementary
+stream that FFmpeg reads with `-r` and copies into an MP4 with `-c:v copy`.
+
+It costs almost nothing — a duplicate frame is a P-frame with no residual — and
+it produces what the editor wants anyway, since the timeline is CFR and
+`features/export/renderTimeline.ts` samples at `frame / fps * 1000`. There is no
+muxer dependency and no second encode generation. Verified: a measured 10.001s
+take gives 301 frames and a 10.033s container.
+
+Four more things that are easy to get wrong:
+
+- **Capture at the display's own pixels.** `size × scaleFactor`, pinned with
+  `min` *and* `max` constraints. The in-panel `screen-record-panel` caps at
+  1920×1080 unconditionally, which throws away 64% of a Retina panel before the
+  encoder sees the picture. `videoTrack.contentHint = "detail"` goes with it —
+  spatial detail over temporal smoothness, which is the right trade for a screen
+  and precisely wrong for the camera, which gets `"motion"`.
+- **A hardware encoder's limits are not the codec's, so ask.** VideoToolbox
+  refuses this machine's own 3600×2338 whatever the level tables say.
+  `negotiateEncode` walks `captureSizeLadder` through
+  `VideoEncoder.isConfigSupported` and takes the first size accepted — measured
+  here, that is 3324×2160 at `avc1.640033`. Guessing the limit would be wrong on
+  the next machine.
+- **The overlay window is `setContentProtection(true)`.** `NSWindowSharingNone`
+  on macOS, `WDA_EXCLUDEFROMCAPTURE` on Windows: the compositor leaves it out of
+  every screen capture including ours. Without it the bubble the user is looking
+  at is captured into the recording and the compositor draws a second one on
+  top. It is also what lets the bubble be positioned live — the preview and the
+  file are two renderings of one layout, from one `bubbleLayout.ts`, not a
+  recording of each other. Pinned by a sentinel check: put the overlay's bubble
+  in one corner and the composite's in another, and only the composite's appears
+  in the file.
+- **`electron/` may not import `apps/app/src`**, so the tray menu crosses the
+  boundary as *data*. The engine builds a model, main renders it with
+  `Menu.buildFromTemplate`, and menu item ids are opaque to main. What is
+  duplicated is the vocabulary of a menu — label, checkbox, radio, submenu —
+  which does not change when a setting is added. `lib/preset.ts` makes the same
+  call for the same reason.
+
+Audio is uncompressed PCM to a headerless `.pcm` file, converted to AAC once at
+mux time: a WAV header states a length that is not known until the recording
+stops, and a header patch that fails leaves a file that looks valid and plays as
+noise. `captureMicrophone` turns off `echoCancellation`, `noiseSuppression` and
+`autoGainControl` — all three default to on because the default caller is a
+video call, and all three are wrong for a recording.
+
+**macOS cannot capture system audio.** Electron 33's `Streams.audio` documents
+`loopback` as Windows-only (`node_modules/electron/electron.d.ts`). The tray
+greys the item and says why rather than hiding it. macOS support needs Electron
+35+.
+
+Not yet wired, though the pure modules and their suites exist: **auto zoom**
+(`zoomPlan.ts`, and `recordSession.ts` already records the cursor track at 30Hz)
+and **drawing / click highlight** (`strokeRender.ts`). Click highlight
+additionally needs a global mouse hook — `screen.getCursorScreenPoint()` gives
+position but not clicks — which means a native module and, on macOS, the
+Accessibility prompt.
 
 ## Testing
 

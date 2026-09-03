@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cartcut Recorder</title>
+    <style>
+      /*
+       * The window is transparent and click-through, and every pixel this page
+       * paints is a pixel the user cannot click through to whatever they are
+       * recording. So the page itself paints nothing: no background, no margin,
+       * and `pointer-events: none` on the root — the drawing surface turns that
+       * back on for itself when drawing mode is armed.
+       */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        pointer-events: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+    </style>
+    <script type="module" src="/src/overlay/overlayRoot.ts"></script>
+  </head>
+  <body>
+    <record-overlay></record-overlay>
+  </body>
+</html>

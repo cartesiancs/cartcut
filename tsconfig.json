@@ -27,6 +27,13 @@
     "./node_modules",
     "packages",
     "main",
+    // The recorder, for the same reason `packages` is excluded above it and
+    // `tests` is below: with no `include`, this config takes in every .ts file
+    // under the repo root. `apps/overlay-record` is a standalone Vite app with
+    // its own tsconfig, its own `@app/*` path mapping and its own lockfile, so
+    // pulled in here its imports resolve to nothing and `webpack` fails on
+    // errors in code the editor bundle does not contain.
+    "apps/overlay-record",
     // The E2E suite. With no `include`, this config takes in every .ts file
     // under the repo root, so without this the Playwright harness lands in the
     // app's own program and its type errors fail `webpack` — a test breaking

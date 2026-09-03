@@ -61,3 +61,60 @@ export async function saveAndImportRecording(
     return [];
   }
 }
+
+/**
+ * A finished overlay recording, arriving from the recorder.
+ *
+ * The editor's entire involvement in an overlay take. The recorder runs in its
+ * own windows, captures and encodes and composites there, and reaches the
+ * editor exactly once — here, with a path to a finished MP4 already on disk.
+ *
+ * No save dialog, unlike `saveAndImportRecording`: the recorder's Stop button
+ * is in the menu bar, the editor may not even be the front window, and putting
+ * a modal in front of somebody who has just finished talking to camera is the
+ * wrong moment for a file browser. The file is already filed, under
+ * `Videos/Cartcut Recordings`, and the tray can open that folder.
+ *
+ * No `fallbackDurationMs` either. The muxed container states its own length —
+ * that is what `-movflags +faststart` and a real mux buy over the raw
+ * `MediaRecorder` blob the in-panel recorders produce, and it is why
+ * `mediaProbe.ts`'s seek-past-the-end trick has nothing to do here.
+ */
+export async function receiveOverlayRecording(
+  filePath: string,
+): Promise<string[]> {
+  try {
+    const created = await importPathsAt([{ path: filePath }], atPlayhead());
+
+    if (created.length > 0) {
+      toast("Recording added to the timeline.");
+    }
+
+    return created;
+  } catch (error) {
+    console.error("[record] could not import the recording", error);
+    toast("That recording could not be added.");
+    return [];
+  }
+}
+
+/**
+ * Listen for them. Called once, at startup.
+ *
+ * Guarded on the bridge existing rather than on the environment: the web build
+ * has no recorder to hear from, and `ipcWrapper.ts`'s shim answers `"none"`
+ * rather than subscribing.
+ */
+export function watchOverlayRecordings(): void {
+  const on = (window as any).electronAPI?.res?.overlayRecord?.complete;
+
+  if (typeof on !== "function") {
+    return;
+  }
+
+  on((_event: unknown, payload: { path?: string }) => {
+    if (typeof payload?.path === "string" && payload.path.length > 0) {
+      void receiveOverlayRecording(payload.path);
+    }
+  });
+}

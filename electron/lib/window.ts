@@ -1,21 +1,10 @@
-import {
-  BrowserWindow,
-  desktopCapturer,
-  Menu,
-  session,
-  screen,
-  Tray,
-  nativeImage,
-} from "electron";
+import { BrowserWindow, Menu, screen } from "electron";
 import { menu } from "./menu.js";
 import { autoUpdater } from "electron-updater";
+import { installDisplayMediaHandler } from "./displayMedia.js";
 
 import isDev from "electron-is-dev";
 import path from "path";
-
-const trayIcon = nativeImage.createFromPath(
-  path.join("assets/icons/png/tray.png"),
-);
 
 let mainWindow;
 const WINDOW_BACKGROUND_COLOR = "#252729";
@@ -48,22 +37,11 @@ const window = {
     autoUpdater.checkForUpdates();
     Menu.setApplicationMenu(menu);
 
-    session.defaultSession.setDisplayMediaRequestHandler((_, callback) => {
-      desktopCapturer
-        .getSources({ types: ["window", "screen"] })
-        .then((sources) => {
-          for (let i = 0; i < sources.length; ++i) {
-            console.log(
-              sources[i].name,
-              sources[i].thumbnail.getSize(),
-              sources[i].thumbnail.getAspectRatio(),
-              sources[i].thumbnail.getScaleFactors(),
-            );
-          }
-
-          callback({ video: sources[0], audio: "loopback" });
-        });
-    });
+    // The handler moved to `lib/displayMedia.ts`. The one that used to be
+    // inline here granted `sources[0]` to anything that asked — including a
+    // page inside the `<webview>` extension sandbox — and logged every window
+    // on the machine to the console while it did it.
+    installDisplayMediaHandler();
 
     if (isDev) {
       mainWindow.webContents.openDevTools();
@@ -161,20 +139,41 @@ const window = {
     return newWindow;
   },
 
-  createOverlayRecordWindow: () => {
-    const indexFile = "apps/overlay-record/dist/index.html";
+  /**
+   * The recorder's viewfinder: the camera bubble and the drawing surface.
+   *
+   * Transparent, click-through and floating over everything, so it can sit on
+   * top of whatever is being recorded without being in the way of it.
+   *
+   * **`setContentProtection(true)` is the load-bearing line.** It maps to
+   * `NSWindowSharingNone` on macOS and `WDA_EXCLUDEFROMCAPTURE` on Windows, so
+   * the compositor leaves this window out of every screen capture — including
+   * ours. Without it the bubble the user sees is captured into the screen
+   * recording, and the composite pass then draws a second bubble on top of the
+   * first. It is also why the bubble can be positioned live and still end up
+   * wherever the finished file says: the picture and the preview are two
+   * renderings of the same layout, not one recording of the other.
+   *
+   * Sized to `bounds`, not `workAreaSize`: the work area excludes the menu bar
+   * and the dock, and an overlay that stops short of them cannot draw over the
+   * part of the screen that is being recorded.
+   */
+  createRecordOverlayWindow: () => {
     const primaryDisplay = screen.getPrimaryDisplay();
-    const { width, height } = primaryDisplay.workAreaSize as any;
+    const { x, y, width, height } = primaryDisplay.bounds;
 
     const overlayWindow = new BrowserWindow({
-      width: width,
-      height: height,
+      x,
+      y,
+      width,
+      height,
       webPreferences: {
         backgroundThrottling: false,
         preload: path.join(__dirname, "..", "preload.js"),
       },
       resizable: false,
       transparent: true,
+      backgroundColor: "#00000000",
       skipTaskbar: true,
       maximizable: false,
       fullscreenable: false,
@@ -182,23 +181,71 @@ const window = {
       movable: false,
       show: false,
       hasShadow: false,
+      roundedCorners: false,
+      focusable: false,
     });
 
+    overlayWindow.setContentProtection(true);
     overlayWindow.setAlwaysOnTop(true, "screen-saver");
-    overlayWindow.setVisibleOnAllWorkspaces(true);
-    overlayWindow.setPosition(0, 0, false);
-    overlayWindow.show();
-    overlayWindow.setIgnoreMouseEvents(true);
 
-    overlayWindow.loadFile(indexFile);
+    // `skipTransformProcessType` for the reason `createSplashWindow` documents
+    // at length: without it, asking for `visibleOnFullScreen` on macOS turns
+    // the whole process into an accessory and the Dock icon never comes back.
+    overlayWindow.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+      skipTransformProcessType: true,
+    });
 
-    // setInterval(() => {
-    //   overlayWindow.webContents.send("overlayRecord:stop:res", {
-    //     msg: "Hello Renderer!",
-    //   });
-    // }, 1000);
+    // `forward: true` so the overlay still sees `mousemove` while ignoring
+    // clicks — that is what lets drawing mode be armed without the window
+    // having to become interactive first.
+    overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+    overlayWindow.loadFile("apps/overlay-record/dist/overlay.html");
+    overlayWindow.once("ready-to-show", () => overlayWindow.show());
 
     return overlayWindow;
+  },
+
+  /**
+   * The recorder's engine: every capture stream, every encoder, the composite
+   * pass. No UI at all.
+   *
+   * Hidden, and hidden is the point — it must never appear in the recording,
+   * and it has nothing to show. `backgroundThrottling: false` is what keeps an
+   * unfocused, invisible window running its encode loop at full rate; Chromium
+   * otherwise clamps timers in a backgrounded renderer to once a second, which
+   * would drop a screen recording to one frame per second the moment the user
+   * clicked on anything.
+   *
+   * Separate from the overlay because their lifetimes differ: the overlay
+   * closes the instant the take stops, and the engine keeps working through the
+   * composite pass afterwards.
+   */
+  createRecordEngineWindow: () => {
+    const engineWindow = new BrowserWindow({
+      width: 480,
+      height: 320,
+      webPreferences: {
+        backgroundThrottling: false,
+        preload: path.join(__dirname, "..", "preload.js"),
+      },
+      show: false,
+      skipTaskbar: true,
+      frame: false,
+    });
+
+    engineWindow.loadFile("apps/overlay-record/dist/engine.html");
+
+    // Off by default even in development. The engine has no UI worth
+    // inspecting, and an open devtools window is a second debugger target that
+    // anything driving the app over CDP has to step around — plus it appears on
+    // screen, which is unhelpful for a window whose whole job is not to.
+    // `lib/recorder.ts` forwards its console to the main log instead.
+    if (isDev && process.env.CARTCUT_RECORD_DEVTOOLS === "1") {
+      engineWindow.webContents.openDevTools({ mode: "detach" });
+    }
+
+    return engineWindow;
   },
 
   createOffscreenRenderWindow: () => {
@@ -249,22 +296,4 @@ const window = {
   },
 };
 
-const createOverlayWindowTray = (overlayWindow) => {
-  const tray = new Tray(trayIcon);
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: "Exit",
-      type: "checkbox",
-      checked: false,
-      click: (menuItem) => {
-        overlayWindow.webContents.send("overlayRecord:stop:res", "");
-        overlayWindow.close();
-        tray.destroy();
-        console.log("Stop Record:", menuItem.checked);
-      },
-    },
-  ]);
-  tray.setContextMenu(contextMenu);
-};
-
-export { window, mainWindow, createOverlayWindowTray };
+export { window, mainWindow };

@@ -59,9 +59,50 @@ const request = {
   desktopCapturer: {
     getSources: () => ipcRenderer.invoke("desktopCapturer:getSources"),
   },
+  /**
+   * The recorder.
+   *
+   * `show` is the editor's only call — it opens the recorder and then has
+   * nothing more to do with it until a finished file arrives on
+   * `res.overlayRecord.complete`. Everything else here is called by the engine
+   * renderer, which shares this preload.
+   *
+   * `append` is deliberately an `invoke`: it resolves once the write pipe has
+   * room, and the encoder awaits that resolution as backpressure. The same
+   * reason `render.v2.sendFrame` above is one.
+   */
   overlayRecord: {
     show: () => ipcRenderer.invoke("overlayRecord:show"),
-    stop: () => ipcRenderer.invoke("overlayRecord:stop"),
+    close: () => ipcRenderer.invoke("overlayRecord:close"),
+    sources: () => ipcRenderer.invoke("overlayRecord:sources"),
+    platform: () => ipcRenderer.invoke("overlayRecord:platform"),
+    permissions: () => ipcRenderer.invoke("overlayRecord:permissions"),
+    requestPermission: (kind) =>
+      ipcRenderer.invoke("overlayRecord:requestPermission", kind),
+    setTray: (model) => ipcRenderer.invoke("overlayRecord:setTray", model),
+    setOverlay: (state) =>
+      ipcRenderer.invoke("overlayRecord:setOverlay", state),
+    armDisplayMedia: (sourceId, audio) =>
+      ipcRenderer.invoke("overlayRecord:armDisplayMedia", sourceId, audio),
+    disarmDisplayMedia: () =>
+      ipcRenderer.invoke("overlayRecord:disarmDisplayMedia"),
+    start: (request) => ipcRenderer.invoke("overlayRecord:start", request),
+    append: (sessionId, key, chunk) =>
+      ipcRenderer.invoke("overlayRecord:append", sessionId, key, chunk),
+    finishFile: (sessionId, key) =>
+      ipcRenderer.invoke("overlayRecord:finishFile", sessionId, key),
+    pause: (sessionId) => ipcRenderer.invoke("overlayRecord:pause", sessionId),
+    resume: (sessionId) =>
+      ipcRenderer.invoke("overlayRecord:resume", sessionId),
+    stroke: (sessionId, stroke) =>
+      ipcRenderer.invoke("overlayRecord:stroke", sessionId, stroke),
+    click: (sessionId, click) =>
+      ipcRenderer.invoke("overlayRecord:click", sessionId, click),
+    stop: (sessionId) => ipcRenderer.invoke("overlayRecord:stop", sessionId),
+    deliver: (sessionId, request) =>
+      ipcRenderer.invoke("overlayRecord:deliver", sessionId, request),
+    cancel: () => ipcRenderer.invoke("overlayRecord:cancel"),
+    openFolder: () => ipcRenderer.invoke("overlayRecord:openFolder"),
   },
   filesystem: {
     getDirectory: (dir) => ipcRenderer.invoke("filesystem:getDirectory", dir),
@@ -193,8 +234,22 @@ const response = {
       start: (callback) => ipcRenderer.on("render:offscreen:start", callback),
     },
   },
+  /**
+   * Pushes from main.
+   *
+   * `complete` is the editor's whole involvement in a recording: `(event,
+   * { path })`, once, when a finished file is on disk. `tray` and `overlay` go
+   * to the recorder's own two windows.
+   *
+   * The old `stop` listener is gone with the stub it belonged to. Nothing ever
+   * sent `overlayRecord:stop:res` except a tray item that also closed the
+   * window, and `req.overlayRecord.stop` had no handler in main at all — an
+   * `invoke` that could only ever reject.
+   */
   overlayRecord: {
-    stop: (callback) => ipcRenderer.on("overlayRecord:stop:res", callback),
+    complete: (callback) => ipcRenderer.on("overlayRecord:complete", callback),
+    tray: (callback) => ipcRenderer.on("overlayRecord:tray", callback),
+    overlay: (callback) => ipcRenderer.on("overlayRecord:overlay", callback),
   },
   ffmpeg: {
     // No `getMetadata` here. `GET_METADATA` is an `ipcMain.handle`, reached
