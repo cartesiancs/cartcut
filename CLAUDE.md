@@ -559,11 +559,51 @@ video call, and all three are wrong for a recording.
 greys the item and says why rather than hiding it. macOS support needs Electron
 35+.
 
-Not yet wired, though the pure modules and their suites exist: **auto zoom**
-(`zoomPlan.ts`, and `recordSession.ts` already records the cursor track at 30Hz)
-and **drawing / click highlight** (`strokeRender.ts`). Click highlight
-additionally needs a global mouse hook — `screen.getCursorScreenPoint()` gives
-position but not clicks — which means a native module and, on macOS, the
+### Drawing mode has to carry its own exit
+
+Turning drawing on means `setIgnoreMouseEvents(false)` on a window covering the
+whole display, and from that moment **every click on the screen lands in the
+overlay**. `pointer-events: none` does not help — it governs dispatch inside the
+page, not whether the OS window receives the click at all. That is inherent; it
+is what a drawing surface *is*. What is not inherent is being unable to leave,
+and the first version managed to be unleavable three ways at once: the window
+sat at `"screen-saver"` level over the menu bar so the tray was unclickable, it
+rendered nothing when no camera was selected so there was no sign anything had
+happened, and `drawing` was **persisted**, so a session that ended in that state
+came back to an unclickable screen on the next launch.
+
+So there are three exits and each is enough on its own:
+
+- the toolbar's **Done** button, drawn by the overlay itself;
+- the **Escape** key, which is why the window is `setFocusable(true)` and
+  focused for exactly the duration of drawing mode and at no other time;
+- the **tray**, kept reachable by dropping the window to `"floating"` level —
+  below `NSMainMenuWindowLevel` — for the duration. On Windows the taskbar is
+  topmost, so leaving always-on-top does the same job.
+
+And `normalizeRecordSettings` **never reads `drawing` back**. It is written like
+any other field, because one write path is simpler than two, and then ignored on
+load: it is a mode, not a preference.
+
+Annotations cross from the overlay to the compositor **as data, through main** —
+two renderer processes sharing no memory. A stroke is re-sent whole as it grows
+and replaces its earlier self by id, which is what makes the line appear in the
+recording as it is drawn rather than popping in complete when the pen lifts, and
+makes a dropped message cost one frame. Points are normalised `0..1` to the
+display, the only space the overlay's CSS pixels and the encoder's capture
+pixels can agree on. The fade is timed from when a stroke stopped changing, on
+the *engine's* clock — the two windows' `performance.now()` share no epoch.
+
+Strokes are re-drawn from their points rather than captured, which keeps them
+crisp at any scale and is anyway the only option: the overlay is
+content-protected and therefore invisible to the capture. `shouldCompose` is
+asked per encoded frame, so a take with no camera and nothing drawn keeps the
+zero-copy path until the moment something has to be drawn.
+
+Still not wired, though the pure module and its suite exist: **auto zoom**
+(`zoomPlan.ts`; `recordSession.ts` already records the cursor track at 30Hz).
+**Click highlight** needs a global mouse hook — `screen.getCursorScreenPoint()`
+gives position but not clicks — which means a native module and, on macOS, the
 Accessibility prompt.
 
 ## Testing

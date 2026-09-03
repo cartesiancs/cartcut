@@ -61,10 +61,20 @@ export type VideoWriterOptions = {
    *
    * Absent means the captured frame is encoded as it arrived — no canvas, no
    * pixel copy, no colour-space round trip. That is the better path and the
-   * common one; the composite path exists only because a camera bubble has to
-   * be drawn onto something.
+   * common one; the composite path exists only because a camera bubble or an
+   * annotation has to be drawn onto something.
    */
   compose?: ComposeFn;
+
+  /**
+   * Whether this frame actually needs compositing.
+   *
+   * Asked per frame rather than decided once, because drawing mode can be
+   * turned on in the middle of a take. A recording with nothing to composite
+   * keeps the zero-copy path for every frame until the moment something has to
+   * be drawn, and goes back to it when the last annotation fades.
+   */
+  shouldCompose?: () => boolean;
   onChunk: (bytes: Uint8Array) => Promise<void>;
   onError: (error: Error) => void;
 };
@@ -251,7 +261,7 @@ export async function startVideoWriter(
 
     let frame: VideoFrame;
 
-    if (ctx != null) {
+    if (ctx != null && (options.shouldCompose?.() ?? true)) {
       options.compose!(ctx, source);
       frame = new VideoFrame(ctx.canvas, { timestamp, alpha: "discard" });
     } else {

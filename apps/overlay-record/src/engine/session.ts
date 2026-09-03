@@ -59,6 +59,14 @@ import {
   releaseStream,
 } from "./capture";
 import { enumerate, noDevices, primeLabels, type Devices } from "./devices";
+import { paintStroke } from "../paintStroke";
+import {
+  applyStrokeMessage,
+  clearStrokes,
+  hasStrokes,
+  visibleStrokes,
+  type StrokeMessage,
+} from "./strokeStore";
 import { startAudioWriter, type AudioWriter } from "./audioWriter";
 import {
   negotiateEncode,
@@ -198,9 +206,37 @@ function bubblePath(
   ctx.roundRect(rect.x, rect.y, rect.width, rect.height, radius);
 }
 
-function composeWithBubble(take: Take) {
+/**
+ * Draw the annotations, in the capture's own pixels.
+ *
+ * Re-stroked from the points rather than captured from the overlay, which is
+ * what keeps them crisp: a line burned into the picture at capture resolution
+ * would soften under any later scaling, and a vector one does not. It is also
+ * the only way they can be drawn at all — the overlay is content-protected and
+ * therefore invisible to the capture, by design.
+ */
+function drawStrokes(
+  ctx: OffscreenCanvasRenderingContext2D,
+  size: Size,
+  now: number,
+): void {
+  for (const { stroke, alpha } of visibleStrokes(now)) {
+    paintStroke(ctx, stroke.points, stroke.color, {
+      width: size.width,
+      height: size.height,
+      widthN: stroke.widthN,
+      alpha,
+    });
+  }
+}
+
+function composeFrame(take: Take) {
   return (ctx: OffscreenCanvasRenderingContext2D, frame: VideoFrame) => {
     ctx.drawImage(frame, 0, 0, take.size.width, take.size.height);
+
+    // Under the bubble: the bubble is a fixed piece of furniture and should
+    // never be drawn over, whereas an annotation is about the picture.
+    drawStrokes(ctx, take.size, performance.now());
 
     const video = take.cameraVideo;
     if (video == null || video.readyState < 2 || video.videoWidth === 0) {
@@ -360,7 +396,10 @@ export async function start(): Promise<void> {
       track: screen.track,
       codec: encode.codec,
       plan: encode.plan,
-      compose: cameraVideo == null ? undefined : composeWithBubble(take),
+      compose: composeFrame(take),
+      // Drawing can be switched on mid-take, so this is asked per frame. With
+      // no camera and nothing drawn, every frame takes the zero-copy path.
+      shouldCompose: () => take.cameraVideo != null || hasStrokes(),
       onChunk: (bytes) => bridge.append(session.id, "video", bytes),
       onError,
     });
@@ -525,6 +564,32 @@ async function setPaused(paused: boolean): Promise<void> {
 }
 
 /**
+ * Turn drawing on or off, from wherever the request came.
+ *
+ * Both the tray checkbox and the overlay's own Done button land here, so there
+ * is one path and one place that clears the annotations. Leaving them behind on
+ * the way out would put lines over an interface the user can click again and no
+ * longer has a pen to erase with.
+ */
+export async function applyDrawing(value: boolean): Promise<void> {
+  const next = applyRecordSettings(state.settings, { drawing: value });
+
+  if (next === state.settings) {
+    return;
+  }
+
+  state.settings = next;
+
+  if (!value) {
+    clearStrokes();
+  }
+
+  await persist();
+  await refreshTray();
+  await refreshOverlay();
+}
+
+/**
  * A tray click.
  *
  * The id is opaque to the main process, which is what keeps a new setting from
@@ -572,6 +637,12 @@ export async function handleTrayClick(id: string): Promise<void> {
     return;
   }
 
+  // Drawing goes through the one path that also clears what is on screen.
+  if (action.kind === "toggle" && action.key === "drawing") {
+    await applyDrawing(patch.drawing === true);
+    return;
+  }
+
   const next = applyRecordSettings(state.settings, patch);
 
   // Declined by identity: the value was already this, or it was unusable. Both
@@ -600,6 +671,20 @@ export async function init(): Promise<void> {
 
   bridge.onTrayClick((id) => {
     void handleTrayClick(id);
+  });
+
+  // Annotations, made in the overlay window and relayed by main. Stamped with
+  // *this* renderer's clock on arrival, which is the clock the compositor fades
+  // them against — the two windows' `performance.now()` share no epoch.
+  bridge.onStroke((message: StrokeMessage) => {
+    applyStrokeMessage(message, performance.now());
+  });
+
+  // The overlay's Done button and its Escape key. Routed through the setting
+  // rather than applied locally, so the tray's tick, the overlay's appearance
+  // and the compositor's behaviour keep describing one state.
+  bridge.onSetDrawing((value) => {
+    void applyDrawing(value);
   });
 
   // Devices come and go. Re-enumerating on the event rather than on a timer

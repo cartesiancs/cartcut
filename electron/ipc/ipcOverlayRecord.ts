@@ -18,7 +18,9 @@ import { armDisplayMedia, disarmDisplayMedia } from "../lib/displayMedia.js";
 import {
   closeRecorder,
   deliverToEditor,
+  forwardStroke,
   openRecorder,
+  sendToEngine,
   setRecorderTray,
   updateOverlay,
 } from "../lib/recorder.js";
@@ -27,6 +29,7 @@ import {
   addStroke,
   appendChunk,
   cancelSession,
+  currentSession,
   deliverSession,
   finishFile,
   pauseSession,
@@ -190,6 +193,19 @@ export const ipcOverlayRecord = {
   },
 
   /**
+   * The overlay asking to leave drawing mode.
+   *
+   * Explicit rather than the tray's toggle: the overlay knows it wants drawing
+   * *off*, and a toggle would flip the wrong way if the two ever disagreed
+   * about the current state. Routed to the engine, which owns the setting, so
+   * the tray's tick stays truthful.
+   */
+  setDrawing: async (_event, value: boolean) => {
+    sendToEngine("overlayRecord:setDrawing", value === true);
+    return { status: 1 as const };
+  },
+
+  /**
    * Arm the next `getDisplayMedia`, for system audio only.
    *
    * One shot, consumed by the request that follows it. `lib/displayMedia.ts`
@@ -260,14 +276,30 @@ export const ipcOverlayRecord = {
     }
   },
 
-  stroke: async (_event, sessionId: string, stroke: unknown) => {
-    try {
-      addStroke(sessionId, stroke);
-      return { status: 1 as const };
-    } catch (error) {
-      // A stroke arriving after the take stopped is a race, not a failure.
-      return { status: 0 as const, error: String(error) };
+  /**
+   * An annotation from the overlay, on its way to the compositor.
+   *
+   * Takes no session id, and is accepted whether or not a take is running:
+   * drawing is a thing you can do on the screen at any time, and gating it on a
+   * recording would mean the pen going dead between takes for no reason the
+   * user can see. It is stored on the session when there is one — for a future
+   * pass that re-renders annotations rather than compositing them live — and
+   * forwarded to the engine either way, which is what actually puts it in the
+   * picture.
+   */
+  stroke: async (_event, message: unknown) => {
+    const session = currentSession();
+    if (session != null) {
+      try {
+        addStroke(session.id, message);
+      } catch {
+        // The take ended between the pointer moving and this arriving. The
+        // forward below still stands; there is simply nowhere to file it.
+      }
     }
+
+    forwardStroke(message);
+    return { status: 1 as const };
   },
 
   click: async (_event, sessionId: string, click: unknown) => {

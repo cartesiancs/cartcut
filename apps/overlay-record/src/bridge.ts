@@ -144,4 +144,18 @@ export const bridge = {
       handler(state),
     );
   },
+
+  /** Annotations from the overlay, relayed by main. Engine side. */
+  onStroke: (handler: (message: any) => void) => {
+    api().res.overlayRecord.stroke((_event: unknown, message: any) =>
+      handler(message),
+    );
+  },
+
+  /** The overlay's Done button and Escape key, relayed by main. Engine side. */
+  onSetDrawing: (handler: (value: boolean) => void) => {
+    api().res.overlayRecord.setDrawing((_event: unknown, value: boolean) =>
+      handler(value === true),
+    );
+  },
 };

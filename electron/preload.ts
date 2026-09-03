@@ -82,6 +82,8 @@ const request = {
     setTray: (model) => ipcRenderer.invoke("overlayRecord:setTray", model),
     setOverlay: (state) =>
       ipcRenderer.invoke("overlayRecord:setOverlay", state),
+    setDrawing: (value) =>
+      ipcRenderer.invoke("overlayRecord:setDrawing", value),
     armDisplayMedia: (sourceId, audio) =>
       ipcRenderer.invoke("overlayRecord:armDisplayMedia", sourceId, audio),
     disarmDisplayMedia: () =>
@@ -94,8 +96,9 @@ const request = {
     pause: (sessionId) => ipcRenderer.invoke("overlayRecord:pause", sessionId),
     resume: (sessionId) =>
       ipcRenderer.invoke("overlayRecord:resume", sessionId),
-    stroke: (sessionId, stroke) =>
-      ipcRenderer.invoke("overlayRecord:stroke", sessionId, stroke),
+    // No session id: drawing works whether or not a take is running, and the
+    // overlay has no reason to know which. See the handler in `ipcOverlayRecord`.
+    stroke: (message) => ipcRenderer.invoke("overlayRecord:stroke", message),
     click: (sessionId, click) =>
       ipcRenderer.invoke("overlayRecord:click", sessionId, click),
     stop: (sessionId) => ipcRenderer.invoke("overlayRecord:stop", sessionId),
@@ -250,6 +253,11 @@ const response = {
     complete: (callback) => ipcRenderer.on("overlayRecord:complete", callback),
     tray: (callback) => ipcRenderer.on("overlayRecord:tray", callback),
     overlay: (callback) => ipcRenderer.on("overlayRecord:overlay", callback),
+    // Overlay -> engine, relayed by main: annotations to composite, and the
+    // overlay's own request to leave drawing mode.
+    stroke: (callback) => ipcRenderer.on("overlayRecord:stroke", callback),
+    setDrawing: (callback) =>
+      ipcRenderer.on("overlayRecord:setDrawing", callback),
   },
   ffmpeg: {
     // No `getMetadata` here. `GET_METADATA` is an `ipcMain.handle`, reached

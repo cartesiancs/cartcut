@@ -129,6 +129,19 @@ export function setRecorderTray(model: TrayModel): void {
  * time it must be `setIgnoreMouseEvents(true, { forward: true })` — ignoring
  * clicks so they reach the app being recorded, and still seeing `mousemove` so
  * it knows where the pointer is without having to steal it.
+ *
+ * **The window level has to come down with it.** An interactive window at
+ * `"screen-saver"` level covering the display's whole `bounds` sits over the
+ * macOS menu bar and the Dock, so it swallows clicks on the tray — the one
+ * control that could turn drawing off again. `"floating"` is below
+ * `NSMainMenuWindowLevel`, so the menu bar and the tray stay clickable while
+ * everything else on screen is still drawn over. On Windows the taskbar is
+ * topmost, so dropping out of always-on-top achieves the same thing.
+ *
+ * This is the third of three exits from drawing mode, and the one that does not
+ * depend on the overlay's own UI working. The other two — the toolbar's Done
+ * button and the Escape key — are in `overlayRoot.ts`, which explains why a
+ * drawing surface must carry its own way out.
  */
 export function updateOverlay(state: {
   drawing: boolean;
@@ -138,8 +151,53 @@ export function updateOverlay(state: {
     return;
   }
 
-  overlayWindow.setIgnoreMouseEvents(!state.drawing, { forward: true });
+  const drawing = state.drawing === true;
+
+  overlayWindow.setIgnoreMouseEvents(!drawing, { forward: true });
+
+  // Focusable only while drawing: the Escape key needs keyboard focus, and a
+  // focusable always-on-top window at any other time would steal it from
+  // whatever is being recorded.
+  overlayWindow.setFocusable(drawing);
+
+  if (process.platform === "win32") {
+    overlayWindow.setAlwaysOnTop(!drawing);
+  } else {
+    overlayWindow.setAlwaysOnTop(true, drawing ? "floating" : "screen-saver");
+  }
+
+  if (drawing) {
+    overlayWindow.focus();
+  }
+
   overlayWindow.webContents.send("overlayRecord:overlay", state);
+}
+
+/**
+ * Hand an annotation from the overlay to the compositor.
+ *
+ * The two live in different renderer processes and share no memory, so a stroke
+ * made in one and drawn by the other has to cross through here. Sent whole and
+ * re-sent as it grows — see `engine/strokeStore.ts` for why that is the cheap
+ * way to make a line appear in the recording as it is being drawn.
+ */
+export function forwardStroke(message: unknown): void {
+  sendToEngine("overlayRecord:stroke", message);
+}
+
+/**
+ * Say something to the engine.
+ *
+ * The engine owns every setting, so anything the *overlay* wants changed — the
+ * Done button turning drawing off, say — has to be asked for rather than done.
+ * Routing it through the owner is what keeps the tray's tick, the overlay's
+ * appearance and the compositor's behaviour describing one state instead of
+ * three.
+ */
+export function sendToEngine(channel: string, payload: unknown): void {
+  if (alive(engineWindow)) {
+    engineWindow.webContents.send(channel, payload);
+  }
 }
 
 /** Tell the editor a recording is ready for it. */

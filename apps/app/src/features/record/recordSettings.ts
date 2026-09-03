@@ -168,6 +168,13 @@ export function normalizeRecordFps(raw: unknown): number {
  * Absent means default, field by field — which is what lets a new setting ship
  * without a version bump, the same rule the project file follows for a new
  * element field.
+ *
+ * **`drawing` is not read back.** It is a mode, not a preference: while it is
+ * on, the overlay window takes every click on the display, so a session that
+ * ended with it on would come back with the screen unclickable and no memory of
+ * why. It is stored — `applyRecordSettings` writes it like any other field, and
+ * one write path is simpler than two — and then deliberately ignored here, so
+ * every launch starts with the pen down.
  */
 export function normalizeRecordSettings(raw: unknown): RecordSettings {
   const source = (raw ?? {}) as Partial<Record<keyof RecordSettings, unknown>>;
@@ -184,7 +191,7 @@ export function normalizeRecordSettings(raw: unknown): RecordSettings {
     bubbleShape: oneOf(BUBBLE_SHAPES, source.bubbleShape, d.bubbleShape),
     bubbleSize: oneOf(BUBBLE_SIZES, source.bubbleSize, d.bubbleSize),
     autoZoom: oneOf(ZOOM_STRENGTHS, source.autoZoom, d.autoZoom),
-    drawing: asBoolean(source.drawing, d.drawing),
+    drawing: d.drawing,
     clickHighlight: asBoolean(source.clickHighlight, d.clickHighlight),
   };
 }

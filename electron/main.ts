@@ -175,6 +175,7 @@ ipcMain.handle(
 );
 ipcMain.handle("overlayRecord:setTray", ipcOverlayRecord.setTray);
 ipcMain.handle("overlayRecord:setOverlay", ipcOverlayRecord.setOverlay);
+ipcMain.handle("overlayRecord:setDrawing", ipcOverlayRecord.setDrawing);
 ipcMain.handle("overlayRecord:armDisplayMedia", ipcOverlayRecord.armDisplayMedia);
 ipcMain.handle(
   "overlayRecord:disarmDisplayMedia",

@@ -8,6 +8,7 @@
  */
 
 import { handleTrayClick, init } from "./session";
+import { hasStrokes, visibleStrokes } from "./strokeStore";
 
 /**
  * The tray, reachable from a script.
@@ -23,7 +24,12 @@ import { handleTrayClick, init } from "./session";
  * and it is the same argument `apps/app/src/index.ts` makes for the handful of
  * modules it re-exports on `CARTCUT`.
  */
-(window as any).__record = { handleTrayClick };
+(window as any).__record = {
+  handleTrayClick,
+  hasStrokes,
+  /** How many annotations the compositor is currently drawing. */
+  strokeCount: () => visibleStrokes(performance.now()).length,
+};
 
 function report(message: string): void {
   const status = document.getElementById("status");

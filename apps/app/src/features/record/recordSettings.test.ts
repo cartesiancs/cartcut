@@ -39,6 +39,17 @@ describe("normalizeRecordSettings", () => {
     expect(settings).toEqual(DEFAULT_RECORD_SETTINGS);
   });
 
+  // While drawing is on, the overlay window takes every click on the display.
+  // A session that ended with it on would come back with the screen
+  // unclickable and nothing on screen saying why — which is exactly how it was
+  // first reported.
+  it("never restores drawing mode, however it was left", () => {
+    expect(normalizeRecordSettings({ drawing: true }).drawing).toBe(false);
+    expect(
+      normalizeRecordSettings({ drawing: true, autoZoom: "strong" }),
+    ).toMatchObject({ drawing: false, autoZoom: "strong" });
+  });
+
   it("keeps the fields it can read and defaults only the rest", () => {
     const settings = normalizeRecordSettings({
       cameraDeviceId: "cam-1",

@@ -134,7 +134,10 @@ export function enableIpcWrapper() {
         resume: async function (sessionId) {
           return "none";
         },
-        stroke: async function (sessionId, stroke) {
+        stroke: async function (message) {
+          return "none";
+        },
+        setDrawing: async function (value) {
           return "none";
         },
         click: async function (sessionId, click) {
@@ -306,6 +309,12 @@ export function enableIpcWrapper() {
           return "none";
         },
         overlay: async function (callback) {
+          return "none";
+        },
+        stroke: async function (callback) {
+          return "none";
+        },
+        setDrawing: async function (callback) {
           return "none";
         },
       },
