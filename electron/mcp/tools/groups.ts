@@ -15,6 +15,41 @@ import { destructive, mutating, tool, type Registrar } from "./define";
 
 export function registerGroupTools(define: Registrar) {
   define(
+    "create_null",
+    {
+      title: "Create a null object",
+      description:
+        "Add an empty transform parent — After Effects' null object — that draws nothing. Attach clips to it " +
+        "afterwards with `set_clip_parent`, then move, rotate or scale the null to move all of them together " +
+        "on the canvas. Their own keyframes are not touched: the null's transform composes on top at draw " +
+        "time. Use this when the clips do not exist yet, or when you want one handle to animate several " +
+        "clips from; use `group_clips` instead to wrap clips that already exist. Spatial only — a null does " +
+        "not move its children in time or change their layer order.",
+      inputSchema: {
+        name: z
+          .string()
+          .optional()
+          .describe("Shown on the null's bar. Defaults to \"Null\"."),
+        color: z.string().optional(),
+        size: z
+          .number()
+          .optional()
+          .describe(
+            "One side of the pivot square, in project pixels. Not a size to draw — nothing paints a null — " +
+              "it is the box it rotates and scales about. Defaults to 100.",
+          ),
+        x: z
+          .number()
+          .optional()
+          .describe("Where the pivot sits. Defaults to the centre of the frame."),
+        y: z.number().optional(),
+      },
+      annotations: mutating,
+    },
+    tool((args) => requestEditor("create_null", args)),
+  );
+
+  define(
     "group_clips",
     {
       title: "Group clips",

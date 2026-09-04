@@ -14,6 +14,7 @@ import { GestureCommit } from "./gestureCommit";
 import { withFittedTextHeights } from "../element/textFit";
 import type { AnimatableProperty } from "../../@types/timeline";
 import "../filter/backgroundRemove";
+import "./controlParent";
 
 @customElement("default-transform")
 export class OptionImage extends LitElement {
@@ -53,6 +54,20 @@ export class OptionImage extends LitElement {
 
   render() {
     return html`
+      <!--
+        Above Position deliberately: the parent decides which space every
+        number below it is written in, so reading the panel top to bottom reads
+        the transform in the order it is composed. The control renders nothing
+        at all when there is no group to pick, so a project that has never made
+        one sees the panel exactly as it was before.
+
+        No backticks in here: this comment sits inside a lit template literal,
+        and one would end it.
+      -->
+      <parent-select
+        .elementId=${this.elementId}
+        .isShow=${this.isShow}
+      ></parent-select>
       <label class="form-label text-light"
         >${this.lc.t("setting.position")}</label
       >

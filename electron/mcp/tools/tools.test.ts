@@ -78,6 +78,7 @@ const EXPECTED = [
   // masking
   "set_mask",
   // groups
+  "create_null",
   "group_clips",
   "ungroup",
   "set_clip_parent",

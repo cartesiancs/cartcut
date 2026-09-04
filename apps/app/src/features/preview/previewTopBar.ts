@@ -18,6 +18,7 @@ import {
 } from "../../states/renderOptionStore";
 import { ZOOM_STEP } from "./viewport";
 import { createShapeElement, shapePoints } from "../element/shapeElement";
+import { createNullElement } from "../element/nullElement";
 
 /** 100% is the fit scale, so it doubles as the "fit" preset. */
 const ZOOM_PRESETS = [25, 50, 100, 200, 400, 800];
@@ -115,6 +116,36 @@ export class PreviewTopBar extends LitElement {
         useTimelineStore.getState().cursor,
         uuidv4(),
       ),
+    );
+    this.timeline = useTimelineStore.getState().timeline;
+
+    return elementId;
+  }
+
+  /**
+   * Add an empty null object, centred on the frame and spanning the project.
+   *
+   * Unlike `createShape` this starts at 0 rather than at the playhead, and the
+   * reason is `localSampleAt`: it falls back to the static value for a cursor
+   * before an element's `startTime`, so a null seated at the playhead would
+   * have its keyframes silently ignored everywhere to the left of it. After
+   * Effects seats a new layer at the top of the comp for the same reason.
+   *
+   * The frame centre and the project length are read *here* and passed in —
+   * `nullElement.ts` is a pure factory and does not know the store exists.
+   */
+  createNull() {
+    const elementId = uuidv4();
+    const { previewSize, duration } = this.renderOption;
+
+    const element = createNullElement({
+      center: { x: Number(previewSize.w) / 2, y: Number(previewSize.h) / 2 },
+      // `renderOption.duration` is in seconds.
+      duration: duration * 1000,
+    });
+
+    this.timelineState.withCheckpoint((doc) =>
+      placeNewElement(doc, elementId, element, 0, uuidv4()),
     );
     this.timeline = useTimelineStore.getState().timeline;
 
@@ -501,6 +532,23 @@ export class PreviewTopBar extends LitElement {
                     "two things called a filter" problem, one tab over.
                   -->
                   Polygon</a
+                >
+                <hr class="dropdown-divider" />
+                <a
+                  class="dropdown-item dropdown-item-sm"
+                  @click=${this.createNull}
+                >
+                  <span class="material-symbols-outlined icon-xs">
+                    filter_center_focus
+                  </span>
+                  <!--
+                    Below the divider because it is not a shape: it draws
+                    nothing at all. A null is a transform to hang other clips
+                    off, attached through the Parent dropdown in the side
+                    panel. Same element type as "Group selected" produces —
+                    the difference is that this one starts empty.
+                  -->
+                  Null Object</a
                 >
               </li>
             </ul>

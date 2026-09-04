@@ -20,12 +20,57 @@ import {
   setParent,
   ungroup,
 } from "../../timeline/groupOps";
+import { createNullElement } from "../../element/nullElement";
+import { placeNewElement } from "../../timeline/placement";
 import { appendTrackOfKind } from "../../timeline/tracks";
+import { renderOptionStore } from "../../../states/renderOptionStore";
 import { commit, declined } from "../commit";
 import { currentDoc, playheadMs, requireElement } from "../context";
 import { registerCommands } from "../registry";
 
 registerCommands({
+  /**
+   * An empty null object, for attaching clips to afterwards.
+   *
+   * The counterpart to `group_clips`, which needs a selection to wrap. Both
+   * produce the same `filetype: "group"` element; this one has no children and
+   * so no bounding box to seat its pivot on, and takes a point instead —
+   * defaulting to the centre of the project frame, derived from the project's
+   * own resolution rather than assuming 1080p.
+   */
+  create_null: (params: {
+    name?: string;
+    color?: string;
+    size?: number;
+    x?: number;
+    y?: number;
+  }) => {
+    const { previewSize, duration } = renderOptionStore.getState().options;
+    const nullId = uuidv4();
+
+    const element = createNullElement({
+      name: params.name,
+      color: params.color,
+      size: params.size,
+      center: {
+        x: params.x ?? Number(previewSize.w) / 2,
+        y: params.y ?? Number(previewSize.h) / 2,
+      },
+      // `renderOption.duration` is in seconds.
+      duration: duration * 1000,
+    });
+
+    // Seated at 0, not the playhead: `localSampleAt` falls back to the static
+    // value before an element's `startTime`, so a null starting later would
+    // have its own keyframes quietly ignored to the left of it.
+    const result = commit(
+      (d) => placeNewElement(d, nullId, element, 0, uuidv4()),
+      "The null object could not be added.",
+    );
+
+    return result.ok ? { ...result, nullId } : result;
+  },
+
   group_clips: (params: { elementIds: string[]; name?: string; color?: string }) => {
     const doc = currentDoc();
     const ids = params.elementIds ?? [];

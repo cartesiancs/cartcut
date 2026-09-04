@@ -237,7 +237,7 @@ step, as the user's own mouse.
 
 ```
 electron/mcp/server.ts      transport, sessions, auth
-electron/mcp/tools.ts       barrel: assembles the 53 tools Claude Code sees
+electron/mcp/tools.ts       barrel: assembles the 55 tools Claude Code sees
 electron/mcp/tools/define.ts  the erased Registrar, shared zod fragments
 electron/mcp/tools/*.ts     one module per family (read, cut, media, tracks, …)
 electron/mcp/bridge.ts      main -> renderer request/response
@@ -272,6 +272,73 @@ Two constraints shape every tool:
 
 Connect with the command shown under the ⚡ icon at the bottom right of the app,
 or set `CARTCUT_MCP_TOKEN` and use the committed `.mcp.json`.
+
+## Groups and null objects
+
+**They are the same thing.** `GroupElementType` *is* After Effects' null object:
+a `TimelinePlaced & Visual & Animatable` element that draws nothing and exists
+only to hold a transform for its children. There is no `filetype: "null"`, and
+adding one would be a mistake — the two rules that make the feature work are
+keyed on the single string `"group"`. `hierarchy.ts#parentOf` admits **only** a
+group as a parent, and `isVisualTimelineElement` excludes **only** a group from
+the paint loop. Missing the first detaches every child in silence; missing the
+second crashes the renderer on an undefined call.
+
+```
+apps/app/src/features/timeline/hierarchy.ts     the parent graph, repairHierarchy
+apps/app/src/features/timeline/transform.ts     localMatrixOf / worldMatrixOf
+apps/app/src/features/timeline/groupOps.ts      createGroup, ungroup, setParent
+apps/app/src/features/timeline/parentOptions.ts what a parent picker may offer
+apps/app/src/features/element/nullElement.ts    createNullElement — the empty one
+apps/app/src/features/option/controlParent.ts   <parent-select>, the pick-whip
+```
+
+**One type, two ways of being born**, and the difference is only the pivot:
+
+- **`createGroup`** wraps a selection, from the timeline's "Group selected".
+  Its pivot is the selection's bounding box, and that is not a preference: it
+  makes the compensation each child owes exactly `−bbox.topLeft`, a pure
+  translation, which is the only transform that is *exact* for a bezier
+  keyframe's handles as well as its anchor.
+- **`createNullElement`** starts empty, from the preview's create menu or the
+  `create_null` tool. It has nothing to keep still, so its pivot is a plain
+  100×100 square on a point the caller chooses, and clips are attached
+  afterwards through `setParent`.
+
+`name` — "Group" or "Null" — is the only thing that tells them apart, and it is
+shown on the bar. No schema change; `SCHEMA_VERSION` did not move.
+
+Four things that are easy to get wrong:
+
+- **"Parenting does not touch the child's keyframes" is true and false
+  depending on which moment you mean**, and conflating the two is the way to
+  misunderstand the whole feature. *At the instant of parenting*, `setParent`
+  rewrites the child's numbers once, by the change of basis between its old
+  space and its new one — that is what keeps the picture still while the space
+  underneath it changes, and it is what AE's pick-whip does too. *Every moment
+  after that*, moving the parent changes nothing on the child at all: the
+  matrix is composed at draw time by `applyParentTransform`, so the child's
+  curves are read and never written. `nullParenting.test.ts` pins exactly that
+  pair, in that order, and says so at the top.
+- **A null starts at 0, not at the playhead.** `localSampleAt` falls back to the
+  static value for a cursor before an element's `startTime`, so a null seated at
+  the playhead would have its own keyframes quietly ignored everywhere to the
+  left of it. Its `duration` gates nothing — `renderer/timeline.ts` states that
+  a group's span does not gate its children — so the bar's length is only how
+  much there is to aim at when setting a keyframe.
+- **`width`/`height` are the pivot, not a size to draw.** `localMatrixOf`
+  rotates and scales about `w/2, h/2`, so seating a null on a point means
+  offsetting its `location` by half the box. Getting this wrong is invisible
+  until someone rotates it, and then everything swings about the wrong place.
+- **The picker and the op must not drift.** `parentOptions.ts` re-derives
+  `setParent`'s refusals so the dropdown never offers a choice the op would
+  decline — the same rule `groupMenuTemplate` already keeps. It is held by a
+  contract test that asserts, across a table of documents, that every enabled
+  choice is one `setParent` accepts and every disabled one is one it declines.
+
+Opacity is the one deliberate divergence from AE: parenting there does not pass
+opacity down, and `inheritedOpacityOf` does, so that fading a group fades what
+is in it. The reasoning is at the function.
 
 ## Masks
 
