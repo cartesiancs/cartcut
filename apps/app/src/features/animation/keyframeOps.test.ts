@@ -221,6 +221,37 @@ describe("setTrackActive", () => {
     ]);
   });
 
+  it("seeds size from the element's own box, both lanes", () => {
+    // Pixels, and the same numbers the sidebar's Size row shows — `size` is
+    // the width and height fields animated, not a second scale. Seeding from
+    // them is what stops the clip resizing itself the moment the stopwatch is
+    // clicked.
+    const sized = doc({
+      a: imageElement({ trackId: "v1", width: 320, height: 180 }),
+    });
+    const next = setTrackActive(sized, "a", "size", true, { atMs: 250 });
+    const animation = (next.elements.a as any).animation.size;
+    expect(animation.isActivate).toBe(true);
+    expect(animation.x[0].p).toEqual([250, 320]);
+    expect(animation.y[0].p).toEqual([250, 180]);
+    expect(animation.ax).toEqual([[250, 320]]);
+    expect(animation.ay).toEqual([[250, 180]]);
+  });
+
+  it("declines size where there is no box to resize", () => {
+    // An effect covers the whole frame, and gif and audio carry no animation
+    // block at all. Identity, so no undo step is recorded either.
+    const effects = doc({ a: effectElement({ trackId: "v1" }) });
+    expect(setTrackActive(effects, "a", "size" as any, true)).toBe(effects);
+    expect(addKeyframe(effects, "a", "size" as any, "x", 0, 100)).toBe(effects);
+
+    for (const element of [gifElement(), audioElement()]) {
+      const d = doc({ a: { ...element, trackId: "v1" } });
+      expect(setTrackActive(d, "a", "size" as any, true)).toBe(d);
+      expect(addKeyframe(d, "a", "size" as any, "x", 0, 100)).toBe(d);
+    }
+  });
+
   it("seeds scale at 10, because scale is stored in tenths", () => {
     // `renderElement` divides by 10, so an unscaled element is 10 and not 1.
     const next = setTrackActive(inactive(), "a", "scale", true, { atMs: 0 });

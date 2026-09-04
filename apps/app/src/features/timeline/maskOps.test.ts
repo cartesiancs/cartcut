@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { MaskNode } from "../../@types/timeline";
 import { MASK_ANIMATABLE_PROPERTIES, animatableProperties } from "../../@types/timeline";
-import { normalizeAnimation } from "../animation/keyframes";
+import { emptyAnimation, normalizeAnimation } from "../animation/keyframes";
 import { addKeyframe, rebakeAnimations } from "../animation/keyframeOps";
 import { pasteClips, splitClip, trimClipStart } from "./clipOps";
 import {
@@ -103,8 +103,12 @@ describe("setClipMask", () => {
       for (const property of MASK_ANIMATABLE_PROPERTIES) {
         expect(property in animation, property).toBe(false);
       }
+      // Against `emptyAnimation` rather than a written-out list: the claim is
+      // "the five went and the clip's own block came back", and spelling the
+      // block out here means every track added to it later fails this test for
+      // no reason.
       expect(Object.keys(animation).sort()).toEqual(
-        ["opacity", "position", "rotation", "scale"].sort(),
+        Object.keys(emptyAnimation("image")).sort(),
       );
     });
 
@@ -340,10 +344,7 @@ describe("the tracks and the mask stay in step", () => {
     expect(animatableProperties(before.elements.a)).not.toContain("maskPosition");
     const after = setClipMask(before, "a", "rectangle");
     expect(animatableProperties(after.elements.a)).toEqual([
-      "position",
-      "opacity",
-      "scale",
-      "rotation",
+      ...animatableProperties(before.elements.a),
       ...MASK_ANIMATABLE_PROPERTIES,
     ]);
   });

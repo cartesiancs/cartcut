@@ -104,6 +104,50 @@ describe("withFittedTextHeights", () => {
     expect((doc.elements.pic as any).height).toBe(999);
   });
 
+  /**
+   * A height the user has keyframed is authored, not derived.
+   *
+   * The fit would be silently ineffective on such a clip — the sampled height
+   * wins at draw time, so writing a static one changes no pixels — while
+   * still producing a document diff, which means an undo step per width
+   * scrub for a value nobody can see. Skipping is the only reading of "the
+   * box is the size of the text in it" that survives the box being animated.
+   */
+  it("leaves a clip whose height the size track owns", () => {
+    const animated = base({
+      text: "A\nB\nC",
+      height: 60,
+      animation: {
+        ...(base().animation as any),
+        size: {
+          isActivate: true,
+          x: [],
+          y: [],
+          ax: [[0, 200]],
+          ay: [[0, 300]],
+        },
+      },
+    });
+    const doc = docOf({ a: animated });
+    expect(fit(doc, ["a"])).toBe(doc);
+  });
+
+  it("still fits a clip whose size track exists but is off", () => {
+    // Switching animation off has to hand the box back, or a clip that was
+    // once animated could never auto-fit again.
+    const doc = docOf({
+      a: base({
+        text: "A\nB\nC",
+        height: 60,
+        animation: {
+          ...(base().animation as any),
+          size: { isActivate: false, x: [], y: [], ax: [], ay: [] },
+        },
+      }),
+    });
+    expect(fit(doc, ["a"])).not.toBe(doc);
+  });
+
   it("ignores ids that are not in the document", () => {
     const doc = docOf({ a: base({ height: 60 }) });
     expect(fit(doc, ["missing"])).toBe(doc);

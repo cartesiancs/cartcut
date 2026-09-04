@@ -33,6 +33,7 @@ import {
   type Mat,
   type Point,
 } from "../timeline/transform";
+import { addKeyframe } from "../animation/keyframeOps";
 import type { TimelineDocument } from "../timeline/tracks";
 import type { Rect } from "./dragMath";
 import type { StretchZone } from "./hitTest";
@@ -270,6 +271,17 @@ export type ResizeCommit = {
   originLocation: Point;
   /** Where `resizedRect` says the rect should be now. */
   next: Rect;
+  /**
+   * The playhead in the element's own milliseconds, for the `size` keyframe.
+   *
+   * Optional, and omitting it means "write the static box only". A caller with
+   * no playhead — a test, a batch op — has no honest answer here, and a
+   * keyframe planted at a guessed time is worse than no keyframe: it is a
+   * point on the curve the user did not author and cannot see they have.
+   */
+  atMs?: number;
+  /** The project's bake rate, for the lanes this writes. */
+  bakeHz?: number;
 };
 
 /**
@@ -303,7 +315,7 @@ export function resizedDocument(
     return doc;
   }
 
-  const { originLocal, originLocation, next } = commit;
+  const { originLocal, originLocation, next, atMs, bakeHz } = commit;
 
   // The anchor correction is measured against the mousedown rect and applied to
   // the mousedown field, so the animated and static positions never mix. With
@@ -313,11 +325,39 @@ export function resizedDocument(
     y: originLocation.y + (next.y - originLocal.y),
   };
 
+  // The keyframe at the playhead, where the clip's size is animated — the
+  // same pairing the move gesture makes between `location` and `position`.
+  // Without it the grip and the sidebar would move while the picture stayed
+  // put, because the sampled box overrides the static one at draw time.
+  //
+  // Still an absolute setter: `addKeyframe` *replaces* the keyframe at a given
+  // time rather than appending one, so re-applying against the live document
+  // on every mousemove collapses to a single keyframe per lane, and a held
+  // pointer writes the same value over itself.
+  let withKeyframes = doc;
   if (
-    current.width === next.w &&
-    current.height === next.h &&
-    current.location?.x === location.x &&
-    current.location?.y === location.y
+    Number.isFinite(atMs) &&
+    current.animation?.size?.isActivate === true
+  ) {
+    withKeyframes = addKeyframe(
+      addKeyframe(doc, elementId, "size", "x", atMs!, next.w, undefined, bakeHz),
+      elementId,
+      "size",
+      "y",
+      atMs!,
+      next.h,
+      undefined,
+      bakeHz,
+    );
+  }
+
+  const settled: any = withKeyframes.elements[elementId];
+  if (
+    withKeyframes === doc &&
+    settled.width === next.w &&
+    settled.height === next.h &&
+    settled.location?.x === location.x &&
+    settled.location?.y === location.y
   ) {
     // Identity, so the gesture records nothing for a drag that changed nothing
     // — the same decline-by-identity contract the pure timeline ops use.
@@ -325,10 +365,10 @@ export function resizedDocument(
   }
 
   return {
-    ...doc,
+    ...withKeyframes,
     elements: {
-      ...doc.elements,
-      [elementId]: { ...current, width: next.w, height: next.h, location },
+      ...withKeyframes.elements,
+      [elementId]: { ...settled, width: next.w, height: next.h, location },
     },
   };
 }

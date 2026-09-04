@@ -56,6 +56,7 @@ import {
   localMatrixOf,
   multiply,
   parentMatrixOf,
+  sampledBoxOf,
   type TransformMemo,
 } from "../timeline/transform";
 import type { Surface } from "./surface";
@@ -126,10 +127,12 @@ export function maskRenderFor(
   }
 
   const sample = maskSampleAt(element, mask, timelineCursor);
-  const box = {
-    width: (element as any).width ?? 0,
-    height: (element as any).height ?? 0,
-  };
+  // The box the clip is *drawn* at, so the mask keeps its grip on the picture
+  // while a `size` track moves it. A mask's own location and size are stored
+  // as percentages of this box, so reading the stored one instead would slide
+  // the mask off the clip over the length of the resize — visible only in a
+  // project that animates both, which is exactly when it matters.
+  const box = sampledBoxOf(element, timelineCursor);
   const local = maskNodesInElementSpace(mask, sample, box);
   if (local.length < 2) {
     return null;

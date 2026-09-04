@@ -127,6 +127,10 @@ const ANIMATION_MENU: Record<string, { label: string; icon: string }> = {
   opacity: { label: "Animate opacity", icon: "opacity" },
   scale: { label: "Animate scale", icon: "aspect_ratio" },
   rotation: { label: "Animate rotation", icon: "rotate_90_degrees_cw" },
+  // Not `aspect_ratio`, which `scale` above already wears: the two are next to
+  // each other on this menu and are the pair most easily confused for one
+  // another, so they must not also look alike.
+  size: { label: "Animate size", icon: "open_in_full" },
   // The mask's five, which `animatableProperties` offers only on a clip that
   // has one. Listed because the fallback above would otherwise render them as
   // `Animate maskPosition` — correct, and not English.

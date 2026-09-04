@@ -116,7 +116,22 @@ export class OptionImage extends LitElement {
             value="10"
           ></number-input>
         </div>
-        <div class="d-flex flex-row gap-2 justify-content-end"></div>
+        <div class="d-flex flex-row gap-2 justify-content-end">
+          <button
+            class="btn btn-xxs text-light mr-2"
+            @click=${() => this.setAnimationEnable("size")}
+          >
+            <span
+              class="material-symbols-outlined icon-xsm ${this.getAnimationEnable(
+                "size",
+              )
+                ? "text-light"
+                : "text-secondary"}"
+            >
+              stat_0
+            </span>
+          </button>
+        </div>
       </div>
 
       <label class="form-label text-light"
@@ -206,8 +221,9 @@ export class OptionImage extends LitElement {
     yDom.value = position.y;
     opacityDom.value = opacity.x;
     rotationDom.value = rotation.x;
-    width.value = this.timeline[this.elementId].width;
-    height.value = this.timeline[this.elementId].height;
+    const size = this.getSize();
+    width.value = size.x;
+    height.value = size.y;
   }
 
   /**
@@ -269,6 +285,24 @@ export class OptionImage extends LitElement {
       this.timelineCursor,
       location.x,
       location.y,
+    );
+  }
+
+  getSize() {
+    const element = this.timeline[this.elementId];
+    if (!this.isAnimated("size")) {
+      return { x: element.width, y: element.height };
+    }
+    // The number in the box is the number on the canvas. Showing the static
+    // field while a track drives the picture is how the panel ends up
+    // disagreeing with the preview, and then a scrub of the spinner writes a
+    // keyframe carrying a value the user never saw.
+    return sampleTrackXY(
+      this.track("size"),
+      element.startTime,
+      this.timelineCursor,
+      element.width,
+      element.height,
     );
   }
 
@@ -412,8 +446,12 @@ export class OptionImage extends LitElement {
     const width: any = this.querySelector("number-input[aria-event='width'");
     const height: any = this.querySelector("number-input[aria-event='height'");
 
-    const w = parseFloat(width.value);
-    const h = parseFloat(height.value);
+    // Rounded the way `handleLocation` rounds, and now for a second reason:
+    // with `size` animated these fields show a *sampled* value, and a baked
+    // sample is a float — committing `249.99999999999997` straight back would
+    // write that into the keyframe the user is standing on.
+    const w = parseFloat(parseFloat(width.value).toFixed(2));
+    const h = parseFloat(parseFloat(height.value).toFixed(2));
     if (!Number.isFinite(w) || !Number.isFinite(h)) {
       return;
     }
@@ -422,16 +460,28 @@ export class OptionImage extends LitElement {
     // one the user touched, so it compares against what is stored.
     const widthChanged = this.timeline?.[this.elementId]?.width !== w;
 
-    // Size carries no animation track, so this is a plain value change.
-    this.commitValue([
-      { path: ["width"], value: w },
-      { path: ["height"], value: h },
-    ]);
+    // The static box and, when `size` is animated, the keyframe at the
+    // playhead, as one undo step — exactly what `handleLocation` does for
+    // `position`. `commitValue` writes the keyframes only where the track is
+    // active, so a clip nobody has animated takes the same path it always did.
+    this.commitValue(
+      [
+        { path: ["width"], value: w },
+        { path: ["height"], value: h },
+      ],
+      [
+        { animationType: "size", lane: 0, value: w },
+        { animationType: "size", lane: 1, value: h },
+      ],
+    );
 
     // A text clip's width is its wrapping width, so changing it changes how
     // many lines there are and the box has to be re-measured. A typed *height*
     // is left exactly as typed: it holds until the next edit that moves the
     // text, which is how an auto-sizing text box behaves everywhere else.
+    //
+    // `withFittedTextHeights` declines on its own for a clip whose height the
+    // size track owns, so there is no second condition here.
     if (widthChanged) {
       const elementId = this.elementId;
       this.gesture.apply((doc) => withFittedTextHeights(doc, [elementId]));

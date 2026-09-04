@@ -97,7 +97,7 @@ describe("createNullElement", () => {
     expect(createNullElement({ duration: 30_000 }).duration).toBe(30_000);
   });
 
-  it("carries the four animation tracks a group gets", () => {
+  it("carries the five animation tracks a group gets", () => {
     const element = createNullElement();
     expect(element.animation).toEqual(emptyAnimation("group"));
     expect(canAnimate(element)).toBe(true);
@@ -106,6 +106,12 @@ describe("createNullElement", () => {
       "opacity",
       "scale",
       "rotation",
+      // A group's box is its rotate/scale pivot rather than something drawn,
+      // so animating its size moves the pivot and leaves the children where
+      // they are. Offered all the same: the list is the same for all five
+      // animatable types, and a filetype exception here would have to be
+      // re-derived by the context menu, the diamond lane and the MCP schema.
+      "size",
     ]);
   });
 

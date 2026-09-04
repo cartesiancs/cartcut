@@ -8,6 +8,7 @@ import {
   inheritedOpacityOf,
   localMatrixOf,
   parentMatrixOf,
+  sampledBoxOf,
   type TransformMemo,
 } from "../timeline/transform";
 import { blendOf, DEFAULT_BLEND, isBlendIsolating } from "./blend";
@@ -278,7 +279,8 @@ export function renderElement<T extends VisualTimelineElement>(
       applyParentTransform(ctx, elementId, timelineCursor, context);
     }
     applyElementTransform(ctx, element, timelineCursor);
-    renderControlOutline(ctx, 0, 0, element.width, element.height);
+    const box = sampledBoxOf(element, timelineCursor);
+    renderControlOutline(ctx, 0, 0, box.width, box.height);
     ctx.restore();
   }
 }
@@ -300,7 +302,22 @@ function drawDirect<T extends VisualTimelineElement>(
 ): void {
   ctx.save();
 
-  const { width, height, opacity, startTime } = element;
+  // The box being drawn, which is the stored one unless a `size` track says
+  // otherwise. Substituted into the element rather than passed alongside it,
+  // so every element renderer keeps reading `element.width`/`element.height`
+  // and none of them had to learn that the box can move — the same reason the
+  // transform is applied to the context rather than handed over as a matrix.
+  //
+  // Identity is preserved when nothing is animated: that is every frame of
+  // every project that has never used the property, and a renderer holding a
+  // per-element cache must go on seeing the same object.
+  const { width, height } = sampledBoxOf(element, timelineCursor);
+  const sized =
+    width === element.width && height === element.height
+      ? element
+      : ({ ...element, width, height } as T);
+
+  const { opacity, startTime } = element;
   const canAnimate = "animation" in element;
 
   if (context != null) {
@@ -338,7 +355,7 @@ function drawDirect<T extends VisualTimelineElement>(
   }
   ctx.globalAlpha *= opacityScaledBy100 / 100;
 
-  renderFunction(ctx, elementId, element, timelineCursor);
+  renderFunction(ctx, elementId, sized, timelineCursor);
 
   if (controlOutlineEnabled) {
     renderControlOutline(ctx, 0, 0, width, height);

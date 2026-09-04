@@ -125,6 +125,15 @@ export function withFittedTextHeights(
       continue;
     }
 
+    // A keyframed height is authored rather than derived, so the fit has
+    // nothing to say about it. It would also be invisible: the sampled height
+    // is what reaches the renderer, so writing a static one changes no pixels
+    // while still dirtying the document — an undo step per width scrub for a
+    // number nobody can see.
+    if ((element as any).animation?.size?.isActivate === true) {
+      continue;
+    }
+
     const height = fittedHeightWith(ctx, element);
     if (height === element.height) {
       continue;

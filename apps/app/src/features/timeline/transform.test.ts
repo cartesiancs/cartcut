@@ -12,6 +12,7 @@ import {
   parentLocalToWorld,
   parentMatrixOf,
   rotationOf,
+  sampledBoxOf,
   scaleOf,
   worldBoundsOf,
   worldCornersOf,
@@ -231,6 +232,8 @@ describe("localSampleAt", () => {
       rotationDeg: 33,
       scale: 1,
       opacity: 44,
+      width: 100,
+      height: 100,
     });
   });
 
@@ -240,10 +243,10 @@ describe("localSampleAt", () => {
     // scale through zero flips the matrix and mirrors the element, which is a
     // different picture rather than an overshoot. Only what reaches the matrix
     // is bounded; the authored curve keeps its shape.
-    const list = keys([
-      [0, 10],
-      [500, -40],
-    ]);
+    // `keys` is varargs. Passing one array of pairs made every `p` an array,
+    // which baked to NaN, which `sampleBaked` answered with the fallback — so
+    // this assertion used to hold on an unclamped 1 and proved nothing.
+    const list = keys([0, 10], [500, -40]);
     const element = imageElement({
       animation: {
         ...imageElement().animation,
@@ -252,6 +255,7 @@ describe("localSampleAt", () => {
     });
 
     expect(localSampleAt(element, 500).scale).toBeGreaterThan(0);
+    expect(localSampleAt(element, 500).scale).toBeLessThan(0.01);
   });
 
   it("ignores a track whose isActivate is false even when it has keyframes", () => {
@@ -315,7 +319,89 @@ describe("localSampleAt", () => {
       rotationDeg: 0,
       scale: 1,
       opacity: 100,
+      width: 0,
+      height: 0,
     });
+  });
+});
+
+describe("the sampled box", () => {
+  /** An image whose size track runs 100x100 -> 400x200 over a second. */
+  const sized = (over: Record<string, any> = {}) => {
+    const w = keys([0, 100], [1000, 400]);
+    const h = keys([0, 100], [1000, 200]);
+    return imageElement({
+      width: 100,
+      height: 100,
+      animation: {
+        ...imageElement().animation,
+        size: {
+          isActivate: true,
+          x: w,
+          y: h,
+          ax: bakeTrack(w),
+          ay: bakeTrack(h),
+        },
+      },
+      ...over,
+    });
+  };
+
+  it("answers the static box when the track is off", () => {
+    const element = imageElement({ width: 320, height: 180 });
+    expect(sampledBoxOf(element, 5000)).toEqual({ width: 320, height: 180 });
+    expect(localSampleAt(element, 5000).width).toBe(320);
+    expect(localSampleAt(element, 5000).height).toBe(180);
+  });
+
+  it("answers the curve when it is on, per lane", () => {
+    expect(sampledBoxOf(sized(), 0)).toEqual({ width: 100, height: 100 });
+    expect(sampledBoxOf(sized(), 1000)).toEqual({ width: 400, height: 200 });
+  });
+
+  it("never lets a sampled extent go negative", () => {
+    // Zero is a legitimate size — the clip covers no pixels — so unlike
+    // `scale` it is not floored above zero. A *negative* extent is not an
+    // overshoot though: it is a mirrored draw, a different picture.
+    const list = keys([0, 100], [500, -400]);
+    const element = imageElement({
+      animation: {
+        ...imageElement().animation,
+        size: {
+          isActivate: true,
+          x: list,
+          y: list,
+          ax: bakeTrack(list),
+          ay: bakeTrack(list),
+        },
+      },
+    });
+    expect(sampledBoxOf(element, 500).width).toBe(0);
+    expect(sampledBoxOf(element, 500).height).toBe(0);
+  });
+
+  it("is what localMatrixOf pivots about", () => {
+    // The pivot is the centre of the box being drawn, so it has to move with
+    // the animated box. Reading `element.width` here instead is invisible
+    // until someone rotates an element whose size is animated, and then the
+    // whole thing swings about a point it no longer has a corner on.
+    const element = sized({ location: { x: 0, y: 0 }, rotation: 180 });
+    const m = localMatrixOf(element, 1000);
+
+    // A half-turn about the centre of a 400x200 box maps (0,0) -> (400,200).
+    const corner = applyPoint(m, { x: 0, y: 0 });
+    close(corner.x, 400);
+    close(corner.y, 200);
+  });
+
+  it("is what worldCornersOf measures", () => {
+    const elements = { a: sized({ location: { x: 0, y: 0 } }) } as any;
+    expect(worldCornersOf(elements, "a", 1000)).toEqual([
+      { x: 0, y: 0 },
+      { x: 400, y: 0 },
+      { x: 400, y: 200 },
+      { x: 0, y: 200 },
+    ]);
   });
 });
 

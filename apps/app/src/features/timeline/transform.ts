@@ -132,6 +132,17 @@ export type LocalSample = {
   scale: number;
   /** 0..100, matching the element field. */
   opacity: number;
+  /**
+   * The box, in element-local pixels — `element.width`/`height` unless the
+   * `size` track overrides them.
+   *
+   * Unlike `scale`, which multiplies the matrix, this *replaces* the field:
+   * everything that reads a clip's box at draw time reads it from here, so an
+   * animated size and a typed one produce the same picture through the same
+   * code. `sampledBoxOf` is the shorthand for callers that want only this.
+   */
+  width: number;
+  height: number;
 };
 
 function isFinite2(value: unknown): value is number {
@@ -199,7 +210,15 @@ export function localSampleAt(
 ): LocalSample {
   const any = element as any;
   if (any == null) {
-    return { x: 0, y: 0, rotationDeg: 0, scale: 1, opacity: 100 };
+    return {
+      x: 0,
+      y: 0,
+      rotationDeg: 0,
+      scale: 1,
+      opacity: 100,
+      width: 0,
+      height: 0,
+    };
   }
 
   const staticX = any.location?.x ?? 0;
@@ -214,7 +233,34 @@ export function localSampleAt(
       track(any, "scale", "ax", 10, cursor) / 10,
     ),
     opacity: track(any, "opacity", "ax", any.opacity ?? 100, cursor),
+    // Floored at zero rather than above it, which is the one way this differs
+    // from `scale`. A clip of zero width is a legitimate picture — it covers
+    // no pixels — whereas a scale of zero would be reached only on the way to
+    // a negative one, and that mirrors the element. A negative *extent* is the
+    // same mirroring by another name, so it stops here too.
+    width: Math.max(0, track(any, "size", "ax", any.width ?? 0, cursor)),
+    height: Math.max(0, track(any, "size", "ay", any.height ?? 0, cursor)),
   };
+}
+
+/**
+ * The element's box at `cursor` — the `size` track resolved, or the static
+ * fields when it is off.
+ *
+ * **Every read of a clip's box in a cursor-dependent context goes through
+ * here.** The renderer, the mask's element-space mapping, the selection
+ * outline, the corner handles and the hit test all used to read
+ * `element.width`/`element.height` directly, which was correct only while the
+ * box could not move. One of them left behind would be the
+ * `previewCanvas.collisionCheck` bug over again — the picture in one place and
+ * the pointer's idea of it in another.
+ */
+export function sampledBoxOf(
+  element: TimelineElement | null | undefined,
+  cursor: number,
+): { width: number; height: number } {
+  const sample = localSampleAt(element, cursor);
+  return { width: sample.width, height: sample.height };
 }
 
 /**
@@ -239,11 +285,14 @@ export function localMatrixOf(
   element: TimelineElement | null | undefined,
   cursor: number,
 ): Mat {
-  const any = element as any;
   const sample = localSampleAt(element, cursor);
 
-  const cx = (any?.width ?? 0) / 2;
-  const cy = (any?.height ?? 0) / 2;
+  // The centre of the box *being drawn*, not of the one stored. Reading
+  // `element.width` here is exact until a size track is switched on, and then
+  // silently wrong: rotation and scale would pivot about a point the element
+  // no longer has a corner on.
+  const cx = sample.width / 2;
+  const cy = sample.height / 2;
 
   const theta = toRadian(sample.rotationDeg);
   const s = sample.scale;
@@ -459,9 +508,7 @@ export function worldCornersOf(
   cursor: number,
   memo?: TransformMemo,
 ): [Point, Point, Point, Point] {
-  const element = elements[elementId] as any;
-  const w = element?.width ?? 0;
-  const h = element?.height ?? 0;
+  const { width: w, height: h } = sampledBoxOf(elements[elementId], cursor);
   const m = worldMatrixOf(elements, elementId, cursor, memo);
   return [
     applyPoint(m, { x: 0, y: 0 }),

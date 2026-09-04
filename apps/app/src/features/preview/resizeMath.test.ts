@@ -8,6 +8,7 @@ import {
   type StretchZone,
 } from "./resizeMath";
 import type { Rect } from "./dragMath";
+import { emptyAnimation } from "../animation/keyframes";
 import {
   applyPoint,
   applyVector,
@@ -305,6 +306,109 @@ describe("resizedDocument", () => {
   };
 
   const el = (doc: any) => doc.elements.a;
+
+  /**
+   * The resize gesture writing to the `size` track, the way the move gesture
+   * already writes to `position`.
+   *
+   * Without this a resize on an animated clip would set the static box, which
+   * the sampled one overrides — so the grip would move, the number in the
+   * sidebar would move, and the picture would not. The absolute-setter
+   * contract carries over unchanged: `addKeyframe` replaces the keyframe at a
+   * time rather than appending one, so a held pointer still collapses to a
+   * single keyframe.
+   */
+  describe("the size track", () => {
+    const sizeTrack = (over: Record<string, any> = {}) => ({
+      isActivate: true,
+      x: [],
+      y: [],
+      ax: [],
+      ay: [],
+      ...over,
+    });
+
+    const animated = () =>
+      docWith({
+        startTime: 0,
+        animation: { ...emptyAnimation("shape"), size: sizeTrack() },
+      });
+
+    const lanes = (doc: any) => ({
+      x: el(doc).animation.size.x.map((k: any) => k.p),
+      y: el(doc).animation.size.y.map((k: any) => k.p),
+    });
+
+    const at = (doc: any, zone: StretchZone, dx: number, dy: number) => {
+      const next = resize(ORIGIN, zone, dx, dy, false);
+      return resizedDocument(doc, "a", {
+        originLocal: ORIGIN,
+        originLocation: { x: ORIGIN.x, y: ORIGIN.y },
+        next: next!,
+        atMs: 500,
+      });
+    };
+
+    it("writes both lanes at the playhead", () => {
+      const doc = at(animated(), "stretchSE", 40, 30);
+      expect(lanes(doc)).toEqual({
+        x: [[500, ORIGIN.w + 40]],
+        y: [[500, ORIGIN.h + 30]],
+      });
+      // The static box moves too, exactly as `handleLocation` writes both for
+      // `position`: it stays the fallback for a cursor before the clip starts.
+      expect(el(doc).width).toBe(ORIGIN.w + 40);
+    });
+
+    it("collapses a held pointer to one keyframe per lane", () => {
+      let doc = animated();
+      for (let i = 0; i < 60; i++) {
+        doc = at(doc, "stretchSE", 40, 30);
+      }
+      expect(lanes(doc)).toEqual({
+        x: [[500, ORIGIN.w + 40]],
+        y: [[500, ORIGIN.h + 30]],
+      });
+    });
+
+    it("replaces the keyframe as the pointer moves, rather than stacking", () => {
+      let doc = at(animated(), "stretchSE", 10, 10);
+      doc = at(doc, "stretchSE", 40, 30);
+      expect(lanes(doc)).toEqual({
+        x: [[500, ORIGIN.w + 40]],
+        y: [[500, ORIGIN.h + 30]],
+      });
+    });
+
+    it("writes nothing while the track is off", () => {
+      const doc = at(
+        docWith({
+          startTime: 0,
+          animation: {
+            ...emptyAnimation("shape"),
+            size: sizeTrack({ isActivate: false }),
+          },
+        }),
+        "stretchSE",
+        40,
+        30,
+      );
+      expect(lanes(doc)).toEqual({ x: [], y: [] });
+      expect(el(doc).width).toBe(ORIGIN.w + 40);
+    });
+
+    it("writes nothing when the caller gives no cursor", () => {
+      // Not every caller has a playhead to offer, and a keyframe at a guessed
+      // time is worse than none.
+      const next = resize(ORIGIN, "stretchSE", 40, 30, false);
+      const doc = resizedDocument(animated(), "a", {
+        originLocal: ORIGIN,
+        originLocation: { x: ORIGIN.x, y: ORIGIN.y },
+        next: next!,
+      });
+      expect(lanes(doc)).toEqual({ x: [], y: [] });
+    });
+  });
 
   it("does not move the element when the pointer holds still", () => {
     for (const zone of ZONES) {

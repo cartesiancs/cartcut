@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { useTimelineStore } from "../../../states/timelineStore";
 import { MASK_ANIMATABLE_PROPERTIES } from "../../../@types/timeline";
+import { emptyAnimation } from "../../animation/keyframes";
 import { maskOf } from "../../mask/maskShape";
 import {
   audioElement,
@@ -162,8 +163,10 @@ describe("set_mask", () => {
     it("go with it", async () => {
       await run("set_mask", { elementIds: ["clip"], shape: "rectangle" });
       await run("set_mask", { elementIds: ["clip"], shape: null });
+      // The clip's own block, whatever it holds — the claim is that the five
+      // mask tracks went with the mask, not that the block has four entries.
       expect(tracks("clip").sort()).toEqual(
-        ["opacity", "position", "rotation", "scale"].sort(),
+        Object.keys(emptyAnimation("video")).sort(),
       );
     });
   });

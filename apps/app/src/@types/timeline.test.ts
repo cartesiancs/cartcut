@@ -60,22 +60,42 @@ describe("canAnimate / animatableProperties", () => {
     expect(canAnimate(audioElement({}))).toBe(false);
   });
 
-  it("offers all four properties where the type supports them", () => {
+  it("offers all five properties where the type supports them", () => {
     expect(animatableProperties(imageElement({}))).toEqual([
       "position",
       "opacity",
       "scale",
       "rotation",
+      "size",
     ]);
   });
 
-  it("offers all four for a shape, which animates like any other visual", () => {
+  it("offers all five for a shape, which animates like any other visual", () => {
     expect(animatableProperties(shapeElement({}))).toEqual([
       "position",
       "opacity",
       "scale",
       "rotation",
+      "size",
     ]);
+  });
+
+  it("offers size on every type that has a box, and on no other", () => {
+    // `size` is the one property whose two lanes are a width and a height
+    // rather than an x and a y. It is offered wherever `Visual` is — an
+    // effect covers the whole frame and has no box to resize, and gif and
+    // audio carry no animation block at all.
+    for (const element of [
+      imageElement({}),
+      videoElement({}),
+      textElement({}),
+      shapeElement({}),
+    ]) {
+      expect(animatableProperties(element)).toContain("size");
+    }
+    expect(animatableProperties(effectElement({}))).not.toContain("size");
+    expect(animatableProperties(gifElement({}))).not.toContain("size");
+    expect(animatableProperties(audioElement({}))).not.toContain("size");
   });
 
   it("offers only opacity for an effect, which covers the whole frame", () => {

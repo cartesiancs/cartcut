@@ -962,8 +962,16 @@ export function sliceKeyframes(
  * pairing is about track structure — which instants carry a keyframe — and a
  * mask that was 40% wide at one keyframe and had no height keyframe there would
  * animate along one axis and jump along the other.
+ *
+ * The clip's own `size` is the same shape and here for the same sentence, in
+ * pixels rather than percentages.
  */
-const VECTOR_PROPERTIES = new Set(["position", "maskPosition", "maskSize"]);
+const VECTOR_PROPERTIES = new Set([
+  "position",
+  "size",
+  "maskPosition",
+  "maskSize",
+]);
 
 export function lanesOf(property: string): Lane[] {
   return VECTOR_PROPERTIES.has(property) ? ["x", "y"] : ["x"];
@@ -985,6 +993,7 @@ export function siblingLane(lane: Lane): Lane {
  */
 export function emptyAnimation(filetype: string): any {
   const scalar = () => ({ isActivate: false, x: [], ax: [] });
+  const vector = () => ({ isActivate: false, x: [], y: [], ax: [], ay: [] });
   // An effect is `OpacityAnimatable`: it covers the whole frame by definition,
   // so it has no position, scale or rotation to move and those keyframes would
   // have nowhere to live. A shape used to be here too, but only because its
@@ -1000,10 +1009,15 @@ export function emptyAnimation(filetype: string): any {
     filetype === "group"
   ) {
     return {
-      position: { isActivate: false, x: [], y: [], ax: [], ay: [] },
+      position: vector(),
       opacity: scalar(),
       scale: scalar(),
       rotation: scalar(),
+      // Unconditional, unlike the mask's five: every element that has a box
+      // has one always, so there is no state to gate it on and nothing for
+      // `maskOps`' seed-and-strip dance to do. An element that predates the
+      // track gets one from `normalizeAnimation` on ingress.
+      size: vector(),
     };
   }
   // gif and audio carry no animation block at all.
@@ -1139,6 +1153,16 @@ function sameTrack(before: any, after: any, lanes: Lane[]): boolean {
  * staler at each frame-rate change it is not re-baked for. Dropping it here
  * costs one `startsWith` per track on the one pass that already exists for
  * exactly this kind of repair.
+ *
+ * And it is where **a missing unconditional track is seeded**, which is the
+ * same rule read the other way round. A track the element *should* carry but
+ * does not is invisible in the opposite direction: `keyframeOps.resolve` and
+ * `setTrackActive` both read `animation[property]` and decline by identity
+ * when it is absent, so on a project written before the track existed the
+ * stopwatch button clicks and nothing happens, with nothing on screen saying
+ * why. `emptyAnimation` is the definition of what an element of this filetype
+ * ought to have, so it is what the gap is measured against — which also keeps
+ * the mask's five out of it, since they are deliberately not in there.
  */
 export function normalizeAnimation<T extends TimelineElement>(element: T): T {
   const animation = (element as any).animation;
@@ -1160,6 +1184,16 @@ export function normalizeAnimation<T extends TimelineElement>(element: T): T {
     next[property] = normalized;
     if (!sameTrack(animation[property], normalized, lanes)) {
       changed = true;
+    }
+  }
+
+  const expected = emptyAnimation((element as any).filetype);
+  if (expected != null) {
+    for (const property of Object.keys(expected)) {
+      if (next[property] == null) {
+        next[property] = expected[property];
+        changed = true;
+      }
     }
   }
 

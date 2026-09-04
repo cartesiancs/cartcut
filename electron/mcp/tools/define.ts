@@ -202,6 +202,7 @@ export const ANIMATABLE = [
   "opacity",
   "scale",
   "rotation",
+  "size",
   "maskPosition",
   "maskSize",
   "maskRotation",

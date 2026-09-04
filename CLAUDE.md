@@ -227,6 +227,64 @@ is `max(BAKE_HZ, fps)`, keeping a 60Hz floor so nothing at or below 60 changes.
 Rebaking happens at exactly two moments, ingress (`patchDocument({ bakeHz })`)
 and a rate change; never on a checkpoint.
 
+## What a clip can animate
+
+Five properties, listed by `@types/timeline.ts#OWN_ANIMATABLE_PROPERTIES` and
+offered per element by `animatableProperties`: `position`, `opacity`, `scale`,
+`rotation` and `size`. Plus the mask's five, which exist only while the clip
+has a mask — see "Masks". An effect has `opacity` alone; gif and audio have no
+`animation` block at all.
+
+`position`, `size`, `maskPosition` and `maskSize` are the two-lane ones,
+registered in `keyframes.ts#VECTOR_PROPERTIES` and asked of `lanesOf`. Nothing
+hardcodes a property name: the curve editor takes its lane count from `lanesOf`,
+the diamond lane and the context menu walk `animatableProperties`, and
+`cloneAnimation`/`rebaseAnimation`/`sliceAnimation`/`rebakeElement` walk
+`Object.keys(animation)`. So split, trim, duplicate, paste and a frame-rate
+change carry any property for free.
+
+**`size` and `scale` are different things, and the difference is the point.**
+`scale` is uniform, stored in *tenths*, and multiplies the matrix about the
+element's centre; it never touches the box. `size` is the clip's own `width`
+and `height`, in **pixels** — the two numbers the sidebar's Size row shows —
+and the sampled value **replaces** those fields on the way to the renderer.
+
+That replacement is the whole contract:
+
+> **A keyframed property behaves exactly like the static field it keyframes.**
+
+`renderer/element.ts#drawDirect` substitutes the sampled box into the element it
+hands each renderer, so `image.ts`, `video.ts`, `shape.ts` and `text.ts` needed
+no changes — they go on reading `element.width`. Animating to 500 therefore
+draws precisely what typing 500 into the sidebar draws, including on text, where
+`width` is the *wrapping* width and re-wraps, and `height` is a consequence of
+layout that the renderer never reads. A non-uniform matrix scale would have been
+fewer lines and would have given those two numbers a second meaning.
+
+Four things that are easy to get wrong:
+
+- **`timeline/transform.ts#sampledBoxOf` is the only way to ask how big a clip
+  is** at a cursor. The renderer, the mask's element-space mapping
+  (`renderer/mask.ts`), the selection outline, the eight grips, the hit test and
+  the resize origin all go through it. One of them left reading `element.width`
+  is the `previewCanvas.collisionCheck` bug over again — the picture in one
+  place and the pointer's idea of it in another.
+- **`localMatrixOf` pivots on the sampled box, not the stored one.** Getting
+  this wrong is invisible until someone rotates a clip whose size is animated,
+  and then it swings about a point it has no corner on.
+- **The track is unconditional, so it has to be seeded.** Unlike the mask's
+  five it is in `emptyAnimation`, and `normalizeAnimation` adds it on ingress to
+  any element missing it — the symmetric half of the orphan-mask drop, in the
+  same loop. Without that, the stopwatch on a project written before the feature
+  clicks and does nothing: `resolve` and `setTrackActive` both decline by
+  identity on an absent track, silently.
+- **`withFittedTextHeights` declines while the track is on.** A keyframed height
+  is authored, and the fit would be invisible anyway (the sampled height wins)
+  while still dirtying the document once per width scrub.
+
+`SCHEMA_VERSION` did not move. A project written by an older build simply lacks
+the track and gains one on load.
+
 ## The Claude Code bridge
 
 `electron/mcp/` runs a Streamable HTTP MCP server on `127.0.0.1:9826/mcp`,

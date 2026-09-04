@@ -495,6 +495,12 @@ function staticValueOf(
       return any.rotation ?? 0;
     case "scale":
       return 10;
+    // Pixels, straight off the box — `size` is the sidebar's two Size fields
+    // animated, so seeding from anything else would move the clip the instant
+    // the stopwatch was clicked. Unlike `scale` there is no unit conversion:
+    // what is stored is what the renderer draws at.
+    case "size":
+      return (lane === "x" ? any.width : any.height) ?? 0;
     case "maskPosition": {
       const mask = maskOf(element);
       const location = mask?.location ?? DEFAULT_MASK_LOCATION;

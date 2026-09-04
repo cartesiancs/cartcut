@@ -339,6 +339,31 @@ type Animatable = OpacityAnimatable & {
       x: CubicKeyframeType[];
       ax: number[][];
     };
+    /**
+     * The element's box, in **pixels** — the two numbers the sidebar's Size
+     * row shows, animated.
+     *
+     * Two lanes, and they are a *width* and a *height* rather than an x and a
+     * y — the same arrangement `maskSize` has, for the same reason: the
+     * pairing is about which instants carry a keyframe, and a clip that was
+     * 400 wide at one keyframe with no height keyframe there would animate
+     * along one axis and jump along the other.
+     *
+     * **Not a second `scale`.** `scale` is uniform, stored in tenths, and
+     * applied as a matrix factor about the centre; it never touches the box.
+     * A sampled `size` *replaces* `width`/`height` on the way to the renderer,
+     * so animating to 500 draws exactly what typing 500 into the sidebar
+     * draws. That equivalence is the whole contract — see
+     * `timeline/transform.ts#sampledBoxOf`.
+     */
+    size: {
+      isActivate: boolean;
+      x: CubicKeyframeType[];
+      y: CubicKeyframeType[];
+
+      ax: number[][];
+      ay: number[][];
+    };
   };
 };
 
@@ -869,11 +894,27 @@ export const MASK_ANIMATABLE_PROPERTIES = [
 export type MaskAnimatableProperty =
   (typeof MASK_ANIMATABLE_PROPERTIES)[number];
 
+/**
+ * The tracks a clip carries on its own account, as a value rather than a type.
+ *
+ * A runtime list because `electron/` cannot import this module — `rootDir` is
+ * pinned to `electron/`, which is why `mcp/tools/define.ts` keeps a copy of
+ * this array — and `tools.test.ts` can only compare the copy against something
+ * it can actually import. It used to compare it against these four names typed
+ * out a third time in the test itself, which meant the guard was exactly as
+ * stale as the copy it was guarding: adding a property left all three lists
+ * disagreeing and every test passing.
+ */
+export const OWN_ANIMATABLE_PROPERTIES = [
+  "position",
+  "opacity",
+  "scale",
+  "rotation",
+  "size",
+] as const;
+
 export type AnimatableProperty =
-  | "position"
-  | "opacity"
-  | "scale"
-  | "rotation"
+  | (typeof OWN_ANIMATABLE_PROPERTIES)[number]
   | MaskAnimatableProperty;
 
 /**
@@ -887,9 +928,11 @@ export type AnimatableProperty =
  *
  * An effect's `intensity` is deliberately not here. `AnimatableProperty` is a
  * closed union that `keyframeOps`, the curve editor and the timeline's diamond
- * lane all switch on, and the `animation` block was a fixed record of four
- * named tracks — so a fifth animatable property is a change to the keyframe
- * subsystem, not to this list. `intensity` stays static until that happens.
+ * lane all switch on, so a new animatable property is a change to the keyframe
+ * subsystem rather than a line added to this list — `size` cost a lane
+ * registration in `lanesOf`, a `staticValueOf` case, a seeded track in
+ * `emptyAnimation` and a sampled box in `transform.ts`. `intensity` stays
+ * static until someone does that work for it.
  *
  * **The mask made this a function of the element's state, not just its
  * filetype**, and that is the one surprising thing about it. A clip's mask
@@ -912,7 +955,12 @@ export function animatableProperties(
   if (element.filetype === "effect") {
     return ["opacity"];
   }
-  const own: AnimatableProperty[] = ["position", "opacity", "scale", "rotation"];
+  // `size` is offered to a group as well, and that is deliberate rather than
+  // an oversight: a group's box is its rotate/scale pivot, so animating it
+  // moves the pivot and leaves the children exactly where they are. Excluding
+  // it would put a filetype exception here that the context menu, the diamond
+  // lane and the MCP schema would each have to re-derive.
+  const own: AnimatableProperty[] = [...OWN_ANIMATABLE_PROPERTIES];
   return (element as { mask?: unknown }).mask != null
     ? [...own, ...MASK_ANIMATABLE_PROPERTIES]
     : own;

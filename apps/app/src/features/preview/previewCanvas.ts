@@ -1,4 +1,8 @@
-import { emptyAnimation, sampleTrackXY } from "../animation/keyframes";
+import {
+  bakeRateFor,
+  emptyAnimation,
+  sampleTrackXY,
+} from "../animation/keyframes";
 import { addKeyframePaired } from "../animation/keyframeOps";
 import { displayPosition, isPositionAnimated } from "./elementPosition";
 import type { TimelineDocument } from "../timeline/tracks";
@@ -69,6 +73,7 @@ import {
   localMatrixOf,
   localSampleAt,
   parentMatrixOf,
+  sampledBoxOf,
   scaleOf,
   worldBoundsOf,
   worldMatrixOf,
@@ -755,7 +760,8 @@ export class PreviewCanvas extends LitElement {
     );
     ctx.transform(parent.a, parent.b, parent.c, parent.d, parent.e, parent.f);
     applyElementTransform(ctx, element, this.timelineCursor);
-    renderControlOutline(ctx, 0, 0, element.width, element.height, {
+    const box = sampledBoxOf(element, this.timelineCursor);
+    renderControlOutline(ctx, 0, 0, box.width, box.height, {
       dashed: isGroup,
     });
     ctx.restore();
@@ -898,10 +904,15 @@ export class PreviewCanvas extends LitElement {
       return "none";
     }
     const m = worldMatrixOf(this.timeline, elementId, this.timelineCursor);
+    // The box being drawn, so the grips stay on the outline while a `size`
+    // track moves it. Reading the stored fields here is the
+    // `collisionCheck`-versus-renderer split all over again — the element in
+    // one place and the pointer's idea of it in another.
+    const { width, height } = sampledBoxOf(element, this.timelineCursor);
     return hitZoneOf(
       applyPoint(invert(m), { x: mx, y: my }),
-      element.width ?? 0,
-      element.height ?? 0,
+      width,
+      height,
       { worldScale: scaleOf(m) },
     );
   }
@@ -976,10 +987,7 @@ export class PreviewCanvas extends LitElement {
     const commit =
       element == null
         ? null
-        : penCommit(session, {
-            width: element.width ?? 0,
-            height: element.height ?? 0,
-          });
+        : penCommit(session, sampledBoxOf(element, this.timelineCursor));
 
     this.endPen();
     // Back to the pointer whether or not anything was committed: the stroke is
@@ -1293,7 +1301,8 @@ export class PreviewCanvas extends LitElement {
   localRectOf(elementId: string): { x: number; y: number; w: number; h: number } {
     const element: any = this.timeline[elementId];
     const { x, y } = displayPosition(element, this.timelineCursor);
-    return { x, y, w: element?.width ?? 0, h: element?.height ?? 0 };
+    const { width, height } = sampledBoxOf(element, this.timelineCursor);
+    return { x, y, w: width, h: height };
   }
 
   // `toParentLocal`, `toParentLocalDelta` and `parentRotationOf` used to sit
@@ -1560,8 +1569,10 @@ export class PreviewCanvas extends LitElement {
         // animated element miss its rectangle and then jump by the difference.
         // `drawCanvas` and `_handleMouseMove` resolve through the same matrix.
         const { x, y } = this.worldTopLeft(elementId);
-        const w = element.width;
-        const h = element.height;
+        const { width: w, height: h } = sampledBoxOf(
+          element,
+          this.timelineCursor,
+        );
 
         // Whether this element is live at the playhead is `isPointerTarget`'s
         // job, above — it used to be re-decided here and in `_handleMouseMove`,
@@ -2086,6 +2097,14 @@ export class PreviewCanvas extends LitElement {
           originLocal: origin,
           originLocation: this.elementOriginLocation,
           next,
+          // The playhead in the element's own ms, so a resize on a clip whose
+          // size is animated lands on the curve instead of only on the static
+          // box the curve overrides. `resizedDocument` declines when the track
+          // is off, so this costs nothing on an ordinary clip.
+          atMs:
+            this.timelineCursor -
+            (this.timeline[elementId]?.startTime ?? 0),
+          bakeHz: bakeRateFor(this.renderOption.fps),
         };
         // A text clip's width is its wrapping width, so any grip that moves the
         // left or right edge changes the number of lines and the box has to be
@@ -2260,8 +2279,10 @@ export class PreviewCanvas extends LitElement {
         // same world resolve every other pointer path uses, which also makes a
         // caption inside a group double-clickable where it is drawn.
         const { x, y } = this.worldTopLeft(elementId);
-        const w = element.width;
-        const h = element.height;
+        const { width: w, height: h } = sampledBoxOf(
+          element,
+          this.timelineCursor,
+        );
 
         const collide = { type: this.hitZoneAt(elementId, mx, my) };
 

@@ -82,6 +82,87 @@ describe("renderElement", () => {
     expect(pixel(later.canvas, 25, 25)).toMatchObject({ r: 0, g: 0, b: 0 });
   });
 
+  /**
+   * The `size` track replaces the element's box on the way to its renderer,
+   * rather than multiplying the matrix the way `scale` does.
+   *
+   * That is the whole contract of the property: a clip animated to 200x50 is
+   * drawn by exactly the code that draws one typed as 200x50 in the sidebar,
+   * so preview, export, mask and hit test cannot form separate opinions about
+   * how big it is. `fillLocalBox` above reads `element.width`/`height` off the
+   * element it is handed, which is precisely the substitution being asserted.
+   */
+  describe("the size track", () => {
+    const sized = () =>
+      imageElement({
+        location: { x: 0, y: 0 },
+        width: 100,
+        height: 100,
+        animation: {
+          ...inactiveAnimation(),
+          size: {
+            isActivate: true,
+            x: [],
+            y: [],
+            ax: points([0, 100], [1000, 200]),
+            ay: points([0, 100], [1000, 50]),
+          },
+        },
+      });
+
+    it("draws the sampled box, per axis", () => {
+      const start = draw(sized(), 0);
+      expect(pixel(start.canvas, 99, 99)).toMatchObject({ r: 255, g: 0, b: 0 });
+      expect(pixel(start.canvas, 101, 101)).toMatchObject({ r: 0, g: 0, b: 0 });
+
+      // 200 wide, 50 tall: the two axes move independently, which is what
+      // makes this a size rather than a second scale.
+      const later = draw(sized(), 1000);
+      expect(pixel(later.canvas, 199, 49)).toMatchObject({ r: 255, g: 0, b: 0 });
+      expect(pixel(later.canvas, 199, 60)).toMatchObject({ r: 0, g: 0, b: 0 });
+      expect(pixel(later.canvas, 210, 49)).toMatchObject({ r: 0, g: 0, b: 0 });
+    });
+
+    it("rotates about the centre of the box it is drawing", () => {
+      // A half-turn is the cleanest witness: it maps the top-left corner onto
+      // the bottom-right one, so the box lands back on itself only if the
+      // pivot moved with the size. Pivoting on the stored 100x100 centre
+      // would fling the 200x50 box up and to the left instead.
+      const el = { ...sized(), rotation: 180 };
+      const { canvas } = draw(el, 1000);
+
+      expect(pixel(canvas, 5, 5)).toMatchObject({ r: 255, g: 0, b: 0 });
+      expect(pixel(canvas, 195, 45)).toMatchObject({ r: 255, g: 0, b: 0 });
+      expect(pixel(canvas, 210, 45)).toMatchObject({ r: 0, g: 0, b: 0 });
+    });
+
+    it("hands the renderer the element itself when the track is off", () => {
+      // Identity, not just equality. Every frame of every project that has
+      // never used the property goes through this branch, so it must allocate
+      // nothing — and a renderer that caches on the element object must keep
+      // seeing the same one.
+      const el = imageElement({ width: 100, height: 100 });
+      const seen: unknown[] = [];
+      const { ctx } = scene(300, 300, "#000000");
+      renderElement(ctx, "el", el, 0, false, (_c, _id, passed) => {
+        seen.push(passed);
+      });
+      expect(seen).toEqual([el]);
+      expect(seen[0]).toBe(el);
+    });
+
+    it("leaves the stored box alone", () => {
+      // The substitution is a value handed to the renderer for one frame, not
+      // an edit. A sampled size that wrote back would be a document change on
+      // every repaint — and `withCheckpoint` would have nothing to say about
+      // it, since the renderer never goes near the store.
+      const el = sized();
+      draw(el, 1000);
+      expect(el.width).toBe(100);
+      expect(el.height).toBe(100);
+    });
+  });
+
   it("rotates about the element's own centre, not its corner", () => {
     // A wide, short bar rotated a quarter turn becomes tall and narrow while
     // its centre stays put.

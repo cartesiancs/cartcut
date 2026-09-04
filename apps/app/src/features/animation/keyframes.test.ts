@@ -8,6 +8,7 @@ import {
   bakeTrack,
   cloneAnimation,
   emptyAnimation,
+  lanesOf,
   moveKeyframe,
   normalizeAnimation,
   normalizeBaked,
@@ -745,16 +746,54 @@ describe("sampleTrack / sampleTrackXY", () => {
 
 // ======================================================== element helpers
 
+describe("lanesOf", () => {
+  it("pairs the lanes of every two-dimensional property", () => {
+    expect(lanesOf("position")).toEqual(["x", "y"]);
+    expect(lanesOf("maskPosition")).toEqual(["x", "y"]);
+    expect(lanesOf("maskSize")).toEqual(["x", "y"]);
+    // A width and a height rather than an x and a y — the same reason
+    // `maskSize` is here. The pairing is about track structure: a clip that
+    // was 400 wide at one keyframe and had no height keyframe there would
+    // animate along one axis and jump along the other.
+    expect(lanesOf("size")).toEqual(["x", "y"]);
+  });
+
+  it("gives one lane to every scalar property", () => {
+    for (const property of [
+      "opacity",
+      "scale",
+      "rotation",
+      "maskRotation",
+      "maskFeather",
+      "maskRoundness",
+    ]) {
+      expect(lanesOf(property)).toEqual(["x"]);
+    }
+  });
+});
+
 describe("emptyAnimation", () => {
-  it("gives all four tracks to image, video, text, shape and group", () => {
+  it("gives all five tracks to image, video, text, shape and group", () => {
     for (const filetype of ["image", "video", "text", "shape", "group"]) {
       expect(Object.keys(emptyAnimation(filetype)).sort()).toEqual([
         "opacity",
         "position",
         "rotation",
         "scale",
+        "size",
       ]);
     }
+  });
+
+  it("gives size two lanes, like position", () => {
+    const animation = emptyAnimation("video");
+    expect(animation.size).toEqual({
+      isActivate: false,
+      x: [],
+      y: [],
+      ax: [],
+      ay: [],
+    });
   });
 
   it("gives effect opacity alone, matching its type", () => {
@@ -804,6 +843,45 @@ describe("normalizeAnimation", () => {
   it("returns an element with no animation block by identity", () => {
     const el = { filetype: "audio", startTime: 0 } as any;
     expect(normalizeAnimation(el)).toBe(el);
+  });
+
+  /**
+   * The other half of the orphan-mask rule, and the thing that makes `size`
+   * reach a project written before it existed.
+   *
+   * A track this element *should* carry but does not is invisible to
+   * `keyframeOps.resolve` and to `setTrackActive`, both of which read
+   * `element.animation[property]` and decline by identity when it is missing —
+   * so the diamond button on an old project would do nothing, silently, with
+   * no way for the user to tell why. Seeding on ingress is the symmetric
+   * operation to dropping an orphan, and it goes in the same pass.
+   */
+  it("seeds a track the element should carry but does not", () => {
+    const el = imageElement();
+    const { size, ...withoutSize } = el.animation as any;
+    const old = { ...el, animation: withoutSize } as any;
+
+    const out = normalizeAnimation(old);
+    expect(out).not.toBe(old);
+    expect((out.animation as any).size).toEqual({
+      isActivate: false,
+      x: [],
+      y: [],
+      ax: [],
+      ay: [],
+    });
+  });
+
+  it("seeds nothing on an element whose block is already complete", () => {
+    const el = imageElement();
+    expect(normalizeAnimation(el)).toBe(el);
+  });
+
+  it("does not seed mask tracks, which exist only while there is a mask", () => {
+    // `emptyAnimation` is the definition of the *unconditional* block, so the
+    // five mask tracks are outside it and stay owned by `maskOps`.
+    const out = normalizeAnimation(imageElement()) as any;
+    expect(Object.keys(out.animation)).not.toContain("maskSize");
   });
 
   it("sorts an unsorted authored track", () => {

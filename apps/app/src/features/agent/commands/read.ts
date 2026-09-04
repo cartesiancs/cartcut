@@ -395,6 +395,17 @@ registerCommands({
       ...(params.property === "scale"
         ? { note: "Scale is in tenths: 10 is unscaled, 12 is 120%." }
         : {}),
+      // Worth saying because the neighbouring property is not in pixels and
+      // the two are easy to reach for interchangeably: an agent that reads a
+      // `size` lane of 1920 and writes 19 into it, as it would for `scale`,
+      // has collapsed the clip rather than left it alone.
+      ...(params.property === "size"
+        ? {
+            note:
+              "Size is in pixels — the clip's own width (x) and height (y). " +
+              "Unlike scale it replaces the box rather than multiplying it, and the two axes are independent.",
+          }
+        : {}),
     };
   },
 

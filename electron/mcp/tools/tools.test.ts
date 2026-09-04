@@ -188,10 +188,17 @@ describe("every tool is usable as declared", () => {
     // refused: `get_clip` reports whichever tracks a clip has, so an enum
     // narrower than the union would name a property in one tool's output and
     // reject it in another's input.
-    const { MASK_ANIMATABLE_PROPERTIES } = await import(
-      "../../../apps/app/src/@types/timeline"
-    );
-    const union = ["position", "opacity", "scale", "rotation", ...MASK_ANIMATABLE_PROPERTIES];
+    // Both halves imported, neither retyped. Spelling the clip's own four out
+    // here made this guard stale in the same way and at the same moment as the
+    // copy it exists to guard: `size` was added to the union, to
+    // `animatableProperties` and to every consumer, and this test went on
+    // passing against a list that named four of the five.
+    const { OWN_ANIMATABLE_PROPERTIES, MASK_ANIMATABLE_PROPERTIES } =
+      await import("../../../apps/app/src/@types/timeline");
+    const union = [
+      ...OWN_ANIMATABLE_PROPERTIES,
+      ...MASK_ANIMATABLE_PROPERTIES,
+    ];
     expect([...ANIMATABLE].sort()).toEqual([...union].sort());
   });
 

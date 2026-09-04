@@ -4,7 +4,15 @@ import type { ImageElementType, MaskType } from "../../@types/timeline";
 import { defaultMask } from "../mask/maskShape";
 import { renderElement } from "./element";
 import { resetLayers } from "./surface";
-import { groupElement, imageElement, pixel, scene, type Rgba } from "./testing";
+import { bakeTrack } from "../animation/keyframes";
+import {
+  groupElement,
+  imageElement,
+  keys,
+  pixel,
+  scene,
+  type Rgba,
+} from "./testing";
 
 /**
  * These drive the **real** `renderElement` onto a real Skia surface installed
@@ -276,6 +284,51 @@ describe("the mask travels with the clip", () => {
     // mask boundary lands at device x = 20, not at x = 10.
     expectPixel(pixel(canvas, 15, 20), CLIP);
     expectPixel(pixel(canvas, 25, 20), BACK);
+  });
+
+  /**
+   * A mask's location and size are percentages of the element's box, so the
+   * box the mask is placed in has to be the one being *drawn*.
+   *
+   * Reading the stored `width`/`height` here is exact until a `size` track is
+   * switched on, and then the mask slides off the clip over the length of the
+   * resize — the picture growing while its mask stays the old size. Nothing
+   * else in this file can catch it, because every other case draws a clip
+   * whose sampled box and stored box are the same.
+   */
+  it("stays glued to a box the size track is moving", () => {
+    const half = keys([0, 20], [1000, 40]);
+    const full = keys([0, 40], [1000, 40]);
+    const element = imageElement({
+      location: { x: 0, y: 0 },
+      width: 20,
+      height: 40,
+      mask: leftHalf(),
+      animation: {
+        ...imageElement().animation,
+        size: {
+          isActivate: true,
+          x: half,
+          y: full,
+          ax: bakeTrack(half),
+          ay: bakeTrack(full),
+        },
+      },
+    });
+
+    const at = (cursor: number) => {
+      const { canvas, ctx } = scene(SIZE, SIZE, BACKGROUND);
+      renderElement(ctx, "el", element, cursor, false, fillBox(CLIP_COLOR));
+      return canvas;
+    };
+
+    // 20 wide: the clip covers [0, 20) and its left half [0, 10).
+    expectPixel(pixel(at(0), 5, 20), CLIP);
+    expectPixel(pixel(at(0), 15, 20), BACK);
+
+    // 40 wide: the clip covers [0, 40) and the boundary has moved with it.
+    expectPixel(pixel(at(1000), 15, 20), CLIP);
+    expectPixel(pixel(at(1000), 25, 20), BACK);
   });
 
   it("respects a translated destination", () => {
