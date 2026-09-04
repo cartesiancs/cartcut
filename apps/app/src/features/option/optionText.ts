@@ -7,6 +7,7 @@ import { setIn } from "../../utils/immutable";
 import { rasterizeTextElements } from "../element/rasterizeText";
 import { affectsTextBlock, withFittedTextHeights } from "../element/textFit";
 import { DEFAULT_LINE_HEIGHT, coerceLineHeight } from "../text/metrics";
+import "./animationPresetBrowser";
 import "./controlBlendMode";
 import "./optionLutSection";
 import "./optionMaskSection";
@@ -102,11 +103,17 @@ export class OptionText extends LitElement {
         }}
       ></option-tab-bar>
 
-      <!-- Both panes stay mounted; only one is shown. See optionTabBar.ts -->
+      <!-- Every pane stays mounted; only one is shown. See optionTabBar.ts -->
       <div class=${this.tab === "mask" ? "" : "d-none"}>
         <option-mask-section
           .elementIds=${this.elementId}
         ></option-mask-section>
+      </div>
+
+      <div class=${this.tab === "animation" ? "" : "d-none"}>
+        <animation-preset-browser
+          .elementIds=${this.elementId}
+        ></animation-preset-browser>
       </div>
 
       <div class=${this.tab === "media" ? "" : "d-none"}>

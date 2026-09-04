@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   addKeyframe,
   addKeyframePaired,
+  clearAnimation,
+  hasAnimation,
   moveKeyframe,
   moveKeyframePaired,
   normalizeAnimations,
@@ -857,5 +859,227 @@ describe("rebakeAnimations", () => {
       expect(rebakeAnimations(at60, bakeRateFor(fps))).toBe(at60);
     }
     expect(rebakeAnimations(at60, bakeRateFor(120))).not.toBe(at60);
+  });
+});
+
+/**
+ * `clearAnimation` — the preset grid's "None" tile.
+ *
+ * The distinction it turns on: `setTrackActive(..., false)` switches a track off
+ * and **keeps** the user's keyframes, which is right for a stopwatch and wrong
+ * for a tile that claims the clip has no animation. These pin the difference,
+ * and pin that a mask's five tracks are not this op's business.
+ */
+describe("clearAnimation", () => {
+  /** An image animating opacity and position, both lanes of the latter. */
+  function busy() {
+    const base = imageElement();
+    return imageElement({
+      trackId: "v1",
+      animation: {
+        ...(base.animation as any),
+        opacity: {
+          isActivate: true,
+          x: keys([0, 0], [1000, 100]),
+          ax: points([0, 0], [1000, 100]),
+        },
+        position: {
+          isActivate: true,
+          x: keys([0, 10], [1000, 90]),
+          y: keys([0, 20], [1000, 80]),
+          ax: points([0, 10], [1000, 90]),
+          ay: points([0, 20], [1000, 80]),
+        },
+      } as any,
+    });
+  }
+
+  it("empties every own lane, authored and baked, and switches the track off", () => {
+    const before = doc({ a: busy() });
+    const after = clearAnimation(before, "a");
+    const animation = (after.elements.a as any).animation;
+
+    for (const property of ["opacity", "position", "scale", "rotation", "size"]) {
+      expect(animation[property].isActivate, property).toBe(false);
+      for (const lane of ["x", "y", "ax", "ay"]) {
+        if (animation[property][lane] === undefined) {
+          continue;
+        }
+        expect(animation[property][lane], `${property}.${lane}`).toEqual([]);
+      }
+    }
+  });
+
+  it("leaves the rest of the element and the document alone", () => {
+    const before = doc({ a: busy(), b: imageElement({ trackId: "v1" }) });
+    const after = clearAnimation(before, "a");
+
+    expect(after.tracks).toBe(before.tracks);
+    expect(after.elements.b).toBe(before.elements.b);
+    expect((after.elements.a as any).location).toBe(
+      (before.elements.a as any).location,
+    );
+  });
+
+  it("does not touch a mask's tracks, which belong to the mask", () => {
+    const base = imageElement();
+    const masked = imageElement({
+      trackId: "v1",
+      mask: { shape: "rectangle" } as any,
+      animation: {
+        ...(base.animation as any),
+        opacity: {
+          isActivate: true,
+          x: keys([0, 0], [1000, 100]),
+          ax: points([0, 0], [1000, 100]),
+        },
+        maskRotation: {
+          isActivate: true,
+          x: keys([0, 0], [1000, 45]),
+          ax: points([0, 0], [1000, 45]),
+        },
+      } as any,
+    });
+
+    const after = clearAnimation(doc({ a: masked }), "a");
+    const animation = (after.elements.a as any).animation;
+
+    expect(animation.opacity.x).toEqual([]);
+    expect(animation.maskRotation.isActivate).toBe(true);
+    expect(animation.maskRotation.x).toHaveLength(2);
+  });
+
+  it("clears an effect, which animates opacity and nothing else", () => {
+    const base = effectElement({ trackId: "v1" });
+    const before = doc({
+      a: {
+        ...base,
+        animation: {
+          opacity: {
+            isActivate: true,
+            x: keys([0, 0], [1000, 100]),
+            ax: points([0, 0], [1000, 100]),
+          },
+        },
+      },
+    });
+
+    const after = clearAnimation(before, "a");
+    expect(after).not.toBe(before);
+    expect((after.elements.a as any).animation.opacity.isActivate).toBe(false);
+    expect((after.elements.a as any).animation.opacity.x).toEqual([]);
+  });
+
+  // ------------------------------------------------------- decline by identity
+
+  it("declines an unknown element", () => {
+    const before = doc({ a: busy() });
+    expect(clearAnimation(before, "nope")).toBe(before);
+  });
+
+  it("declines a gif, which has no animation block at all", () => {
+    const before = doc({ a: gifElement({ trackId: "v1" }) });
+    expect(clearAnimation(before, "a")).toBe(before);
+  });
+
+  it("declines audio", () => {
+    const before = doc({ a: audioElement({ trackId: "v1" }) });
+    expect(clearAnimation(before, "a")).toBe(before);
+  });
+
+  it("declines a clip whose tracks are already empty and off", () => {
+    const before = doc({ a: imageElement({ trackId: "v1" }) });
+    expect(clearAnimation(before, "a")).toBe(before);
+  });
+
+  it("declines a second time, so clicking None twice costs one undo step", () => {
+    const once = clearAnimation(doc({ a: busy() }), "a");
+    expect(clearAnimation(once, "a")).toBe(once);
+  });
+
+  it("still clears a track that is switched off but holds keyframes", () => {
+    // Exactly the state `setTrackActive(..., false)` leaves behind, and the
+    // reason this op is not that one in a loop.
+    const before = clearAnimation(
+      setTrackActive(doc({ a: busy() }), "a", "opacity", false),
+      "a",
+    );
+    expect((before.elements.a as any).animation.opacity.x).toEqual([]);
+  });
+});
+
+describe("hasAnimation", () => {
+  const of = (d: TimelineDocument) => hasAnimation(d.elements.a);
+
+  it("agrees with clearAnimation on every case, which is the point of it", () => {
+    const base = imageElement();
+    const withKeys = (over: Record<string, any>) =>
+      imageElement({
+        trackId: "v1",
+        animation: { ...(base.animation as any), ...over } as any,
+      });
+
+    const cases: Array<[string, any]> = [
+      ["nothing", imageElement({ trackId: "v1" })],
+      ["a gif", gifElement({ trackId: "v1" })],
+      [
+        "an active track",
+        withKeys({
+          opacity: { isActivate: true, x: [], ax: [] },
+        }),
+      ],
+      [
+        "an inactive track that still holds keyframes",
+        withKeys({
+          opacity: {
+            isActivate: false,
+            x: keys([0, 0], [1000, 100]),
+            ax: points([0, 0], [1000, 100]),
+          },
+        }),
+      ],
+      [
+        "keyframes on the second lane only",
+        withKeys({
+          position: {
+            isActivate: false,
+            x: [],
+            y: keys([0, 0], [1000, 100]),
+            ax: [],
+            ay: points([0, 0], [1000, 100]),
+          },
+        }),
+      ],
+    ];
+
+    for (const [label, element] of cases) {
+      const before = doc({ a: element });
+      const declined = clearAnimation(before, "a") === before;
+      expect(hasAnimation(element), label).toBe(!declined);
+    }
+  });
+
+  it("says no for nothing at all", () => {
+    expect(hasAnimation(null)).toBe(false);
+    expect(hasAnimation(undefined)).toBe(false);
+  });
+
+  it("ignores a mask's tracks, matching what clearAnimation will remove", () => {
+    const base = imageElement();
+    const maskedOnly = imageElement({
+      trackId: "v1",
+      mask: { shape: "rectangle" } as any,
+      animation: {
+        ...(base.animation as any),
+        maskRotation: {
+          isActivate: true,
+          x: keys([0, 0], [1000, 45]),
+          ax: points([0, 0], [1000, 45]),
+        },
+      } as any,
+    });
+
+    expect(hasAnimation(maskedOnly)).toBe(false);
+    expect(of(doc({ a: maskedOnly }))).toBe(false);
   });
 });

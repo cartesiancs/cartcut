@@ -35,6 +35,7 @@ import {
   type Baked,
   addKeyframe as addToList,
   bakeTrack,
+  isMaskTrack,
   lanesOf,
   moveKeyframe as moveInList,
   normalizeAnimation,
@@ -585,6 +586,102 @@ export function setTrackActive(
         animation: { ...element.animation, [property]: nextTrack },
       },
     },
+  };
+}
+
+/**
+ * The properties a clip animates that are its own, mask tracks excluded.
+ *
+ * `animatableProperties` is a function of the element's *state* — a masked clip
+ * offers five more — so this is where the two questions are separated rather
+ * than at each call site.
+ */
+function ownAnimatableProperties(element: TimelineElement): AnimatableProperty[] {
+  return animatableProperties(element).filter(
+    (property) => !isMaskTrack(property),
+  );
+}
+
+/**
+ * Whether this clip carries any animation of its own.
+ *
+ * The exact condition `clearAnimation` declines on, written once so the two
+ * cannot drift: the "None" tile in the preset grid highlights on this, and it
+ * would be a lie the moment it disagreed with what the tile does.
+ *
+ * Mask tracks do not count, for the reason `clearAnimation` gives.
+ */
+export function hasAnimation(
+  element: TimelineElement | null | undefined,
+): boolean {
+  if (element == null || (element as any).animation == null) {
+    return false;
+  }
+  for (const property of ownAnimatableProperties(element)) {
+    const track = (element as any).animation?.[property];
+    if (track == null) {
+      continue;
+    }
+    if (track.isActivate === true) {
+      return true;
+    }
+    for (const lane of lanesOf(property)) {
+      if (Array.isArray(track[lane]) && track[lane].length > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Remove every keyframe this clip has of its own, and switch the tracks off.
+ *
+ * This is what the preset grid's "None" tile does, and it is deliberately not
+ * `setTrackActive(..., false)` in a loop: switching a track off **keeps** its
+ * keyframes, which is right for a stopwatch the user may click again and wrong
+ * for a tile that says the clip has no animation. Both lanes are emptied,
+ * authored (`x`/`y`) and baked (`ax`/`ay`) together — the invariant this whole
+ * module exists to hold.
+ *
+ * **Mask tracks are left alone.** `maskPosition` and its four siblings are
+ * properties of the mask, not of the clip's movement; they exist only while
+ * there is a mask, `maskOps` seeds and removes them with it, and the UI that
+ * offers them is a different tab. Clearing exactly what the preset grid can
+ * write is the rule that keeps the tile honest.
+ *
+ * Declines by identity when there was nothing to clear, so a second click on
+ * "None" costs no undo step.
+ */
+export function clearAnimation(
+  doc: TimelineDocument,
+  elementId: string,
+  bakeHz: number = BAKE_HZ,
+): TimelineDocument {
+  const element = doc.elements[elementId] as any;
+  if (element == null || !hasAnimation(element)) {
+    return doc;
+  }
+
+  const animation: any = { ...element.animation };
+  for (const property of ownAnimatableProperties(element)) {
+    const track = animation[property];
+    if (track == null || typeof track !== "object") {
+      continue;
+    }
+    const next: any = { ...track, isActivate: false };
+    for (const lane of lanesOf(property)) {
+      next[lane] = [];
+      // Baked from the now-empty list rather than assigned `[]` directly, so
+      // there is one definition of what an empty lane bakes to.
+      next[bakedKeyOf(lane)] = bakeTrack([], bakeHz);
+    }
+    animation[property] = next;
+  }
+
+  return {
+    ...doc,
+    elements: { ...doc.elements, [elementId]: { ...element, animation } },
   };
 }
 

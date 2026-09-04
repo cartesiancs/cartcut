@@ -1,8 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  MIN_SLIDE_PX,
   applyPreset,
   focusOffset,
+  playheadAnchor,
+  presetGroup,
   presetIsFocusable,
+  presetLabel,
   presetNames,
   presetProperties,
   presetProperty,
@@ -358,6 +362,265 @@ describe("focus", () => {
     expect(
       withFocus.elements.a.animation.position.x.map((k: any) => k.p[1]),
     ).toEqual(without.elements.a.animation.position.x.map((k: any) => k.p[1]));
+  });
+});
+
+/**
+ * The playhead anchor.
+ *
+ * Every assertion above pins the *unanchored* path, and they are the regression
+ * guard for this block: `startAtMs` is an option, so omitting it has to leave
+ * `fade_in` at the clip's start and `fade_out` at its end, exactly as before.
+ */
+describe("startAtMs", () => {
+  it("starts the preset at the anchor rather than the clip's start", () => {
+    const after = applyPreset(doc({ a: clip() }), "a", "fade_in", 250, undefined, {
+      startAtMs: 1_000,
+    });
+
+    expect(laneOf(after, "a", "opacity")).toEqual([
+      [1_000, 0],
+      [1_250, 100],
+    ]);
+  });
+
+  it("overrides fromEnd, so an out preset also runs forward from the anchor", () => {
+    // Without the anchor this lands at 3750 -> 4000. The playhead is the whole
+    // point of the option, so it outranks the preset's own idea of where to sit.
+    const after = applyPreset(doc({ a: clip() }), "a", "fade_out", 250, undefined, {
+      startAtMs: 1_000,
+    });
+
+    expect(laneOf(after, "a", "opacity")).toEqual([
+      [1_000, 100],
+      [1_250, 0],
+    ]);
+  });
+
+  it("compresses a preset that will not fit rather than moving the anchor back", () => {
+    // Pulling the anchor back to 3750 would start the move somewhere the user
+    // did not click. A 100ms fade at the point they asked for is the honest
+    // reading of "fade in from here".
+    const after = applyPreset(doc({ a: clip() }), "a", "fade_in", 250, undefined, {
+      startAtMs: 3_900,
+    });
+
+    expect(laneOf(after, "a", "opacity")).toEqual([
+      [3_900, 0],
+      [4_000, 100],
+    ]);
+  });
+
+  it("clamps an anchor past the clip's end into it", () => {
+    const after = applyPreset(doc({ a: clip() }), "a", "fade_in", 250, undefined, {
+      startAtMs: 9_000,
+    });
+    const times = laneOf(after, "a", "opacity").map(([t]: any) => t);
+
+    expect(times[0]).toBe(3_999);
+    expect(times[times.length - 1]).toBe(4_000);
+  });
+
+  it("clamps a negative anchor to the clip's start", () => {
+    const after = applyPreset(doc({ a: clip() }), "a", "fade_in", 250, undefined, {
+      startAtMs: -500,
+    });
+
+    expect(laneOf(after, "a", "opacity")).toEqual([
+      [0, 0],
+      [250, 100],
+    ]);
+  });
+
+  it("anchors a multi-stop preset's whole curve, keeping its shape", () => {
+    const after = applyPreset(doc({ a: clip() }), "a", "pop", 320, undefined, {
+      startAtMs: 500,
+    });
+    const times = laneOf(after, "a", "scale").map(([t]: any) => t);
+
+    // 0 / 0.55 / 1 of 320ms, all shifted by the anchor.
+    expect(times).toEqual([500, 500 + 176, 820]);
+  });
+
+  it("leaves the unanchored path exactly where it was", () => {
+    const before = doc({ a: clip() });
+    expect(laneOf(applyPreset(before, "a", "fade_in", 250), "a", "opacity")).toEqual(
+      laneOf(
+        applyPreset(before, "a", "fade_in", 250, undefined, {}),
+        "a",
+        "opacity",
+      ),
+    );
+  });
+});
+
+describe("playheadAnchor", () => {
+  it("answers the element-local time when the cursor is over the clip", () => {
+    expect(playheadAnchor(clip({ startTime: 1_000 }), 2_500)).toBe(1_500);
+  });
+
+  it("answers 0 at the clip's own start", () => {
+    expect(playheadAnchor(clip({ startTime: 1_000 }), 1_000)).toBe(0);
+  });
+
+  it("declines before the clip", () => {
+    expect(playheadAnchor(clip({ startTime: 1_000 }), 500)).toBeUndefined();
+  });
+
+  it("declines at and past the clip's end, which is a half-open span", () => {
+    // [1000, 5000): the last instant the clip covers is 4999.
+    expect(playheadAnchor(clip({ startTime: 1_000 }), 5_000)).toBeUndefined();
+    expect(playheadAnchor(clip({ startTime: 1_000 }), 9_000)).toBeUndefined();
+    expect(playheadAnchor(clip({ startTime: 1_000 }), 4_999)).toBe(3_999);
+  });
+
+  it("uses the span the viewer sees, so speed is accounted for", () => {
+    // 4000ms of source at 2x is 2000ms on the timeline.
+    const fast = clip({ startTime: 1_000, speed: 2 });
+    expect(playheadAnchor(fast, 2_500)).toBe(1_500);
+    expect(playheadAnchor(fast, 3_500)).toBeUndefined();
+  });
+
+  it("declines for nothing at all", () => {
+    expect(playheadAnchor(null, 0)).toBeUndefined();
+    expect(playheadAnchor(undefined, 0)).toBeUndefined();
+  });
+});
+
+describe("the directional slides", () => {
+  /**
+   * Every slide, and which way its value runs.
+   *
+   * Canvas x grows rightward and y grows downward, so travelling *up* or *left*
+   * means the value falls. A sign flip in one of the eight is the failure this
+   * table exists to catch, and it is invisible from the preset's name alone.
+   */
+  const DIRECTIONS = [
+    ["slide_in_up", "y", "falls"],
+    ["slide_in_down", "y", "rises"],
+    ["slide_in_left", "x", "falls"],
+    ["slide_in_right", "x", "rises"],
+    ["slide_out_up", "y", "falls"],
+    ["slide_out_down", "y", "rises"],
+    ["slide_out_left", "x", "falls"],
+    ["slide_out_right", "x", "rises"],
+  ] as const;
+
+  it("travels the direction its name claims", () => {
+    for (const [preset, lane, direction] of DIRECTIONS) {
+      const after = applyPreset(doc({ a: clip() }), "a", preset, 420);
+      const values = after.elements.a.animation.position[lane].map(
+        (k: any) => k.p[1],
+      );
+      const first = values[0];
+      const last = values[values.length - 1];
+
+      if (direction === "falls") {
+        expect(first, preset).toBeGreaterThan(last);
+      } else {
+        expect(first, preset).toBeLessThan(last);
+      }
+    }
+  });
+
+  it("comes to rest at the clip's own position, in and out alike", () => {
+    for (const [preset] of DIRECTIONS) {
+      const after = applyPreset(
+        doc({ a: clip({ location: { x: 300, y: 200 } }) }),
+        "a",
+        preset,
+        420,
+      );
+      const xs = after.elements.a.animation.position.x.map((k: any) => k.p[1]);
+      const ys = after.elements.a.animation.position.y.map((k: any) => k.p[1]);
+      const rest = preset.startsWith("slide_in_") ? "last" : "first";
+      const at = (list: number[]) => (rest === "last" ? list[list.length - 1] : list[0]);
+
+      expect(at(xs), preset).toBe(300);
+      expect(at(ys), preset).toBe(200);
+    }
+  });
+
+  it("fades as well as moves, in every direction", () => {
+    // A move with no fade slides an opaque title in from off-screen, or cuts one
+    // off mid-flight. Premiere's and Final Cut's own slides pair the two.
+    for (const [preset] of DIRECTIONS) {
+      expect(presetProperties(preset), preset).toContain("position");
+      expect(presetProperties(preset), preset).toContain("opacity");
+    }
+  });
+
+  it("measures the distance in the element's own box, not in pixels", () => {
+    const wide = applyPreset(
+      doc({ a: clip({ width: 800, height: 400 }) }),
+      "a",
+      "slide_in_up",
+      420,
+    );
+    const ys = wide.elements.a.animation.position.y.map((k: any) => k.p[1]);
+    // One box-height below its resting place.
+    expect(ys[0] - ys[ys.length - 1]).toBe(400);
+  });
+
+  it("floors the distance so a zero-height element still moves", () => {
+    const flat = applyPreset(
+      doc({ a: clip({ width: 0, height: 0 }) }),
+      "a",
+      "slide_in_up",
+      420,
+    );
+    const ys = flat.elements.a.animation.position.y.map((k: any) => k.p[1]);
+    expect(ys[0] - ys[ys.length - 1]).toBe(MIN_SLIDE_PX);
+  });
+
+  it("leaves shake in absolute pixels, which is what a rattle is", () => {
+    const big = applyPreset(
+      doc({ a: clip({ width: 1920, height: 1080 }) }),
+      "a",
+      "shake",
+      300,
+    );
+    expect(big.elements.a.animation.position.x[1].p[1]).toBe(-14);
+  });
+
+  // ------------------------------------------------------- decline by identity
+
+  it("returns the input by identity for a gif", () => {
+    const before = doc({ a: gifElement({ trackId: "v1" }) });
+    expect(applyPreset(before, "a", "slide_in_up", 420)).toBe(before);
+  });
+
+  it("returns the input by identity for an effect, which cannot move", () => {
+    const before = doc({ a: effectElement({ trackId: "v1" }) });
+    expect(applyPreset(before, "a", "slide_in_up", 420)).toBe(before);
+  });
+});
+
+describe("preset metadata", () => {
+  it("labels every preset it offers", () => {
+    for (const name of presetNames()) {
+      expect(presetLabel(name), name).toBeTruthy();
+    }
+  });
+
+  it("gives every preset a distinct label, or the grid is unreadable", () => {
+    const labels = presetNames().map(presetLabel);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it("groups every preset", () => {
+    for (const name of presetNames()) {
+      expect(["in", "out", "emphasis"], name).toContain(presetGroup(name));
+    }
+  });
+
+  it("puts the anchored-to-the-end presets in the out group", () => {
+    // Not a naming rule: `fromEnd` is what the preset does when nobody anchors
+    // it, and that is the same question the group answers.
+    expect(presetGroup("fade_out")).toBe("out");
+    expect(presetGroup("slide_out_up")).toBe("out");
+    expect(presetGroup("fade_in")).toBe("in");
+    expect(presetGroup("shake")).toBe("emphasis");
   });
 });
 

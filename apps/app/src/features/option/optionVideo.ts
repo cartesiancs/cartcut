@@ -23,6 +23,7 @@ import "./controlBlendMode";
 import "./controlClipSpeed";
 import "./optionLutSection";
 import "./optionMaskSection";
+import "./animationPresetBrowser";
 import "./optionTabBar";
 import type { OptionTab } from "./optionTabBar";
 
@@ -151,7 +152,7 @@ export class OptionVideo extends LitElement {
       ></option-tab-bar>
 
       <!--
-        Both panes stay mounted; only one is shown. See optionTabBar.ts - the
+        Every pane stays mounted; only one is shown. See optionTabBar.ts - the
         controls inside subscribe to the document when they mount, and toggling
         would otherwise drop and re-add those subscriptions on every click.
       -->
@@ -159,6 +160,12 @@ export class OptionVideo extends LitElement {
         <option-mask-section
           .elementIds=${[this.elementId]}
         ></option-mask-section>
+      </div>
+
+      <div class=${this.tab === "animation" ? "" : "d-none"}>
+        <animation-preset-browser
+          .elementIds=${[this.elementId]}
+        ></animation-preset-browser>
       </div>
 
       <div class=${this.tab === "media" ? "" : "d-none"}>

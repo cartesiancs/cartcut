@@ -7,6 +7,7 @@ import "./controlDefaultTransform";
 import "./controlBlendMode";
 import "./optionLutSection";
 import "./optionMaskSection";
+import "./animationPresetBrowser";
 import "./optionTabBar";
 import type { OptionTab } from "./optionTabBar";
 
@@ -62,11 +63,17 @@ export class OptionImage extends LitElement {
         }}
       ></option-tab-bar>
 
-      <!-- Both panes stay mounted; only one is shown. See optionTabBar.ts -->
+      <!-- Every pane stays mounted; only one is shown. See optionTabBar.ts -->
       <div class=${this.tab === "mask" ? "" : "d-none"}>
         <option-mask-section
           .elementIds=${[this.elementId]}
         ></option-mask-section>
+      </div>
+
+      <div class=${this.tab === "animation" ? "" : "d-none"}>
+        <animation-preset-browser
+          .elementIds=${[this.elementId]}
+        ></animation-preset-browser>
       </div>
 
       <div class=${this.tab === "media" ? "" : "d-none"}>

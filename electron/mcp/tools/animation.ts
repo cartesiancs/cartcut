@@ -24,19 +24,21 @@ export function registerAnimationTools(define: Registrar) {
     {
       title: "Apply an animation preset",
       description:
-        "The common moves, correctly built — one undo step, the track activated for you, the value units and " +
-        "the curve already right. Prefer this over hand-authoring keyframes. " +
-        "`fade_in`/`fade_out` on opacity. `drift` is a Ken Burns, constant-rate over seconds. " +
-        "`punch_in` is a hard push that lands in under a fifth of a second. `overshoot_in` passes its target " +
-        "and settles back. `pop` and `slam` are for something arriving — `pop` grows past full size, `slam` " +
-        "comes in oversized and lands. `shake` is a decaying rattle, `rotate_settle` rocks past level. " +
-        "`zoom_in`/`zoom_out` are the older gentle pair the toolbar buttons use. " +
-        "Omit `durationMs` and each preset uses the length it is meant to have; they differ a lot, and a " +
-        "punch stretched to a second is not a punch. " +
-        "**`focus` is how you zoom towards something.** Scale animates about the clip's centre, so a zoom " +
-        "always converges on the middle unless the clip is pushed the other way as it grows — `focus` does " +
-        "that arithmetic. It is a point in the clip's own box, 0-100 per axis, and only means anything for the " +
-        "scale presets.",
+        "The common moves, correctly built — one undo step, the track activated for you, the units and the " +
+        "curve already right. Prefer this over hand-authoring keyframes. " +
+        "`fade_in`/`fade_out` on opacity. `drift` is a Ken Burns, constant-rate over seconds. `punch_in` " +
+        "lands hard in under a fifth of a second; `overshoot_in` passes its target and settles back. `pop` " +
+        "grows past full size, `slam` arrives oversized and lands. `shake` is a decaying rattle, " +
+        "`rotate_settle` rocks past level. `zoom_in`/`zoom_out` are the gentle pair. The eight `slide_*` " +
+        "move one box length and fade as they go, named for the direction of travel: `slide_in_up` " +
+        "arrives from below. " +
+        "Omit `durationMs` for each preset's own length; a punch stretched to a second is not a punch. " +
+        "Omit `atMs` and `_in` presets sit at the clip's start, `_out` at its end; give it and every preset " +
+        "starts there and runs forward — how you fade mid-shot. One that will not fit is shortened, not " +
+        "moved back. " +
+        "**`focus`** aims a zoom. Scale is about the clip's centre, so a zoom converges there unless the " +
+        "clip is pushed the other way as it grows; `focus` does that. A point in the clip's box, 0-100 per " +
+        "axis; scale presets only.",
       inputSchema: {
         elementIds: z.array(z.string()).min(1),
         preset: z.enum(PRESETS),
@@ -45,6 +47,13 @@ export function registerAnimationTools(define: Registrar) {
           .min(1)
           .optional()
           .describe("Defaults to the preset's own length."),
+        atMs: z
+          .number()
+          .optional()
+          .describe(
+            "Timeline ms the move starts at. Must be inside every clip in `elementIds`. " +
+              "Defaults to the preset's own anchor — the clip's start, or its end for an out preset.",
+          ),
         focus: z
           .object({ x: z.number().min(0).max(100), y: z.number().min(0).max(100) })
           .optional()

@@ -285,6 +285,58 @@ Four things that are easy to get wrong:
 `SCHEMA_VERSION` did not move. A project written by an older build simply lacks
 the track and gains one on load.
 
+### Animation presets
+
+Nineteen ready-made moves, in `features/animation/presets.ts` as **plain
+TypeScript data** — deliberately not in the `assets/presets/` registry, which
+exists to load untrusted, user-installable data-plus-GLSL and has nothing an
+animation preset needs. Adding one is a diff to one object literal, plus the
+hand-copied `PRESETS` in `electron/mcp/tools/define.ts` that `tools.test.ts`
+pins by set equality.
+
+```
+apps/app/src/features/animation/presets.ts        the table, applyPreset, playheadAnchor
+apps/app/src/features/animation/presetPreview.ts  what a tile draws — pure, node-tested
+apps/app/src/features/option/animationPresetBrowser.ts   the grid, in the Animation tab
+apps/app/src/features/animation/keyframeOps.ts    clearAnimation / hasAnimation
+```
+
+Reached three ways, all through the same `applyPreset`: the **Animation tab**
+in the text, image, video and shape inspectors; the `apply_animation_preset`
+MCP tool; and `apply_edit_plan`.
+
+Four things that are easy to get wrong:
+
+- **`startAtMs` is element-local, and it outranks `fromEnd`.** Anchored, *every*
+  preset starts there and runs forward — a `fade_out` dropped mid-clip runs from
+  the playhead, not from the tail. The conversion from the playhead is
+  `playheadAnchor`, which answers `undefined` when the cursor is off the clip so
+  the preset falls back to its own anchor. The panel takes that fallback; the
+  agent command throws instead (`localTime`), because an agent naming a time
+  meant that time and a silently relocated keyframe looks like the request.
+- **Near the clip's end the preset is compressed, not moved back.** Sliding the
+  anchor to make room starts the move somewhere nobody clicked, which is the one
+  thing an anchor is for.
+- **The tiles run the real thing.** `previewSamples` applies the actual
+  `applyPreset` to a throwaway clip and reads it back through the actual
+  `localSampleAt`, so nothing restates what a preset does and nothing can drift
+  from it — the argument `fxPreviewProvider` makes for its own thumbnails. The
+  one place the tile is *not* faithful is scale: it is a diagram, so one box
+  length is drawn as `TILE_TRAVEL` of the tile. At 1:1 a slide's start pose is
+  exactly off the tile's edge and Move Up renders empty.
+- **"None" is `clearAnimation`, not `setTrackActive(false)` in a loop.**
+  Switching a track off *keeps* its keyframes, which is right for a stopwatch
+  and wrong for a tile claiming the clip has no animation. It empties authored
+  and baked lanes together and leaves the mask's five alone — those belong to
+  the mask, and clearing exactly what the grid can write is what keeps the tile
+  honest. `hasAnimation` is the same condition, written once, and is what
+  lights the tile up.
+
+`SCHEMA_VERSION` did not move: a preset writes ordinary keyframes, and nothing
+records that a preset was what wrote them. That is also why no tile but "None"
+shows an applied state — a highlight on Fade In would be a guess presented as a
+fact.
+
 ## The Claude Code bridge
 
 `electron/mcp/` runs a Streamable HTTP MCP server on `127.0.0.1:9826/mcp`,

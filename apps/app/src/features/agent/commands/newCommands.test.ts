@@ -855,6 +855,94 @@ describe("animation commands", () => {
       expect(steps).toBe(1);
     });
 
+    it("starts the move at atMs, in absolute timeline ms", async () => {
+      // The clip starts at 10s, so an absolute 11s anchor is stored at 1000.
+      seed({
+        a: clip({
+          startTime: 10_000,
+          duration: 10_000,
+          trim: { startTime: 0, endTime: 10_000 },
+        }),
+      });
+
+      await run("apply_animation_preset", {
+        elementIds: ["a"],
+        preset: "fade_in",
+        atMs: 11_000,
+      });
+
+      const lane = (doc().elements.a as any).animation.opacity.x;
+      expect(lane.map((k: any) => k.p[0])).toEqual([1_000, 1_250]);
+    });
+
+    it("lets atMs override an out preset's own anchor", async () => {
+      seed({
+        a: clip({ duration: 10_000, trim: { startTime: 0, endTime: 10_000 } }),
+      });
+
+      await run("apply_animation_preset", {
+        elementIds: ["a"],
+        preset: "fade_out",
+        atMs: 2_000,
+      });
+
+      const lane = (doc().elements.a as any).animation.opacity.x;
+      // Without the anchor this would sit at 9750 -> 10000.
+      expect(lane.map((k: any) => k.p[1])).toEqual([100, 0]);
+      expect(lane[0].p[0]).toBe(2_000);
+    });
+
+    it("refuses a time outside the clip rather than moving it", async () => {
+      // The panel clamps; an agent naming a time meant that time, and quietly
+      // relocating it would produce an edit that looks like the request.
+      seed({ a: clip({ startTime: 0, duration: 2_000 }) });
+      await expect(
+        run("apply_animation_preset", {
+          elementIds: ["a"],
+          preset: "fade_in",
+          atMs: 9_000,
+        }),
+      ).rejects.toThrow(/outside the clip/);
+    });
+
+    it("records nothing when one clip in the selection rejects the time", async () => {
+      // The anchors are resolved before the commit, so a bad time cannot leave
+      // half the selection animated and an undo step already on the stack.
+      seed({
+        a: clip({ startTime: 0, duration: 2_000 }),
+        b: clip({ startTime: 8_000, duration: 2_000 }),
+      });
+      const before = historyLength();
+
+      await expect(
+        run("apply_animation_preset", {
+          elementIds: ["a", "b"],
+          preset: "fade_in",
+          atMs: 500,
+        }),
+      ).rejects.toThrow(/outside the clip/);
+
+      expect(historyLength()).toBe(before);
+      expect((doc().elements.a as any).animation.opacity.x).toHaveLength(0);
+    });
+
+    it("meets each clip at its own offset, not at one shared local time", async () => {
+      seed({
+        a: clip({ startTime: 0, duration: 5_000, trim: { startTime: 0, endTime: 5_000 } }),
+        b: clip({ startTime: 2_000, duration: 5_000, trim: { startTime: 0, endTime: 5_000 } }),
+      });
+
+      await run("apply_animation_preset", {
+        elementIds: ["a", "b"],
+        preset: "fade_in",
+        atMs: 3_000,
+      });
+
+      // Absolute 3000 is 3000 into `a` and 1000 into `b`.
+      expect((doc().elements.a as any).animation.opacity.x[0].p[0]).toBe(3_000);
+      expect((doc().elements.b as any).animation.opacity.x[0].p[0]).toBe(1_000);
+    });
+
     it("is one undo step across several clips", async () => {
       seed({
         a: clip({ startTime: 0, duration: 2_000 }),

@@ -1,5 +1,5 @@
 /**
- * The Media / Mask switch at the top of a clip's inspector.
+ * The Media / Animation / Mask switch at the top of a clip's inspector.
  *
  * The option column has never had a tab bar — panels simply stacked, and a
  * masked clip would have added eleven more controls to the bottom of a list
@@ -21,10 +21,11 @@
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 
-export type OptionTab = "media" | "mask";
+export type OptionTab = "media" | "mask" | "animation";
 
 const TABS: Array<{ id: OptionTab; label: string; icon: string }> = [
   { id: "media", label: "Media", icon: "movie" },
+  { id: "animation", label: "Animation", icon: "animation" },
   { id: "mask", label: "Mask", icon: "crop" },
 ];
 

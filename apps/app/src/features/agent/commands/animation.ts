@@ -188,6 +188,7 @@ registerCommands({
     elementIds: string[];
     preset: PresetName;
     durationMs?: number;
+    atMs?: number;
     focus?: { x: number; y: number };
   }) => {
     const doc = currentDoc();
@@ -219,6 +220,24 @@ registerCommands({
       );
     }
 
+    // Where the move begins, if the caller says. Absolute timeline ms in, the
+    // element-local ms `applyPreset` wants out — and per clip, since a preset
+    // applied across a selection meets each one at a different offset.
+    //
+    // `localTime` throws for a time outside the clip rather than clamping,
+    // which is right here and not in the panel: an agent naming a time has one
+    // in mind, and silently moving it would produce an edit that looks like the
+    // request and is not. The panel's `playheadAnchor` falls back instead,
+    // because there the "time" is wherever the playhead happened to be parked.
+    const anchorFor =
+      params.atMs == null
+        ? () => undefined
+        : (id: string) => localTime(requireElement(doc, id), params.atMs as number);
+
+    // Computed before the commit so a bad time is an error, not a half-applied
+    // edit with an undo step already recorded.
+    const anchors = new Map(ids.map((id) => [id, anchorFor(id)]));
+
     const bakeHz = projectBakeHz();
 
     return commit(
@@ -227,6 +246,7 @@ registerCommands({
           (next, id) =>
             applyPreset(next, id, params.preset, durationMs, bakeHz, {
               focus: params.focus,
+              startAtMs: anchors.get(id),
             }),
           d,
         ),

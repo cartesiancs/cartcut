@@ -234,6 +234,14 @@ export const PRESETS = [
   "slam",
   "shake",
   "rotate_settle",
+  "slide_in_up",
+  "slide_in_down",
+  "slide_in_left",
+  "slide_in_right",
+  "slide_out_up",
+  "slide_out_down",
+  "slide_out_left",
+  "slide_out_right",
 ] as const;
 
 /** The named easing curves `add_keyframes` accepts. Copied, and pinned, as above. */

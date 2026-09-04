@@ -31,10 +31,10 @@
  * slip into a library expansion.
  */
 
-import type { AnimatableProperty } from "../../@types/timeline";
+import type { AnimatableProperty, TimelineElement } from "../../@types/timeline";
 import { animatableProperties } from "../../@types/timeline";
 import type { TimelineDocument } from "../timeline/tracks";
-import { spanLength } from "../timeline/geometry";
+import { spanLength, spanOf } from "../timeline/geometry";
 import { addKeyframe, setHandles, setTrackActive } from "./keyframeOps";
 import { BAKE_HZ } from "./keyframes";
 import { projectEasing, resolveEasing, type EasingName } from "./easing";
@@ -50,7 +50,15 @@ export type PresetName =
   | "pop"
   | "slam"
   | "shake"
-  | "rotate_settle";
+  | "rotate_settle"
+  | "slide_in_up"
+  | "slide_in_down"
+  | "slide_in_left"
+  | "slide_in_right"
+  | "slide_out_up"
+  | "slide_out_down"
+  | "slide_out_left"
+  | "slide_out_right";
 
 /** Unscaled, in the tenths the scale track stores. */
 const SCALE_NEUTRAL = 10;
@@ -65,14 +73,42 @@ const SCALE_ZOOMED = 12;
  */
 type Stop = { at: number; value: number; easing?: EasingName };
 
-/** A position stop, in pixels **offset from where the clip already sits**. */
+/**
+ * A position stop, **offset from where the clip already sits**.
+ *
+ * In pixels, unless the shape says `positionUnit: "box"`.
+ */
 type Move = { at: number; x: number; y: number; easing?: EasingName };
+
+/**
+ * Smallest slide a box-relative preset may travel, in pixels.
+ *
+ * A text clip whose height has not been fitted yet, or a shape authored at
+ * zero, would otherwise animate from its own position to its own position:
+ * keyframes written, nothing visibly moving, and no way to tell from the
+ * timeline that the preset landed at all.
+ */
+export const MIN_SLIDE_PX = 40;
 
 type PresetShape = {
   /** Used when the caller does not give one. */
   defaultMs: number;
   /** Anchored to the clip's end rather than its start. */
   fromEnd?: boolean;
+  /**
+   * How `position` stops are read. `"px"` when absent.
+   *
+   * `"box"` multiplies `x` by the element's width and `y` by its height, so one
+   * unit is one of the clip's own box lengths. A slide written in pixels is a
+   * different move in a 4K project than in a 1080p one, and a different move
+   * under a one-line caption than under a full-bleed title — the distance that
+   * reads as "in from off the edge" is a property of the thing being moved.
+   *
+   * `shake` stays in pixels: a rattle of fourteen pixels is a rattle whatever
+   * it is rattling, and scaling it by the clip's size would make a title-card
+   * shake like an earthquake and a caption not at all.
+   */
+  positionUnit?: "px" | "box";
   /**
    * Whether `focus` means anything here.
    *
@@ -202,7 +238,235 @@ const PRESETS: Record<PresetName, PresetShape> = {
       { at: 1, value: 0 },
     ],
   },
+
+  // ---- the directional slides ----
+  //
+  // Eight presets that are one preset with a sign and an axis, written out
+  // rather than generated because `PresetName` is a closed union the MCP
+  // schema copies by hand — a generated table would name them somewhere a
+  // reader cannot grep for.
+  //
+  // Canvas x grows rightward and y grows downward, so a move *up* ends lower
+  // in value than it started. `slide_in_up` therefore begins one box-height
+  // **below** its resting place, at `y: 1`.
+  //
+  // **They fade as well as move.** A slide with no fade brings a fully opaque
+  // title in from off the edge of the frame, or cuts one off mid-flight —
+  // which is why Premiere's and Final Cut's own slides pair the two. The fade
+  // covers only part of the move (0.6 in, 0.4 out) so the travel is still
+  // visible at both ends rather than happening entirely under a dissolve.
+  //
+  // `in` eases out — it arrives and settles. `out` eases in — it leaves and
+  // accelerates away. Reversing those makes both read as a drift.
+
+  slide_in_up: {
+    defaultMs: 420,
+    positionUnit: "box",
+    position: [
+      { at: 0, x: 0, y: 1, easing: "ease_out" },
+      { at: 1, x: 0, y: 0 },
+    ],
+    opacity: [
+      { at: 0, value: 0, easing: "ease_out" },
+      { at: 0.6, value: 100 },
+    ],
+  },
+
+  slide_in_down: {
+    defaultMs: 420,
+    positionUnit: "box",
+    position: [
+      { at: 0, x: 0, y: -1, easing: "ease_out" },
+      { at: 1, x: 0, y: 0 },
+    ],
+    opacity: [
+      { at: 0, value: 0, easing: "ease_out" },
+      { at: 0.6, value: 100 },
+    ],
+  },
+
+  slide_in_left: {
+    defaultMs: 420,
+    positionUnit: "box",
+    position: [
+      { at: 0, x: 1, y: 0, easing: "ease_out" },
+      { at: 1, x: 0, y: 0 },
+    ],
+    opacity: [
+      { at: 0, value: 0, easing: "ease_out" },
+      { at: 0.6, value: 100 },
+    ],
+  },
+
+  slide_in_right: {
+    defaultMs: 420,
+    positionUnit: "box",
+    position: [
+      { at: 0, x: -1, y: 0, easing: "ease_out" },
+      { at: 1, x: 0, y: 0 },
+    ],
+    opacity: [
+      { at: 0, value: 0, easing: "ease_out" },
+      { at: 0.6, value: 100 },
+    ],
+  },
+
+  slide_out_up: {
+    defaultMs: 420,
+    fromEnd: true,
+    positionUnit: "box",
+    position: [
+      { at: 0, x: 0, y: 0, easing: "ease_in" },
+      { at: 1, x: 0, y: -1 },
+    ],
+    opacity: [
+      { at: 0.4, value: 100, easing: "ease_in" },
+      { at: 1, value: 0 },
+    ],
+  },
+
+  slide_out_down: {
+    defaultMs: 420,
+    fromEnd: true,
+    positionUnit: "box",
+    position: [
+      { at: 0, x: 0, y: 0, easing: "ease_in" },
+      { at: 1, x: 0, y: 1 },
+    ],
+    opacity: [
+      { at: 0.4, value: 100, easing: "ease_in" },
+      { at: 1, value: 0 },
+    ],
+  },
+
+  slide_out_left: {
+    defaultMs: 420,
+    fromEnd: true,
+    positionUnit: "box",
+    position: [
+      { at: 0, x: 0, y: 0, easing: "ease_in" },
+      { at: 1, x: -1, y: 0 },
+    ],
+    opacity: [
+      { at: 0.4, value: 100, easing: "ease_in" },
+      { at: 1, value: 0 },
+    ],
+  },
+
+  slide_out_right: {
+    defaultMs: 420,
+    fromEnd: true,
+    positionUnit: "box",
+    position: [
+      { at: 0, x: 0, y: 0, easing: "ease_in" },
+      { at: 1, x: 1, y: 0 },
+    ],
+    opacity: [
+      { at: 0.4, value: 100, easing: "ease_in" },
+      { at: 1, value: 0 },
+    ],
+  },
 };
+
+/**
+ * What a person reads on the tile.
+ *
+ * The ids are systematic so they sort and group; these are what the panel
+ * shows. English, and staying English, for the reason `fxPresetBrowser` and
+ * `ControlText` both give: a preset library reads worse half-localised than it
+ * does consistently in one language.
+ */
+const LABELS: Record<PresetName, string> = {
+  fade_in: "Fade In",
+  fade_out: "Fade Out",
+  zoom_in: "Zoom In",
+  zoom_out: "Zoom Out",
+  punch_in: "Punch In",
+  drift: "Drift",
+  overshoot_in: "Overshoot",
+  pop: "Pop",
+  slam: "Slam",
+  shake: "Shake",
+  rotate_settle: "Rotate In",
+  slide_in_up: "Move Up",
+  slide_in_down: "Move Down",
+  slide_in_left: "Move Left",
+  slide_in_right: "Move Right",
+  slide_out_up: "Exit Up",
+  slide_out_down: "Exit Down",
+  slide_out_left: "Exit Left",
+  slide_out_right: "Exit Right",
+};
+
+/**
+ * Which third of the panel a preset belongs to.
+ *
+ * `in` and `out` are the ones with somewhere to be — they are built to sit at
+ * one end of a clip, and `fromEnd` is the same fact stated for the unanchored
+ * path. `emphasis` is everything that happens in the middle and returns to
+ * where it started.
+ */
+export type PresetGroup = "in" | "out" | "emphasis";
+
+const GROUPS: Record<PresetName, PresetGroup> = {
+  fade_in: "in",
+  zoom_in: "in",
+  punch_in: "in",
+  overshoot_in: "in",
+  pop: "in",
+  slam: "in",
+  rotate_settle: "in",
+  slide_in_up: "in",
+  slide_in_down: "in",
+  slide_in_left: "in",
+  slide_in_right: "in",
+
+  fade_out: "out",
+  zoom_out: "out",
+  slide_out_up: "out",
+  slide_out_down: "out",
+  slide_out_left: "out",
+  slide_out_right: "out",
+
+  drift: "emphasis",
+  shake: "emphasis",
+};
+
+export function presetLabel(preset: PresetName): string {
+  return LABELS[preset] ?? preset;
+}
+
+export function presetGroup(preset: PresetName): PresetGroup {
+  return GROUPS[preset] ?? "emphasis";
+}
+
+/**
+ * Where the playhead falls inside a clip, in the element-local ms
+ * `applyPreset`'s `startAtMs` wants — or `undefined` when it falls outside.
+ *
+ * `undefined` means "do not anchor", and the preset lands where it was designed
+ * to: the clip's start, or its end for a `fromEnd` one. That is deliberately
+ * not a refusal. A tile that does nothing because the playhead happens to be
+ * parked elsewhere is the worst outcome a preset grid can have, and this is the
+ * same call `fxPresetBrowser` makes when a click has no obvious target.
+ *
+ * The span is half-open, `[start, end)`, which is the convention `spanOf` and
+ * every consumer of it already use: the instant a clip ends is the instant the
+ * next one begins, and both cannot own it.
+ */
+export function playheadAnchor(
+  element: TimelineElement | null | undefined,
+  cursor: number,
+): number | undefined {
+  if (element == null || !Number.isFinite(cursor)) {
+    return undefined;
+  }
+  const span = spanOf(element);
+  if (cursor < span.start || cursor >= span.end) {
+    return undefined;
+  }
+  return cursor - span.start;
+}
 
 export function presetNames(): PresetName[] {
   return Object.keys(PRESETS) as PresetName[];
@@ -367,7 +631,9 @@ function writeTrack(
  * `animation` block at all, and a shape carries only `opacity`.
  *
  * Keyframe times are element-local, which is the convention `keyframeOps` works
- * in: `0` is the clip's own start.
+ * in: `0` is the clip's own start. `options.startAtMs` is in that same space —
+ * the caller converts from the playhead with `playheadAnchor`, never by handing
+ * an absolute timeline time here.
  */
 export function applyPreset(
   doc: TimelineDocument,
@@ -375,7 +641,7 @@ export function applyPreset(
   preset: PresetName,
   durationMs: number,
   bakeHz: number = BAKE_HZ,
-  options: { focus?: Focus } = {},
+  options: { focus?: Focus; startAtMs?: number } = {},
 ): TimelineDocument {
   const shape = PRESETS[preset];
   const element = doc.elements[elementId] as any;
@@ -396,8 +662,40 @@ export function applyPreset(
   // A preset longer than the clip is clamped rather than refused: "fade this
   // in" on a 200ms clip is a coherent request, and the default should not turn
   // it into an error.
-  const length = Math.max(1, Math.min(durationMs, span));
-  const startAt = shape.fromEnd ? Math.max(0, span - length) : 0;
+  const requested = Math.max(1, Math.min(durationMs, span));
+
+  /*
+   * Where the move begins, in element-local ms.
+   *
+   * Anchored, the caller wins: `startAtMs` outranks `fromEnd`, because the
+   * anchor is the playhead and the playhead is a thing the user pointed at.
+   * A `fade_out` dropped at 1s runs 1s -> 1.25s, not at the clip's tail.
+   *
+   * Near the end of the clip the preset is **compressed** rather than pulled
+   * back. Sliding the anchor to make room would start the move somewhere the
+   * user did not click, which is the one thing an anchor is for; a fade that is
+   * shorter than asked is still a fade beginning where they asked. The clamp
+   * leaves one millisecond so a preset always has a segment to ease across.
+   */
+  const anchored = options.startAtMs != null;
+  const startAt = anchored
+    ? Math.max(0, Math.min(options.startAtMs as number, Math.max(0, span - 1)))
+    : shape.fromEnd
+      ? Math.max(0, span - requested)
+      : 0;
+  const length = anchored
+    ? Math.max(1, Math.min(requested, span - startAt))
+    : requested;
+
+  // One box length per unit for a `"box"` preset, floored so a clip with no
+  // height still travels. `1` for the pixel presets, which multiplies out.
+  const boxUnit =
+    shape.positionUnit === "box"
+      ? {
+          x: Math.max(element.width ?? 0, MIN_SLIDE_PX),
+          y: Math.max(element.height ?? 0, MIN_SLIDE_PX),
+        }
+      : { x: 1, y: 1 };
 
   let next = doc;
 
@@ -473,8 +771,8 @@ export function applyPreset(
       elementId,
       "position",
       [
-        { lane: "x", values: shape.position.map((s) => baseX + s.x) },
-        { lane: "y", values: shape.position.map((s) => baseY + s.y) },
+        { lane: "x", values: shape.position.map((s) => baseX + s.x * boxUnit.x) },
+        { lane: "y", values: shape.position.map((s) => baseY + s.y * boxUnit.y) },
       ],
       shape.position.map((s) => timeOf(s, startAt, length)),
       shape.position.map((s) => s.easing),
