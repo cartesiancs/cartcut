@@ -1,6 +1,6 @@
 {
   "name": "cartcut-app",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Video Editor",
   "main": "main/main.js",
   "author": "cartesiancs",
@@ -20,6 +20,7 @@
     "test:e2e:smoke120": "playwright test -c tests/e2e/playwright.config.ts --project=smoke120",
     "test:e2e:extreme": "playwright test -c tests/e2e/playwright.config.ts --project=extreme",
     "bundle:prod:src": "webpack --mode=production",
+    "build:web": "npm run bundle:prod:src && node scripts/buildWeb.mjs",
     "build:main": "tsc -p ./.tsconfig",
     "build:overlay": "npm --prefix apps/overlay-record ci && npm --prefix apps/overlay-record run build",
     "build:osx": "npm run build:main && npm run bundle:prod:src && npm run build:overlay && electron-builder build --mac --arm64 --x64 -p always",

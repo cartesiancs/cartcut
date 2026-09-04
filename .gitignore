@@ -16,3 +16,4 @@
 # first, and the second is only interesting while a failure is being chased.
 /tests/e2e/.fixtures
 /tests/e2e/.out
+dist-web/
