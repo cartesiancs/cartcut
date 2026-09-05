@@ -4,19 +4,34 @@ import { LocaleController } from "../../controllers/locale";
 import axios from "axios";
 import { Buffer } from "buffer";
 
+// A Giphy proxy that no bundled server provides — nothing under electron/server
+// answers /api/gif, so this is only reachable against a separately run backend.
+// The search therefore has to report a failure rather than throw one.
+const GIF_SEARCH_ENDPOINT = "http://127.0.0.1:8000/api/gif";
+
 @customElement("gif-preset")
 export class ControlText extends LitElement {
-  returnArray: any;
+  returnArray: any = [];
+  private loaded = false;
+  private error = "";
+
   constructor() {
     super();
   }
 
   createRenderRoot() {
-    this.getGif();
     return this;
   }
 
   @query("#searchGifInput") searchInput;
+
+  // The panel is hidden until its tab is picked, so the first search waits for
+  // that rather than firing a request at app start.
+  load() {
+    if (this.loaded) return;
+    this.loaded = true;
+    this.getGif();
+  }
 
   async _handleClickGif(gifurl) {
     const response = await fetch(gifurl);
@@ -33,7 +48,6 @@ export class ControlText extends LitElement {
     window.electronAPI.req.stream
       .saveBufferToTempFile(buffer, "gif")
       .then((path) => {
-        console.log(path);
         control.addGif(fileBlob, path.path);
       });
   }
@@ -44,20 +58,28 @@ export class ControlText extends LitElement {
     ) as HTMLInputElement | null;
     const value = searchText?.value?.trim() || "_defcartcut";
 
-    const request = await axios.get(`http://127.0.0.1:8000/api/gif?q=${value}`);
-    const result = request.data.result.data;
-    this.returnArray = [];
-    for (let index = 0; index < result.length; index++) {
-      const element = result[index];
-      this.returnArray.push(html`
-        <div
-          class="col-6 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
-          @click=${() => this._handleClickGif(element.images.original.url)}
-        >
-          <img src=${element.images.original.url} />
-        </div>
-      `);
+    this.error = "";
+
+    try {
+      const request = await axios.get(
+        `${GIF_SEARCH_ENDPOINT}?q=${encodeURIComponent(value)}`,
+      );
+      const result = request.data?.result?.data ?? [];
+      this.returnArray = result.map(
+        (element) => html`
+          <div
+            class="col-6 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
+            @click=${() => this._handleClickGif(element.images.original.url)}
+          >
+            <img src=${element.images.original.url} />
+          </div>
+        `,
+      );
+    } catch (error) {
+      this.returnArray = [];
+      this.error = "GIF search is unavailable.";
     }
+
     this.requestUpdate();
   }
 
@@ -68,10 +90,10 @@ export class ControlText extends LitElement {
   }
 
   onSearch() {
-    const searchText = this.searchInput.value.trim();
+    const searchText = this.searchInput?.value.trim();
     if (searchText) {
+      this.loaded = true;
       this.getGif();
-      console.log("검색어:", searchText);
     }
   }
 
@@ -87,6 +109,10 @@ export class ControlText extends LitElement {
           @keydown="${this._handleKeyDown}"
         />
       </div>
+
+      ${this.error
+        ? html`<div class="text-secondary px-2 mb-2">${this.error}</div>`
+        : ""}
 
       <div class="row px-2">${this.returnArray}</div>`;
   }

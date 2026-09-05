@@ -4,19 +4,32 @@ import { LocaleController } from "../../controllers/locale";
 import axios from "axios";
 import { Buffer } from "buffer";
 
+// Same unserved endpoint gifPreset.ts documents: nothing under electron/server
+// answers /api/gif, so a failure is reported rather than thrown.
+const TEMPLATE_SEARCH_ENDPOINT = "http://127.0.0.1:8000/api/gif";
+
 @customElement("template-list")
 export class TemplateList extends LitElement {
-  returnArray: any;
+  returnArray: any = [];
+  private loaded = false;
+  private error = "";
+
   constructor() {
     super();
   }
 
   createRenderRoot() {
-    this.getTemplate();
     return this;
   }
 
-  @query("#searchGifInput") searchInput;
+  // Loaded when the panel is actually shown, not at app start.
+  load() {
+    if (this.loaded) return;
+    this.loaded = true;
+    this.getTemplate();
+  }
+
+  @query("#searchTemplateInput") searchInput;
 
   async _handleClickGif(gifurl) {
     const response = await fetch(gifurl);
@@ -33,31 +46,38 @@ export class TemplateList extends LitElement {
     window.electronAPI.req.stream
       .saveBufferToTempFile(buffer, "gif")
       .then((path) => {
-        console.log(path);
         control.addGif(fileBlob, path.path);
       });
   }
 
   async getTemplate() {
     const searchText = this.querySelector(
-      "#searchGifInput",
+      "#searchTemplateInput",
     ) as HTMLInputElement | null;
     const value = searchText?.value?.trim() || "_defcartcut";
 
-    const request = await axios.get(`http://127.0.0.1:8000/api/gif?q=${value}`);
-    const result = request.data.result.data;
-    this.returnArray = [];
-    for (let index = 0; index < result.length; index++) {
-      const element = result[index];
-      this.returnArray.push(html`
-        <div
-          class="col-6 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
-          @click=${() => this._handleClickGif(element.images.original.url)}
-        >
-          <img src=${element.images.original.url} />
-        </div>
-      `);
+    this.error = "";
+
+    try {
+      const request = await axios.get(
+        `${TEMPLATE_SEARCH_ENDPOINT}?q=${encodeURIComponent(value)}`,
+      );
+      const result = request.data?.result?.data ?? [];
+      this.returnArray = result.map(
+        (element) => html`
+          <div
+            class="col-6 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
+            @click=${() => this._handleClickGif(element.images.original.url)}
+          >
+            <img src=${element.images.original.url} />
+          </div>
+        `,
+      );
+    } catch (error) {
+      this.returnArray = [];
+      this.error = "Template search is unavailable.";
     }
+
     this.requestUpdate();
   }
 
@@ -68,10 +88,10 @@ export class TemplateList extends LitElement {
   }
 
   onSearch() {
-    const searchText = this.searchInput.value.trim();
+    const searchText = this.searchInput?.value.trim();
     if (searchText) {
+      this.loaded = true;
       this.getTemplate();
-      console.log("검색어:", searchText);
     }
   }
 
@@ -87,6 +107,10 @@ export class TemplateList extends LitElement {
           @keydown="${this._handleKeyDown}"
         />
       </div>
+
+      ${this.error
+        ? html`<div class="text-secondary px-2 mb-2">${this.error}</div>`
+        : ""}
 
       <div class="row px-2">${this.returnArray}</div>`;
   }

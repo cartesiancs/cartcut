@@ -17,6 +17,11 @@ export class ControlUiFilter extends LitElement {
   _handleClickChangePanel(name) {
     this.activePanel = name;
     this.requestUpdate();
+
+    // gif-preset only searches once it is on screen, so tell it when it is.
+    if (name == "gif") {
+      (this.querySelector("gif-preset") as any)?.load();
+    }
   }
 
   render() {
