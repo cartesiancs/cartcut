@@ -6,7 +6,8 @@ type ActiveStringType =
   | "audioRecord"
   | "automaticCaption"
   | "ytDownload"
-  | "proxy";
+  | "proxy"
+  | "autoTrack";
 
 export interface IControlPanelStore {
   /** Panels with a tab in the preview top bar, in the order they were opened. */
