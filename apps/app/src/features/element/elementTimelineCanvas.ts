@@ -1029,7 +1029,16 @@ export class elementTimelineCanvas extends LitElement {
     this.drawCanvas();
   }
 
-  _handleMouseWheel(e) {
+  /**
+   * Apply a wheel gesture to the timeline.
+   *
+   * Public because the track-header column forwards its own wheel events here
+   * rather than working the scroll out for itself: the two columns are one
+   * scrollable surface, and one implementation is what stops them drifting
+   * apart. Vertical, horizontal and the Ctrl/pinch zoom therefore behave
+   * identically wherever the pointer is.
+   */
+  applyWheel(e) {
     // Not `hasEditorModifier`. macOS synthesises `ctrlKey` on a trackpad pinch,
     // and Windows spells wheel-zoom Ctrl+wheel — so this one flag is the right
     // test on both platforms. Routing it through the editor modifier would make
@@ -1051,9 +1060,25 @@ export class elementTimelineCanvas extends LitElement {
       this.canvasVerticalScroll = nextVertical;
       this.timelineOptions.canvasVerticalScroll = nextVertical;
       this.drawCanvas();
+      this.syncTrackHeaders();
     }
 
     this.timelineState.setScroll(Math.max(0, this.timelineScroll + e.deltaX));
+  }
+
+  /**
+   * Tell the track-header column to redraw at the new vertical scroll.
+   *
+   * Writing the offset into the shared context object is not enough on its own:
+   * `@lit/context` publishes when the provider's property is *reassigned*, and
+   * this is a mutation of the object it already holds. So the value is correct
+   * the moment the column next renders, but nothing asks it to — until this
+   * change that only happened when an unrelated store update happened to wake
+   * it, which left the headers sitting a few notches behind the rows they name.
+   */
+  private syncTrackHeaders() {
+    const headers: any = document.querySelector("element-timeline-left-option");
+    headers?.requestUpdate();
   }
 
   _handleMouseMove(e) {
@@ -1688,7 +1713,7 @@ export class elementTimelineCanvas extends LitElement {
         @dragover=${this._handleDragOver}
         @dragleave=${this._handleDragLeave}
         @drop=${this._handleDrop}
-        @mousewheel=${this._handleMouseWheel}
+        @mousewheel=${this.applyWheel}
         @mousemove=${this._handleMouseMove}
         @mousedown=${this._handleMouseDown}
         @mouseup=${this._handleMouseUp}

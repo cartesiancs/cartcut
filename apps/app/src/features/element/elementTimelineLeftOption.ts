@@ -170,6 +170,23 @@ export class ElementTimelineLeftOption extends LitElement {
     this.redrawTimeline();
   }
 
+  /**
+   * A wheel over the headers scrolls the timeline, the same as one over the
+   * canvas.
+   *
+   * The two columns are one scrollable surface — the canvas paints its own
+   * vertical offset and this column is pushed by the same number — so the
+   * gesture has to work on both halves or the header a user is pointing at is
+   * the one place it does not. The scroll value is the canvas's, and the event
+   * is forwarded whole rather than worked out again here: vertical, horizontal
+   * and the Ctrl/pinch zoom all go through the one implementation, so nothing
+   * about the two halves can drift.
+   */
+  private _handleWheel(e: WheelEvent) {
+    const canvas: any = document.querySelector("element-timeline-canvas");
+    canvas?.applyWheel(e);
+  }
+
   _handleClickResizePanel() {
     this.isAbleResize = true;
   }
@@ -388,6 +405,7 @@ export class ElementTimelineLeftOption extends LitElement {
       <div
         style="width: ${width}px;position: absolute; height: 100%; overflow: hidden;"
         class="tab-content"
+        @wheel=${this._handleWheel}
       >
         <div
           style="position: relative; top: -${
