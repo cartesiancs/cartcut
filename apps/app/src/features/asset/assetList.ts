@@ -15,6 +15,17 @@ import {
   type PressEv,
   type PressState,
 } from "./assetPress";
+import {
+  HOVER,
+  idleHover,
+  reduceHover,
+  type HoverEv,
+  type HoverState,
+} from "./assetHover";
+import {
+  hoverPreview,
+  type HoverPreviewSource,
+} from "./hoverPreviewOverlay";
 
 /**
  * The grid. Presentation only — `<asset-browser>` owns the directory and hands
@@ -85,6 +96,11 @@ export class AssetFile extends LitElement {
   private press: PressState = idlePress;
   private holdTimer = 0;
 
+  /** Resting on the tile, decided by `assetHover.ts`. */
+  private hover: HoverState = idleHover;
+  private dwellTimer = 0;
+  private watchingWindow = false;
+
   constructor() {
     super();
 
@@ -104,6 +120,9 @@ export class AssetFile extends LitElement {
     this.addEventListener("pointercancel", this.handleGestureEnd);
     this.addEventListener("dragstart", this.handleDragStart);
     this.addEventListener("dragend", this.handleGestureEnd);
+    // Neither bubbles, so they go on the tile itself rather than on the grid.
+    this.addEventListener("pointerenter", this.handlePointerEnter);
+    this.addEventListener("pointerleave", this.handlePointerLeave);
 
     this.videoBlob = "";
   }
@@ -111,6 +130,13 @@ export class AssetFile extends LitElement {
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.clearHold();
+
+    // `repeat` keys on `entry.name`, so reloading the directory replaces these
+    // elements without any `pointerleave` reaching the one under the cursor.
+    // This is the only thing that stops a preview outliving its tile.
+    this.dispatchHover({ type: "cancel" });
+    this.clearDwell();
+    this.unwatchWindow();
   }
 
   @property()
@@ -128,6 +154,17 @@ export class AssetFile extends LitElement {
 
   protected updated(_changedProperties: PropertyValues): void {
     applyShowType(this, this.showType);
+
+    // `<asset-list>`'s `repeat` keys on `entry.name` alone, so navigating to a
+    // folder holding a file of the same name *reuses this element* — new
+    // `name`/`directory`, no `disconnectedCallback`. A preview open at that
+    // moment would go on playing the previous folder's file.
+    if (
+      _changedProperties.has("name") ||
+      _changedProperties.has("directory")
+    ) {
+      this.dispatchHover({ type: "cancel" });
+    }
   }
 
   private get fullPath(): string {
@@ -154,7 +191,7 @@ export class AssetFile extends LitElement {
     if (fileType == "video") {
       const cached = thumbnailCache.get(fileUrl);
       if (cached != undefined) {
-        this.videoBlob = cached;
+        this.videoBlob = cached.url;
       } else {
         this.captureVideoThumbnail(fileUrl);
       }
@@ -239,6 +276,10 @@ export class AssetFile extends LitElement {
   }
 
   private handlePointerDown = (e: PointerEvent) => {
+    // Above the button guard on purpose. A right-click opens the context menu,
+    // and a preview left standing would cover it.
+    this.dispatchHover({ type: "press" });
+
     // Only the primary button picks things up; right-click is the context menu
     // and the middle button is a paste on some platforms.
     if (e.button !== 0) {
@@ -264,6 +305,15 @@ export class AssetFile extends LitElement {
 
   private handlePointerMove = (e: PointerEvent) => {
     this.dispatch({ type: "move", x: e.clientX, y: e.clientY, t: e.timeStamp });
+
+    if (e.pointerType === "mouse" && this.previewKind != null) {
+      this.dispatchHover({
+        type: "move",
+        x: e.clientX,
+        y: e.clientY,
+        t: e.timeStamp,
+      });
+    }
   };
 
   private handlePointerUp = (e: PointerEvent) => {
@@ -272,9 +322,12 @@ export class AssetFile extends LitElement {
 
   private handleGestureEnd = () => {
     this.dispatch({ type: "cancel" });
+    this.dispatchHover({ type: "cancel" });
   };
 
   private handleDragStart = (e: DragEvent) => {
+    this.dispatchHover({ type: "cancel" });
+
     // The gate. `draggable` is only set once the hold completes, but Chromium
     // can still begin a drag on the same frame the attribute lands, so refusing
     // here is what actually guarantees a short press never drags.
@@ -310,6 +363,156 @@ export class AssetFile extends LitElement {
         composed: true,
       }),
     );
+  }
+
+  // ----------------------------------------------------------- hover preview
+
+  /**
+   * What this tile would show, or `null` if it would show nothing.
+   *
+   * Asked before any timer is armed, so an audio or unrecognised file costs
+   * nothing at all. A waveform would be a real feature with its own scope, and
+   * a muted `<video>` for an mp3 is a black rectangle.
+   */
+  private get previewKind(): HoverPreviewSource["kind"] | null {
+    const type = mime.lookup(this.name).type;
+    if (type == "video" || type == "image" || type == "gif") {
+      return type;
+    }
+    return null;
+  }
+
+  private handlePointerEnter = (e: PointerEvent) => {
+    // A tap is not a hover, and this is the whole reason these are pointer
+    // events rather than mouse events: `mouseenter` is synthesised for touch.
+    if (e.pointerType !== "mouse" || this.previewKind == null) {
+      return;
+    }
+
+    this.dispatchHover({
+      type: "enter",
+      x: e.clientX,
+      y: e.clientY,
+      t: e.timeStamp,
+    });
+  };
+
+  private handlePointerLeave = () => {
+    this.dispatchHover({ type: "leave" });
+  };
+
+  private handleWindowCancel = () => {
+    this.dispatchHover({ type: "cancel" });
+  };
+
+  private dispatchHover(ev: HoverEv) {
+    const previous = this.hover;
+    const { state, effects } = reduceHover(previous, ev);
+    this.hover = state;
+
+    for (const effect of effects) {
+      switch (effect.type) {
+        case "open":
+          this.openPreview(effect.x, effect.y);
+          break;
+        case "move":
+          hoverPreview.move(this, effect.x, effect.y);
+          break;
+        case "close":
+          hoverPreview.close(this);
+          break;
+      }
+    }
+
+    this.armDwell(previous);
+
+    if (state.phase === "idle") {
+      this.unwatchWindow();
+    } else {
+      this.watchWindow();
+    }
+  }
+
+  /**
+   * Arm the clock whenever the dwell *starts over*, not whenever it is running.
+   *
+   * A fresh `enter` moves `enterT` forward, and a timer left from the previous
+   * one would fire early — the reducer would refuse it on its own clock check
+   * and nothing would be left to open the preview.
+   */
+  private armDwell(previous: HoverState) {
+    if (this.hover.phase !== "dwelling") {
+      this.clearDwell();
+      return;
+    }
+
+    if (
+      previous.phase === "dwelling" &&
+      previous.enterT === this.hover.enterT
+    ) {
+      return;
+    }
+
+    this.clearDwell();
+    const startedT = this.hover.enterT;
+    // Same reason `holdTimer` exists: the dwell has to be able to complete with
+    // the pointer perfectly still, so it cannot wait on a move event.
+    this.dwellTimer = window.setTimeout(() => {
+      this.dwellTimer = 0;
+      this.dispatchHover({ type: "tick", t: startedT + HOVER.DWELL_MS });
+    }, HOVER.DWELL_MS);
+  }
+
+  private clearDwell() {
+    if (this.dwellTimer !== 0) {
+      window.clearTimeout(this.dwellTimer);
+      this.dwellTimer = 0;
+    }
+  }
+
+  private openPreview(x: number, y: number) {
+    const kind = this.previewKind;
+    if (kind == null) {
+      return;
+    }
+
+    hoverPreview.open(this, { kind, url: this.fileUrl }, x, y);
+  }
+
+  /**
+   * Window-level ways a hover ends, attached only while one is in progress.
+   *
+   * At most one tile is hovered at a time, so this is at most one set of
+   * listeners — where attaching them in the constructor would put a pair on
+   * every tile in the folder. The handler is a field, created once, because
+   * `removeEventListener(this.f.bind(this))` hands over a newly bound function
+   * that was never registered and the listener outlives the app.
+   */
+  private watchWindow() {
+    if (this.watchingWindow) {
+      return;
+    }
+    this.watchingWindow = true;
+
+    // `wheel`, not `scroll`: the asset panel's scroller is the `.tab-content`
+    // container, and `scroll` does not bubble to `window`. Nothing here calls
+    // `preventDefault`, so both are passive.
+    window.addEventListener("wheel", this.handleWindowCancel, {
+      passive: true,
+    });
+    window.addEventListener("blur", this.handleWindowCancel);
+    window.addEventListener("keydown", this.handleWindowCancel);
+  }
+
+  private unwatchWindow() {
+    if (!this.watchingWindow) {
+      return;
+    }
+    this.watchingWindow = false;
+
+    window.removeEventListener("wheel", this.handleWindowCancel);
+    window.removeEventListener("blur", this.handleWindowCancel);
+    window.removeEventListener("keydown", this.handleWindowCancel);
   }
 
   async captureVideoThumbnail(url) {
@@ -358,7 +561,10 @@ export class AssetFile extends LitElement {
 
                     this.videoBlob = url;
                     this.requestUpdate();
-                    thumbnailCache.set(fileUrl, url);
+                    // `width`/`height` are the source's own, read above to size
+                    // the canvas. The hover preview opens before its `<video>`
+                    // has metadata and uses them to avoid a reflow.
+                    thumbnailCache.set(fileUrl, { url, w: width, h: height });
                     resolve(url);
                   } catch (error) {}
                 });
