@@ -90,15 +90,39 @@ export type TransformableContext = {
  * Attributes are assigned before the transform: writing `width` or `height`
  * resets the context, transform included, so setting the transform first would
  * silently lose it.
+ *
+ * **Each attribute is written only when it actually changes.** Assigning
+ * `canvas.width` reallocates and clears the backing store even when the value
+ * is identical, and the timeline canvas and the ruler both called this on every
+ * cursor tick — several megabytes of churn per frame to redraw the same size of
+ * surface. Two consequences of skipping the write, both deliberate:
+ *
+ * - **The transform is set unconditionally.** Only the resize was resetting it,
+ *   so it now has to be restated on every call. That is why this function must
+ *   be the only place a caller sizes its canvas: a caller doing
+ *   `ctx.scale(dpr, dpr)` of its own would compound once the reset stops
+ *   happening, and would look correct until the first repaint at the same size.
+ * - **The canvas is no longer cleared as a side effect.** A caller that relied
+ *   on it has to clear explicitly. `drawTimeline` already fills the whole
+ *   viewport with the background colour as its first act, so it needs nothing;
+ *   the ruler now calls `clearRect` for itself.
  */
 export function applySurface(
   canvas: SizableCanvas,
   ctx: TransformableContext,
   spec: SurfaceSpec,
 ): void {
-  canvas.width = spec.attrWidth;
-  canvas.height = spec.attrHeight;
-  canvas.style.width = spec.styleWidth;
-  canvas.style.height = spec.styleHeight;
+  if (canvas.width !== spec.attrWidth) {
+    canvas.width = spec.attrWidth;
+  }
+  if (canvas.height !== spec.attrHeight) {
+    canvas.height = spec.attrHeight;
+  }
+  if (canvas.style.width !== spec.styleWidth) {
+    canvas.style.width = spec.styleWidth;
+  }
+  if (canvas.style.height !== spec.styleHeight) {
+    canvas.style.height = spec.styleHeight;
+  }
   ctx.setTransform(...spec.transform);
 }

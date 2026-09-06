@@ -204,6 +204,32 @@ const request = {
     backgroundRemove: (path) =>
       ipcRenderer.invoke("media:backgroundRemove", path),
   },
+  /**
+   * Proxy media — small stand-ins the preview decodes instead of the originals.
+   *
+   * `generate` resolves only when the whole pass is done, which for a handful
+   * of 4K sources is minutes, so the two listeners are how a caller shows
+   * anything in the meantime. Both return an unsubscribe rather than relying on
+   * the caller to reconstruct the same function reference for `removeListener`.
+   */
+  proxy: {
+    list: () => ipcRenderer.invoke("proxy:list"),
+    stats: () => ipcRenderer.invoke("proxy:stats"),
+    inspect: (sources) => ipcRenderer.invoke("proxy:inspect", sources),
+    generate: (sources, force) =>
+      ipcRenderer.invoke("proxy:generate", sources, force),
+    clear: () => ipcRenderer.invoke("proxy:clear"),
+    onProgress: (handler) => {
+      const wrapped = (_event, payload) => handler(payload);
+      ipcRenderer.on("proxy:progress", wrapped);
+      return () => ipcRenderer.removeListener("proxy:progress", wrapped);
+    },
+    onDone: (handler) => {
+      const wrapped = (_event, payload) => handler(payload);
+      ipcRenderer.on("proxy:done", wrapped);
+      return () => ipcRenderer.removeListener("proxy:done", wrapped);
+    },
+  },
   selfhosted: {
     run: () => ipcRenderer.invoke("selfhosted:run"),
   },

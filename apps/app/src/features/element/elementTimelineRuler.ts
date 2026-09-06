@@ -12,6 +12,8 @@ import { msToPxSigned, pxToMsSigned } from "../timeline/geometry";
 import { normalizeFps, snapMsToFrame } from "../timeline/frames";
 import { planRulerTicks } from "../timeline/rulerTicks";
 import { LABEL_FONT } from "../timeline/draw";
+import { applySurface, surfaceSpec } from "../timeline/canvasSurface";
+import { count as perfCount } from "../debug/frameStats";
 
 @customElement("element-timeline-ruler")
 export class ElementTimelineRuler extends LitElement {
@@ -35,13 +37,15 @@ export class ElementTimelineRuler extends LitElement {
   @property({ attribute: false })
   timelineState: ITimelineStore = useTimelineStore.getInitialState();
 
-  @property({ attribute: false })
+  // Deliberately *not* reactive properties. Nothing in `render()` reads them —
+  // the template is a bare `<canvas>` sized from the ui store — so a Lit update
+  // could only re-emit identical markup and then repaint through `updated()`,
+  // which is the second of the two paints per cursor tick. They are read by
+  // `paintRuler`, which the store subscriber schedules directly.
   timelineRange = this.timelineState.range;
 
-  @property({ attribute: false })
   timelineScroll = this.timelineState.scroll;
 
-  @property({ attribute: false })
   timelineCursor = this.timelineState.cursor;
 
   @property({ attribute: false })
@@ -121,6 +125,10 @@ export class ElementTimelineRuler extends LitElement {
   disconnectedCallback(): void {
     this.timelineResizeObserver?.disconnect();
     this.timelineResizeObserver = undefined;
+    if (this.drawRequest) {
+      cancelAnimationFrame(this.drawRequest);
+      this.drawRequest = 0;
+    }
     super.disconnectedCallback();
   }
 
@@ -162,22 +170,55 @@ export class ElementTimelineRuler extends LitElement {
     ctx.fill();
   }
 
+  /** A pending coalesced repaint, or 0. */
+  private drawRequest = 0;
+
+  /**
+   * Ask for a repaint on the next frame.
+   *
+   * The ruler was the worst offender of the four canvases: the store
+   * subscriber drew it *and* wrote `timelineCursor`, which was a reactive
+   * property, so Lit re-rendered the host and `updated()` drew it a second
+   * time — twice per cursor tick, each one re-measuring the timeline through
+   * `querySelector` + `clientWidth`, to move a six-pixel playhead triangle.
+   * Those three fields are plain now, and this collapses whatever is left into
+   * one paint per frame.
+   */
   drawRuler() {
+    if (this.drawRequest) {
+      return;
+    }
+    this.drawRequest = requestAnimationFrame(() => {
+      this.drawRequest = 0;
+      this.paintRuler();
+    });
+  }
+
+  private paintRuler() {
+    perfCount("ruler.draw");
     const timeline = document.querySelector("element-timeline");
     if (!this.canvas || !timeline) return;
 
     this.width = timeline.clientWidth;
 
-    const ctx: any = this.canvas.getContext("2d");
+    const ctx = this.canvas.getContext("2d");
+    if (ctx == null) return;
 
-    const dpr = window.devicePixelRatio;
-    this.canvas.style.width = `${this.width}px`;
+    // Through the shared surface helper, which writes the attributes only when
+    // they actually change — assigning `canvas.width` reallocates and clears
+    // the backing store even when the value is identical, and this ran on every
+    // cursor tick. It also uses `setTransform` rather than `scale`, which is
+    // what makes skipping the reallocation safe: `scale` compounds against
+    // whatever transform survived, and only the reset hid that before.
+    applySurface(
+      this.canvas,
+      ctx,
+      surfaceSpec(this.width, this.height as number, window.devicePixelRatio),
+    );
 
-    this.canvas.width = this.width * dpr;
-    this.canvas.height = (this.height as number) * dpr;
-
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    ctx.scale(dpr, dpr);
+    // No longer implied by the resize, so it is explicit. In CSS pixels, since
+    // the transform is already applied.
+    ctx.clearRect(0, 0, this.width, this.height as number);
 
     const plan = planRulerTicks({
       range: this.timelineRange,

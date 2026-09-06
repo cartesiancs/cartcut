@@ -31,6 +31,7 @@ import { closeRecorder } from "./lib/recorder.js";
 import "./render/renderFrame.js";
 import { ipcRenderV2 } from "./render/renderFrame.js";
 import { ipcMedia } from "./ipc/ipcMedia.js";
+import { ipcProxy } from "./ipc/ipcProxy.js";
 import { runServer } from "./webServer.js";
 import { ipcSelfhosted } from "./ipc/ipcSelfhosted.js";
 import { httpFFmpegRenderV2 } from "./server/controllers/render.js";
@@ -140,6 +141,13 @@ ipcMain.handle("stream:saveBufferToAudio", ipcStream.saveBufferToAudio);
 ipcMain.handle("stream:saveBufferToTempFile", ipcStream.saveBufferToTempFile);
 
 ipcMain.handle("media:backgroundRemove", ipcMedia.backgroundRemove);
+
+// Proxy media. `generate` is long-running and reports on `proxy:progress`.
+ipcMain.handle("proxy:list", ipcProxy.list);
+ipcMain.handle("proxy:stats", ipcProxy.stats);
+ipcMain.handle("proxy:inspect", ipcProxy.inspect);
+ipcMain.handle("proxy:generate", ipcProxy.generate);
+ipcMain.handle("proxy:clear", ipcProxy.clear);
 
 ipcMain.handle("app:getResourcesPath", ipcApp.getResourcesPath);
 ipcMain.handle("app:getTempPath", ipcApp.getTempPath);

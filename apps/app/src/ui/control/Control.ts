@@ -350,6 +350,16 @@ export class Control extends LitElement {
 
         <div
           style="height: calc(100% - 2rem);"
+          class="position-relative d-flex align-items-start justify-content-center ${this
+            .nowActivePanel == "proxy"
+            ? ""
+            : "d-none"}"
+        >
+          <proxy-panel></proxy-panel>
+        </div>
+
+        <div
+          style="height: calc(100% - 2rem);"
           class="position-relative d-flex align-items-center justify-content-center ${this
             .nowActivePanel == "automaticCaption"
             ? ""

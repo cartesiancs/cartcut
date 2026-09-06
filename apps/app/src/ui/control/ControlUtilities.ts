@@ -80,6 +80,16 @@ export class ControlText extends LitElement {
 
         <div
           class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
+          @click=${() => this._handleClickPanel("proxy")}
+        >
+          <span class="material-symbols-outlined icon-lg align-self-center">
+            speed
+          </span>
+          <b class="align-self-center text-light text-center">Proxy Media</b>
+        </div>
+
+        <div
+          class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
           @click=${() => this._handleClickPanel("ytDownload")}
         >
           <span class="material-symbols-outlined icon-lg align-self-center">

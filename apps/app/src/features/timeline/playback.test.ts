@@ -7,6 +7,7 @@ import {
   type MediaHandle,
 } from "./playback";
 import { splitAt } from "./clipEdit";
+import { sourceTimeAt } from "./geometry";
 import { moveClip } from "./clipOps";
 import {
   SCHEMA_VERSION,
@@ -568,6 +569,292 @@ describe("syncPlayback", () => {
       other: imageElement({ trackId: "v1", startTime: 0, duration: 1000 }),
     });
     expect(() => syncPlayback(two, 500, true, { a })).not.toThrow();
+  });
+});
+
+/**
+ * A clip parked off the playhead must be seeked once, not once per repaint.
+ *
+ * This is modelled on the project that exposed it: twelve video clips, at most
+ * two of them under the playhead at a time, so ten handles sat parked while the
+ * preview repainted sixty times a second. Because the paused tolerance is zero
+ * and a seek lands on a frame boundary rather than on the millisecond asked
+ * for, every one of those repaints re-issued an identical seek — six hundred
+ * decoder flushes a second, against 3600x2338 120fps H.264 whose keyframes were
+ * up to eight seconds apart.
+ *
+ * The fake below reproduces the mechanism exactly: it snaps `currentTime` to a
+ * frame grid, which is what a real `<video>` does and what makes comparing
+ * `currentTime` to the request a permanently losing test.
+ */
+describe("a parked clip is not re-seeked on every repaint", () => {
+  /** A handle whose seeks land on a frame boundary, as a real one's do. */
+  function frameSnappingVideo(sourceFps: number) {
+    const step = 1 / sourceFps;
+    const handle = fakeVideo();
+    let seeks = 0;
+    return {
+      handle: new Proxy(handle, {
+        set(target, prop, value) {
+          if (prop === "currentTime") {
+            seeks++;
+            // Land on the frame containing the requested instant.
+            (target as any).currentTime = Math.floor(value / step) * step;
+            return true;
+          }
+          (target as any)[prop] = value;
+          return true;
+        },
+      }) as MediaHandle,
+      seekCount: () => seeks,
+    };
+  }
+
+  it("re-seeks on every repaint without the request memory", () => {
+    // The behaviour as it was: `applyIntent` given no `lastRequestedSec`.
+    const { handle, seekCount } = frameSnappingVideo(120);
+    const element = clip({ trim: { startTime: 18_933, endTime: 33_117 } });
+
+    for (let i = 0; i < 60; i++) {
+      // Cursor well before the clip, so it is parked at its trim-in point.
+      applyIntent(handle, intentFor(element, 0, true));
+    }
+
+    expect(seekCount()).toBe(60);
+  });
+
+  it("seeks once when the caller remembers the request", () => {
+    const { handle, seekCount } = frameSnappingVideo(120);
+    const element = clip({ trim: { startTime: 18_933, endTime: 33_117 } });
+    const doc1 = doc({ a: element });
+    const lastRequests = new Map<string, number>();
+
+    for (let i = 0; i < 60; i++) {
+      syncPlayback(doc1, 0, true, { a: handle }, undefined, lastRequests);
+    }
+
+    expect(seekCount()).toBe(1);
+  });
+
+  it("still places the handle exactly when the target moves", () => {
+    const { handle, seekCount } = frameSnappingVideo(120);
+    const element = clip({ trim: { startTime: 18_933, endTime: 33_117 } });
+    const doc1 = doc({ a: element });
+    const lastRequests = new Map<string, number>();
+
+    // Parked before the clip.
+    syncPlayback(doc1, 0, false, { a: handle }, undefined, lastRequests);
+    // Scrubbing inside it: a different target on every tick, so every one of
+    // these must place the handle.
+    for (const cursor of [5100, 5200, 5300, 5400]) {
+      syncPlayback(doc1, cursor, false, { a: handle }, undefined, lastRequests);
+    }
+
+    expect(seekCount()).toBe(5);
+  });
+
+  it("re-places a handle that was released and reloaded", () => {
+    // The map is the caller's, and a fresh handle starts at zero — so the
+    // caller must forget the id. `loadedAssetStore` does this on load and on
+    // release; this pins the consequence of failing to.
+    const element = clip({ trim: { startTime: 18_933, endTime: 33_117 } });
+    const doc1 = doc({ a: element });
+    const lastRequests = new Map<string, number>();
+
+    const first = frameSnappingVideo(120);
+    syncPlayback(doc1, 0, false, { a: first.handle }, undefined, lastRequests);
+    expect(first.seekCount()).toBe(1);
+
+    const replacement = frameSnappingVideo(120);
+    lastRequests.delete("a");
+    syncPlayback(
+      doc1,
+      0,
+      false,
+      { a: replacement.handle },
+      undefined,
+      lastRequests,
+    );
+    expect(replacement.seekCount()).toBe(1);
+  });
+
+  /**
+   * The other half, and the one that actually stalled real footage.
+   *
+   * A clip the playhead has just entered is `playing` in intent but still
+   * `paused` in fact, so it takes the exact tolerance — and because the cursor
+   * is moving its target is a *different* exact value on every repaint, which
+   * `lastRequestedSec` cannot suppress. Each seek flushed the decoder still
+   * working on the previous one, so the handle never buffered, never
+   * un-paused, and was seeked forever. Observed directly on 3600x2338 120fps
+   * footage: two handles pinned at `readyState 1` — metadata and no frames —
+   * taking sixty seeks a second each for as long as playback ran.
+   */
+  describe("a seek already in flight", () => {
+    /**
+     * A handle that cannot start.
+     *
+     * `play()` is a no-op, which is the whole point: a real element whose
+     * decoder is starved stays `paused` however often it is asked to roll, and
+     * that is what puts it on the exact-placement branch every frame.
+     */
+    function stalledVideo(reportsSeeking: boolean) {
+      let seeks = 0;
+      const handle: any = {
+        currentTime: 0,
+        seeking: reportsSeeking ? false : undefined,
+        muted: false,
+        volume: 1,
+        playbackRate: 1,
+        paused: true,
+        play() {},
+        pause() {},
+      };
+      return {
+        handle: new Proxy(handle, {
+          set(target, prop, value) {
+            if (prop === "currentTime") {
+              seeks++;
+              if (reportsSeeking) target.seeking = true;
+            }
+            target[prop] = value;
+            return true;
+          },
+        }) as MediaHandle,
+        raw: handle,
+        seekCount: () => seeks,
+      };
+    }
+
+    /** In its window from 0, so a moving cursor gives a moving target. */
+    const entering = () => doc({ a: clip({ startTime: 0 }) });
+
+    /**
+     * The headline case: a decoder that cannot keep up is placed once and then
+     * left to work, rather than being re-placed as fast as seeks can land.
+     */
+    it("places a stalled handle once and then lets it be", () => {
+      const d = entering();
+      const v = stalledVideo(true);
+      const lastRequests = new Map<string, number>();
+
+      for (let cursor = 100; cursor < 1700; cursor += 16) {
+        syncPlayback(d, cursor, true, { a: v.handle }, undefined, lastRequests);
+      }
+
+      // 1.6s of cursor travel is well inside PLAYING_DRIFT_TOLERANCE_SEC, so
+      // after the entry placement there is nothing worth correcting.
+      expect(v.seekCount()).toBe(1);
+    });
+
+    it("still corrects a handle that has fallen genuinely far behind", () => {
+      const d = entering();
+      const v = stalledVideo(true);
+      const lastRequests = new Map<string, number>();
+
+      syncPlayback(d, 100, true, { a: v.handle }, undefined, lastRequests);
+      expect(v.seekCount()).toBe(1);
+
+      // A jump — clicking the ruler mid-playback — is not drift, and must move
+      // the handle even though it is nominally rolling.
+      v.raw.seeking = false;
+      syncPlayback(d, 3500, true, { a: v.handle }, undefined, lastRequests);
+      expect(v.seekCount()).toBe(2);
+    });
+
+    /**
+     * Scrubbing keeps the exact tolerance, so it is the case where seeks can
+     * still pile up — a pointer moves faster than a 4K seek lands.
+     */
+    it("does not queue a second scrub seek on top of one in flight", () => {
+      const d = entering();
+      const v = stalledVideo(true);
+      const lastRequests = new Map<string, number>();
+
+      // isPlaying false: every one of these is an exact placement.
+      for (let cursor = 100; cursor < 900; cursor += 16) {
+        syncPlayback(d, cursor, false, { a: v.handle }, undefined, lastRequests);
+      }
+
+      expect(v.seekCount()).toBe(1);
+    });
+
+    it("scrubs again as soon as the previous seek lands", () => {
+      const d = entering();
+      const v = stalledVideo(true);
+      const lastRequests = new Map<string, number>();
+
+      syncPlayback(d, 100, false, { a: v.handle }, undefined, lastRequests);
+      expect(v.seekCount()).toBe(1);
+
+      syncPlayback(d, 200, false, { a: v.handle }, undefined, lastRequests);
+      expect(v.seekCount()).toBe(1);
+
+      v.raw.seeking = false;
+      syncPlayback(d, 300, false, { a: v.handle }, undefined, lastRequests);
+      expect(v.seekCount()).toBe(2);
+    });
+
+    it("scrubs every frame when the handle cannot report seeking", () => {
+      // The degraded path: a handle with no `seeking` property is placed on
+      // each move, which is what the code did everywhere before.
+      const d = entering();
+      const v = stalledVideo(false);
+      const lastRequests = new Map<string, number>();
+
+      let ticks = 0;
+      for (let cursor = 100; cursor < 900; cursor += 16) {
+        ticks++;
+        syncPlayback(d, cursor, false, { a: v.handle }, undefined, lastRequests);
+      }
+
+      expect(v.seekCount()).toBe(ticks);
+    });
+
+    // The guard must not change the case that was already correct: a handle
+    // that is actually rolling is governed by the generous tolerance.
+    it("leaves a rolling handle alone", () => {
+      const d = entering();
+      const element = clip({ startTime: 0 });
+      const handle = fakeVideo({ seeking: false });
+      const lastRequests = new Map<string, number>();
+
+      // Start it: one exact placement, then it rolls.
+      syncPlayback(d, 100, true, { a: handle }, undefined, lastRequests);
+      expect(handle.paused).toBe(false);
+
+      let seeks = 0;
+      const counting = new Proxy(handle, {
+        set(t, p, val) {
+          if (p === "currentTime") seeks++;
+          (t as any)[p] = val;
+          return true;
+        },
+      }) as MediaHandle;
+
+      for (let cursor = 116; cursor < 1700; cursor += 16) {
+        // The handle keeps up on its own, a hair behind — the healthy case the
+        // 250ms tolerance exists for.
+        (handle as any).currentTime = sourceTimeAt(element, cursor) / 1000 - 0.03;
+        syncPlayback(d, cursor, true, { a: counting }, undefined, lastRequests);
+      }
+
+      expect(seeks).toBe(0);
+    });
+  });
+
+  it("forgets a handle whose element has gone", () => {
+    const element = clip();
+    const lastRequests = new Map<string, number>([["gone", 1.5]]);
+    syncPlayback(
+      doc({ a: element }),
+      0,
+      false,
+      { gone: fakeVideo() },
+      undefined,
+      lastRequests,
+    );
+    expect(lastRequests.has("gone")).toBe(false);
   });
 });
 

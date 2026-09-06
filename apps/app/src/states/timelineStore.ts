@@ -16,6 +16,7 @@ import {
   normalizeAnimations,
   rebakeAnimations,
 } from "../features/animation/keyframeOps";
+import { count as perfCount } from "../features/debug/frameStats";
 
 /**
  * The editor's modal tool.
@@ -227,8 +228,11 @@ export const useTimelineStore = createStore<ITimelineStore>((set, get) => ({
   rollbackTimelineFromCheckPoint: (cursor: number) =>
     set((state) => {
       const target = state.history.historyNow + cursor;
+      // Same rule as `withCheckpoint`: `state` by identity so an undo past the
+      // start of history — which the toolbar and Cmd-Z can both ask for
+      // repeatedly — notifies nobody.
       if (target < 0 || target >= state.history.timelineHistory.length) {
-        return {};
+        return state;
       }
 
       const entry = state.history.timelineHistory[target];
@@ -281,8 +285,14 @@ export const useTimelineStore = createStore<ITimelineStore>((set, get) => ({
     set((state) => {
       const before = documentOf(state);
       const after = fn(before);
+      // `state` itself, not `{}`. A pure op that declines returns its input by
+      // identity, and this is where that becomes "the edit cost the user
+      // nothing" — zustand compares the updater's result with `Object.is` and
+      // does not notify when they match, so a declined split records no history
+      // *and* repaints nothing. `{}` would have been a fresh object, i.e. a
+      // full repaint of every subscriber for an edit that did not happen.
       if (after === before) {
-        return {};
+        return state;
       }
 
       const normalized = normalizeDocument(after);
@@ -313,16 +323,46 @@ export const useTimelineStore = createStore<ITimelineStore>((set, get) => ({
           ? 0
           : (state.cursor / 5) * (range / 4) - state.canvasWidth / 2,
     })),
-  setScroll: (scroll: number) => set(() => ({ scroll: scroll })),
+  setScroll: (scroll: number) => {
+    if (get().scroll === scroll) {
+      return;
+    }
+    set({ scroll });
+  },
   // Guarded against a write of the value already held. Playback quantizes the
   // cursor to the project's frame grid, so on a display faster than the project
   // — a 120Hz panel showing a 30fps timeline — three out of every four animation
   // frames ask for the instant that is already set. Without this, each of them
   // wakes every subscriber to redraw a picture that cannot have changed.
-  setCursor: (cursor: number) =>
-    set((state) => (state.cursor === cursor ? {} : { cursor })),
-  setCanvasWidth: (canvasWidth: number) =>
-    set(() => ({ canvasWidth: canvasWidth })),
+  //
+  // The guard has to run *before* `set`, and this is the part that is easy to
+  // get wrong: it used to be `set((state) => state.cursor === cursor ? {} : …)`,
+  // which does not work. Zustand skips its listeners only when the updater's
+  // result is `Object.is` the current state; `{}` is a fresh object, so it
+  // merges into a new state and notifies every subscriber anyway. The quantizer
+  // above was therefore buying nothing at all, and the whole app repainted at
+  // the display's refresh rate rather than the project's frame rate.
+  // `selectionStore` states the same rule at its own writers.
+  setCursor: (cursor: number) => {
+    perfCount("store.setCursor");
+    if (get().cursor === cursor) {
+      return;
+    }
+    perfCount("store.setCursor:changed");
+    set({ cursor });
+  },
+  // Guarded for the same reason as `setCursor`, and it turned out to matter as
+  // much: `elementTimelineCanvas.render()` calls this with the measured width
+  // on every Lit update, which during playback is every cursor tick. The width
+  // is the same number every time — the window is not being resized — so this
+  // was a second full notification of every subscriber per frame, doubling the
+  // wake-up rate that fixing `setCursor` had just halved.
+  setCanvasWidth: (canvasWidth: number) => {
+    if (get().canvasWidth === canvasWidth) {
+      return;
+    }
+    set({ canvasWidth });
+  },
 
   increaseCursor: (dt: number) =>
     set((state) => ({ cursor: state.cursor + dt })),

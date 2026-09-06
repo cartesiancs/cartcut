@@ -10,6 +10,7 @@ import { isCollapsedHandle } from "../animation/handleBounds";
 import { lanesOf, type Keyframe, type Lane } from "../animation/keyframes";
 import type { TimelineDocument } from "../timeline/tracks";
 import { isTypingEvent } from "../../utils/typingTarget";
+import { count as perfCount } from "../debug/frameStats";
 import {
   clampToClip,
   hitTest,
@@ -436,10 +437,31 @@ export class KeyframeEditor extends LitElement {
    */
   private surface = { width: 0, height: 0 };
 
+  /** A pending coalesced repaint, or 0. */
+  private drawRequest = 0;
+
+  /**
+   * Ask for a repaint on the next frame.
+   *
+   * The panel is usually closed, and `paintCanvas`'s `isShow` guard already
+   * made that case cheap. This is for when it is open: the store subscriber
+   * fires on every cursor tick, and the curve editor is a full-width canvas.
+   */
   private drawCanvas() {
+    if (this.drawRequest) {
+      return;
+    }
+    this.drawRequest = requestAnimationFrame(() => {
+      this.drawRequest = 0;
+      this.paintCanvas();
+    });
+  }
+
+  private paintCanvas() {
     if (!this.isShow || !this.canvas) {
       return false;
     }
+    perfCount("keyframe.draw");
 
     const ctx = this.canvas.getContext("2d");
     const timeline = document.querySelector("element-timeline");
@@ -818,6 +840,10 @@ export class KeyframeEditor extends LitElement {
     window.removeEventListener("keydown", this.boundKeydown);
     window.removeEventListener("mouseup", this._handleMouseUp);
     window.removeEventListener("blur", this.handleCancelDrag);
+    if (this.drawRequest) {
+      cancelAnimationFrame(this.drawRequest);
+      this.drawRequest = 0;
+    }
     super.disconnectedCallback();
   }
 }

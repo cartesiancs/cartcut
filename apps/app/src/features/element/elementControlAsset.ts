@@ -22,8 +22,19 @@ export class ElementControlAsset extends LitElement {
   @property()
   timeline = this.timelineState.timeline;
 
+  /** Undoes the store subscription. See `disconnectedCallback`. */
+  private unsubscribeTimeline?: () => void;
+
   createRenderRoot() {
-    useTimelineStore.subscribe((state) => {
+    this.unsubscribeTimeline = useTimelineStore.subscribe((state) => {
+      // Guarded on identity, because `timeline` is a reactive property and
+      // `render()` reads it through `templateAudio`. There is one of these
+      // elements per clip, so an unguarded assignment meant a Lit update per
+      // clip on every store write — including the cursor ticks, which cannot
+      // change the element map at all.
+      if (state.timeline === this.timeline) {
+        return;
+      }
       this.timeline = state.timeline;
     });
 
@@ -31,6 +42,21 @@ export class ElementControlAsset extends LitElement {
     this.style.display = "none";
 
     return this;
+  }
+
+  /**
+   * Release the store subscription.
+   *
+   * There was none, and this element is created per clip and destroyed with it,
+   * so the listener set grew for the life of the session — deleting a clip left
+   * its listener behind, still holding the element, still running on every
+   * store write. `element-control` re-renders the whole list on any timeline
+   * change, so the churn was continuous.
+   */
+  disconnectedCallback(): void {
+    this.unsubscribeTimeline?.();
+    this.unsubscribeTimeline = undefined;
+    super.disconnectedCallback();
   }
 
   @property()

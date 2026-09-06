@@ -10,6 +10,10 @@ import {
 } from "../../@types/timeline";
 import { VideoFilterPipeline } from "../renderer/filter/videoPipeline";
 import { isElementVisibleAtTime } from "../element/time";
+import { decodersFor } from "./decoderWindow";
+import { playbackPathFor } from "../../states/proxyStore";
+import { toLocalPath } from "../element/mediaProbe";
+import { count as perfCount, gauge as perfGauge } from "../debug/frameStats";
 import { sourceTimeAt, speedOf } from "../timeline/geometry";
 import { frameSampleMs } from "../timeline/frames";
 import {
@@ -39,6 +43,15 @@ export type VideoMetadataPerElement = {
   elementId: string;
   /** The source this was decoded from, so a changed path can be detected. */
   localpath: string;
+  /**
+   * The file this handle actually opened — the proxy when one is in use.
+   *
+   * Distinct from `localpath`, which stays the element's own path so every
+   * other consumer is unaffected. Compared on each reconcile so that toggling
+   * proxies, or a proxy finishing generation mid-session, rebuilds the handles
+   * that are now pointing at the wrong rendition.
+   */
+  playbackPath: string;
   path: string;
   object: HTMLVideoElement;
 };
@@ -120,8 +133,17 @@ export interface ILoadedAssetStore {
   loadAssetsNeededAtTime: (t: number, timeline: Timeline) => Promise<boolean>;
   _loadAssetsWithFilter: (
     timeline: Timeline,
-    filter: ((element: VisualTimelineElement) => boolean) | null,
+    filter:
+      | ((element: VisualTimelineElement, elementId: string) => boolean)
+      | null,
     options?: AssetLoadOptions,
+    /**
+     * The playhead, when the caller wants distant decoders released too.
+     *
+     * Absent for export, which loads the whole timeline deliberately and must
+     * never have a handle taken away from under its frame loop.
+     */
+    cursorMs?: number,
   ) => Promise<boolean>;
 
   /**
@@ -157,12 +179,29 @@ export interface ILoadedAssetStore {
    */
   _awaitedSeeks: Map<string, number>;
 
-  /** Drop videos whose element is gone or whose source path changed. */
-  releaseUnusedVideos: (timeline: Timeline) => void;
+  /**
+   * elementId → the source time this handle was last *asked* to go to.
+   *
+   * Distinct from `_awaitedSeeks`, which records what a repaint is waiting on.
+   * This is what stops the seek being issued in the first place — see
+   * `playback.ts#applyIntent`. A handle that is parked off the playhead has a
+   * constant target, so after the first placement every later reconcile finds
+   * the same number here and does nothing.
+   */
+  _lastSeekRequests: Map<string, number>;
+
+  /**
+   * Drop videos whose element is gone or whose source path changed.
+   *
+   * With `cursorMs`, also drop those that have drifted outside
+   * `decoderWindow.releaseWindow` — the preview passes it, export does not.
+   */
+  releaseUnusedVideos: (timeline: Timeline, cursorMs?: number) => void;
 }
 
 export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
   _awaitedSeeks: new Map<string, number>(),
+  _lastSeekRequests: new Map<string, number>(),
   _loadedImage: {},
   _loadingImage: new Set<string>(),
   _loadedGif: {},
@@ -238,15 +277,35 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
       const video = document.createElement("video");
       video.playbackRate = videoElement.speed;
 
-      video.src = videoElement.localpath;
+      // **The one place a proxy is substituted for its source.**
+      //
+      // Everything downstream — the compositor, `syncPlayback`, the hit tests,
+      // the MCP tools — goes on reading `element.localpath` and never learns
+      // that a smaller file is what actually decoded, which is exactly the
+      // property that let this feature be added without touching any of them.
+      // Export does not come through here at all: it drives handles built by
+      // `loadEntireTimeline` and reads `localpath` directly, so a delivered
+      // file is always cut from the originals.
+      const playbackPath = toLocalPath(playbackPathFor(videoElement.localpath));
+      video.src = playbackPath;
 
       video.addEventListener(
         "loadeddata",
         () => {
           video.currentTime = 0;
+          // A brand new handle sits at zero whatever the old one was doing, so
+          // any remembered request would suppress its first real placement.
+          this._lastSeekRequests.delete(elementId);
+          this._awaitedSeeks.delete(elementId);
           this._loadedElementVideo[elementId] = {
             elementId,
             localpath: videoElement.localpath,
+            // What this handle is actually decoding. `localpath` above stays
+            // the element's own, so the "did the clip change file?" test keeps
+            // working; this is the separate question "is this handle still the
+            // right *rendition*?", which a proxy toggle changes without the
+            // element changing at all.
+            playbackPath,
             path: getPath(videoElement.localpath),
             object: video,
           };
@@ -292,19 +351,32 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
     await this._loadAssetsWithFilter(timeline, null, options);
   },
   async loadAssetsNeededAtTime(t: number, timeline: Timeline) {
-    return this._loadAssetsWithFilter(timeline, (element) => {
-      return isElementVisibleAtTime(t, timeline, element);
-    });
+    // Video answers to the decoder window rather than to visibility, for the
+    // two reasons `decoderWindow.ts` sets out: a clip that only starts decoding
+    // when the playhead reaches it stutters at the cut, and a clip that keeps
+    // its decoder forever is one of seventy-five a page is allowed. Everything
+    // else — images, gifs — is cheap and keeps the visibility test it had.
+    const { load } = decodersFor(timeline, t);
+    return this._loadAssetsWithFilter(
+      timeline,
+      (element, elementId) =>
+        element.filetype === "video"
+          ? load.has(elementId) || isElementVisibleAtTime(t, timeline, element)
+          : isElementVisibleAtTime(t, timeline, element),
+      undefined,
+      t,
+    );
   },
-  async _loadAssetsWithFilter(timeline, filter, options) {
+  async _loadAssetsWithFilter(timeline, filter, options, cursorMs) {
     // Drop handles for clips that are gone or now point at another file, so
-    // the cache cannot outlive the timeline it was built from.
-    get().releaseUnusedVideos(timeline);
+    // the cache cannot outlive the timeline it was built from — and, when a
+    // cursor is supplied, for clips that have drifted out of reach of it.
+    get().releaseUnusedVideos(timeline, cursorMs);
 
     const idElementPairs = Object.entries(timeline);
     const visibleElements = idElementPairs.filter(
       (x): x is [string, VisualTimelineElement] => {
-        return isVisualTimelineElement(x[1]) && (filter?.(x[1]) ?? true);
+        return isVisualTimelineElement(x[1]) && (filter?.(x[1], x[0]) ?? true);
       },
     );
 
@@ -419,6 +491,12 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
 
             video.playbackRate = speedOf(element);
 
+            // Export drives the handles itself rather than through
+            // `syncPlayback`, so it has to keep the request record honest — a
+            // stale entry would suppress the preview's next placement when the
+            // export finishes and the user scrubs.
+            get()._lastSeekRequests.set(meta.elementId, want);
+
             // Assigning the position it already holds fires no `seeked`, so
             // waiting for one would stall the export's frame loop forever.
             if (Math.abs(video.currentTime - want) < 1e-3) {
@@ -450,7 +528,17 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
       cursorMs,
       isPlaying,
       handles,
+      undefined,
+      get()._lastSeekRequests,
     );
+
+    // The two numbers that say whether the media layer is healthy: how many
+    // decoders are alive, and how many seeks a frame costs. A parked clip
+    // should contribute nothing to the second.
+    perfGauge("media.decoders", Object.keys(state._loadedElementVideo).length);
+    for (let i = 0; i < seeks.length; i++) {
+      perfCount("media.seek");
+    }
 
     // The seeked frames are not decoded yet. A painter that stops here shows
     // the frame from before the seek — which for a clip that was just added is
@@ -462,7 +550,7 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
     return seeks;
   },
 
-  releaseUnusedVideos(timeline) {
+  releaseUnusedVideos(timeline, cursorMs) {
     const loadedAudio = get()._loadedElementAudio;
     for (const [elementId, audio] of Object.entries(loadedAudio)) {
       const element = timeline[elementId];
@@ -474,16 +562,29 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
       audio.removeAttribute("src");
       delete loadedAudio[elementId];
       get()._loadingElementAudio.delete(elementId);
+      // The next handle for this id starts at zero, so a remembered request
+      // from the old one would suppress its first placement.
+      get()._lastSeekRequests.delete(elementId);
+      get()._awaitedSeeks.delete(elementId);
     }
 
     const loaded = get()._loadedElementVideo;
+    // Only computed when a cursor was supplied; export passes none and must
+    // keep every handle it has been given.
+    const keep =
+      cursorMs == null ? null : decodersFor(timeline, cursorMs).keep;
 
     for (const [elementId, meta] of Object.entries(loaded)) {
       const element = timeline[elementId];
       const stillValid =
         element != null &&
         element.filetype === "video" &&
-        element.localpath === meta.localpath;
+        element.localpath === meta.localpath &&
+        // A proxy toggle changes nothing about the element, so this is the only
+        // thing that notices it. Without it, turning proxies on would take
+        // effect only for clips that happened to be loaded afterwards.
+        meta.playbackPath === toLocalPath(playbackPathFor(element.localpath)) &&
+        (keep == null || keep.has(elementId));
 
       if (stillValid) {
         continue;
@@ -497,6 +598,8 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
       meta.object.load();
       delete loaded[elementId];
       get()._loadingElementVideo.delete(elementId);
+      get()._lastSeekRequests.delete(elementId);
+      get()._awaitedSeeks.delete(elementId);
     }
   },
 }));

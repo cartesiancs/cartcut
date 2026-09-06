@@ -143,6 +143,109 @@ describe("applySurface", () => {
     expect(order.indexOf("setTransform")).toBeGreaterThan(order.indexOf("width"));
     expect(order.indexOf("setTransform")).toBeGreaterThan(order.indexOf("height"));
   });
+
+  /**
+   * A canvas that reports which attributes were actually assigned.
+   *
+   * The distinction matters because assigning `canvas.width` is not a no-op
+   * when the value is unchanged: the browser reallocates and clears the backing
+   * store either way. The timeline canvas and the ruler both call `applySurface`
+   * on every repaint, which during playback is every cursor tick.
+   */
+  function recordingCanvas() {
+    const writes: string[] = [];
+    let w = 0;
+    let h = 0;
+    let sw = "";
+    let sh = "";
+    return {
+      writes,
+      canvas: {
+        get width() {
+          return w;
+        },
+        set width(v: number) {
+          writes.push("width");
+          w = v;
+        },
+        get height() {
+          return h;
+        },
+        set height(v: number) {
+          writes.push("height");
+          h = v;
+        },
+        style: {
+          get width() {
+            return sw;
+          },
+          set width(v: string) {
+            writes.push("style.width");
+            sw = v;
+          },
+          get height() {
+            return sh;
+          },
+          set height(v: string) {
+            writes.push("style.height");
+            sh = v;
+          },
+        },
+      } as SizableCanvas,
+    };
+  }
+
+  it("writes nothing but the transform when the size is unchanged", () => {
+    const { writes, canvas } = recordingCanvas();
+    const ctx = fakeContext();
+    const spec = surfaceSpec(800, 400, 2);
+
+    applySurface(canvas, ctx, spec);
+    expect(writes).toEqual(["width", "height", "style.width", "style.height"]);
+
+    writes.length = 0;
+    applySurface(canvas, ctx, spec);
+
+    // The whole point: no reallocation of a 1600x800 backing store to replace
+    // it with a 1600x800 backing store.
+    expect(writes).toEqual([]);
+    // The transform is still restated, because skipping the resize also skips
+    // the context reset that used to be what made it necessary.
+    expect(ctx.calls).toEqual([
+      [2, 0, 0, 2, 0, 0],
+      [2, 0, 0, 2, 0, 0],
+    ]);
+  });
+
+  it("writes only the attributes that actually changed", () => {
+    const { writes, canvas } = recordingCanvas();
+    const ctx = fakeContext();
+
+    applySurface(canvas, ctx, surfaceSpec(800, 400, 2));
+    writes.length = 0;
+
+    // Same CSS box, new device pixel ratio: the backing store changes and the
+    // style does not.
+    applySurface(canvas, ctx, surfaceSpec(800, 400, 1));
+
+    expect(writes).toEqual(["width", "height"]);
+    expect(canvas.width).toBe(800);
+    expect(canvas.style.width).toBe("800px");
+  });
+
+  it("still resizes when the layout box changes", () => {
+    const { writes, canvas } = recordingCanvas();
+    const ctx = fakeContext();
+
+    applySurface(canvas, ctx, surfaceSpec(800, 400, 2));
+    writes.length = 0;
+
+    applySurface(canvas, ctx, surfaceSpec(1000, 400, 2));
+
+    expect(writes).toEqual(["width", "style.width"]);
+    expect(canvas.width).toBe(2000);
+    expect(canvas.style.width).toBe("1000px");
+  });
 });
 
 /**

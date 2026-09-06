@@ -20,6 +20,7 @@ import { affectsTextBlock, withFittedTextHeights } from "./textFit";
 import { setIn } from "../../utils/immutable";
 import { cursorAtElapsed } from "../timeline/playbackClock";
 import { projectFps } from "../editor/frameRate";
+import { mark as perfMark } from "../debug/frameStats";
 
 @customElement("element-control")
 export class ElementControl extends LitElement {
@@ -811,6 +812,7 @@ export class ElementControl extends LitElement {
   }
 
   step() {
+    perfMark("playback.step");
     const elapsed = Date.now() - this.startTime;
 
     let nowTimelineRange = Number(

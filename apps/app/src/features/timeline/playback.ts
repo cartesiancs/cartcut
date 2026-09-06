@@ -38,6 +38,14 @@ import type { TimelineDocument } from "./tracks";
 /** Everything this layer touches on a `<video>` or `<audio>`. */
 export interface MediaHandle {
   currentTime: number;
+  /**
+   * Whether a seek is still in flight.
+   *
+   * Optional because a plain object satisfies this interface in the suites, and
+   * absent reads as "not seeking" — which is what a test double that never
+   * seeks asynchronously actually is.
+   */
+  readonly seeking?: boolean;
   muted: boolean;
   /**
    * Linear gain, 0..1 — the unit the DOM uses, **not** the element's
@@ -149,6 +157,14 @@ export const PLAYING_DRIFT_TOLERANCE_SEC = 0.25;
  * Scrubbing must move the frame immediately, and a clip being entered has to
  * start on its first frame rather than wherever it was parked, so both are
  * placed exactly.
+ *
+ * This stays **zero**, and the redundant-seek problem it used to cause is
+ * solved by remembering the request instead of by widening the window — see
+ * `applyIntent`'s `lastRequestedSec`. Widening it would have been the obvious
+ * fix and is the wrong one: the residual is up to one *source* frame, which is
+ * 8ms in a 120fps screen recording and 42ms in 24fps footage, so any constant
+ * big enough to work on the second is big enough to show the wrong frame on the
+ * first. This layer has no way to learn a source's frame rate.
  */
 export const DRIFT_TOLERANCE_SEC = 0;
 
@@ -262,6 +278,24 @@ export function applyIntent(
   handle: MediaHandle,
   intent: PlaybackIntent,
   playingToleranceSec: number = PLAYING_DRIFT_TOLERANCE_SEC,
+  /**
+   * The source time this handle was last *asked* for, if the caller remembers.
+   *
+   * Not the same as `handle.currentTime`, and the difference is the whole point.
+   * A seek lands on a frame boundary, so a handle asked for 18.933s reports
+   * back the timestamp of the frame containing it — 18.925s in a 120fps source.
+   * Comparing the two then finds a residual of one source frame, forever, and
+   * with a tolerance of zero that re-issues the identical seek on every single
+   * repaint. Measured on a real project: twelve video clips, ten of them parked
+   * off the playhead, sixty repaints a second — some six hundred redundant
+   * seeks per second, each one flushing a decoder that then had to decode
+   * forward from a keyframe up to eight seconds back.
+   *
+   * Comparing the *request* instead is exact and needs no knowledge of the
+   * source's frame rate. Only consulted for a handle that is paused, since a
+   * rolling one moves on its own and the generous tolerance governs it.
+   */
+  lastRequestedSec?: number,
 ): boolean {
   // Only write when the value actually changes. This runs on every animation
   // frame for every loaded clip, and a media element treats each assignment as
@@ -280,11 +314,59 @@ export function applyIntent(
 
   // A handle already rolling gets the generous window; one that is parked,
   // scrubbing, or about to enter its clip is placed exactly.
-  const rolling = intent.playing && !handle.paused;
+  // "Rolling" is about what this handle has been *asked* to do, not about
+  // whether it has managed it yet.
+  //
+  // It used to be `intent.playing && !handle.paused`, which reads correctly and
+  // behaves badly on footage the decoder cannot keep up with. Such a handle
+  // stays `paused` — `play()` on a starved element does not take — so it took
+  // the exact branch forever, and its target moves with the cursor, so it was
+  // re-placed as fast as seeks could land. All of its decode budget went on
+  // seeking and none on playing, which is self-sustaining: the picture it was
+  // being asked for kept moving away from the one it was decoding.
+  //
+  // `lastRequestedSec != null` is the record that this handle has been placed
+  // at least once since it was loaded, and placement while parked leaves it at
+  // the clip's trim-in point — which is exactly where entering the clip should
+  // start. So one exact placement, then leave it alone and let the generous
+  // tolerance govern, which is ffplay's rule too: do not correct small drift,
+  // because the correction costs more than the drift.
+  const placed = lastRequestedSec != null;
+  const rolling = intent.playing && (!handle.paused || placed);
   const tolerance = rolling ? playingToleranceSec : DRIFT_TOLERANCE_SEC;
 
+  // A paused handle cannot have moved since we placed it, so asking again for
+  // the position we already asked for can only cost a decoder flush. The moment
+  // the target actually changes — a scrub, or the playhead entering the clip —
+  // this is false and the exact placement above applies as it always did.
+  const alreadyThere =
+    handle.paused &&
+    lastRequestedSec != null &&
+    lastRequestedSec === intent.sourceTimeSec;
+
+  // **Never interrupt a seek that has not landed.**
+  //
+  // This is the case `alreadyThere` cannot cover, and on heavy footage it was
+  // the worse of the two. A clip the playhead has just entered is `playing` in
+  // intent but still `paused` in fact, so it takes the exact tolerance — and
+  // its target moves with the cursor, so it is a *different* exact target on
+  // every repaint. Each one flushed the decoder that was still working on the
+  // last, which is a live feedback loop: the handle can never buffer, so it
+  // never un-pauses, so it never stops being seeked. Measured on 3600x2338
+  // 120fps footage, two handles sat at `readyState 1` — metadata and no frames
+  // — issuing sixty seeks a second each, indefinitely.
+  //
+  // `seeking` is the same fact `whenSeeksLand` waits for, read directly, and it
+  // needs no threshold to be tuned. A handle that genuinely cannot keep up
+  // simply stays here rather than being asked again.
+  const seekInFlight = handle.seeking === true;
+
   let seeked = false;
-  if (Math.abs(handle.currentTime - intent.sourceTimeSec) > tolerance) {
+  if (
+    !alreadyThere &&
+    !seekInFlight &&
+    Math.abs(handle.currentTime - intent.sourceTimeSec) > tolerance
+  ) {
     // Seek before starting playback, so a handle entering its window cannot
     // emit a burst of audio from wherever it had run on to.
     handle.currentTime = intent.sourceTimeSec;
@@ -317,6 +399,15 @@ export function syncPlayback(
   isPlaying: boolean,
   handles: Record<string, MediaHandle>,
   playingToleranceSec: number = PLAYING_DRIFT_TOLERANCE_SEC,
+  /**
+   * The caller's memory of the last seek asked of each handle.
+   *
+   * Optional so every existing caller and test compiles unchanged; the preview
+   * supplies one, and without it the behaviour is exactly what it was. Written
+   * here rather than by the caller so the record cannot drift from the seeks
+   * actually issued.
+   */
+  lastRequests?: Map<string, number>,
 ): SeekRequest[] {
   const seeks: SeekRequest[] = [];
 
@@ -324,6 +415,7 @@ export function syncPlayback(
     const element = doc.elements[elementId];
 
     if (element == null) {
+      lastRequests?.delete(elementId);
       // Volume is deliberately left alone. Muted and paused is already
       // completely silent, and this branch has no change guard — it writes
       // every frame — so a volume assignment here would cost one pointless
@@ -337,7 +429,15 @@ export function syncPlayback(
     }
 
     const intent = intentFor(element, cursorMs, isPlaying, doc.elements);
-    if (applyIntent(handle, intent, playingToleranceSec)) {
+    if (
+      applyIntent(
+        handle,
+        intent,
+        playingToleranceSec,
+        lastRequests?.get(elementId),
+      )
+    ) {
+      lastRequests?.set(elementId, intent.sourceTimeSec);
       seeks.push({ elementId, sourceTimeSec: intent.sourceTimeSec });
     }
   }

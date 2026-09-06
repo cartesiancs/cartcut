@@ -110,6 +110,7 @@ import {
   undo,
 } from "../editor/actions";
 import { penCapturesKey } from "../mask/penSession";
+import { count as perfCount } from "../debug/frameStats";
 
 /** What a click on a bare cut reaches for first. */
 const DEFAULT_TRANSITION_PRESET = "com.cartcut.cross-dissolve";
@@ -326,6 +327,12 @@ export class elementTimelineCanvas extends LitElement {
     this.peaks.dispose();
     this.timelineResizeObserver?.disconnect();
     this.timelineResizeObserver = undefined;
+    // A coalesced repaint outlives the element that asked for it otherwise, and
+    // would run `paintCanvas` against a canvas that is no longer in the tree.
+    if (this.drawRequest) {
+      cancelAnimationFrame(this.drawRequest);
+      this.drawRequest = 0;
+    }
     window.removeEventListener("resize", this.handleWindowResize);
     window.removeEventListener("mousemove", this.handleWindowMouseMove);
     window.removeEventListener("mouseup", this.handleWindowMouseUp);
@@ -425,7 +432,45 @@ export class elementTimelineCanvas extends LitElement {
     return this.pendingDoc ?? useTimelineStore.getState().getDocument();
   }
 
+  /** A pending coalesced repaint, or 0. */
+  private drawRequest = 0;
+
+  /**
+   * Ask for a repaint on the next frame.
+   *
+   * This is the entry point every caller gets — including the cross-component
+   * ones that reach in through `querySelector` — because none of them needs the
+   * pixels to exist before the call returns, and several of them fire far
+   * faster than the display can show the result: a cursor tick on a 120Hz
+   * panel, a mousemove from a high-rate pointer, a drag writing the document
+   * once per event. Each of those used to be a synchronous relayout of every
+   * clip plus a full-window paint.
+   *
+   * `previewCanvas.scheduleDraw` is the same thing, and was already doing it
+   * for the viewport.
+   *
+   * Coalescing also keeps `this.layout` honest rather than compromising it.
+   * Every hit test — `_handleMouseMove`, `_handleMouseDown`, the drop targets —
+   * reads the layout `paintCanvas` last computed, so deferring the paint defers
+   * the layout with it and the pointer goes on aiming at the frame actually on
+   * screen. Painting eagerly would have let the layout run a frame *ahead* of
+   * the picture, which is the `previewCanvas.collisionCheck` bug in a new
+   * place: the picture in one spot and the pointer's idea of it in another.
+   * The field is initialised to an empty layout, so a hit test before the first
+   * paint misses rather than throwing.
+   */
   drawCanvas() {
+    if (this.drawRequest) {
+      return;
+    }
+    this.drawRequest = requestAnimationFrame(() => {
+      this.drawRequest = 0;
+      this.paintCanvas();
+    });
+  }
+
+  private paintCanvas() {
+    perfCount("timeline.draw");
     const container = document.querySelector("element-timeline");
     if (!this.canvas || !container) {
       return;

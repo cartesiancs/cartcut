@@ -28,6 +28,8 @@ import {
 } from "../renderer/timeline";
 import { previewFxRuntime } from "../renderer/fx/createRuntime";
 import { hasFxElements } from "../renderer/fx/planFrame";
+import { count as perfCount } from "../debug/frameStats";
+import { proxyStore } from "../../states/proxyStore";
 import { releaseUnusedOverlays } from "../renderer/fx/overlaySource";
 import {
   animatableProperties,
@@ -398,23 +400,37 @@ export class PreviewCanvas extends LitElement {
       }
 
       // this.setTimelineColor();
-      this.drawCanvas(this.canvas);
+      // Coalesced, not drawn inline. A store write can arrive faster than the
+      // display can show the result — a cursor tick on a 120Hz panel, a
+      // mousemove from a high-rate pointer, several fields written by one
+      // gesture — and each of those used to be a synchronous full repaint.
+      // `scheduleDraw` collapses a burst into the one frame that can actually
+      // be seen. The viewport subscriber below has always done this.
+      this.scheduleDraw();
     });
 
     uiStore.subscribe((state) => {
       this.resize = state.resize;
-      this.drawCanvas(this.canvas);
+      this.scheduleDraw();
     });
 
     renderOptionStore.subscribe((state) => {
       this.renderOption = state.options;
-      this.drawCanvas(this.canvas);
+      this.scheduleDraw();
     });
 
     previewViewportStore.subscribe((state) => {
       this.viewport = state.viewport;
       this.scheduleDraw();
       this.requestUpdate();
+    });
+
+    // Switching to or from proxies changes nothing about the document, so
+    // nothing else here would notice. The repaint is what runs
+    // `releaseUnusedVideos`, which is where a handle pointing at the wrong
+    // rendition is torn down and reloaded from the right one.
+    proxyStore.subscribe(() => {
+      this.scheduleDraw();
     });
 
     return this;
@@ -579,6 +595,7 @@ export class PreviewCanvas extends LitElement {
     if (canvas == null) {
       return;
     }
+    perfCount("preview.draw");
 
     const ctx = canvas.getContext("2d");
     if (ctx == null) {
@@ -1018,7 +1035,10 @@ export class PreviewCanvas extends LitElement {
         return;
       case "update":
         this.penSession = action.session;
-        this.drawCanvas(this.canvas);
+        // Pointer-rate: a pen stroke's rubber-band updates arrive as fast as
+        // the mouse reports, which on a high-rate pointer is well above the
+        // display's refresh. The other cases here fire once per gesture.
+        this.scheduleDraw();
         return;
       case "commit":
         this.commitPen(action.session);
