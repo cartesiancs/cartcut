@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
+  addTrack,
   capabilities,
   copySelection,
   cutSelection,
@@ -241,6 +242,63 @@ describe("capabilities", () => {
 
     select(["b"]);
     expect(capabilities().canDetachAudio).toBe(false);
+  });
+});
+
+describe("addTrack", () => {
+  beforeEach(() => seed());
+
+  const tracks = () => store().tracks;
+
+  it("adds a row of the kind asked for, in one undo step", () => {
+    const before = historyLength();
+
+    addTrack("audio");
+
+    expect(tracks()).toHaveLength(2);
+    expect(tracks().some((track) => track.kind === "audio")).toBe(true);
+    expect(historyLength()).toBe(before + 1);
+
+    undo();
+    expect(tracks()).toHaveLength(1);
+  });
+
+  // Where the row lands is `appendTrackOfKind`'s rule, and the reason the
+  // action does not choose an index itself: a caption behind the picture is not
+  // a caption.
+  it("puts a first text row in front of the picture", () => {
+    addTrack("text");
+
+    const text = tracks().find((track) => track.kind === "text");
+    const video = tracks().find((track) => track.kind === "video");
+    expect(text!.index).toBeLessThan(video!.index);
+  });
+
+  it("stacks a second row of a kind on top of the first", () => {
+    addTrack("audio");
+    addTrack("audio");
+
+    const audio = tracks().filter((track) => track.kind === "audio");
+    expect(audio).toHaveLength(2);
+    // Indices are re-derived with no holes, so the two are adjacent rows.
+    expect(Math.abs(audio[0].index - audio[1].index)).toBe(1);
+  });
+
+  it("leaves the clips alone", () => {
+    addTrack("video");
+
+    expect(elements().a).toBeDefined();
+    expect(elements().a.trackId).toBe("t0");
+  });
+
+  it("needs no selection", () => {
+    select([]);
+    const before = historyLength();
+
+    addTrack("effect");
+
+    expect(historyLength()).toBe(before + 1);
+    expect(tracks().some((track) => track.kind === "effect")).toBe(true);
   });
 });
 

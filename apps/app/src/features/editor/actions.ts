@@ -34,7 +34,11 @@ import { canDetachAudio } from "../timeline/audio";
 import { detachAudioFrom } from "../timeline/audioOps";
 import { normalizeFps, snapMsToFrame } from "../timeline/frames";
 import { spanEnd, spanStart } from "../timeline/geometry";
-import type { TimelineDocument } from "../timeline/tracks";
+import {
+  appendTrackOfKind,
+  type TimelineDocument,
+  type TrackKind,
+} from "../timeline/tracks";
 
 // ------------------------------------------------------------------ reading
 
@@ -144,6 +148,24 @@ export function pasteFromClipboard(): void {
 export function detachAudioFromSelection(): void {
   const ids = selectedIds();
   commit((input) => detachAudioFrom(input, ids, uuidv4));
+}
+
+/**
+ * Add an empty track of `kind`.
+ *
+ * The only command here that does not touch the selection, and the only one
+ * that always applies: a row can be added to any document, including an empty
+ * one, so there is no capability gating it.
+ *
+ * Where the row lands is `appendTrackOfKind`'s decision and not this
+ * function's — directly above the topmost row of the same kind, or, for a kind
+ * the project has none of yet, above everything ranked behind it. That is what
+ * puts a first text row in front of the picture instead of underneath it, and
+ * restating any of it here would be a second copy of a rule that already has
+ * one.
+ */
+export function addTrack(kind: TrackKind): void {
+  commit((input) => appendTrackOfKind(input, kind, uuidv4()));
 }
 
 export function undo(): void {
