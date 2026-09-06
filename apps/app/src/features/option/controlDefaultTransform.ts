@@ -1,5 +1,5 @@
 // position, rotation, opacity, scale, width, height
-import { LitElement, html } from "lit";
+import { LitElement, PropertyValues, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { LocaleController } from "../../controllers/locale";
@@ -40,7 +40,7 @@ export class OptionImage extends LitElement {
 
   createRenderRoot() {
     useTimelineStore.subscribe((state) => {
-      if (this.isExistElement(this.elementId) && this.isShow) {
+      if (this.isExistElement(this.targetId) && this.isShow) {
         this.updateValue();
       }
     });
@@ -50,6 +50,58 @@ export class OptionImage extends LitElement {
 
   constructor() {
     super();
+  }
+
+  /**
+   * The clip these fields act on.
+   *
+   * Two shapes arrive on `elementId`. `option-image`, `option-video`,
+   * `option-shape` and `option-groupelement` pass a bare id; `option-text`
+   * passes the whole selection as an array, because
+   * `elementTimelineCanvas.showSideOption` routes *every* text selection —
+   * single included — through `showOptions`.
+   *
+   * A one-element array used to work by accident: `timeline[["a"]]` coerces the
+   * key to `"a"`. A two-element one becomes `"a,b"`, which names nothing, so
+   * `updateValue` was skipped and every handler below declined in silence.
+   * Normalising once, here, is what makes the "single-element only" contract
+   * `controlParent.ts` states true rather than accidental.
+   *
+   * Empty means nothing is selected, the same sentinel `parent-select` uses.
+   * `timeline[""]` is undefined, so every `isExistElement` and `element == null`
+   * guard below already reads it as "no clip" — and a `string` keeps it out of
+   * the computed keys and index expressions those guards protect.
+   */
+  private get targetId(): string {
+    const id: any = this.elementId;
+    return (Array.isArray(id) ? id[0] : id) ?? "";
+  }
+
+  /**
+   * Re-read the fields when the panel is pointed at a different clip.
+   *
+   * `updateValue` is the only thing that writes these inputs, and its other
+   * caller is a *timeline store* subscription — but selecting a clip changes
+   * `selectionStore`, which that subscription never hears. The one notification
+   * a click does produce is `setCursorType("pointer")` at the top of
+   * `elementTimelineCanvas._handleMouseDown`, and it fires *before*
+   * `showSideOption` swaps `elementId`, so it refreshes the boxes with the
+   * outgoing clip's numbers.
+   *
+   * The result was a panel showing the previously selected clip's position while
+   * a new one was selected — most visible right after a duplicate, where the
+   * copy starts at the original's coordinates and the two look linked.
+   *
+   * `optionText.resetValue` already does exactly this for the font fields; this
+   * is the missing half of it. Runs after render, so the inputs exist.
+   */
+  updated(changed: PropertyValues) {
+    if (!changed.has("elementId") && !changed.has("isShow")) {
+      return;
+    }
+    if (this.isExistElement(this.targetId) && this.isShow) {
+      this.updateValue();
+    }
   }
 
   render() {
@@ -65,7 +117,7 @@ export class OptionImage extends LitElement {
         and one would end it.
       -->
       <parent-select
-        .elementId=${this.elementId}
+        .elementId=${this.targetId}
         .isShow=${this.isShow}
       ></parent-select>
       <label class="form-label text-light"
@@ -194,7 +246,11 @@ export class OptionImage extends LitElement {
   }
 
   isExistElement(elementId) {
-    return this.timeline.hasOwnProperty(elementId);
+    // Guarded now that `updated` calls this too: that runs on the first render,
+    // which can land before the parent has bound `timeline`. An empty id — the
+    // "nothing selected" sentinel — falls out on its own, since no clip is
+    // filed under it.
+    return this.timeline?.hasOwnProperty(elementId) === true;
   }
 
   updateValue() {
@@ -237,7 +293,7 @@ export class OptionImage extends LitElement {
    * showed the static value instead. `sampleTrack` uses `??`.
    */
   private track(animationType: string) {
-    return this.timeline?.[this.elementId]?.animation?.[animationType];
+    return this.timeline?.[this.targetId]?.animation?.[animationType];
   }
 
   private isAnimated(animationType: string): boolean {
@@ -245,14 +301,14 @@ export class OptionImage extends LitElement {
   }
 
   getOpacity() {
-    const fallback = this.timeline[this.elementId].opacity;
+    const fallback = this.timeline[this.targetId].opacity;
     if (!this.isAnimated("opacity")) {
       return { x: fallback };
     }
     return {
       x: sampleTrack(
         this.track("opacity"),
-        this.timeline[this.elementId].startTime,
+        this.timeline[this.targetId].startTime,
         this.timelineCursor,
         fallback,
       ),
@@ -260,14 +316,14 @@ export class OptionImage extends LitElement {
   }
 
   getRotation() {
-    const fallback = this.timeline[this.elementId].rotation;
+    const fallback = this.timeline[this.targetId].rotation;
     if (!this.isAnimated("rotation")) {
       return { x: fallback };
     }
     return {
       x: sampleTrack(
         this.track("rotation"),
-        this.timeline[this.elementId].startTime,
+        this.timeline[this.targetId].startTime,
         this.timelineCursor,
         fallback,
       ),
@@ -275,13 +331,13 @@ export class OptionImage extends LitElement {
   }
 
   getPosition() {
-    const location = this.timeline[this.elementId].location ?? { x: 0, y: 0 };
+    const location = this.timeline[this.targetId].location ?? { x: 0, y: 0 };
     if (!this.isAnimated("position")) {
       return { x: location.x, y: location.y };
     }
     return sampleTrackXY(
       this.track("position"),
-      this.timeline[this.elementId].startTime,
+      this.timeline[this.targetId].startTime,
       this.timelineCursor,
       location.x,
       location.y,
@@ -289,7 +345,7 @@ export class OptionImage extends LitElement {
   }
 
   getSize() {
-    const element = this.timeline[this.elementId];
+    const element = this.timeline[this.targetId];
     if (!this.isAnimated("size")) {
       return { x: element.width, y: element.height };
     }
@@ -320,12 +376,13 @@ export class OptionImage extends LitElement {
    * covered.
    */
   setAnimationEnable(animationType) {
-    const element = this.timeline?.[this.elementId];
+    const elementId = this.targetId;
+    const element = this.timeline?.[elementId];
     if (element == null) {
       return;
     }
     this.keyframeControl.setActive({
-      elementId: this.elementId,
+      elementId,
       animationType,
       active: !this.getAnimationEnable(animationType),
       atMs: this.timelineCursor - element.startTime,
@@ -351,7 +408,7 @@ export class OptionImage extends LitElement {
     statics: Array<{ path: string[]; value: any }>,
     keyframes: Array<{ animationType: AnimatableProperty; lane: 0 | 1; value: number }> = [],
   ) {
-    const elementId = this.elementId;
+    const elementId = this.targetId;
     const element = this.timeline?.[elementId];
     if (element == null) {
       return;
@@ -458,7 +515,7 @@ export class OptionImage extends LitElement {
 
     // Both fields are written on every change — this handler cannot tell which
     // one the user touched, so it compares against what is stored.
-    const widthChanged = this.timeline?.[this.elementId]?.width !== w;
+    const widthChanged = this.timeline?.[this.targetId]?.width !== w;
 
     // The static box and, when `size` is animated, the keyframe at the
     // playhead, as one undo step — exactly what `handleLocation` does for
@@ -483,7 +540,7 @@ export class OptionImage extends LitElement {
     // `withFittedTextHeights` declines on its own for a clip whose height the
     // size track owns, so there is no second condition here.
     if (widthChanged) {
-      const elementId = this.elementId;
+      const elementId = this.targetId;
       this.gesture.apply((doc) => withFittedTextHeights(doc, [elementId]));
     }
   }

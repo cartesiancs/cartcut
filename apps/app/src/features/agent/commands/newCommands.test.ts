@@ -425,6 +425,49 @@ describe("duplicate_clips", () => {
     // The 6000ms gap between them survives the move.
     expect(starts[1] - starts[0]).toBe(6_000);
   });
+
+  /**
+   * `pasteClips` builds its copies with `{...clip}`, so everything but the
+   * animation block is shared by reference — its header says so deliberately,
+   * because that is what makes a paste cheap. What must not be shared is the
+   * *live* document: this command used to hand `pasteClips` the store's own
+   * elements, so a duplicate held the original's `location` object and one
+   * in-place edit anywhere would have moved both clips at once.
+   *
+   * Identity, not equality: the values are supposed to match — that is what a
+   * duplicate is — and only `toBe` can tell a copy from an alias.
+   */
+  it("shares no mutable object with the original, or between repeats", async () => {
+    seed({ a: textElement({ startTime: 0, duration: 4_000 }) });
+    const source = doc().elements.a;
+
+    const result = await run("duplicate_clips", {
+      elementIds: ["a"],
+      repeat: 2,
+    });
+    expect(result.created).toHaveLength(2);
+
+    const copies = result.created.map((id: string) => doc().elements[id]);
+
+    for (const copy of copies) {
+      for (const field of [
+        "location",
+        "timelineOptions",
+        "options",
+        "background",
+        "animation",
+      ]) {
+        expect(copy[field]).toEqual(source[field]);
+        expect(copy[field]).not.toBe(source[field]);
+      }
+      // One level down: `options.outline` is its own object, and a spread of
+      // `options` would still have shared it.
+      expect(copy.options.outline).not.toBe(source.options.outline);
+    }
+
+    expect(copies[0].location).not.toBe(copies[1].location);
+    expect(copies[0].options).not.toBe(copies[1].options);
+  });
 });
 
 describe("set_clip_speed", () => {

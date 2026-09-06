@@ -263,7 +263,22 @@ registerCommands({
     return commit((d) => {
       let next = d;
       for (let index = 0; index < repeat; index++) {
-        next = pasteClips(next, picked, onFrame(first + step * index), uuidv4);
+        // `structuredClone`, exactly as `editor/actions.ts#copySelection` does
+        // before filling the clipboard, and for the reason its header gives:
+        // `pasteClips` shares everything but the animation block between a clip
+        // and its copy, so handing it `picked` as it stands would give every
+        // copy the *live* element's own `location`, `options` and `background`
+        // objects. Per iteration rather than once, so the repeats do not share
+        // with each other either.
+        //
+        // The two duplicate entry points disagreed on this: the clipboard path
+        // cloned and this one did not.
+        next = pasteClips(
+          next,
+          structuredClone(picked),
+          onFrame(first + step * index),
+          uuidv4,
+        );
       }
       return next;
     }, "There was no room to place the copies.");
