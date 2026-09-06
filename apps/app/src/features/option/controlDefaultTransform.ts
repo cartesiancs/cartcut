@@ -475,7 +475,11 @@ export class OptionImage extends LitElement {
 
   handleOpacity() {
     const dom: any = this.querySelector("number-input[aria-event='opacity'");
-    const opacity = parseInt(dom.value);
+    // Two decimals, the way `handleLocation` and `handleSize` round — not
+    // `parseInt`. The spinner scrubs in tenths and the box shows two places,
+    // so truncating here stored a number the panel was not showing: a drag to
+    // 45.3 displayed 45.30 and wrote 45.
+    const opacity = parseFloat(parseFloat(dom.value).toFixed(2));
     if (!Number.isFinite(opacity)) {
       return;
     }
@@ -489,7 +493,7 @@ export class OptionImage extends LitElement {
     const dom = this.querySelector(
       "number-input[aria-event='rotation'",
     ) as any;
-    const rotation = parseInt(dom.value);
+    const rotation = parseFloat(parseFloat(dom.value).toFixed(2));
     if (!Number.isFinite(rotation)) {
       return;
     }
