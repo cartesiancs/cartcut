@@ -1,4 +1,8 @@
-@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
+/* Pretendard used to be pulled from jsDelivr here. It has gone: the app has to
+   run offline, and nothing in this file or the component ever named the
+   `Pretendard` family — only the local face below, which is confusingly named
+   `notosanskr` while pointing at a Pretendard file. Left as-is; renaming it
+   would be a behaviour change unrelated to the network. */
 
 @font-face {
   font-family: notosanskr;

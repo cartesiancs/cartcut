@@ -7,7 +7,38 @@
 @import "style/onboarding";
 @import "var";
 
-@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@100;300;400;500;700;900&display=swap");
+// The two webfonts the UI needs, both served from disk. Nothing here reaches
+// the network: the app has to work with the machine offline, and an icon font
+// that fails to arrive does not degrade — every glyph renders as the literal
+// ligature text, so the toolbar reads `play_arrow  content_cut  delete`.
+//
+// `$material-symbols-font-path` has to be a specifier css-loader can resolve
+// from *this* file. Sass inlines an imported partial without rebasing its
+// `url()`s, so the package's own `'./'` default would resolve against
+// apps/app/src/sass/ and 404. The mixin appends the class name to it, giving
+// `material-symbols/material-symbols-outlined.woff2` — a bare module request,
+// which css-loader resolves and webpack emits into apps/app/dist/ as a hashed
+// asset. That copy is the one that matters: the top-level `assets/` tree is an
+// electron-builder `extraResources` entry and is therefore *excluded* from the
+// asar, so nothing inside the package can reach it by a relative URL.
+//
+// This lands before `.material-symbols-outlined`'s `font-variation-settings`
+// override below, which is deliberate — neither this package nor the Google
+// stylesheet it replaces sets the axes, so that rule stays the only source of
+// FILL/wght/GRAD/opsz and the icons render exactly as they did.
+$material-symbols-font-path: "material-symbols/";
+@import "material-symbols/outlined";
+
+// "Noto Sans KR" is *not* declared here. It is a variable face in
+// apps/app/vendor/noto-sans-kr.css, linked from the HTML alongside Bootstrap,
+// because the frozen DeVent stylesheet asks for it too and both have to be
+// looking at the same font.
+//
+// It needs the real variable cut, not an alias onto the Medium OTF further down
+// this file. The UI uses three weights — 400 on `b` and `.btn`, 500 on
+// `.font-weight-md`, 700 on `.font-weight-lg` and `.text-title` — and one
+// static face standing in for all three renders 400 visibly heavier and wider,
+// which pushes every button label out and resizes the pill around it.
 
 ::-webkit-scrollbar {
   width: 5px;

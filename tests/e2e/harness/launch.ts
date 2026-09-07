@@ -147,16 +147,19 @@ export async function launchApp(options: LaunchOptions = {}): Promise<AppSession
 
   await page.waitForLoadState("domcontentloaded");
 
-  // The CDN <script> tags in `apps/app/index.html` are not optional: modals go
-  // through `bootstrap.Modal`, so an offline run fails at the Render button
-  // with an error that says nothing about the network. Fail here instead.
+  // `apps/app/index.html`'s <script> tag is not optional: modals go through
+  // `bootstrap.Modal`, so without it the run fails at the Render button with an
+  // error that says nothing about the missing dependency. Fail here instead.
+  // This is deliberately separate from the `window.CARTCUT` wait below — one
+  // says the page's dependencies loaded, the other that the bundle evaluated,
+  // and keeping Bootstrap out of the bundle is what keeps them two signals.
   await page
     .waitForFunction(() => (globalThis as any).bootstrap?.Modal != null, undefined, { timeout: 30_000 })
     .catch(() => {
       throw new Error(
-        "bootstrap did not load. apps/app/index.html pulls Bootstrap, Popper, SweetAlert2 and " +
-        "the DeVent design system from jsDelivr, and the editor's modals need them — this suite " +
-        "cannot run fully offline.",
+        "bootstrap did not load. apps/app/index.html loads it from " +
+        "apps/app/vendor/bootstrap.bundle.min.js, a committed copy of the installed package — " +
+        "check that the file is present and that the <script> tag still points at it.",
       );
     });
 

@@ -23,6 +23,10 @@ const copies = [
   ["assets", "assets"],
   ["apps/app/assets", "assets"],
   ["apps/app/dist", "dist"],
+  // Bootstrap, as a file rather than a CDN URL. index.html asks for
+  // `vendor/…` and the pages for `../vendor/…`; both resolve once it sits
+  // beside `dist/` and `page/`.
+  ["apps/app/vendor", "vendor"],
   ["apps/app/page", "page"],
   ["apps/app/sample", "sample"],
   ["apps/app/index.html", "index.html"],

@@ -3,7 +3,6 @@ interface Window {
 }
 
 declare var bootstrap: any;
-declare var _: any;
 declare var CARTCUT: any;
 
 interface Document {

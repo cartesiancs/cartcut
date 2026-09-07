@@ -1,3 +1,8 @@
+// The subpath, not the barrel: this is the only lodash call left in the
+// renderer, and `import _ from "lodash"` would pull the whole library into the
+// bundle for one function. It used to be a global from a CDN <script>.
+import cloneDeep from "lodash/cloneDeep";
+
 import { rendererModal } from "./utils/modal";
 import { renderProgress } from "./ui/modal/renderProgress";
 
@@ -83,7 +88,7 @@ window.electronAPI.res.shortcut.controlO((evt) => {
 });
 
 window.electronAPI.res.timeline.get((event) => {
-  let timeline = _.cloneDeep(
+  let timeline = cloneDeep(
     document.querySelector("element-timeline").timeline,
   );
 
