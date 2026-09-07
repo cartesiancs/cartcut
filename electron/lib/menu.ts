@@ -85,20 +85,6 @@ const template: any = [
   {
     label: "About",
     submenu: [
-      // {
-      //   label: "About Cartcut",
-      //   click: async () => {
-      //     let mainWindow = window.createWindow({
-      //       width: 600,
-      //       height: 240,
-      //       webPreferences: {
-      //         nodeIntegration: true,
-      //         contextIsolation: false,
-      //       },
-      //       indexFile: "apps/app/page/about.html",
-      //     });
-      //   },
-      // },
       {
         label: "Credit",
         click: async () => {

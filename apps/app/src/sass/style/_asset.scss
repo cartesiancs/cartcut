@@ -129,9 +129,8 @@
  * is still.
  *
  * `z-index: 7000` is the one free rung on the ladder and the right one: above
- * the dropdown menus at 6000, below the modals and `.tutorial-popover` at 8000,
- * the toasts at 9000 and the drop curtain at 10000. A preview must never cover
- * a dialog or a message.
+ * the dropdown menus at 6000, below the modals at 8000, the toasts at 9000 and
+ * the drop curtain at 10000. A preview must never cover a dialog or a message.
  *
  * Position and size arrive as inline styles from `hoverPreviewOverlay.ts` —
  * they are the only things that change per open. Everything structural is here.

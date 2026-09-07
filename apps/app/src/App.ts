@@ -46,14 +46,6 @@ export class App extends LitElement {
   render() {
     return html`
       <asset-upload-drop></asset-upload-drop>
-      <tutorial-group>
-        <tutorial-popover
-          tutorial-idx="1"
-          tutorial-title="test"
-          tutorial-message="fsdf"
-          target-element-id="split_col_1"
-        ></tutorial-popover>
-      </tutorial-group>
 
       <div class="top-bar">
         <b>${this.topBarTitle}</b>

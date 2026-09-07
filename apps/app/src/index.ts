@@ -54,9 +54,6 @@ import "./features/option/optionTransition";
 
 import "./features/input/inputText";
 
-import { Tutorial } from "./features/tutorial/tutorial";
-import { TutorialPopover } from "./features/tutorial/tutorialPopover";
-
 import { Toast } from "./features/toast/toast";
 import { ToastBox } from "./features/toast/toastBox";
 import "./context/timelineContext";
@@ -97,9 +94,6 @@ installProxyBridge();
 // rate. Anything higher is a write that changed nothing, and the difference
 // between this and `store.setCursor:changed` says so directly.
 useTimelineStore.subscribe(() => perfCount("store.notify"));
-
-customElements.define("tutorial-group", Tutorial);
-customElements.define("tutorial-popover", TutorialPopover);
 
 customElements.define("toast-item", Toast);
 customElements.define("toast-box", ToastBox);
