@@ -103,9 +103,9 @@ import {
   type Viewport,
   type ViewportGeometry,
 } from "./viewport";
+import { chromeFor, type PreviewChrome } from "./playbackPreview";
+import { playbackPreviewStore } from "../../states/playbackPreviewStore";
 
-/** The infinite plane the frame floats on. */
-const CANVAS_BG = "#101112";
 /** How much of an out-of-frame pixel survives. */
 const OUTSIDE_ALPHA = 0.28;
 const FRAME_GUIDE_COLOR = "rgba(255, 255, 255, 0.35)";
@@ -371,6 +371,16 @@ export class PreviewCanvas extends LitElement {
   @property()
   viewport = this.viewportStore.viewport;
 
+  /**
+   * What the canvas draws and answers, this mode.
+   *
+   * One record rather than a `playbackPreview` boolean tested at each of the
+   * six sites that care. See `playbackPreview.ts` for why.
+   */
+  private chrome: PreviewChrome = chromeFor(
+    playbackPreviewStore.getInitialState().state.active,
+  );
+
   createRenderRoot() {
     // The canvas is where the pen tool is used, and `elementTimelineCanvas`
     // clears the selection on any document mousedown that is not opted out —
@@ -421,6 +431,19 @@ export class PreviewCanvas extends LitElement {
 
     previewViewportStore.subscribe((state) => {
       this.viewport = state.viewport;
+      this.scheduleDraw();
+      this.requestUpdate();
+    });
+
+    playbackPreviewStore.subscribe((state) => {
+      this.chrome = chromeFor(state.state.active);
+      // Entering leaves whatever the pointer was last over on the cursor — a
+      // resize arrow, say — and it would stay there for the whole presentation
+      // with nothing left that could change it, since the hover pass is one of
+      // the things being switched off.
+      if (!this.chrome.pointerInput) {
+        this.cursorType = "default";
+      }
       this.scheduleDraw();
       this.requestUpdate();
     });
@@ -507,6 +530,7 @@ export class PreviewCanvas extends LitElement {
       this.viewH,
       w,
       h,
+      this.chrome.fitPadding,
     );
     this.setPreviewRatio();
 
@@ -616,10 +640,11 @@ export class PreviewCanvas extends LitElement {
       g.offsetY * dpr,
     ];
 
-    // 1. The infinite plane the frame floats on.
+    // 1. The infinite plane the frame floats on — or, while presenting, the
+    //    letterbox.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
-    ctx.fillStyle = CANVAS_BG;
+    ctx.fillStyle = this.chrome.background;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // 2. Render the scene exactly once, off screen. The control outline is
@@ -690,10 +715,16 @@ export class PreviewCanvas extends LitElement {
     );
 
     // 3. Everything, dimmed — this is what an overflowing element looks like.
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = OUTSIDE_ALPHA;
-    ctx.drawImage(offscreen, 0, 0);
-    ctx.globalAlpha = 1;
+    //    Skipped while presenting, and skipping it is the whole of "nothing
+    //    outside the frame may be seen": step 4 blits the same pixels clipped,
+    //    so without this pass there is nothing left outside the frame but the
+    //    background.
+    if (this.chrome.dimOutside) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = OUTSIDE_ALPHA;
+      ctx.drawImage(offscreen, 0, 0);
+      ctx.globalAlpha = 1;
+    }
 
     // 4. The same pixels again at full opacity, clipped to the frame, giving a
     //    hard cut exactly where the rendered video ends.
@@ -708,18 +739,27 @@ export class PreviewCanvas extends LitElement {
     ctx.drawImage(offscreen, 0, 0);
     ctx.restore();
 
-    this.drawFrameGuide(ctx, dpr, frame);
+    if (this.chrome.frameGuide) {
+      this.drawFrameGuide(ctx, dpr, frame);
+    }
 
     // 5. Selection chrome and snap guides: always full opacity, never clipped.
-    ctx.save();
-    ctx.setTransform(...toDevice);
-    this.drawActiveOutline(ctx);
-    this.drawPenOverlay(ctx);
-    this.drawShapeOverlay(ctx);
-    if (this.alignDirection.length > 0) {
-      this.drawAlign(ctx, this.alignDirection);
+    //
+    //    All of it goes at once while presenting, and the *selection* does not:
+    //    `activeElementId` is left exactly as it was, so leaving the mode finds
+    //    the same clip still picked with its grips back. Clearing it instead
+    //    would make a view toggle quietly undo the user's last click.
+    if (this.chrome.selection) {
+      ctx.save();
+      ctx.setTransform(...toDevice);
+      this.drawActiveOutline(ctx);
+      this.drawPenOverlay(ctx);
+      this.drawShapeOverlay(ctx);
+      if (this.alignDirection.length > 0) {
+        this.drawAlign(ctx, this.alignDirection);
+      }
+      ctx.restore();
     }
-    ctx.restore();
   }
 
   /** The rendered resolution, marked out on the infinite plane. */
@@ -1514,6 +1554,9 @@ export class PreviewCanvas extends LitElement {
   }
 
   _handleMouseDown(e) {
+    if (!this.chrome.pointerInput) {
+      return;
+    }
     this.updateGeometry();
 
     // Middle-drag and alt-drag always pan, whatever is under the pointer.
@@ -1802,6 +1845,9 @@ export class PreviewCanvas extends LitElement {
    * canvas.
    */
   _handleWindowMouseMove(e: MouseEvent) {
+    if (!this.chrome.pointerInput) {
+      return;
+    }
     if (this.isPanning) {
       const view = this.toView(e);
       const scale = this.geometry.scale;
@@ -2207,6 +2253,11 @@ export class PreviewCanvas extends LitElement {
    * one is Cmd-only on macOS, and demanding Cmd+wheel here would break pinch.
    */
   _handleWheel(e: WheelEvent) {
+    // No `preventDefault` on the way out: while presenting the canvas has no
+    // claim on the wheel, so let the event go wherever it would have gone.
+    if (!this.chrome.pointerInput) {
+      return;
+    }
     e.preventDefault();
 
     this.updateGeometry();
@@ -2249,6 +2300,14 @@ export class PreviewCanvas extends LitElement {
 
   /** Fit / zoom shortcuts. Ignored while the user is typing. */
   _handleKeydown(e: KeyboardEvent) {
+    // Zoom and fit are meaningless while presenting — the viewport is pinned —
+    // and ⌘0 would silently overwrite the viewport being held for the user's
+    // return. Play/pause and scrubbing are bound on `Timeline`, not here, so
+    // they keep working.
+    if (!this.chrome.pointerInput) {
+      return;
+    }
+
     // `isTypingEvent` rather than a local tagName check, and first, matching
     // `elementTimelineCanvas`. The check this replaces read `e.target`, which
     // shadow DOM has already retargeted to the host — so ⌘0 typed inside

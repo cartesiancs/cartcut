@@ -1,6 +1,7 @@
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { IUIStore, uiStore } from "./states/uiStore";
+import { playbackPreviewStore } from "./states/playbackPreviewStore";
 import { loadPresets } from "./features/fx/presetRegistry";
 import "./features/demo/warningDemoEnv";
 import "./features/gpt/chatSidebar";
@@ -21,6 +22,19 @@ export class App extends LitElement {
     uiStore.subscribe((state) => {
       this.resize = state.resize;
       this.topBarTitle = state.topBarTitle;
+    });
+
+    // The playback preview's input block, as one class on the real document
+    // body. A class rather than a re-render because the rule has to cover
+    // `chat-sidebar` and every column at once, and because a Lit update of this
+    // component rebuilds the whole editor tree — including the preview canvas —
+    // which is a heavy price for a mode toggle.
+    //
+    // `document.body` is the outer one. The `<body>` this component renders
+    // inside its own template is an ordinary element Lit created, not the
+    // document's.
+    playbackPreviewStore.subscribe((state) => {
+      document.body.classList.toggle("playback-preview", state.state.active);
     });
 
     // Point the renderer's LUT lookup at the registry. Before `loadPresets`

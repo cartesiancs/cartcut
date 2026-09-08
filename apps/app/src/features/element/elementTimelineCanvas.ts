@@ -71,7 +71,7 @@ import {
   type VideoTileProvider,
 } from "../timeline/strip/videoTiles";
 import {
-  createAudioPeakProvider,
+  sharedAudioPeakProvider,
   type AudioPeakProvider,
 } from "../timeline/strip/audioPeaks";
 import {
@@ -249,7 +249,12 @@ export class elementTimelineCanvas extends LitElement {
    * nothing; when one lands it asks for a repaint.
    */
   private tiles: VideoTileProvider = createVideoTileProvider();
-  private peaks: AudioPeakProvider = createAudioPeakProvider();
+  /**
+   * Shared, not owned: the preview's level meter reads the same decoded peaks.
+   * See `sharedAudioPeakProvider`. This element unsubscribes from it on
+   * disconnect but must never dispose it.
+   */
+  private peaks: AudioPeakProvider = sharedAudioPeakProvider();
   private disposeStrips: Array<() => void> = [];
 
   constructor() {
@@ -324,7 +329,8 @@ export class elementTimelineCanvas extends LitElement {
     }
     this.disposeStrips = [];
     this.tiles.dispose();
-    this.peaks.dispose();
+    // `peaks` is deliberately not disposed: it is the shared decode cache, and
+    // the preview's level meter is still reading it.
     this.timelineResizeObserver?.disconnect();
     this.timelineResizeObserver = undefined;
     // A coalesced repaint outlives the element that asked for it otherwise, and

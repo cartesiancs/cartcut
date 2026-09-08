@@ -33,7 +33,13 @@ export type ViewportGeometry = {
   offsetY: number;
 };
 
-/** Breathing room left around the frame at zoom 100, in CSS px. */
+/**
+ * Breathing room left around the frame at zoom 100, in CSS px.
+ *
+ * The default rather than the rule: the playback preview passes 0, which is
+ * what makes zoom 100 mean "the frame fills the viewport" there instead of
+ * "the frame fits with a margin". See `playbackPreview.ts#chromeFor`.
+ */
 export const FIT_PADDING_PX = 24;
 
 export const ZOOM_MIN = 5;
@@ -58,13 +64,15 @@ export function fitScale(
   viewH: number,
   frameW: number,
   frameH: number,
+  padding: number = FIT_PADDING_PX,
 ): number {
   const w = Number(frameW);
   const h = Number(frameH);
   if (!(w > 0) || !(h > 0)) return 1;
 
-  const availableW = viewW - FIT_PADDING_PX * 2;
-  const availableH = viewH - FIT_PADDING_PX * 2;
+  const pad = Number.isFinite(padding) && padding > 0 ? padding : 0;
+  const availableW = viewW - pad * 2;
+  const availableH = viewH - pad * 2;
   if (!(availableW > 0) || !(availableH > 0)) return 1;
 
   return Math.min(availableW / w, availableH / h);
@@ -76,8 +84,10 @@ export function computeGeometry(
   viewH: number,
   frameW: number,
   frameH: number,
+  padding: number = FIT_PADDING_PX,
 ): ViewportGeometry {
-  const scale = fitScale(viewW, viewH, frameW, frameH) * (viewport.zoom / 100);
+  const scale =
+    fitScale(viewW, viewH, frameW, frameH, padding) * (viewport.zoom / 100);
 
   return {
     scale,

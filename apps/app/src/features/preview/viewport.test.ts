@@ -34,6 +34,78 @@ describe("fitScale", () => {
   });
 });
 
+/**
+ * The playback preview passes 0 here, which is what makes zoom 100 mean "the
+ * frame fills the viewport" rather than "the frame fits with a margin". The
+ * padding is a trailing default precisely so every existing caller and every
+ * test above keeps the behaviour it had.
+ */
+describe("fitScale with an explicit padding", () => {
+  it("fills the viewport exactly at zero padding", () => {
+    expect(fitScale(VIEW_W, VIEW_H, 1920, 1080, 0)).toBeCloseTo(800 / 1920);
+    expect(fitScale(VIEW_W, VIEW_H, 1080, 1920, 0)).toBeCloseTo(500 / 1920);
+  });
+
+  it("matches the default when handed the default", () => {
+    expect(fitScale(VIEW_W, VIEW_H, 1920, 1080, FIT_PADDING_PX)).toBe(
+      fitScale(VIEW_W, VIEW_H, 1920, 1080),
+    );
+  });
+
+  it("still has a viewport to fill when the padding is gone", () => {
+    // The one case the default rejects outright: a viewport smaller than its
+    // own padding. With none, there is nothing to run out of.
+    expect(fitScale(10, 10, 1920, 1080, 0)).toBeCloseTo(10 / 1920);
+  });
+
+  it("treats a nonsense padding as none rather than inverting the viewport", () => {
+    expect(fitScale(VIEW_W, VIEW_H, 1920, 1080, -100)).toBeCloseTo(800 / 1920);
+    expect(fitScale(VIEW_W, VIEW_H, 1920, 1080, NaN)).toBeCloseTo(800 / 1920);
+  });
+});
+
+describe("computeGeometry with an explicit padding", () => {
+  it("puts the frame dead centre, edge to edge on its tight axis", () => {
+    const frameW = 1920;
+    const frameH = 1080;
+    const g = computeGeometry(
+      fitViewport(frameW, frameH),
+      VIEW_W,
+      VIEW_H,
+      frameW,
+      frameH,
+      0,
+    );
+
+    const topLeft = worldToScreen(g, 0, 0);
+    const bottomRight = worldToScreen(g, frameW, frameH);
+
+    // Width binds at 800/1920, so the frame reaches both vertical edges...
+    expect(topLeft.x).toBeCloseTo(0);
+    expect(bottomRight.x).toBeCloseTo(VIEW_W);
+    // ...and the leftover height is letterboxed symmetrically.
+    expect(topLeft.y).toBeCloseTo(VIEW_H - bottomRight.y);
+    expect(topLeft.y).toBeGreaterThan(0);
+  });
+
+  it("letterboxes the other way for a portrait frame", () => {
+    const g = computeGeometry(fitViewport(1080, 1920), VIEW_W, VIEW_H, 1080, 1920, 0);
+    const topLeft = worldToScreen(g, 0, 0);
+    const bottomRight = worldToScreen(g, 1080, 1920);
+
+    expect(topLeft.y).toBeCloseTo(0);
+    expect(bottomRight.y).toBeCloseTo(VIEW_H);
+    expect(topLeft.x).toBeCloseTo(VIEW_W - bottomRight.x);
+  });
+
+  it("shows nothing outside the frame on the tight axis", () => {
+    const g = computeGeometry(fitViewport(1920, 1080), VIEW_W, VIEW_H, 1920, 1080, 0);
+    // A world point one pixel left of the frame is off the canvas entirely.
+    expect(worldToScreen(g, -1, 0).x).toBeLessThan(0);
+    expect(worldToScreen(g, 1921, 0).x).toBeGreaterThan(VIEW_W);
+  });
+});
+
 describe("fitViewport / computeGeometry", () => {
   it("puts the whole frame on screen with padding at zoom 100", () => {
     const frames: [number, number][] = [

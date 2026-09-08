@@ -139,3 +139,26 @@ export function createAudioPeakProvider(): AudioPeakProvider {
     },
   };
 }
+
+let shared: AudioPeakProvider | null = null;
+
+/**
+ * The one decode cache, shared by everything that needs a waveform.
+ *
+ * Two things read peaks now — the timeline's clip strips and the preview's
+ * level meter — and a provider each would decode every file twice, hold two
+ * copies of every peak array, and open a second `AudioContext` (a limited
+ * per-document resource). On this project's footage, 120fps screen recordings
+ * running to gigabytes, that is not a rounding error.
+ *
+ * Deliberately never disposed. It outlives every component that reads it, which
+ * is the point: a cache torn down when the timeline unmounts is a cache that
+ * re-decodes the whole project the next time anything asks. Callers release
+ * their own `onReady` subscriptions and leave the cache alone.
+ */
+export function sharedAudioPeakProvider(): AudioPeakProvider {
+  if (shared == null) {
+    shared = createAudioPeakProvider();
+  }
+  return shared;
+}

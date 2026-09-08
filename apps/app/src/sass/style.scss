@@ -493,6 +493,36 @@ preview-canvas {
   overflow: clip;
 }
 
+/*
+ * The playback preview: everything above the timeline stops answering the
+ * mouse.
+ *
+ * Set on `document.body` from `App.ts`, not on the preview column, because the
+ * mode has to reach the panel and option columns too — they stay visible, and a
+ * visible column that silently ignores clicks is better than one that vanishes
+ * and takes the layout with it.
+ *
+ * `timeline-ui` is a *sibling* of `control-ui` in `App.ts`, so no rule here
+ * touches it: scrubbing, play/pause and the toolbar all keep working, which is
+ * the point. Keyboard is untouched throughout — Space is bound at `window`.
+ */
+body.playback-preview control-ui,
+body.playback-preview chat-sidebar {
+  pointer-events: none;
+}
+
+/*
+ * The one exception, and it is the exit.
+ *
+ * The toggle that leaves this mode lives inside `control-ui`, so without this
+ * the mode would be unleavable by mouse — the failure the screen recorder's
+ * drawing mode shipped with and had to grow three exits to fix. One exit is
+ * enough only if nothing can take it away.
+ */
+body.playback-preview preview-bottom-bar {
+  pointer-events: auto;
+}
+
 .line {
   position: relative;
   overflow-x: hidden !important;

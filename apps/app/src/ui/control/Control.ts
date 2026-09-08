@@ -8,6 +8,7 @@ import "./ControlUtilities";
 import "./ControlFilter";
 import "./ControlFx";
 import "../../features/preview/previewTopBar";
+import "../../features/preview/previewBottomBar";
 import "../../features/record/screenRecord";
 import "../../features/record/audioRecord";
 import "../../features/ytdown/ytDownload";
@@ -308,15 +309,26 @@ export class Control extends LitElement {
 
         <preview-top-bar></preview-top-bar>
 
+        <!--
+          A flex column rather than a second height subtraction: the bottom bar
+          belongs to the preview tab alone, and the six sibling panels below
+          keep the height they had. min-height: 0 on the canvas row is what lets
+          a flex item shrink past its intrinsic size — without it the video box
+          refuses to give the bar its 2rem and the bar is pushed out of the
+          column.
+        -->
         <div
           style="height: calc(100% - 2rem);"
-          class="position-relative ${this.nowActivePanel == "" ? "" : "d-none"}"
+          class="position-relative d-flex flex-column ${this.nowActivePanel == ""
+            ? ""
+            : "d-none"}"
         >
-          <div id="video" class="video">
+          <div id="video" class="video flex-grow-1" style="min-height: 0;">
             <preview-canvas></preview-canvas>
             <element-control></element-control>
             <drag-alignment-guide></drag-alignment-guide>
           </div>
+          <preview-bottom-bar></preview-bottom-bar>
         </div>
 
         <div
