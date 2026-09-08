@@ -57,6 +57,21 @@ function sameIds(a: string[], b: string[]): boolean {
   return a.every((id, index) => id === b[index]);
 }
 
+/**
+ * `base` plus whatever `added` brings that is not already in it.
+ *
+ * Shift-dragging a rubber-band extends the selection that existed when the
+ * press began, so `base` keeps its order — the "order they were picked" this
+ * store promises — and the band's finds are appended in layout order. Both
+ * halves are stable, which is what lets `sameIds` above decline a mousemove
+ * that swept nothing new. A band updates the selection on every pointer event,
+ * so that guard is the difference between one repaint and hundreds.
+ */
+export function mergeIds(base: string[], added: string[]): string[] {
+  const seen = new Set(base);
+  return [...base, ...added.filter((id) => !seen.has(id))];
+}
+
 export const selectionStore = createStore<ISelectionStore>((set, get) => ({
   ids: [],
   clipboard: {},

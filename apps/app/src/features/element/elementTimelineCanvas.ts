@@ -52,9 +52,12 @@ import {
 } from "../fx/presetRegistry";
 import {
   TRACK_PITCH,
+  clipsInRect,
   hitTest,
   layoutTimeline,
+  rectBetween,
   trackAtY,
+  type ScreenRect,
   type TimelineLayout,
 } from "../timeline/layout";
 import {
@@ -64,7 +67,12 @@ import {
   type DragState,
   type PointerEv,
 } from "../timeline/dragMachine";
-import { clipLabel, drawDropTarget, drawTimeline } from "../timeline/draw";
+import {
+  clipLabel,
+  drawDropTarget,
+  drawMarquee,
+  drawTimeline,
+} from "../timeline/draw";
 import { applySurface, surfaceSpec } from "../timeline/canvasSurface";
 import {
   createVideoTileProvider,
@@ -99,7 +107,7 @@ import { dropTargetAt } from "../asset/dropTarget";
 import { importDroppedFiles, importPathsAt } from "../asset/importDrop";
 import { isTypingEvent } from "../../utils/typingTarget";
 import { hasEditorModifier } from "../../utils/platform";
-import { selectionStore } from "../../states/selectionStore";
+import { mergeIds, selectionStore } from "../../states/selectionStore";
 import {
   copySelection,
   cutSelection,
@@ -203,11 +211,20 @@ export class elementTimelineCanvas extends LitElement {
   private dragState: DragState = idleDrag;
   /** The document as it stood when the drag began. */
   private dragBase: TimelineDocument | null = null;
-  /** The selection the drag is carrying. */
+  /**
+   * The selection the drag is carrying.
+   *
+   * Also the band's starting point: `dispatchPointer` snapshots this on `down`
+   * *before* the effects run, so for a shift-drag over empty space it holds
+   * the selection as it stood when the button went down — the thing a band
+   * extends, and the thing Escape puts back.
+   */
   private dragIds: string[] = [];
   private longPressTimer = 0;
   /** Row a freed clip is currently hovering over, for the drop highlight. */
   private dropTrackId: string | null = null;
+  /** The rubber-band currently being dragged, in canvas px, or null. */
+  private marqueeRect: ScreenRect | null = null;
   /**
    * The document as the drag has it so far.
    *
@@ -555,6 +572,13 @@ export class elementTimelineCanvas extends LitElement {
 
     if (this.dropTrackId != null) {
       drawDropTarget(ctx, this.layout, this.dropTrackId, width);
+    }
+
+    // Last, because it is the topmost transient. Outside `drawTimeline` for
+    // the reason the drop target is: that function takes a document and a
+    // layout and knows nothing about a gesture in flight.
+    if (this.marqueeRect != null) {
+      drawMarquee(ctx, this.marqueeRect);
     }
   }
 
@@ -931,6 +955,42 @@ export class elementTimelineCanvas extends LitElement {
     this.drawCanvas();
   }
 
+  /**
+   * Recompute the band, and the selection it names.
+   *
+   * The screen-space twin of `applyDrag`: same moment in the gesture, same
+   * per-move budget, but it produces a selection rather than a candidate
+   * document. Separate because `applyDrag`'s entire job is turning the
+   * machine's verdict into a `TimelineDocument`, and a band makes none — so a
+   * marquee must not reach it, and the branch that keeps it out is stated in
+   * `dispatchPointer` rather than left to `applyDrag`'s early return, which
+   * only declines a band by coincidence of `hit.kind`.
+   *
+   * Selection is applied on every move, not once on release: watching clips
+   * light up as the band sweeps them is the whole gesture. That costs nothing,
+   * because `clipsInRect` answers in layout order — the same array whichever
+   * way the band was dragged — so a move that swept nothing new is declined by
+   * `setIds`' `sameIds` guard and wakes no subscriber. The repaint below is
+   * unconditional anyway: the band itself has moved even when its contents
+   * have not.
+   */
+  private applyMarquee() {
+    const drag = this.dragState;
+    const rect = rectBetween(drag.origin, {
+      x: drag.origin.x + drag.dxPx,
+      y: drag.origin.y + drag.dyPx,
+    });
+    this.marqueeRect = rect;
+
+    // `this.layout` is the layout the last paint produced — the same one every
+    // hit test in this file reads, and so the same pixels the user is aiming
+    // at. See `drawCanvas`.
+    const banded = clipsInRect(this.layout, rect);
+    this.targetId = drag.shift ? mergeIds(this.dragIds, banded) : banded;
+
+    this.drawCanvas();
+  }
+
   /** Feed one pointer event to the machine and carry out what it asks for. */
   private dispatchPointer(ev: PointerEv) {
     const { state, effects } = reduceDrag(this.dragState, ev);
@@ -955,6 +1015,13 @@ export class elementTimelineCanvas extends LitElement {
           break;
         case "clearSelection":
           this.targetId = [];
+          this.drawCanvas();
+          break;
+        case "restoreSelection":
+          // A cancelled band. `dragIds` still holds the selection from before
+          // the press — the idle branch below clears it, and that runs after
+          // this loop.
+          this.targetId = this.dragIds;
           this.drawCanvas();
           break;
         case "commit": {
@@ -985,6 +1052,8 @@ export class elementTimelineCanvas extends LitElement {
       this.dragIds = [];
       this.snapGuideMs = null;
       this.dropTrackId = null;
+      // One place covers `up`, `cancel`, Escape and window blur.
+      this.marqueeRect = null;
       // `commit` and `revert` clear this themselves, but a press that ends
       // without ever becoming a drag emits neither — and `applyDrag` has
       // already run for it, because a `pressed` state still tracks the pointer.
@@ -999,7 +1068,11 @@ export class elementTimelineCanvas extends LitElement {
     }
 
     if (!wasIdle || ev.type !== "down") {
-      this.applyDrag();
+      if (state.phase === "marquee") {
+        this.applyMarquee();
+      } else {
+        this.applyDrag();
+      }
     }
   }
 
@@ -1156,6 +1229,11 @@ export class elementTimelineCanvas extends LitElement {
       this.addTransitionAtCut(hit.fromId, hit.toId);
     }
 
+    // `mousedown` fires for the right button too, and that press still has to
+    // reach the machine: it is what settles the selection `_handleContextmenu`
+    // is about to snapshot. `primary` is what stops it *arming* anything — the
+    // menu opens over the canvas, so a gesture tracking the pointer would sweep
+    // a rubber-band underneath it as the hand moves to the menu.
     this.dispatchPointer({
       type: "down",
       x: e.offsetX,
@@ -1164,6 +1242,7 @@ export class elementTimelineCanvas extends LitElement {
       hit,
       shift: e.shiftKey,
       alt: e.altKey,
+      primary: e.button === 0,
     });
 
     this.drawCanvas();

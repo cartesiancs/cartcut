@@ -6,8 +6,10 @@ import {
   TRACK_PITCH,
   RULER_OFFSET,
   TRIM_HANDLE_PX,
+  clipsInRect,
   hitTest,
   layoutTimeline,
+  rectBetween,
   rowTop,
   timeAtX,
   trackAtY,
@@ -15,6 +17,7 @@ import {
   xAtTime,
   type LayoutInput,
 } from "./layout";
+import { addTransition } from "./transitionOps";
 import {
   SCHEMA_VERSION,
   createTrack,
@@ -22,7 +25,7 @@ import {
   normalizeDocument,
   type TimelineDocument,
 } from "./tracks";
-import { imageElement, videoElement } from "../renderer/testing";
+import { groupElement, imageElement, videoElement } from "../renderer/testing";
 
 const RANGE = 0.9; // 45px per second
 
@@ -368,5 +371,195 @@ describe("trackAtY", () => {
     const l = layout(doc([["a", "video"]]));
     expect(trackAtY(l, TRACK_HEIGHT + 1)).toBeNull();
     expect(trackAtY(l, -5)).toBeNull();
+  });
+});
+
+describe("rectBetween", () => {
+  it("normalises a band dragged down and to the right", () => {
+    expect(rectBetween({ x: 10, y: 20 }, { x: 60, y: 90 })).toEqual({
+      x: 10,
+      y: 20,
+      w: 50,
+      h: 70,
+    });
+  });
+
+  it("gives the same band dragged up and to the left", () => {
+    expect(rectBetween({ x: 60, y: 90 }, { x: 10, y: 20 })).toEqual({
+      x: 10,
+      y: 20,
+      w: 50,
+      h: 70,
+    });
+  });
+
+  it("gives the same band dragged up and to the right, and down and to the left", () => {
+    const expected = { x: 10, y: 20, w: 50, h: 70 };
+    expect(rectBetween({ x: 10, y: 90 }, { x: 60, y: 20 })).toEqual(expected);
+    expect(rectBetween({ x: 60, y: 20 }, { x: 10, y: 90 })).toEqual(expected);
+  });
+
+  it("reports no area for a press that never moved", () => {
+    expect(rectBetween({ x: 40, y: 40 }, { x: 40, y: 40 })).toEqual({
+      x: 40,
+      y: 40,
+      w: 0,
+      h: 0,
+    });
+  });
+});
+
+describe("clipsInRect", () => {
+  // At RANGE, one second is 45px: `a` spans x 0..180 on row 0, `b` spans
+  // x 270..450 on row 0, and `c` spans x 0..180 on row 1 (y 44..84).
+  const d = doc([["v1", "video"], ["v2", "video"]], {
+    a: imageElement({ trackId: "v1", startTime: 0, duration: 4000 }),
+    b: imageElement({ trackId: "v1", startTime: 6000, duration: 4000 }),
+    c: imageElement({ trackId: "v2", startTime: 0, duration: 4000 }),
+  });
+
+  it("selects a clip the band merely grazes", () => {
+    // Five pixels of a 180px clip. Touching is the whole rule.
+    expect(clipsInRect(layout(d), { x: 175, y: 5, w: 10, h: 10 })).toEqual(["a"]);
+  });
+
+  it("does not have to contain a clip to select it", () => {
+    // The band drawn wholly *inside* the clip — the other half of "touch".
+    expect(clipsInRect(layout(d), { x: 50, y: 10, w: 10, h: 10 })).toEqual(["a"]);
+  });
+
+  it("sweeps two rows at once, naming them in layout order", () => {
+    // Track index, then start time — top to bottom, left to right, which is
+    // what is on screen.
+    expect(clipsInRect(layout(d), { x: 0, y: 0, w: 300, h: 100 })).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+  });
+
+  it("selects the same clips whichever corner the drag started from", () => {
+    const l = layout(d);
+    const tl = { x: 10, y: 10 };
+    const br = { x: 300, y: 100 };
+    const tr = { x: 300, y: 10 };
+    const bl = { x: 10, y: 100 };
+    const expected = ["a", "b", "c"];
+    for (const [from, to] of [
+      [tl, br],
+      [br, tl],
+      [tr, bl],
+      [bl, tr],
+    ]) {
+      expect(clipsInRect(l, rectBetween(from, to))).toEqual(expected);
+    }
+  });
+
+  it("selects neither of two clips when the band sits in the gap between them", () => {
+    expect(clipsInRect(layout(d), { x: 200, y: 5, w: 50, h: 10 })).toEqual([]);
+  });
+
+  it("declines a band with no width", () => {
+    // `overlap.ts`' rule: a half-open interval of zero width holds nothing.
+    expect(clipsInRect(layout(d), { x: 90, y: 0, w: 0, h: 40 })).toEqual([]);
+  });
+
+  it("declines a band with no height", () => {
+    // Otherwise a perfectly horizontal sweep would claim a whole row.
+    expect(clipsInRect(layout(d), { x: 0, y: 20, w: 500, h: 0 })).toEqual([]);
+  });
+
+  it("leaves a clip alone when the band stops exactly at its left edge", () => {
+    expect(clipsInRect(layout(d), { x: 200, y: 5, w: 70, h: 10 })).toEqual([]);
+  });
+
+  it("claims a clip when the band starts exactly on its left edge", () => {
+    expect(clipsInRect(layout(d), { x: 270, y: 5, w: 10, h: 10 })).toEqual(["b"]);
+  });
+
+  it("leaves a clip alone when the band starts exactly at its right edge", () => {
+    // The rule `hitTest` gives abutting clips: an edge belongs to one side.
+    expect(clipsInRect(layout(d), { x: 180, y: 5, w: 10, h: 10 })).toEqual([]);
+  });
+
+  it("finds a clip too short to draw at its true width", () => {
+    // 10ms is 0.45px of time and `MIN_CLIP_PX` of picture. The band agrees
+    // with the pixels, not with the arithmetic.
+    const tiny = doc([["v1", "video"]], {
+      t: imageElement({ trackId: "v1", startTime: 20_000, duration: 10 }),
+    });
+    const l = layout(tiny);
+    expect(l.clips[0]).toMatchObject({ x: 900, w: MIN_CLIP_PX });
+    expect(clipsInRect(l, { x: 902, y: 5, w: 1, h: 10 })).toEqual(["t"]);
+  });
+
+  it("cannot select a clip scrolled off the side, because none is drawn to touch", () => {
+    const l = layout(d, { hScroll: 5000 });
+    expect(clipsInRect(l, { x: 0, y: 0, w: 1000, h: 500 })).toEqual([]);
+  });
+
+  it("cannot select a row scrolled out of view", () => {
+    const l = layout(d, { vScroll: 500 });
+    expect(clipsInRect(l, { x: 0, y: 0, w: 1000, h: 500 })).toEqual([]);
+  });
+
+  it("ignores a transition badge, selecting the two clips it joins", () => {
+    const abutting = normalizeDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: [createTrack("v1", "video", 0)],
+      elements: {
+        a: videoElement({
+          trackId: "v1",
+          startTime: 0,
+          duration: 4000,
+          trim: { startTime: 2000, endTime: 6000 },
+          sourceDuration: 20_000,
+        }),
+        b: videoElement({
+          trackId: "v1",
+          startTime: 4000,
+          duration: 4000,
+          trim: { startTime: 2000, endTime: 6000 },
+          sourceDuration: 20_000,
+        }),
+      },
+    });
+    const withT = addTransition(abutting, "t1", "a", "b", "cross", 800, "center");
+    const l = layout(withT);
+    expect(l.transitions).toHaveLength(1);
+    expect(clipsInRect(l, { x: 0, y: 0, w: 1000, h: 100 })).toEqual(["a", "b"]);
+  });
+
+  it("selects a group's bar like any other clip", () => {
+    const grouped = doc([["g1", "group"]], {
+      g: groupElement({ trackId: "g1", startTime: 0, duration: 4000 }),
+    });
+    expect(clipsInRect(layout(grouped), { x: 0, y: 0, w: 200, h: 40 })).toEqual([
+      "g",
+    ]);
+  });
+
+  it("finds nothing over an empty track", () => {
+    expect(
+      clipsInRect(layout(doc([["v1", "video"]])), { x: 0, y: 0, w: 500, h: 100 }),
+    ).toEqual([]);
+  });
+
+  it("finds nothing on an empty layout", () => {
+    expect(
+      clipsInRect(layout(doc([])), { x: 0, y: 0, w: 500, h: 100 }),
+    ).toEqual([]);
+  });
+
+  it("agrees with hitTest on a one-pixel band", () => {
+    // The contract that keeps the two queries in one file: a click and a
+    // one-pixel band on the same pixel must name the same clip.
+    const l = layout(d);
+    for (const clip of l.clips) {
+      const x = clip.x + clip.w / 2;
+      const y = clip.y + clip.h / 2;
+      expect(clipsInRect(l, { x, y, w: 1, h: 1 })).toEqual([clip.elementId]);
+      expect(hitTest(l, x, y)).toMatchObject({ elementId: clip.elementId });
+    }
   });
 });

@@ -325,6 +325,93 @@ export function trackAtY(layout: TimelineLayout, y: number): string | null {
 }
 
 /**
+ * A box in screen px — the same space `ClipRect` is in.
+ *
+ * `ClipRect` structurally satisfies this, so a clip can be handed straight to
+ * `clipsInRect` in a test without being unpacked.
+ */
+export type ScreenRect = { x: number; y: number; w: number; h: number };
+
+/**
+ * The band between two points, whichever corner the drag started from.
+ *
+ * Folding all four directions into one non-negative rect here is what lets
+ * `clipsInRect` below be a plain overlap test: it never has to reason about a
+ * negative extent, and it can be exhaustively tested without a gesture.
+ */
+export function rectBetween(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): ScreenRect {
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    w: Math.abs(a.x - b.x),
+    h: Math.abs(a.y - b.y),
+  };
+}
+
+/**
+ * Every clip a rubber-band touches, in layout order.
+ *
+ * The area query to `hitTest`'s point query, and it lives here for the reason
+ * this module exists: both read `layout.clips` and both have to agree about
+ * where a clip ends. `hitTest` writes that as `x >= clip.x + clip.w`; the test
+ * below is the same half-open rule on both axes, which is also
+ * `overlap.ts#overlaps` in two dimensions. Split across two files, a click and
+ * a one-pixel band on the same pixel could name different clips.
+ *
+ * Three consequences follow from the half-open rule, and each matches something
+ * the codebase already states:
+ *
+ * - A band with no width or no height selects nothing — `overlaps`' own rule,
+ *   that a zero-width interval contains no instant. The gesture never presents
+ *   one (a band does not start until the pointer has travelled), so this is
+ *   about the function being total rather than about the UI.
+ * - A band whose right edge lands exactly on a clip's left edge misses it, and
+ *   one that *starts* there hits it. That is the rule `hitTest` gives abutting
+ *   clips: an edge belongs to exactly one side.
+ * - Touching is enough, and so is being contained: the test asks only whether
+ *   two boxes overlap, so a band drawn wholly inside a long clip selects it.
+ *
+ * Iterating `layout.clips` in its natural order — track index, then start time,
+ * then id — makes the result independent of which way the band was dragged.
+ * That is what lets `selectionStore.setIds` decline a mousemove that swept
+ * nothing new, which is the whole reason a band can update the selection live.
+ *
+ * Taking a `TimelineLayout` rather than a `TimelineDocument` is deliberate:
+ * `layout.clips` is viewport-culled and clamped to `MIN_CLIP_PX`, so the band
+ * selects exactly what is *drawn*, down to a clip too short to draw at its true
+ * width. Re-deriving from the document would reintroduce the drift this module
+ * exists to prevent.
+ */
+export function clipsInRect(
+  layout: TimelineLayout,
+  rect: ScreenRect,
+): string[] {
+  // Stated separately rather than left to the comparison below, exactly as
+  // `overlaps` does it: `x < clip.x + clip.w && clip.x < x + 0` is true for a
+  // zero-width band sitting inside a clip, so the half-open rule has to be
+  // asserted rather than derived.
+  if (rect.w <= 0 || rect.h <= 0) {
+    return [];
+  }
+
+  const found: string[] = [];
+  for (const clip of layout.clips) {
+    if (
+      rect.x < clip.x + clip.w &&
+      clip.x < rect.x + rect.w &&
+      rect.y < clip.y + clip.h &&
+      clip.y < rect.y + rect.h
+    ) {
+      found.push(clip.elementId);
+    }
+  }
+  return found;
+}
+
+/**
  * What is under the pointer.
  *
  * Order matters, and it is the reverse of the drawing order for one reason: a

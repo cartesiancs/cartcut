@@ -1346,3 +1346,46 @@ describe("drawTimeline — frame grid", () => {
     expect(isGridInk(canvas, 1)).toBe(false);
   });
 });
+
+// ======================================================= the rubber-band
+
+import { drawMarquee } from "./draw";
+
+describe("drawMarquee", () => {
+  // Loud and opaque, so a pixel says which of the two values reached it.
+  const loud = {
+    ...defaultColors,
+    marqueeFill: "#ff0000",
+    marqueeStroke: "#00ff00",
+  };
+  const band = { x: 100, y: 10, w: 100, h: 20 };
+
+  it("fills the band over whatever it covers", () => {
+    const { canvas, ctx } = paint(doc({}));
+    drawMarquee(ctx, band, loud);
+    expect(pixel(canvas, 150, 20)).toMatchObject({ r: 255, g: 0, b: 0 });
+  });
+
+  it("outlines it, so the edge reads over a bright clip", () => {
+    // The half-pixel inset is the point: without it the 1px stroke straddles
+    // two columns and neither is fully the stroke colour.
+    const { canvas, ctx } = paint(doc({}));
+    drawMarquee(ctx, band, loud);
+    expect(pixel(canvas, 100, 20)).toMatchObject({ r: 0, g: 255, b: 0 });
+  });
+
+  it("leaves the timeline alone outside the band", () => {
+    const { canvas, ctx } = paint(doc({}));
+    drawMarquee(ctx, band, loud);
+    // The row colour, untouched.
+    expect(pixel(canvas, 50, 20)).toMatchObject({ r: 30, g: 31, b: 37 });
+  });
+
+  it("draws nothing for a band with no width", () => {
+    const { canvas, ctx } = paint(doc({}));
+    expect(() =>
+      drawMarquee(ctx, { x: 100, y: 10, w: 0, h: 20 }, loud),
+    ).not.toThrow();
+    expect(pixel(canvas, 100, 20)).toMatchObject({ r: 30, g: 31, b: 37 });
+  });
+});

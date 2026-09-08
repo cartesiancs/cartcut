@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { selectionStore } from "./selectionStore";
+import { mergeIds, selectionStore } from "./selectionStore";
 
 const reset = () => selectionStore.setState({ ids: [], clipboard: {} });
 const ids = () => selectionStore.getState().ids;
@@ -72,5 +72,45 @@ describe("selectionStore", () => {
     selectionStore.getState().setIds(["b"]);
 
     expect(Object.keys(selectionStore.getState().clipboard)).toEqual(["a"]);
+  });
+});
+
+describe("mergeIds", () => {
+  beforeEach(reset);
+
+  it("appends what the band found to what was already selected", () => {
+    expect(mergeIds(["a"], ["b", "c"])).toEqual(["a", "b", "c"]);
+  });
+
+  it("never lists an id twice", () => {
+    expect(mergeIds(["a", "b"], ["b", "c"])).toEqual(["a", "b", "c"]);
+  });
+
+  it("keeps the base's order, so shift-dragging does not reshuffle the selection", () => {
+    // The store promises "the order they were picked", and a band arriving
+    // must not renumber what the user already had.
+    expect(mergeIds(["c", "a"], ["a", "b"])).toEqual(["c", "a", "b"]);
+  });
+
+  it("returns the band alone when nothing was selected", () => {
+    expect(mergeIds([], ["a", "b"])).toEqual(["a", "b"]);
+  });
+
+  it("returns the base alone when the band found nothing", () => {
+    expect(mergeIds(["a", "b"], [])).toEqual(["a", "b"]);
+  });
+
+  it("gives an identical array for identical input, so the store declines to notify", () => {
+    // The property the live band rests on: a mousemove that sweeps nothing new
+    // must not wake a single subscriber.
+    selectionStore.getState().setIds(mergeIds(["a"], ["b", "c"]));
+
+    const listener = vi.fn();
+    const unsubscribe = selectionStore.subscribe(listener);
+    selectionStore.getState().setIds(mergeIds(["a"], ["b", "c"]));
+    unsubscribe();
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(ids()).toEqual(["a", "b", "c"]);
   });
 });

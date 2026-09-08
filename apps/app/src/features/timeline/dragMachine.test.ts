@@ -46,10 +46,22 @@ describe("pressing a clip", () => {
     expect(effects).toEqual([]);
   });
 
-  it("clears the selection when the press lands on nothing", () => {
+  it("clears the selection when the press lands on nothing, then waits to see if a band is coming", () => {
+    // The effects are exactly what they always were — the press does the same
+    // thing to the selection, on the way down. Only the phase moved: the press
+    // no longer *ends* the gesture, because a rubber-band may be about to
+    // start.
     const { state, effects } = run(down({ hit: { kind: "none" } }));
-    expect(state.phase).toBe("idle");
+    expect(state.phase).toBe("pressed");
     expect(kinds(effects)).toEqual(["clearSelection"]);
+  });
+
+  it("leaves the selection alone when the empty press is a shift-press", () => {
+    // Shift means "add to what is selected", and clearing first would leave
+    // nothing to add to.
+    const { state, effects } = run(down({ hit: { kind: "none" }, shift: true }));
+    expect(state.phase).toBe("pressed");
+    expect(effects).toEqual([]);
   });
 
   it("remembers a shift-press, so the caller can extend the selection", () => {
@@ -277,5 +289,201 @@ describe("trackDeltaFor", () => {
 
   it("is safe with a degenerate pitch", () => {
     expect(trackDeltaFor(100, 0)).toBe(0);
+  });
+});
+
+describe("rubber-band selection", () => {
+  const emptyHit: Hit = { kind: "none" };
+  const trackHit: Hit = { kind: "track", trackId: "v1" };
+  const badgeHit: Hit = {
+    kind: "transition",
+    transitionId: "t1",
+    trackId: "v1",
+    zone: "body",
+  };
+  const cutHit: Hit = {
+    kind: "cut",
+    trackId: "v1",
+    fromId: "a",
+    toId: "b",
+    atMs: 4000,
+  };
+
+  it("starts a band once the pointer clearly leaves the press point", () => {
+    const { state } = run(
+      down({ hit: emptyHit }),
+      { type: "move", x: 140, y: 90, t: 30 },
+    );
+    expect(state.phase).toBe("marquee");
+  });
+
+  it("takes the same boundary as a slide: 4px waits, 5px bands", () => {
+    const waits = run(
+      down({ hit: emptyHit }),
+      { type: "move", x: 104, y: 50, t: 10 },
+    );
+    expect(waits.state.phase).toBe("pressed");
+
+    const bands = run(
+      down({ hit: emptyHit }),
+      { type: "move", x: 105, y: 50, t: 10 },
+    );
+    expect(bands.state.phase).toBe("marquee");
+  });
+
+  it("starts a band from the empty part of a track, not only from below the rows", () => {
+    const { state } = run(
+      down({ hit: trackHit }),
+      { type: "move", x: 140, y: 90, t: 30 },
+    );
+    expect(state.phase).toBe("marquee");
+  });
+
+  it("never starts a band from a clip", () => {
+    const { state } = run(down(), { type: "move", x: 140, y: 90, t: 30 });
+    expect(state.phase).toBe("moveH");
+  });
+
+  it("never starts a band from a transition badge or a bare cut", () => {
+    for (const hit of [badgeHit, cutHit]) {
+      const { state } = run(
+        down({ hit }),
+        { type: "move", x: 140, y: 90, t: 30 },
+      );
+      expect(state.phase).toBe("pressed");
+    }
+  });
+
+  it("tracks both axes, so the band can be dragged in any direction", () => {
+    // Unlike a slide, which locks vertical the moment it is classified.
+    const { state } = run(
+      down({ hit: emptyHit }),
+      { type: "move", x: 40, y: 10, t: 30 },
+    );
+    expect(state.phase).toBe("marquee");
+    expect(state.dxPx).toBe(-60);
+    expect(state.dyPx).toBe(-40);
+  });
+
+  it("carries the shift through, so the band knows to extend rather than replace", () => {
+    const { state } = run(
+      down({ hit: emptyHit, shift: true }),
+      { type: "move", x: 140, y: 90, t: 30 },
+    );
+    expect(state.phase).toBe("marquee");
+    expect(state.shift).toBe(true);
+  });
+
+  it("frees nothing when the press is held on empty space", () => {
+    // The component arms its long-press timer on every press; the tick has to
+    // decline for anything that is not a clip.
+    const { state, effects } = run(
+      down({ hit: emptyHit }),
+      { type: "tick", t: DRAG.LONG_PRESS_MS },
+    );
+    expect(state.phase).toBe("pressed");
+    expect(state.free).toBe(false);
+    expect(kinds(effects)).toEqual(["clearSelection"]);
+  });
+
+  it("ignores a tick once the band is out", () => {
+    const { state } = run(
+      down({ hit: emptyHit }),
+      { type: "move", x: 140, y: 90, t: 30 },
+      { type: "tick", t: DRAG.LONG_PRESS_MS },
+    );
+    expect(state.phase).toBe("marquee");
+    expect(state.free).toBe(false);
+  });
+
+  it("asks for the crosshair when the band starts, and gives the cursor back on release", () => {
+    const { effects } = run(
+      down({ hit: emptyHit }),
+      { type: "move", x: 140, y: 90, t: 30 },
+      { type: "up", t: 60 },
+    );
+    const cursors = effects
+      .filter((e) => e.type === "cursor")
+      .map((e) => (e as { value: string }).value);
+    expect(cursors).toEqual(["crosshair", "default"]);
+  });
+
+  it("commits nothing on release, because a band edits no document", () => {
+    const { effects } = run(
+      down({ hit: emptyHit }),
+      { type: "move", x: 140, y: 90, t: 30 },
+      { type: "up", t: 60 },
+    );
+    expect(kinds(effects)).not.toContain("checkpoint");
+    expect(kinds(effects)).not.toContain("commit");
+  });
+
+  it("forgets everything after the band is released", () => {
+    const { state } = run(
+      down({ hit: emptyHit }),
+      { type: "move", x: 140, y: 90, t: 30 },
+      { type: "up", t: 60 },
+    );
+    expect(state).toEqual(idleDrag);
+  });
+
+  it("puts the selection back when the band is cancelled", () => {
+    const { state, effects } = run(
+      down({ hit: emptyHit }),
+      { type: "move", x: 140, y: 90, t: 30 },
+      { type: "cancel" },
+    );
+    expect(state).toEqual(idleDrag);
+    expect(kinds(effects)).toContain("restoreSelection");
+    // A band has no document to throw away, so `revert` would be a lie.
+    expect(kinds(effects)).not.toContain("revert");
+  });
+
+  it("still reverts the document when an ordinary drag is cancelled", () => {
+    // The guard that splitting `cancel` by phase did not swallow `revert`.
+    const { effects } = run(
+      down(),
+      { type: "move", x: 140, y: 50, t: 30 },
+      { type: "cancel" },
+    );
+    expect(kinds(effects)).toContain("revert");
+    expect(kinds(effects)).not.toContain("restoreSelection");
+  });
+});
+
+describe("a non-primary press", () => {
+  const emptyHit: Hit = { kind: "none" };
+
+  it("still clears the selection, because the context menu acts on what it leaves", () => {
+    const { effects } = run(down({ hit: emptyHit, primary: false }));
+    expect(kinds(effects)).toEqual(["clearSelection"]);
+  });
+
+  it("arms nothing, so no band can be swept under the open menu", () => {
+    const { state } = run(
+      down({ hit: emptyHit, primary: false }),
+      { type: "move", x: 300, y: 200, t: 40 },
+    );
+    expect(state).toEqual(idleDrag);
+  });
+
+  it("cannot start a slide, a lift or a trim on a clip either", () => {
+    for (const hit of [bodyHit, startHandle, endHandle]) {
+      const { state } = run(down({ hit, primary: false }));
+      expect(state).toEqual(idleDrag);
+    }
+    // Not even with Alt, which is otherwise an immediate lift.
+    expect(run(down({ alt: true, primary: false })).state).toEqual(idleDrag);
+  });
+
+  it("leaves the cursor alone, having started nothing to show", () => {
+    const { effects } = run(down({ hit: startHandle, primary: false }));
+    expect(effects).toEqual([]);
+  });
+
+  it("still behaves as a primary press when the flag is not given", () => {
+    // Every existing caller predates the flag and must be unaffected.
+    expect(run(down()).state.phase).toBe("pressed");
+    expect(run(down({ primary: true })).state.phase).toBe("pressed");
   });
 });

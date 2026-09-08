@@ -75,6 +75,17 @@ export type ThemeColors = {
   transitionClamped: string;
   /** The hint on a bare cut that a transition can go there. */
   cutAffordance: string;
+  /**
+   * The rubber-band's interior, and its edge.
+   *
+   * Two values because the band is dragged over both the near-black background
+   * and a bright filmstrip and has to read on either. The fill stays under
+   * `frameGrid`'s 0.13 so a swept clip reads as *selected* rather than as
+   * tinted; the stroke matches `cutAffordance`'s 0.5, because the edge is the
+   * only part of a band that has to be legible over a lit frame.
+   */
+  marqueeFill: string;
+  marqueeStroke: string;
 };
 
 export const defaultColors: ThemeColors = {
@@ -107,6 +118,8 @@ export const defaultColors: ThemeColors = {
   transitionClamped: "#e8a33d",
   // The same white, dimmed: a hint, not an object.
   cutAffordance: "rgba(255, 255, 255, 0.5)",
+  marqueeFill: "rgba(255, 255, 255, 0.10)",
+  marqueeStroke: "rgba(255, 255, 255, 0.55)",
 };
 
 export type DrawOptions = {
@@ -801,4 +814,33 @@ export function drawDropTarget(
   }
   ctx.fillStyle = color;
   ctx.fillRect(0, row.top, viewportW, row.height);
+}
+
+/**
+ * The rubber-band, while one is being dragged over empty space.
+ *
+ * Drawn from the component rather than from `drawTimeline`, for the reason the
+ * drop target already is: `drawTimeline` takes a document and a layout and
+ * knows nothing about a gesture in flight.
+ */
+export function drawMarquee(
+  ctx: CanvasRenderingContext2D,
+  rect: { x: number; y: number; w: number; h: number },
+  colors: ThemeColors = defaultColors,
+) {
+  // The rule `clipsInRect` applies, for the same reason: a band with no area
+  // is not a band. Without it the negative inset below draws a stray hairline.
+  if (rect.w <= 0 || rect.h <= 0) {
+    return;
+  }
+
+  ctx.save();
+  ctx.fillStyle = colors.marqueeFill;
+  ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+  ctx.strokeStyle = colors.marqueeStroke;
+  ctx.lineWidth = 1;
+  // Half-pixel inset, so a 1px stroke lands on one pixel instead of straddling
+  // two and drawing at half strength.
+  ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+  ctx.restore();
 }
