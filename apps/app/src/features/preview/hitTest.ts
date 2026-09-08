@@ -186,17 +186,31 @@ export function canPointerTarget(
   element: TimelineElement | undefined,
   cursorMs: number,
   timeline: Timeline,
-  isActiveElement: boolean,
 ): boolean {
   if (element == null) {
     return false;
   }
 
-  // A group's frame is live whenever it is selected, whatever the playhead is
-  // doing: its transform applies to its children at every instant, so hiding
-  // its handles outside its own bar would be arbitrary.
+  // A group is always a target, and its own bar does not gate that: its
+  // transform applies to its children at every instant, so a null whose handles
+  // blinked out with its bar would be arbitrary.
+  //
+  // This used to read `return isActiveElement`, on the reasoning that an
+  // invisible rectangle answering the pointer all the time would swallow every
+  // click aimed at its own children — a real hazard, since a group's box
+  // typically encloses them. But the guard was **circular**: the only thing
+  // that ever wrote `previewCanvas.activeElementId` was the preview's own
+  // mousedown, which could not reach a group that was not already active. So no
+  // group was ever pointer-targetable, its dashed outline was unreachable, and
+  // a null could be created but never seen or moved.
+  //
+  // The hazard is answered where it actually lives instead — in the *zone*:
+  // `nullGizmo.ts#nullHitZoneOf` claims the anchor and the edge bands and
+  // returns `"none"` for the interior, so clicks aimed at a child still reach
+  // it. Liveness and shape are two questions, and this one only ever had to
+  // answer the first.
   if (element.filetype === "group") {
-    return isActiveElement;
+    return true;
   }
 
   if (!isVisualTimelineElement(element)) {

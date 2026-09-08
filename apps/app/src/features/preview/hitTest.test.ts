@@ -264,14 +264,14 @@ describe("canPointerTarget", () => {
 
   it("takes a clip while the playhead is inside its span", () => {
     const el = imageElement({ startTime: 1000, duration: 2000 });
-    expect(canPointerTarget(el, 1000, timeline, false)).toBe(true);
-    expect(canPointerTarget(el, 2999, timeline, false)).toBe(true);
+    expect(canPointerTarget(el, 1000, timeline)).toBe(true);
+    expect(canPointerTarget(el, 2999, timeline)).toBe(true);
   });
 
   it("refuses a clip the playhead has left", () => {
     const el = imageElement({ startTime: 1000, duration: 2000 });
-    expect(canPointerTarget(el, 999, timeline, false)).toBe(false);
-    expect(canPointerTarget(el, 3000, timeline, false)).toBe(false);
+    expect(canPointerTarget(el, 999, timeline)).toBe(false);
+    expect(canPointerTarget(el, 3000, timeline)).toBe(false);
   });
 
   /**
@@ -297,15 +297,15 @@ describe("canPointerTarget", () => {
     expect(parts.right.trim.startTime).toBeGreaterThan(0);
 
     // Grabbable from the cut, not from cut + trim.
-    expect(canPointerTarget(parts.right, 5000, timeline, false)).toBe(true);
-    expect(canPointerTarget(parts.right, 6000, timeline, false)).toBe(true);
-    expect(canPointerTarget(parts.right, 9999, timeline, false)).toBe(true);
-    expect(canPointerTarget(parts.right, 19_999, timeline, false)).toBe(true);
-    expect(canPointerTarget(parts.right, 20_000, timeline, false)).toBe(false);
+    expect(canPointerTarget(parts.right, 5000, timeline)).toBe(true);
+    expect(canPointerTarget(parts.right, 6000, timeline)).toBe(true);
+    expect(canPointerTarget(parts.right, 9999, timeline)).toBe(true);
+    expect(canPointerTarget(parts.right, 19_999, timeline)).toBe(true);
+    expect(canPointerTarget(parts.right, 20_000, timeline)).toBe(false);
 
     // And the first half still stops at the cut.
-    expect(canPointerTarget(parts.left, 4999, timeline, false)).toBe(true);
-    expect(canPointerTarget(parts.left, 5000, timeline, false)).toBe(false);
+    expect(canPointerTarget(parts.left, 4999, timeline)).toBe(true);
+    expect(canPointerTarget(parts.left, 5000, timeline)).toBe(false);
   });
 
   it("measures the span through speed, not raw duration", () => {
@@ -317,24 +317,36 @@ describe("canPointerTarget", () => {
       trim: { startTime: 0, endTime: 4000 },
       sourceDuration: 10_000,
     });
-    expect(canPointerTarget(fast, 1999, timeline, false)).toBe(true);
-    expect(canPointerTarget(fast, 2000, timeline, false)).toBe(false);
+    expect(canPointerTarget(fast, 1999, timeline)).toBe(true);
+    expect(canPointerTarget(fast, 2000, timeline)).toBe(false);
   });
 
-  it("keeps a selected group grabbable at any playhead", () => {
+  /**
+   * This used to read `return isActiveElement`, and the guard was circular:
+   * only the preview's own mousedown ever wrote `activeElementId`, and it could
+   * not reach a group that was not already active. No group was ever
+   * targetable, so a null could be created but never seen or moved.
+   *
+   * The hazard that guard was aimed at — a null's box encloses its children, so
+   * an always-live rectangle would swallow their clicks — is answered by the
+   * *zone* instead: `nullGizmo.ts#nullHitZoneOf` returns "none" for the
+   * interior. See `nullGizmo.test.ts`.
+   */
+  it("takes a group at any playhead, inside its bar or outside it", () => {
     // Its transform applies to its children at every instant, so its handles
     // must not blink out with its own bar.
     const group = groupElement({ startTime: 1000, duration: 1000 });
-    expect(canPointerTarget(group, 50_000, timeline, true)).toBe(true);
-    expect(canPointerTarget(group, 50_000, timeline, false)).toBe(false);
+    expect(canPointerTarget(group, 1500, timeline)).toBe(true);
+    expect(canPointerTarget(group, 50_000, timeline)).toBe(true);
+    expect(canPointerTarget(group, 0, timeline)).toBe(true);
   });
 
   it("refuses audio, which has nothing to grab on the canvas", () => {
     const sound = audioElement({ startTime: 0, duration: 5000 });
-    expect(canPointerTarget(sound, 1000, timeline, false)).toBe(false);
+    expect(canPointerTarget(sound, 1000, timeline)).toBe(false);
   });
 
   it("refuses a missing element", () => {
-    expect(canPointerTarget(undefined, 0, timeline, false)).toBe(false);
+    expect(canPointerTarget(undefined, 0, timeline)).toBe(false);
   });
 });

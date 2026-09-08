@@ -71,6 +71,7 @@ import {
 import {
   applyPoint,
   applyVector,
+  createMemo,
   invert,
   localMatrixOf,
   localSampleAt,
@@ -80,6 +81,13 @@ import {
   worldBoundsOf,
   worldMatrixOf,
 } from "../timeline/transform";
+import {
+  nullGizmoGeometry,
+  nullHitZoneOf,
+  pointerOrder,
+  type NullGizmoState,
+} from "./nullGizmo";
+import { drawNullGizmo } from "../renderer/nullGizmo";
 import {
   angleStep,
   movedLocation,
@@ -139,6 +147,15 @@ export class PreviewCanvas extends LitElement {
   previewRatio: number;
   isMove: boolean;
   activeElementId: string;
+  /**
+   * The null whose gizmo the pointer is over, or `""`.
+   *
+   * A null is drawn at every playhead, so its idle state has to be quiet enough
+   * that several of them stay watchable — and a target that quiet needs a hover
+   * state to say what a click would take. It is only a highlight, so it lives
+   * here rather than in a store: nothing outside this component can act on it.
+   */
+  gizmoHoverId = "";
   mouseOrigin: { x: number; y: number };
   elementOrigin: { x: number; y: number; w: number; h: number };
   /**
@@ -752,6 +769,7 @@ export class PreviewCanvas extends LitElement {
     if (this.chrome.selection) {
       ctx.save();
       ctx.setTransform(...toDevice);
+      this.drawNullGizmos(ctx, g.scale);
       this.drawActiveOutline(ctx);
       this.drawPenOverlay(ctx);
       this.drawShapeOverlay(ctx);
@@ -785,6 +803,80 @@ export class PreviewCanvas extends LitElement {
     ctx.restore();
   }
 
+  /**
+   * Every null object's gizmo — the only thing that makes one visible.
+   *
+   * A null paints nothing, so `renderTimelineAtTime` never hands one over
+   * (`isVisualTimelineElement` drops it from the paint loop) and this pass has
+   * to walk the timeline itself.
+   *
+   * It belongs **here**, in the chrome pass, and not in the renderer. That
+   * function is shared by the in-app export, the offscreen export window, the
+   * agent's contact sheet and the e2e reference render, so a gizmo drawn there
+   * would be baked into the delivered file. Sitting in the chrome pass also
+   * means `chrome.selection` already takes it away while presenting, and the
+   * dim-outside blit never touches it — a null parked off-frame stays fully lit
+   * and grabbable, which is the same reason the pen overlay is drawn here.
+   *
+   * Drawn for every group at every playhead, deliberately. A group's span
+   * gates nothing — `renderer/timeline.ts` says so — because its transform
+   * reaches its children at every instant, so a gizmo that blinked out with its
+   * own bar would be claiming something untrue.
+   *
+   * Assumes `ctx` is already in world space.
+   */
+  private drawNullGizmos(ctx: CanvasRenderingContext2D, viewScale: number) {
+    // One memo for the whole pass, as the renderer does per frame. It must not
+    // outlive the frame: it caches matrices sampled at this cursor.
+    const memo = createMemo();
+
+    for (const elementId of Object.keys(this.timeline)) {
+      const element: any = this.timeline[elementId];
+      if (element?.filetype !== "group") {
+        continue;
+      }
+
+      const state: NullGizmoState =
+        elementId === this.activeElementId
+          ? "active"
+          : elementId === this.gizmoHoverId
+            ? "hover"
+            : "idle";
+
+      ctx.save();
+      // The parent chain first, then the element's own transform — the same two
+      // steps `renderElement` takes, so the gizmo lands exactly where the
+      // null's children are being drawn from.
+      const parent = parentMatrixOf(
+        this.timeline,
+        elementId,
+        this.timelineCursor,
+        memo,
+      );
+      ctx.transform(parent.a, parent.b, parent.c, parent.d, parent.e, parent.f);
+      applyElementTransform(ctx, element, this.timelineCursor);
+
+      const box = sampledBoxOf(element, this.timelineCursor);
+      // The scale standing between an element pixel and a screen pixel: the
+      // null's own world scale and the preview's zoom together. The same
+      // product `penScreenUnit` forms, and dividing the gizmo's sizes by it is
+      // what keeps it constant on screen at every zoom — which matters more
+      // here than anywhere, since the gizmo *is* the null.
+      const worldScale =
+        scaleOf(worldMatrixOf(this.timeline, elementId, this.timelineCursor, memo)) *
+        viewScale;
+
+      drawNullGizmo(
+        ctx,
+        nullGizmoGeometry(box.width, box.height, worldScale),
+        state,
+        element.timelineOptions?.color ?? "#ffffff",
+        element.name,
+      );
+      ctx.restore();
+    }
+  }
+
   /** Assumes `ctx` is already in world space. */
   private drawActiveOutline(ctx: CanvasRenderingContext2D) {
     const element: any = this.timeline[this.activeElementId];
@@ -792,19 +884,20 @@ export class PreviewCanvas extends LitElement {
       return;
     }
 
-    // A group draws nothing, so it cannot be picked in the preview — it is
-    // selected from its bar on the timeline. Once it is, its handles have to
-    // appear, or there is no way to move a group with the mouse at all. Its own
-    // span is not a reason to hide them either: parenting is spatial, so a
-    // group is "there" whenever it is selected.
-    const isGroup = element.filetype === "group";
-    if (!isGroup) {
-      if (!isVisualTimelineElement(element)) {
-        return;
-      }
-      if (!isElementVisibleAtTime(this.timelineCursor, this.timeline, element)) {
-        return;
-      }
+    // A selected null draws its own handles, in `drawNullGizmos` above, from
+    // the same geometry its hit test uses. Falling through to
+    // `renderControlOutline` here would put a second, differently-sized set of
+    // grips on top of them — that function measures in world pixels while every
+    // hit test measures in screen pixels — so the outline pass is now clips
+    // only.
+    if (element.filetype === "group") {
+      return;
+    }
+    if (!isVisualTimelineElement(element)) {
+      return;
+    }
+    if (!isElementVisibleAtTime(this.timelineCursor, this.timeline, element)) {
+      return;
     }
 
     ctx.save();
@@ -818,9 +911,7 @@ export class PreviewCanvas extends LitElement {
     ctx.transform(parent.a, parent.b, parent.c, parent.d, parent.e, parent.f);
     applyElementTransform(ctx, element, this.timelineCursor);
     const box = sampledBoxOf(element, this.timelineCursor);
-    renderControlOutline(ctx, 0, 0, box.width, box.height, {
-      dashed: isGroup,
-    });
+    renderControlOutline(ctx, 0, 0, box.width, box.height);
     ctx.restore();
   }
 
@@ -966,7 +1057,13 @@ export class PreviewCanvas extends LitElement {
     // `collisionCheck`-versus-renderer split all over again — the element in
     // one place and the pointer's idea of it in another.
     const { width, height } = sampledBoxOf(element, this.timelineCursor);
-    return hitZoneOf(
+    // A group is asked a different question, and this one line is what makes a
+    // null safe to leave grabbable all the time: `nullHitZoneOf` claims the
+    // anchor, the edge bands and the knob, and answers `"none"` for the
+    // interior — so a click aimed at a child inside the null's box reaches the
+    // child. `hitZoneOf` would return `"position"` there and swallow it.
+    const zoneOf = element.filetype === "group" ? nullHitZoneOf : hitZoneOf;
+    return zoneOf(
       applyPoint(invert(m), { x: mx, y: my }),
       width,
       height,
@@ -1328,26 +1425,9 @@ export class PreviewCanvas extends LitElement {
     );
   }
 
-  /**
-   * Whether the pointer may interact with this element at all.
-   *
-   * Everything drawable is always a target. A **group** is the exception, and
-   * needs one: its frame is invisible and, by construction, encloses its own
-   * children — so a group that answered the pointer all the time would be an
-   * invisible rectangle swallowing every click aimed at what is inside it.
-   *
-   * It goes live only once it is the active element, which happens by selecting
-   * its bar on the timeline. That is what makes an invisible, resizable box on
-   * the canvas safe to have: until you ask for it, it is not there.
-   */
   /** See `canPointerTarget`, which owns the rule and carries its history. */
-  private isPointerTarget(elementId: string, element: any): boolean {
-    return canPointerTarget(
-      element,
-      this.timelineCursor,
-      this.timeline,
-      elementId === this.activeElementId,
-    );
+  private isPointerTarget(element: any): boolean {
+    return canPointerTarget(element, this.timelineCursor, this.timeline);
   }
 
   /**
@@ -1616,15 +1696,14 @@ export class PreviewCanvas extends LitElement {
     this.nowShapeId = "";
     this.shapeHover = null;
 
-    const sortedTimeline = Object.fromEntries(
-      Object.entries(this.timeline).sort(
-        ([, valueA], [, valueB]) => valueA.priority - valueB.priority,
-      ),
-    );
-
-    for (const elementId of Object.keys(sortedTimeline)) {
+    // Ascending, and the loop below never breaks — so the last match wins,
+    // which is the topmost element. `pointerOrder` is that sort with groups
+    // moved to the end: their rows carry no z-order meaning, so a null's
+    // priority relative to the pictures it sits over is arbitrary, and its
+    // gizmo is chrome, which wins.
+    for (const elementId of pointerOrder(this.timeline)) {
       const element: any = this.timeline[elementId];
-      if (this.isPointerTarget(elementId, element)) {
+      if (this.isPointerTarget(element)) {
         // Where the element is *drawn*, not where `location` says it would be
         // with no animation, and not where it would be with no parent either.
         // Those diverge the moment a position track is active or a group sits
@@ -1917,16 +1996,14 @@ export class PreviewCanvas extends LitElement {
       return false;
     }
 
-    const sortedTimeline = Object.fromEntries(
-      Object.entries(this.timeline).sort(
-        ([, valueA], [, valueB]) => valueA.priority - valueB.priority,
-      ),
-    );
+    // The hover pass has to agree with `_handleMouseDown` about who wins, or
+    // the cursor would name one element and the click would take another.
+    let hoveredGroup = "";
 
     if (!this.isMove || !this.isStretch) {
-      for (const elementId of Object.keys(sortedTimeline)) {
+      for (const elementId of pointerOrder(this.timeline)) {
         const element = this.timeline[elementId];
-        if (this.isPointerTarget(elementId, element)) {
+        if (this.isPointerTarget(element)) {
           // Where the selection box and its drag handles sit, which has to be
           // wherever the element is actually being drawn.
           //
@@ -1947,6 +2024,16 @@ export class PreviewCanvas extends LitElement {
           // Liveness at the playhead is `isPointerTarget`'s job, as in
           // `_handleMouseDown` — this used to re-decide it, and got `trim` wrong.
           const collide = { type: this.hitZoneAt(elementId, mx, my) };
+
+          // Which null the pointer is on, so its gizmo can say so. Tracked in a
+          // local and written once after the loop: the loop does not break, so
+          // a later element can still take the hover, and assigning as we go
+          // would leave whichever group happened to be scanned last.
+          if (collide.type !== "none" && element.filetype === "group") {
+            hoveredGroup = elementId;
+          } else if (collide.type !== "none") {
+            hoveredGroup = "";
+          }
 
           if (collide.type == "position") {
             //this.activeElementId = elementId;
@@ -1988,6 +2075,14 @@ export class PreviewCanvas extends LitElement {
       this.cursorType = "default";
     }
     this.updateCursor();
+
+    // Only when it actually changed. This runs at pointer rate, and a repaint
+    // per mouse move would be the churn `selectionStore.sameIds` exists to
+    // stop — the whole preview redrawn hundreds of times to light up one ring.
+    if (hoveredGroup !== this.gizmoHoverId) {
+      this.gizmoHoverId = hoveredGroup;
+      this.scheduleDraw();
+    }
 
     // Deliberately `any`, not narrowed to `VisualTimelineElement`: a group is
     // excluded from that union — it draws nothing — yet it is exactly what the
