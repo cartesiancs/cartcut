@@ -1,6 +1,7 @@
 import { path } from "../functions/path";
 import mime from "../functions/mime";
 import { getLocationEnv } from "../functions/getLocationEnv";
+import { beginMediaLoad } from "../states/mediaLoadStore";
 
 /** Inserts an asset into the timeline. Directory browsing lives in
  * `features/asset/assetBrowser.ts`. */
@@ -16,6 +17,13 @@ export class AssetController {
       nowEnv == "electron"
         ? `file://${path.encode(originPath)}`
         : `${path.encode(originPath)}`;
+
+    // Up on the click, not on the probe. The fetch below reads the whole file
+    // into memory before anything is measured, which for a screen recording is
+    // the longest part of the import and used to happen with nothing on screen
+    // at all. Each `add*` raises its own count before this one is released, so
+    // the two windows overlap and the bar never blinks between them.
+    const release = beginMediaLoad();
 
     fetch(`${filepath}`)
       .then((res) => {
@@ -35,6 +43,12 @@ export class AssetController {
         } else if (blobType == "gif") {
           control.addGif(blobUrl, fileorgpath);
         }
+      })
+      .finally(release)
+      .catch((error) => {
+        // There was no handler here at all, so an unreadable file left the
+        // click with no clip, no message and an unhandled rejection.
+        console.error("[asset] could not read", originPath, error);
       });
   }
 

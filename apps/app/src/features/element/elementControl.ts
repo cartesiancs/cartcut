@@ -21,7 +21,7 @@ import { setIn } from "../../utils/immutable";
 import { cursorAtElapsed } from "../timeline/playbackClock";
 import { projectFps } from "../editor/frameRate";
 import { mark as perfMark } from "../debug/frameStats";
-import { mediaLoadStore } from "../../states/mediaLoadStore";
+import { beginMediaLoad } from "../../states/mediaLoadStore";
 
 @customElement("element-control")
 export class ElementControl extends LitElement {
@@ -309,9 +309,13 @@ export class ElementControl extends LitElement {
   addImage(blob, path) {
     const elementId = this.generateUUID();
     const img = document.createElement("img");
+    const release = beginMediaLoad();
 
+    img.onerror = release;
     img.src = blob;
     img.onload = () => {
+      release();
+
       let resize = this.fitElementSizeOnPreview(img.width, img.height);
       let width = resize.width;
       let height = resize.height; // /division
@@ -344,6 +348,7 @@ export class ElementControl extends LitElement {
   addGif(blob, path) {
     const elementId = this.generateUUID();
     const img = document.createElement("img");
+    const release = beginMediaLoad();
 
     const nowEnv = getLocationEnv();
     const filepath = nowEnv == "electron" ? path : `/api/file?path=${path}`;
@@ -351,6 +356,7 @@ export class ElementControl extends LitElement {
     fetch(filepath)
       .then((resp) => resp.arrayBuffer())
       .then((buff) => {
+        release();
         let gif = parseGIF(buff);
         let frames = decompressFrames(gif, true);
         this.timeline[elementId] = {
@@ -371,24 +377,17 @@ export class ElementControl extends LitElement {
         };
 
         this.commitNewElement(elementId);
-      });
+      })
+      .catch(release);
   }
 
   addVideo(blob, path) {
     const elementId = this.generateUUID();
     const video = document.createElement("video");
-    // The probe below is the only thing holding the loading indicator up, so
-    // every way out of it has to put the indicator down — including the two
-    // this method never handled, a file the element cannot decode and an
-    // ffprobe call that rejects. `release` is latched because `end` decrements
-    // a shared count: a second call would take another import's load down.
-    mediaLoadStore.getState().begin();
-    let released = false;
-    const release = () => {
-      if (released) return;
-      released = true;
-      mediaLoadStore.getState().end();
-    };
+    // Every way out of the probe below has to lower the indicator, including
+    // the two this method never handled: a file the element cannot decode, and
+    // an ffprobe call that rejects.
+    const release = beginMediaLoad();
 
     video.src = blob;
     video.preload = "metadata";
@@ -475,13 +474,16 @@ export class ElementControl extends LitElement {
   addAudio(blob, path) {
     const elementId = this.generateUUID();
     const audio = document.createElement("audio");
+    const release = beginMediaLoad();
 
     const nowEnv = getLocationEnv();
     const filepath = nowEnv == "electron" ? path : `/api/file?path=${path}`;
 
+    audio.onerror = release;
     audio.src = blob;
 
     audio.onloadedmetadata = () => {
+      release();
       let duration = audio.duration * 1000;
 
       this.timeline[elementId] = {

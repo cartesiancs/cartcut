@@ -1,5 +1,9 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { mediaLoadStore, whileLoadingMedia } from "./mediaLoadStore";
+import {
+  beginMediaLoad,
+  mediaLoadStore,
+  whileLoadingMedia,
+} from "./mediaLoadStore";
 
 describe("mediaLoadStore", () => {
   beforeEach(() => {
@@ -37,6 +41,32 @@ describe("mediaLoadStore", () => {
       }),
     ).rejects.toThrow("unreadable");
 
+    expect(mediaLoadStore.getState().pending).toBe(0);
+  });
+
+  it("latches the release, so one exit cannot lower another load", () => {
+    const release = beginMediaLoad();
+    beginMediaLoad();
+
+    // An `add*` method that both errored and loaded — or that caught after
+    // already releasing — must not take the second import's count with it.
+    release();
+    release();
+    release();
+
+    expect(mediaLoadStore.getState().pending).toBe(1);
+  });
+
+  it("stays up across overlapping windows", () => {
+    // The click raises one, and the probe it starts raises another before the
+    // click's is released. Nothing in between reads zero, so the bar cannot
+    // blink off and on again mid-import.
+    const click = beginMediaLoad();
+    const probe = beginMediaLoad();
+    click();
+
+    expect(mediaLoadStore.getState().pending).toBe(1);
+    probe();
     expect(mediaLoadStore.getState().pending).toBe(0);
   });
 

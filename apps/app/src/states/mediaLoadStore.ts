@@ -38,12 +38,34 @@ export const mediaLoadStore = createStore<IMediaLoadStore>((set, get) => ({
   },
 }));
 
+/**
+ * Raise the indicator now, and hand back the one way to lower it.
+ *
+ * Latched, because `end` decrements a shared count: a second call would take
+ * some other import's load down instead of this one's. That matters because the
+ * callers are callback-based — `elementControl.addVideo` and its siblings each
+ * have three exits (loaded, undecodable, a rejected IPC call) and all three
+ * have to lower exactly one count.
+ */
+export function beginMediaLoad(): () => void {
+  mediaLoadStore.getState().begin();
+
+  let released = false;
+  return () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    mediaLoadStore.getState().end();
+  };
+}
+
 /** Run `work` with the indicator up, and take it down however it ends. */
 export async function whileLoadingMedia<T>(work: () => Promise<T>): Promise<T> {
-  mediaLoadStore.getState().begin();
+  const release = beginMediaLoad();
   try {
     return await work();
   } finally {
-    mediaLoadStore.getState().end();
+    release();
   }
 }
