@@ -9,6 +9,27 @@ export function millisecondsToPx(ms: number, timelineRange: number) {
   return result;
 }
 
+/**
+ * The largest scroll offset, in px, that still shows timeline content.
+ *
+ * Scrolling is bounded by where the *viewport's right edge* reaches the end of
+ * the project, not by where its left edge does. Mapping a scrollbar's travel
+ * onto `millisecondsToPx(duration)` — the position of the project's end — is
+ * the off-by-a-viewport that let the thumb run past its track and leave the
+ * timeline showing nothing but empty space.
+ *
+ * Zero when the project already fits: there is nowhere to scroll to, and a
+ * negative offset would scroll the start off the left edge.
+ */
+export function maxTimelineScroll(
+  durationMs: number,
+  timelineRange: number,
+  viewportPx: number,
+): number {
+  const contentPx = millisecondsToPx(durationMs, timelineRange);
+  return Math.max(0, contentPx - viewportPx);
+}
+
 export function pxToMilliseconds(px: number, timelineRange: number) {
   const timeMagnification = timelineRange / 4;
   const convertMs = (px * 5) / timeMagnification;

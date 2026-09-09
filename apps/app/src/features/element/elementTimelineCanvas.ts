@@ -1163,6 +1163,9 @@ export class elementTimelineCanvas extends LitElement {
       this.syncTrackHeaders();
     }
 
+    // The trackpad scrolls freely past the end of the project — only the bottom
+    // scrollbar is bounded, because a thumb that can leave its track is telling
+    // the user something untrue. A flick is not.
     this.timelineState.setScroll(Math.max(0, this.timelineScroll + e.deltaX));
   }
 

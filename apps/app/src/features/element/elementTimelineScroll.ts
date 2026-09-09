@@ -6,7 +6,7 @@ import {
   IRenderOptionStore,
   renderOptionStore,
 } from "../../states/renderOptionStore";
-import { millisecondsToPx, pxToMilliseconds } from "../../utils/time";
+import { maxTimelineScroll } from "../../utils/time";
 
 @customElement("element-timeline-bottom-scroll")
 export class ElementTimelineBottomScroll extends LitElement {
@@ -42,23 +42,20 @@ export class ElementTimelineBottomScroll extends LitElement {
       this.timelineRange = state.range;
       this.timelineScroll = state.scroll;
 
-      const scrollMs = pxToMilliseconds(state.scroll, state.range);
-      const per = (scrollMs / (this.renderOption.duration * 1000)) * 100;
-
       // The bar is not in the DOM while the whole project fits on screen, so
       // both lookups can miss. Nothing to position in that case.
-      const track = document.querySelector<HTMLElement>(
+      const track = document.querySelector(
         ".timeline-bottom-scroll",
-      );
-      const thumb = document.querySelector<HTMLElement>(
+      ) as HTMLElement | null;
+      const thumb = document.querySelector(
         ".timeline-bottom-scroll-thumb",
-      );
+      ) as HTMLElement | null;
 
       if (track && thumb) {
         const fullWidth =
           track.offsetWidth - this.resize.timelineVertical.leftOption;
 
-        this.left = Math.max(0, (fullWidth - thumb.offsetWidth) * (per / 100));
+        this.left = this.travelOf(fullWidth - thumb.offsetWidth) * this.ratio();
 
         if (!this.isMove) {
           this.prevLeft = this.left;
@@ -142,9 +139,9 @@ export class ElementTimelineBottomScroll extends LitElement {
 
   setWidth() {
     try {
-      const timelineCanvas = document.querySelector<HTMLElement>(
+      const timelineCanvas = document.querySelector(
         "#elementTimelineCanvasRef",
-      );
+      ) as HTMLElement;
 
       const projectDuration = this.renderOption.duration;
       const timelineRange = this.timelineRange;
@@ -173,10 +170,12 @@ export class ElementTimelineBottomScroll extends LitElement {
     if (!this.isMove) return false;
 
     // Zooming out mid-drag can take the bar out of the DOM under the pointer.
-    const track = document.querySelector<HTMLElement>(".timeline-bottom-scroll");
-    const thumb = document.querySelector<HTMLElement>(
+    const track = document.querySelector(
+      ".timeline-bottom-scroll",
+    ) as HTMLElement | null;
+    const thumb = document.querySelector(
       ".timeline-bottom-scroll-thumb",
-    );
+    ) as HTMLElement | null;
 
     if (!track || !thumb) {
       this.isMove = false;
@@ -186,29 +185,42 @@ export class ElementTimelineBottomScroll extends LitElement {
     const fullWidth =
       track.offsetWidth - this.resize.timelineVertical.leftOption;
 
-    const thumbWidth = thumb.offsetWidth;
     const dx =
       e.clientX - this.resize.timelineVertical.leftOption - this.mouseLeft;
 
-    const x = this.prevLeft + dx;
+    // Clamped to the track before it becomes a scroll offset, so a pointer
+    // dragged past either end stops the thumb instead of carrying the timeline
+    // with it. Releasing there and dragging back responds immediately, because
+    // `prevLeft` follows the clamped position rather than the pointer.
+    const travel = this.travelOf(fullWidth - thumb.offsetWidth);
+    const x = Math.min(Math.max(0, this.prevLeft + dx), travel);
 
-    const per = (x / (fullWidth - thumbWidth)) * 100;
-
-    if (x <= 0) {
-      this.left = 0;
-      this.requestUpdate();
-      this.timelineState.setScroll(0);
-      return false;
-    }
-
-    // this.left = x;
-
-    const scroll = millisecondsToPx(
-      this.renderOption.duration * (per / 100) * 1000,
-      this.timelineRange,
+    this.timelineState.setScroll(
+      Math.round(this.maxScroll() * (travel > 0 ? x / travel : 0)),
     );
+  }
 
-    this.timelineState.setScroll(scroll);
+  /** How far the thumb may travel, never negative. */
+  private travelOf(span: number): number {
+    return Math.max(0, span);
+  }
+
+  /** The largest scroll this project admits at the current zoom. */
+  private maxScroll(): number {
+    return maxTimelineScroll(
+      this.renderOption.duration * 1000,
+      this.timelineRange,
+      useTimelineStore.getState().canvasWidth,
+    );
+  }
+
+  /** Where the current scroll sits in `0..1` of its own range. */
+  private ratio(): number {
+    const max = this.maxScroll();
+    if (max <= 0) {
+      return 0;
+    }
+    return Math.min(1, Math.max(0, this.timelineScroll / max));
   }
 
   _handleMouseBodyDown(e) {
