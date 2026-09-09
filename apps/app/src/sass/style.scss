@@ -235,7 +235,12 @@ element-timeline-range {
   color: #6c757d;
   font-size: 12px;
   font-weight: 700;
-  justify-content: space-between;
+  // The button hugs the right; the title is centred on the *window* by the
+  // absolute rule below rather than by the flex line. Flex cannot do both at
+  // once — `space-between` puts the title at the left edge, and centring the
+  // line would push the button inwards by the title's width.
+  position: relative;
+  justify-content: flex-end;
   align-items: center;
   gap: 0.5rem;
 
@@ -243,8 +248,9 @@ element-timeline-range {
   // opposite sides on the two platforms — macOS puts the traffic lights at the
   // left (`trafficLightPosition { x: 10, y: 10 }`), Windows and Linux put
   // `titleBarOverlay` at the right. Both in `electron/lib/window.ts`. One
-  // symmetric padding would hide the title on one platform and the export
-  // button on the other, and only on the machine you are not developing on.
+  // symmetric padding would hide the export button on one platform and clip it
+  // under the window controls on the other, and only on the machine you are
+  // not developing on.
   &.top-bar-mac {
     padding-left: 78px;
     padding-right: 10px;
@@ -255,9 +261,19 @@ element-timeline-range {
     padding-right: 146px;
   }
 
-  // The title stays a drag handle; the button opts out for itself.
+  // Centred on the window, not on the space left over between the insets.
+  // Taken out of the flex line for exactly that reason: the two paddings are
+  // deliberately asymmetric, so anything centred *within* them sits off-centre
+  // by half their difference — 34px on macOS, 68px on Windows.
+  //
+  // It stays a drag handle, and it may not swallow clicks meant for the button
+  // it is now allowed to overlap.
   b {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
     -webkit-app-region: drag;
+    pointer-events: none;
   }
 }
 
