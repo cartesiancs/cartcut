@@ -11,7 +11,9 @@ import {
   renderOptionStore,
 } from "../../states/renderOptionStore";
 import {
+  MASK_ANIMATABLE_PROPERTIES,
   animatableProperties,
+  type AnimatableProperty,
   type TimelineElement,
 } from "../../@types/timeline";
 import {
@@ -128,31 +130,35 @@ const DEFAULT_TRANSITION_PRESET = "com.cartcut.cross-dissolve";
  * How each animatable property is named and drawn on the context menu.
  *
  * A lookup rather than a formatted string because the icon cannot be derived
- * from the property name. An unlisted property still gets an entry — a plain
- * `Animate <type>` with no icon — so widening `animatableProperties` can never
- * silently drop a row from the menu.
+ * from the property name. An unlisted property still gets an entry — its own
+ * name, with no icon — so widening `animatableProperties` can never silently
+ * drop a row from the menu.
+ *
+ * The labels are bare nouns because these rows live inside the "Animate" and
+ * "Animate mask" submenus, which say the verb once. That is also why the two
+ * `position` entries can read alike: they are never on the same panel.
  */
 const ANIMATION_MENU: Record<string, { label: string; icon: string }> = {
-  position: { label: "Animate position", icon: "open_with" },
-  opacity: { label: "Animate opacity", icon: "opacity" },
-  scale: { label: "Animate scale", icon: "aspect_ratio" },
-  rotation: { label: "Animate rotation", icon: "rotate_90_degrees_cw" },
+  position: { label: "Position", icon: "open_with" },
+  opacity: { label: "Opacity", icon: "opacity" },
+  scale: { label: "Scale", icon: "aspect_ratio" },
+  rotation: { label: "Rotation", icon: "rotate_90_degrees_cw" },
   // Not `aspect_ratio`, which `scale` above already wears: the two are next to
   // each other on this menu and are the pair most easily confused for one
   // another, so they must not also look alike.
-  size: { label: "Animate size", icon: "open_in_full" },
+  size: { label: "Size", icon: "open_in_full" },
   // The mask's five, which `animatableProperties` offers only on a clip that
   // has one. Listed because the fallback above would otherwise render them as
-  // `Animate maskPosition` — correct, and not English.
-  maskPosition: { label: "Animate mask position", icon: "open_with" },
-  maskSize: { label: "Animate mask size", icon: "aspect_ratio" },
-  maskRotation: {
-    label: "Animate mask rotation",
-    icon: "rotate_90_degrees_cw",
-  },
-  maskFeather: { label: "Animate mask feather", icon: "blur_on" },
-  maskRoundness: { label: "Animate mask roundness", icon: "rounded_corner" },
+  // `maskPosition` — correct, and not English.
+  maskPosition: { label: "Position", icon: "open_with" },
+  maskSize: { label: "Size", icon: "aspect_ratio" },
+  maskRotation: { label: "Rotation", icon: "rotate_90_degrees_cw" },
+  maskFeather: { label: "Feather", icon: "blur_on" },
+  maskRoundness: { label: "Roundness", icon: "rounded_corner" },
 };
+
+/** The mask's five, as a set, for splitting the menu in two. */
+const MASK_ANIMATION_PROPERTIES = new Set<string>(MASK_ANIMATABLE_PROPERTIES);
 
 /**
  * A clip's label, with an effect's preset name resolved.
@@ -1747,15 +1753,52 @@ export class elementTimelineCanvas extends LitElement {
       return "";
     }
 
-    return animatableProperties(element)
+    const properties = animatableProperties(element);
+
+    return [
+      this.animationSubmenuTemplate(
+        "Animate",
+        "animation",
+        elementId,
+        properties.filter((type) => !MASK_ANIMATION_PROPERTIES.has(type)),
+      ),
+      // `crop` is the icon the sidebar's Mask tab already wears
+      // (`option/optionTabBar.ts`), so both name the same feature.
+      this.animationSubmenuTemplate(
+        "Animate mask",
+        "crop",
+        elementId,
+        properties.filter((type) => MASK_ANIMATION_PROPERTIES.has(type)),
+      ),
+    ].join("");
+  }
+
+  /**
+   * One `Animate …` row, and the panel it opens.
+   *
+   * Empty when the group is: `animatableProperties` offers the mask's five
+   * only on a clip that has a mask, and a submenu with nothing behind it is
+   * the affordance-that-can-only-decline the context menu already refuses to
+   * draw elsewhere.
+   */
+  private animationSubmenuTemplate(
+    label: string,
+    icon: string,
+    elementId: string,
+    properties: AnimatableProperty[],
+  ): string {
+    if (properties.length === 0) {
+      return "";
+    }
+
+    const items = properties
       .map((type) => {
-        const entry = ANIMATION_MENU[type] ?? {
-          label: `Animate ${type}`,
-          icon: "",
-        };
+        const entry = ANIMATION_MENU[type] ?? { label: type, icon: "" };
         return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').openAnimationPanel('${elementId}', '${type}')" item-name="${entry.label}" item-icon="${entry.icon}"></menu-dropdown-item>`;
       })
       .join("");
+
+    return `<menu-dropdown-sub item-name="${label}" item-icon="${icon}">${items}</menu-dropdown-sub>`;
   }
 
   showMenuDropdown({ x, y }) {

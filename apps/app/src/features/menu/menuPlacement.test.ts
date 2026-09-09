@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { MENU_MARGIN_PX, placeMenu } from "./menuPlacement";
+import {
+  MENU_MARGIN_PX,
+  SUBMENU_OVERLAP_PX,
+  placeMenu,
+  placeSubmenu,
+} from "./menuPlacement";
 
 /** A 1280x800 window, roughly what the app runs in. */
 const VIEWPORT = { w: 1280, h: 800 };
@@ -209,5 +214,57 @@ describe("degenerate input", () => {
   it("treats a negative margin as zero", () => {
     const p = placeMenu({ x: 0, y: 10 }, SMALL_MENU, VIEWPORT, { margin: -50 });
     expect(p.left).toBe(0);
+  });
+});
+
+describe("submenus", () => {
+  /** A trigger row in a menu opened near the left of the window. */
+  const TRIGGER = { left: 400, right: 560, top: 200, bottom: 226 };
+
+  it("hangs off the trigger's right edge and lines up with its row", () => {
+    const p = placeSubmenu(TRIGGER, SMALL_MENU, VIEWPORT);
+    expect(p.side).toBe("right");
+    expect(p.left).toBe(TRIGGER.right - SUBMENU_OVERLAP_PX);
+    expect(p.top).toBe(TRIGGER.top);
+  });
+
+  it("flips to the left of the trigger when the right has no room", () => {
+    // A right-click near the right edge: the parent menu's own placement has
+    // already clamped it there, so its submenu has nowhere to go but back.
+    const trigger = { left: 1100, right: 1260, top: 200, bottom: 226 };
+    const p = placeSubmenu(trigger, SMALL_MENU, VIEWPORT);
+    expect(p.side).toBe("left");
+    expect(p.left).toBe(trigger.left + SUBMENU_OVERLAP_PX - SMALL_MENU.w);
+  });
+
+  it("opens right when neither side fits", () => {
+    // Wider than the window. Left would put it further off screen than right,
+    // and the clamp keeps its left edge visible either way.
+    const p = placeSubmenu(TRIGGER, { w: 2000, h: 60 }, VIEWPORT);
+    expect(p.side).toBe("right");
+    expect(p.left).toBe(MENU_MARGIN_PX);
+  });
+
+  it("slides up rather than flipping when the trigger is near the bottom", () => {
+    // The vertical rule is a clamp: the submenu stays beside its trigger.
+    const trigger = { left: 400, right: 560, top: 770, bottom: 796 };
+    const p = placeSubmenu(trigger, SMALL_MENU, VIEWPORT);
+    expect(p.top).toBe(VIEWPORT.h - MENU_MARGIN_PX - SMALL_MENU.h);
+    expect(p.top).toBeLessThan(trigger.top);
+  });
+
+  it("keeps a submenu taller than the window inside the margins", () => {
+    const p = placeSubmenu(TRIGGER, { w: 160, h: 5000 }, VIEWPORT);
+    expect(p.top).toBe(MENU_MARGIN_PX);
+    expect(p.maxHeight).toBe(VIEWPORT.h - MENU_MARGIN_PX * 2);
+  });
+
+  it("survives non-finite numbers", () => {
+    const p = placeSubmenu(
+      { left: NaN, right: NaN, top: Infinity, bottom: NaN },
+      { w: NaN, h: NaN },
+      { w: Infinity, h: NaN },
+    );
+    finiteAll(p);
   });
 });

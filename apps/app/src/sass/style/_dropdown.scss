@@ -52,3 +52,32 @@
   // smaller.
   font-size: 14px;
 }
+
+// ------------------------------------------------------------------ submenus
+
+// The chevron sits at the far edge of the row rather than after the label,
+// which is shadcn/ui's `ml-auto` on `ContextMenuSubTrigger`. `min-width` is
+// what stops a short label — "Animate" — from putting it two characters away
+// from its own text; the padding is the gap it keeps at its widest.
+.dropdown-sub-chevron {
+  margin-left: auto;
+  padding-left: 1.25rem;
+}
+
+.dropdown-sub-trigger {
+  min-width: 9rem;
+}
+
+// A trigger stays lit while its submenu is open, so the open path reads as one
+// row rather than as two menus with no relationship.
+.dropdown-sub-trigger.active {
+  background-color: #43444aba;
+}
+
+// Above the menu that opened it — which `menuPlacement.ts` puts at 6000 — and
+// laid out beside it, never inside: `features/menu/menuDropdown.ts` portals
+// this to `<body>` and says why.
+.dropdown-submenu {
+  z-index: 6001;
+  min-width: 9rem;
+}

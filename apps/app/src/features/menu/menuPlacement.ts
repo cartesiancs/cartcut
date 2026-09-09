@@ -159,3 +159,120 @@ export function applyMenuPlacement(
 
   return placement;
 }
+
+// ---------------------------------------------------------------- submenus
+
+/** How far a submenu overlaps the menu that opened it, in px. */
+export const SUBMENU_OVERLAP_PX = 4;
+
+/** The trigger row's box, in viewport coordinates. */
+export type TriggerRect = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+
+export type SubmenuPlacement = {
+  left: number;
+  top: number;
+  maxHeight: number;
+  /** Which side of the trigger the submenu opened to. */
+  side: "right" | "left";
+};
+
+export type PlaceSubmenuOptions = {
+  margin?: number;
+  /** Overrides {@link SUBMENU_OVERLAP_PX}. */
+  overlap?: number;
+};
+
+/**
+ * Where a submenu goes, given the row that opened it.
+ *
+ * A submenu is anchored to a *box* rather than to a point, which is the whole
+ * difference from `placeMenu`: it hangs off the trigger row's right edge and
+ * lines its first item up with that row, so the pointer travels sideways onto
+ * it. The flip is horizontal for the same reason the parent's is vertical —
+ * near the right edge of the window the submenu opens to the *left* of the
+ * parent instead, which is what every OS menu and Radix's `ContextMenuSub`
+ * both do.
+ *
+ * The vertical rule is a clamp, not a flip. Sliding a submenu up until it fits
+ * keeps it beside its trigger; flipping it would put its bottom edge on a row
+ * the pointer is nowhere near.
+ */
+export function placeSubmenu(
+  trigger: TriggerRect,
+  menu: Size,
+  viewport: Size,
+  opts: PlaceSubmenuOptions = {},
+): SubmenuPlacement {
+  const margin = Math.max(0, finite(opts.margin, MENU_MARGIN_PX));
+  const overlap = Math.max(0, finite(opts.overlap, SUBMENU_OVERLAP_PX));
+
+  const viewportW = Math.max(0, finite(viewport.w, 0));
+  const viewportH = Math.max(0, finite(viewport.h, 0));
+  const menuW = Math.max(0, finite(menu.w, 0));
+  const menuH = Math.max(0, finite(menu.h, 0));
+
+  const triggerLeft = finite(trigger.left, 0);
+  const triggerRight = finite(trigger.right, triggerLeft);
+  const triggerTop = finite(trigger.top, 0);
+
+  const toRight = triggerRight - overlap;
+  const toLeft = triggerLeft + overlap - menuW;
+
+  const fitsRight = toRight + menuW <= viewportW - margin;
+  const fitsLeft = toLeft >= margin;
+  // Right unless it does not fit and the left does — a submenu with room on
+  // neither side still opens right, where the clamp leaves it beside its
+  // trigger rather than across the parent menu.
+  const side: "right" | "left" = fitsRight || !fitsLeft ? "right" : "left";
+
+  const left = clamp(
+    side === "right" ? toRight : toLeft,
+    margin,
+    viewportW - margin - menuW,
+  );
+
+  const maxHeight = Math.max(0, viewportH - margin * 2);
+  const top = clamp(
+    triggerTop,
+    margin,
+    viewportH - margin - Math.min(menuH, maxHeight),
+  );
+
+  return { left, top, maxHeight, side };
+}
+
+/**
+ * Measure `el`, place it beside `trigger`, and write the result onto its style.
+ *
+ * `el` must be visible when this runs: a submenu still carrying `display: none`
+ * measures 0×0 and would be placed as though it fitted anywhere.
+ */
+export function applySubmenuPlacement(
+  el: HTMLElement,
+  trigger: HTMLElement,
+  opts: PlaceSubmenuOptions = {},
+): SubmenuPlacement {
+  el.style.maxHeight = "";
+
+  const rect = trigger.getBoundingClientRect();
+  const placement = placeSubmenu(
+    { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom },
+    { w: el.offsetWidth, h: el.offsetHeight },
+    { w: window.innerWidth, h: window.innerHeight },
+    opts,
+  );
+
+  el.style.position = "fixed";
+  el.style.top = `${placement.top}px`;
+  el.style.left = `${placement.left}px`;
+  el.style.maxHeight = `${placement.maxHeight}px`;
+  el.style.overflowY = "auto";
+  el.style.overscrollBehavior = "contain";
+
+  return placement;
+}
