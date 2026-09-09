@@ -30,6 +30,28 @@ export const ipcDialog = {
     }
   },
 
+  /**
+   * The same dialog, for as many files as the user cares to pick.
+   *
+   * Its own entry rather than an option on `openFile`, because the two return
+   * different shapes and every existing caller wants the single path. Import
+   * is the one place multi-select belongs: `importPathsAt` already plans a
+   * whole drop as one undo step, so picking ten files from the menu costs the
+   * same one Cmd+Z that dropping ten costs.
+   */
+  openFiles: async (event, allowExtensions: string[] = ["*"]) => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      properties: ["openFile", "multiSelections"],
+      filters: [
+        {
+          name: "File",
+          extensions: allowExtensions,
+        },
+      ],
+    });
+    return canceled ? [] : filePaths;
+  },
+
   // `ipcMain.handle` puts the event first, so the container arrives second —
   // same shape as `openFile` above.
   exportVideo: async (event, container: string = "mp4") => {

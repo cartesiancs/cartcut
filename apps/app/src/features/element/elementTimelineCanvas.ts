@@ -82,17 +82,8 @@ import {
   sharedAudioPeakProvider,
   type AudioPeakProvider,
 } from "../timeline/strip/audioPeaks";
-import {
-  appendTrackOfKind,
-  type TimelineDocument,
-} from "../timeline/tracks";
-import {
-  canBeGrouped,
-  createGroup,
-  isGroupAnimated,
-  removeFromParent,
-  ungroup,
-} from "../timeline/groupOps";
+import { type TimelineDocument } from "../timeline/tracks";
+import { canBeGrouped, removeFromParent } from "../timeline/groupOps";
 import { addTemplateToTimeline } from "../template/addTemplate";
 import {
   clearReplaceable,
@@ -120,10 +111,12 @@ import {
   copySelection,
   cutSelection,
   deleteSelection,
+  groupClips,
   pasteFromClipboard,
   redo,
   splitSelection,
   undo,
+  ungroupClips,
 } from "../editor/actions";
 import { penCapturesKey } from "../mask/penSession";
 import { count as perfCount } from "../debug/frameStats";
@@ -609,8 +602,14 @@ export class elementTimelineCanvas extends LitElement {
     return normalizeFps(this.renderOption?.fps);
   }
 
-  /** Move the playhead by whole frames, without accumulating error. */
-  private stepCursor(deltaFrames: number) {
+  /**
+   * Move the playhead by whole frames, without accumulating error.
+   *
+   * Public because the Playback menu offers the same step. The modal-tool
+   * guard stays inside rather than at the callers, so both surfaces decline
+   * together while the mask pen is drawing.
+   */
+  public stepCursor(deltaFrames: number) {
     if (this.control.cursorType !== "pointer") {
       return;
     }
@@ -655,65 +654,19 @@ export class elementTimelineCanvas extends LitElement {
   /**
    * Wrap the right-clicked selection in a new group.
    *
-   * One `withCheckpoint`, so the whole thing is one undo step — and if
-   * `createGroup` declines (audio in the selection, clips from two different
-   * groups) it returns the document by identity and no step is recorded at all.
+   * The work is `features/editor/actions#groupClips`, which the Clip menu also
+   * calls; what stays here is the one thing the context menu means and the menu
+   * bar does not — that it acts on the right-click snapshot rather than on the
+   * live selection.
    */
   public groupSelected() {
-    const ids = [...this.targetIdDuringRightClick];
-    const groupId = uuidv4();
-    const trackId = uuidv4();
-
-    this.commit((doc) => {
-      // Groups live on their own kind of row, so a group bar never competes
-      // with a real clip for a slot. Reuse a group track if one is free at that
-      // moment; `chooseTrackFor` is not used because it keys off the element's
-      // filetype and would have to build the group first.
-      const withTrack = doc.tracks.some((track) => track.kind === "group")
-        ? doc
-        : appendTrackOfKind(doc, "group", trackId);
-
-      const target =
-        withTrack.tracks.find((track) => track.kind === "group")?.id ?? trackId;
-
-      return createGroup(withTrack, ids, groupId, target);
-    });
-
-    this.targetId = [groupId];
+    groupClips([...this.targetIdDuringRightClick]);
     this.drawCanvas();
   }
 
   /** Dissolve the right-clicked group, leaving its contents where they look. */
   public ungroupSelected() {
-    const ids = [...this.targetIdDuringRightClick];
-    const atMs = useTimelineStore.getState().cursor;
-
-    // Losing a group's animation is not something a menu click should do
-    // silently: there is no way to fold a time-varying transform into a child's
-    // static fields, so `ungroup` keeps only the instant at the playhead.
-    const doc = this.currentDoc();
-    const animated = ids.filter(
-      (id) =>
-        doc.elements[id]?.filetype === "group" &&
-        isGroupAnimated(doc.elements, id),
-    );
-    if (animated.length > 0) {
-      const ok = window.confirm(
-        "This group is animated. Ungrouping keeps only its transform at the " +
-          "playhead and discards the animation. Continue?",
-      );
-      if (!ok) {
-        return;
-      }
-    }
-
-    this.commit((next) => {
-      let out = next;
-      for (const id of ids) {
-        out = ungroup(out, id, atMs);
-      }
-      return out;
-    });
+    ungroupClips([...this.targetIdDuringRightClick]);
     this.drawCanvas();
   }
 
@@ -1561,7 +1514,7 @@ export class elementTimelineCanvas extends LitElement {
    * being masked to another track — one undo step per press, under a pointer
    * that was nowhere near the timeline.
    */
-  private moveSelectionByTrack(delta: number) {
+  public moveSelectionByTrack(delta: number) {
     if (this.control.cursorType !== "pointer") {
       return;
     }

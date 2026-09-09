@@ -5,6 +5,8 @@ import cloneDeep from "lodash/cloneDeep";
 
 import { rendererModal } from "./utils/modal";
 import { renderProgress } from "./ui/modal/renderProgress";
+import { runMenuCommand } from "./features/editor/menuCommands";
+import { installTextEditingShortcuts } from "./features/editor/textEditing";
 
 window.electronAPI.res.render.progressing((evt, prog) => {
   rendererModal.progressModal.show();
@@ -79,13 +81,15 @@ window.electronAPI.res.app.forceClose((evt) => {
   }
 });
 
-window.electronAPI.res.shortcut.controlS((evt) => {
-  CARTCUT.project.save();
+// The application menu, as one channel. `features/editor/menuCommands` holds
+// the table; `electron/lib/menuCommands.ts` is the other end of it.
+window.electronAPI.res.menu.command((evt, id) => {
+  runMenuCommand(id);
 });
 
-window.electronAPI.res.shortcut.controlO((evt) => {
-  CARTCUT.project.load();
-});
+// The Edit menu's items are the editor's own commands now, so a keystroke that
+// belongs to a text field needs somewhere to go. See `features/editor/textEditing`.
+installTextEditingShortcuts();
 
 window.electronAPI.res.timeline.get((event) => {
   let timeline = cloneDeep(

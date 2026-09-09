@@ -29,6 +29,11 @@ export interface KeyEventLike {
   composedPath?: () => unknown[];
 }
 
+/** The part of `document` `isTypingFocus` reads. */
+export interface ActiveElementRootLike {
+  activeElement?: unknown;
+}
+
 /** Input types that hold no text and so never swallow a shortcut. */
 const NON_TEXT_INPUT_TYPES = new Set([
   "button",
@@ -102,4 +107,37 @@ export function isTypingEvent(event: KeyEventLike | null | undefined): boolean {
   // what has focus inside it.
   const host = event.target as KeyEventTargetLike | null;
   return isTypingTarget(host?.shadowRoot?.activeElement);
+}
+
+/**
+ * The same question with no event to ask it of: is the caret in a text field
+ * *right now*?
+ *
+ * This is what a command arriving from the application menu has to use. A menu
+ * item is chosen with the mouse, so there is no keystroke and no target — but
+ * choosing Edit → Copy while a caption is being typed still means the text, and
+ * `runMenuCommand` has only the focus to tell it so.
+ *
+ * `document.activeElement` stops at a shadow host, so the descent is the same
+ * retargeting `isTypingEvent` undoes with `composedPath`, walked the other way.
+ * Bounded rather than `while (true)`: a component that made itself its own
+ * `activeElement` would otherwise hang the app on a keystroke.
+ */
+export function isTypingFocus(
+  root: ActiveElementRootLike | null | undefined,
+): boolean {
+  let node = root?.activeElement as KeyEventTargetLike | null | undefined;
+
+  for (let depth = 0; depth < 16 && node != null; depth += 1) {
+    const inner = node.shadowRoot?.activeElement as
+      | KeyEventTargetLike
+      | null
+      | undefined;
+    if (inner == null || inner === node) {
+      break;
+    }
+    node = inner;
+  }
+
+  return isTypingTarget(node);
 }

@@ -107,3 +107,51 @@ describe("isTypingEvent", () => {
     ).toBe(false);
   });
 });
+
+// ============================================================ isTypingFocus
+
+import { isTypingFocus } from "./typingTarget";
+
+describe("isTypingFocus", () => {
+  const textInput = { tagName: "INPUT", type: "text" };
+
+  it("reads the focused field", () => {
+    expect(isTypingFocus({ activeElement: textInput })).toBe(true);
+    expect(isTypingFocus({ activeElement: { tagName: "CANVAS" } })).toBe(false);
+  });
+
+  it("descends into shadow roots", () => {
+    // `document.activeElement` stops at the host, so a caret inside
+    // `number-input` looks like a focused `<number-input>` from outside. This
+    // is the same retargeting `isTypingEvent` undoes with `composedPath`,
+    // walked the other way — and getting it wrong means Edit → Copy copies the
+    // selected clips while the user is halfway through typing a caption.
+    const host = {
+      tagName: "NUMBER-INPUT",
+      shadowRoot: { activeElement: textInput },
+    };
+    expect(isTypingFocus({ activeElement: host })).toBe(true);
+  });
+
+  it("descends more than one level", () => {
+    const inner = {
+      tagName: "INNER-WIDGET",
+      shadowRoot: { activeElement: textInput },
+    };
+    const outer = {
+      tagName: "OUTER-WIDGET",
+      shadowRoot: { activeElement: inner },
+    };
+    expect(isTypingFocus({ activeElement: outer })).toBe(true);
+  });
+
+  it("stops on a component that is its own active element", () => {
+    const looping: any = { tagName: "ODD-WIDGET" };
+    looping.shadowRoot = { activeElement: looping };
+    expect(isTypingFocus({ activeElement: looping })).toBe(false);
+  });
+
+  it.each([null, undefined, {}])("survives %s", (root) => {
+    expect(isTypingFocus(root as any)).toBe(false);
+  });
+});

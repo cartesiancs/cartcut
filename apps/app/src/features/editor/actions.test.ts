@@ -2,15 +2,19 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   addTrack,
   capabilities,
+  clearSelection,
   copySelection,
   cutSelection,
   deleteSelection,
+  groupClips,
   mergeSelection,
   pasteFromClipboard,
   redo,
   rotateSelection,
+  selectAllClips,
   splitSelection,
   undo,
+  ungroupClips,
 } from "./actions";
 import { useTimelineStore } from "../../states/timelineStore";
 import { selectionStore } from "../../states/selectionStore";
@@ -318,6 +322,116 @@ describe("deleteSelection", () => {
     const before = historyLength();
 
     deleteSelection();
+
+    expect(historyLength()).toBe(before);
+  });
+});
+
+describe("groupClips", () => {
+  beforeEach(() =>
+    seed({ b: videoElement({ trackId: "t0", startTime: 5000 }) }),
+  );
+
+  const groupIds = () =>
+    Object.entries(elements())
+      .filter(([, element]: [string, any]) => element.filetype === "group")
+      .map(([id]) => id);
+
+  it("wraps the clips in a group and selects it", () => {
+    groupClips(["a", "b"]);
+
+    expect(groupIds()).toHaveLength(1);
+    expect(selectionStore.getState().ids).toEqual(groupIds());
+  });
+
+  it("puts the group on a group track", () => {
+    groupClips(["a", "b"]);
+
+    const track = store().tracks.find((row) => row.kind === "group");
+    expect(track).toBeDefined();
+    expect(elements()[groupIds()[0]].trackId).toBe(track?.id);
+  });
+
+  it("costs nothing when there is nothing to group", () => {
+    // `createGroup` declines by returning what it was handed — which is the
+    // document *with* the new group row — so without the identity check in
+    // `groupClips` a ⌘G on an empty selection left an empty row behind and one
+    // undo step to remove it.
+    const before = historyLength();
+
+    groupClips([]);
+
+    expect(historyLength()).toBe(before);
+    expect(store().tracks.some((row) => row.kind === "group")).toBe(false);
+    expect(groupIds()).toHaveLength(0);
+  });
+
+  it("costs nothing when the selection cannot be grouped", () => {
+    seed({ music: audioElement({ trackId: "t0" }) });
+    const before = historyLength();
+
+    groupClips(["a", "music"]);
+
+    expect(historyLength()).toBe(before);
+    expect(store().tracks.some((row) => row.kind === "group")).toBe(false);
+  });
+
+  it("leaves the selection alone when it declines", () => {
+    select(["a", "music"]);
+    groupClips([]);
+
+    expect(selectionStore.getState().ids).toEqual(["a", "music"]);
+  });
+});
+
+describe("ungroupClips", () => {
+  beforeEach(() =>
+    seed({ b: videoElement({ trackId: "t0", startTime: 5000 }) }),
+  );
+
+  it("dissolves a group, leaving its clips", () => {
+    groupClips(["a", "b"]);
+    const groupId = selectionStore.getState().ids[0];
+
+    ungroupClips([groupId]);
+
+    expect(elements()[groupId]).toBeUndefined();
+    expect(Object.keys(elements()).sort()).toEqual(["a", "b"]);
+  });
+
+  it("records nothing for an id that is not a group", () => {
+    const before = historyLength();
+
+    ungroupClips(["a"]);
+
+    expect(historyLength()).toBe(before);
+  });
+});
+
+describe("selectAllClips and clearSelection", () => {
+  beforeEach(() =>
+    seed({ b: videoElement({ trackId: "t0", startTime: 5000 }) }),
+  );
+
+  it("selects every clip", () => {
+    selectAllClips();
+
+    expect(selectionStore.getState().ids.sort()).toEqual(["a", "b"]);
+  });
+
+  it("clears the selection", () => {
+    select(["a", "b"]);
+
+    clearSelection();
+
+    expect(selectionStore.getState().ids).toEqual([]);
+  });
+
+  it("records no undo step either way", () => {
+    const before = historyLength();
+
+    selectAllClips();
+    clearSelection();
 
     expect(historyLength()).toBe(before);
   });

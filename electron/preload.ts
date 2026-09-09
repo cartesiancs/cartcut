@@ -16,6 +16,17 @@ const request = {
   webUtils: {
     getPathForFile: (file: File) => webUtils.getPathForFile(file),
   },
+  /**
+   * The native text-editing commands, by name.
+   *
+   * Only `features/editor/textEditing.ts` calls these, and only while the
+   * caret is in a text field: the Edit menu's items are the editor's clip
+   * commands now, so this is what keeps ⌘C in a caption meaning "copy the
+   * text". `electron/ipc/ipcEditing.ts` holds the allowlist.
+   */
+  editing: {
+    run: (command) => ipcRenderer.send("editing:command", command),
+  },
   app: {
     forceClose: () => ipcRenderer.send("app:forceClose"),
     restart: () => ipcRenderer.send("app:restart"),
@@ -26,6 +37,8 @@ const request = {
   dialog: {
     openDirectory: () => ipcRenderer.invoke("dialog:openDirectory"),
     openFile: (extension) => ipcRenderer.invoke("dialog:openFile", extension),
+    /** Many paths, for Import Media. Resolves to `[]` when cancelled. */
+    openFiles: (extension) => ipcRenderer.invoke("dialog:openFiles", extension),
     saveTemplate: () => ipcRenderer.invoke("dialog:saveTemplate"),
     exportVideo: (container?: string) =>
       ipcRenderer.invoke("dialog:exportVideo", container),
@@ -317,9 +330,16 @@ const response = {
   ytdlp: {
     finish: (callback) => ipcRenderer.on("ytdlp:finish", callback),
   },
-  shortcut: {
-    controlS: (callback) => ipcRenderer.on("SHORTCUT_CONTROL_S", callback),
-    controlO: (callback) => ipcRenderer.on("SHORTCUT_CONTROL_O", callback),
+  /**
+   * The application menu, as one channel carrying a command id.
+   *
+   * Replaces the two `SHORTCUT_CONTROL_*` channels, which needed a new channel,
+   * a new preload entry and a new listener for every item added to the menu.
+   * The ids are `electron/lib/menuCommands.ts`; the renderer runs them in
+   * `features/editor/menuCommands.ts`.
+   */
+  menu: {
+    command: (callback) => ipcRenderer.on("menu:command", callback),
   },
   timeline: {
     get: (callback) => ipcRenderer.on("timeline:get", callback),

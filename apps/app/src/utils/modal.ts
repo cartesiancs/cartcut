@@ -51,4 +51,6 @@ export const rendererModal = {
   progressError: new ModalClass("progressError"),
   whenClose: new ModalClass("whenClose"),
   whenTimelineChanged: new ModalClass("whenTimelineChanged"),
+  // Help → Keyboard Shortcuts, and the keyboard button in the settings panel.
+  shortKey: new ModalClass("shortKey"),
 };

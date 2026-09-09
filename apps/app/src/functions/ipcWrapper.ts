@@ -44,6 +44,9 @@ export function enableIpcWrapper() {
         openFile: async function (lang) {
           return "none";
         },
+        openFiles: async function (lang) {
+          return [];
+        },
         exportVideo: async function (lang) {
           return "none";
         },
@@ -327,11 +330,10 @@ export function enableIpcWrapper() {
           return "none";
         },
       },
-      shortcut: {
-        controlS: async function (lang) {
-          return "none";
-        },
-        controlO: async function (lang) {
+      // There is no application menu outside Electron, so this never fires.
+      // It exists so `event.ts` can subscribe unconditionally.
+      menu: {
+        command: async function (lang) {
           return "none";
         },
       },

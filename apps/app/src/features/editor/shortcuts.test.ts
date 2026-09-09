@@ -74,6 +74,8 @@ describe("shortcutsByGroup", () => {
       "paste",
       "split",
       "delete",
+      "selectAll",
+      "deselectAll",
     ]);
   });
 });

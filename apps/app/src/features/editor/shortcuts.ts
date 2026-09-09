@@ -15,6 +15,12 @@
  * The `implemented at` column below is the link, and it is worth keeping true —
  * add a binding here when you add one there.
  *
+ * Some bindings are owned by the *application menu* rather than by a keydown
+ * handler — `electron/lib/menuCommands.ts` registers them as accelerators and
+ * `features/editor/menuCommands.ts` runs them. They are listed here all the
+ * same, because the user pressing ⌘G does not care which process heard it, and
+ * the help modal that leaves one out is wrong whichever half implements it.
+ *
  * Deliberately absent: ctrl+wheel zoom on the timeline and preview canvases.
  * Those are pointer gestures, not keyboard bindings — macOS synthesises
  * `ctrlKey` on a trackpad pinch — and listing them in something called
@@ -40,13 +46,20 @@ export type ShortcutId =
   | "paste"
   | "split"
   | "delete"
+  | "selectAll"
+  | "deselectAll"
   | "save"
+  | "saveAs"
   | "open"
+  | "importMedia"
+  | "exportVideo"
   | "playPause"
   | "stepForward"
   | "stepBack"
   | "moveTrackUp"
   | "moveTrackDown"
+  | "group"
+  | "ungroup"
   | "cancel"
   | "previewFit"
   | "previewZoomIn"
@@ -128,8 +141,22 @@ export const SHORTCUTS: readonly Shortcut[] = [
     keys: ["Delete"],
     alternates: [["Backspace"]],
   },
+  {
+    id: "selectAll",
+    label: "Select all",
+    description: "Select every clip in the project",
+    group: "edit",
+    keys: ["Mod", "A"],
+  },
+  {
+    id: "deselectAll",
+    label: "Deselect all",
+    description: "Clear the selection",
+    group: "edit",
+    keys: ["Mod", "Shift", "A"],
+  },
 
-  // Project — Electron menu accelerators, via IPC to `src/event.ts`.
+  // Project — Electron menu accelerators, via IPC to `features/editor/menuCommands`.
   {
     id: "save",
     label: "Save project",
@@ -138,11 +165,32 @@ export const SHORTCUTS: readonly Shortcut[] = [
     keys: ["Mod", "S"],
   },
   {
+    id: "saveAs",
+    label: "Save project as",
+    description: "Save the project under a new name",
+    group: "file",
+    keys: ["Mod", "Shift", "S"],
+  },
+  {
     id: "open",
     label: "Open project",
     description: "Load a project file",
     group: "file",
     keys: ["Mod", "O"],
+  },
+  {
+    id: "importMedia",
+    label: "Import media",
+    description: "Add files to the timeline at the playhead",
+    group: "file",
+    keys: ["Mod", "I"],
+  },
+  {
+    id: "exportVideo",
+    label: "Export video",
+    description: "Render the project with the current export settings",
+    group: "file",
+    keys: ["Mod", "E"],
   },
 
   // Playback — Space in `ui/timeline/Timeline`, arrows in the timeline canvas.
@@ -182,6 +230,20 @@ export const SHORTCUTS: readonly Shortcut[] = [
     description: "Move the selected clips to the track below",
     group: "arrange",
     keys: ["ArrowDown"],
+  },
+  {
+    id: "group",
+    label: "Group",
+    description: "Wrap the selected clips in a group",
+    group: "arrange",
+    keys: ["Mod", "G"],
+  },
+  {
+    id: "ungroup",
+    label: "Ungroup",
+    description: "Dissolve the selected group, keeping its clips in place",
+    group: "arrange",
+    keys: ["Mod", "Shift", "G"],
   },
   {
     id: "cancel",

@@ -22,6 +22,7 @@ import { ipcStore } from "./ipc/ipcStore.js";
 import { ipcApp } from "./ipc/ipcApp.js";
 import { ipcTimeline } from "./ipc/ipcTimeline.js";
 import { ipcDialog } from "./ipc/ipcDialog.js";
+import { ipcEditing } from "./ipc/ipcEditing.js";
 import { ipcFilesystem } from "./ipc/ipcFilesystem.js";
 import { downloadFfmpeg, validateFFmpeg } from "./validate.js";
 import { ipcStream } from "./ipc/ipcStream.js";
@@ -114,6 +115,7 @@ ipcMain.handle("extension:timeline:add", ipcTimeline.add);
 
 ipcMain.handle("dialog:openDirectory", ipcDialog.openDirectory);
 ipcMain.handle("dialog:openFile", ipcDialog.openFile);
+ipcMain.handle("dialog:openFiles", ipcDialog.openFiles);
 ipcMain.handle("dialog:exportVideo", ipcDialog.exportVideo);
 ipcMain.handle("dialog:saveProject", ipcDialog.saveProject);
 ipcMain.handle("dialog:saveTemplate", ipcDialog.saveTemplate);
@@ -138,6 +140,10 @@ ipcMain.handle("store:delete", ipcStore.delete);
 
 ipcMain.on("app:forceClose", ipcApp.forceClose);
 ipcMain.on("app:restart", ipcApp.restart);
+
+// The Edit menu's items are the editor's own commands, so the renderer hands
+// a keystroke back here when the caret is in a text field. See `ipcEditing`.
+ipcMain.on("editing:command", ipcEditing.run);
 
 ipcMain.handle("stream:saveBufferToVideo", ipcStream.saveBufferToVideo);
 ipcMain.handle("stream:saveBufferToAudio", ipcStream.saveBufferToAudio);

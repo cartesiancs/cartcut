@@ -2399,16 +2399,38 @@ export class PreviewCanvas extends LitElement {
       .setZoom(clampZoom(this.viewport.zoom * factor));
   }
 
-  /** Fit / zoom shortcuts. Ignored while the user is typing. */
-  _handleKeydown(e: KeyboardEvent) {
-    // Zoom and fit are meaningless while presenting — the viewport is pinned —
-    // and ⌘0 would silently overwrite the viewport being held for the user's
-    // return. Play/pause and scrubbing are bound on `Timeline`, not here, so
-    // they keep working.
+  /**
+   * Fit the preview to the window.
+   *
+   * Public because the View menu offers the same thing, and the guard is here
+   * rather than at each caller: zoom and fit are meaningless while presenting —
+   * the viewport is pinned — and either surface would otherwise silently
+   * overwrite the viewport being held for the user's return.
+   */
+  public fitPreview() {
     if (!this.chrome.pointerInput) {
       return;
     }
+    const frame = this.frameSize;
+    previewViewportStore.getState().fit(frame.w, frame.h);
+  }
 
+  public zoomPreviewIn() {
+    if (!this.chrome.pointerInput) {
+      return;
+    }
+    this.zoomByStep(ZOOM_STEP);
+  }
+
+  public zoomPreviewOut() {
+    if (!this.chrome.pointerInput) {
+      return;
+    }
+    this.zoomByStep(1 / ZOOM_STEP);
+  }
+
+  /** Fit / zoom shortcuts. Ignored while the user is typing. */
+  _handleKeydown(e: KeyboardEvent) {
     // `isTypingEvent` rather than a local tagName check, and first, matching
     // `elementTimelineCanvas`. The check this replaces read `e.target`, which
     // shadow DOM has already retargeted to the host — so ⌘0 typed inside
@@ -2422,16 +2444,17 @@ export class PreviewCanvas extends LitElement {
       return;
     }
 
+    // Play/pause and scrubbing are bound on `Timeline`, not here, so the
+    // presenting guard inside these three does not reach them.
     if (e.key === "0") {
       e.preventDefault();
-      const frame = this.frameSize;
-      previewViewportStore.getState().fit(frame.w, frame.h);
+      this.fitPreview();
     } else if (e.key === "=" || e.key === "+") {
       e.preventDefault();
-      this.zoomByStep(ZOOM_STEP);
+      this.zoomPreviewIn();
     } else if (e.key === "-" || e.key === "_") {
       e.preventDefault();
-      this.zoomByStep(1 / ZOOM_STEP);
+      this.zoomPreviewOut();
     }
   }
 

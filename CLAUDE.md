@@ -337,6 +337,53 @@ records that a preset was what wrote them. That is also why no tile but "None"
 shows an applied state — a highlight on Fade In would be a guess presented as a
 fact.
 
+## The application menu
+
+The macOS menu bar is a second surface onto the editor's commands, and it obeys
+the rule `features/editor/actions.ts` states for the toolbar: the menu item, the
+button and the keystroke are one code path.
+
+```
+electron/lib/menuCommands.ts          what the menu offers — pure data, no Electron
+electron/lib/menu.ts                  the menus, built from that table
+electron/ipc/ipcEditing.ts            webContents undo/cut/copy/paste, allowlisted
+apps/app/src/features/editor/menuCommands.ts  the ids, run in the renderer
+apps/app/src/features/editor/textEditing.ts   ⌘C/⌘V/⌘Z *inside a text field*
+```
+
+One channel, `menu:command`, carrying an id — not a channel per item, which is
+what the two `SHORTCUT_CONTROL_*` channels it replaced would have needed. The
+renderer's table is a `Record<MenuCommandId, …>`, so an item with no handler is
+a webpack type error rather than a click that does nothing.
+
+Three things about it are easy to get wrong, and all three were paid for once:
+
+- **A menu accelerator fires whatever the page does with the same keystroke.** A
+  renderer `preventDefault` does not cancel it. So for a combination the
+  renderer already binds on `keydown` — ⌘Z, ⌘X, ⌘C, ⌘V, ⌘D, ⌘0, ⌘+, ⌘- — the
+  item carries the accelerator (that is what draws the shortcut beside the
+  label) but declines to send it: `rendererOwnsKey`, tested against
+  `event.triggeredByAccelerator`, which distinguishes the keystroke from the
+  click. Without it one ⌘Z is two undo steps. Verified in the running app:
+  ⌘Z moves `historyNow` by exactly one, and Edit → Undo by exactly one.
+- **A menu accelerator is global to the window with no per-focus escape.** So
+  Space, the arrows, Backspace and Delete are *not* registered — they would
+  toggle playback and delete clips while someone typed a caption. Those stay in
+  `elementTimelineCanvas._handleKeydown` and `Timeline._handleKeydown`, which
+  can see the focus, and their menu items are offered without a shortcut.
+  `menuCommands.test.ts` pins that every registered accelerator has a modifier.
+- **Replacing the `undo`/`cut`/`copy`/`paste` roles takes their job with it.** A
+  role acts on the focused editable and nothing else, which is why Edit → Copy
+  with three clips selected copied nothing. The items are the editor's own
+  commands now, and `textEditing.ts` is the half that would otherwise have gone
+  missing: the same keys, meaning the text, while the caret is in a field. It
+  cancels the keystroke *only* once the command has somewhere to go, because the
+  web build has no main process behind the bridge.
+
+`features/editor/shortcuts.ts` still lists every binding the user can press,
+menu-owned and renderer-owned alike — the help modal that leaves one out is
+wrong whichever half implements it.
+
 ## The Claude Code bridge
 
 `electron/mcp/` runs a Streamable HTTP MCP server on `127.0.0.1:9826/mcp`,

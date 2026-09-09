@@ -28,6 +28,7 @@ import { selectionStore } from "../../states/selectionStore";
 import { useTimelineStore } from "../../states/timelineStore";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { deleteClips, pasteClips, splitAtPlayhead } from "../timeline/clipOps";
+import { createGroup, isGroupAnimated, ungroup } from "../timeline/groupOps";
 import { canMergeClips, mergeClips } from "../timeline/mergeOps";
 import { canRotateClips, rotateClips } from "../timeline/rotateOps";
 import { canDetachAudio } from "../timeline/audio";
@@ -166,6 +167,101 @@ export function detachAudioFromSelection(): void {
  */
 export function addTrack(kind: TrackKind): void {
   commit((input) => appendTrackOfKind(input, kind, uuidv4()));
+}
+
+/**
+ * Wrap clips in a new group.
+ *
+ * Takes its ids rather than reading the selection, because the two callers
+ * mean different sets: the Clip menu acts on what is selected, the timeline's
+ * context menu on what was under the cursor when it opened. `elementTimelineCanvas`
+ * passes its right-click snapshot and this stays the only implementation.
+ *
+ * One `withCheckpoint`, so the whole thing is one undo step — and if
+ * `createGroup` declines (audio in the selection, clips from two different
+ * groups) it returns the document by identity and no step is recorded at all.
+ */
+export function groupClips(ids: string[]): void {
+  const groupId = uuidv4();
+  const trackId = uuidv4();
+
+  commit((input) => {
+    // Groups live on their own kind of row, so a group bar never competes with
+    // a real clip for a slot. Reuse a group track if one is free at that
+    // moment; `chooseTrackFor` is not used because it keys off the element's
+    // filetype and would have to build the group first.
+    const withTrack = input.tracks.some((track) => track.kind === "group")
+      ? input
+      : appendTrackOfKind(input, "group", trackId);
+
+    const target =
+      withTrack.tracks.find((track) => track.kind === "group")?.id ?? trackId;
+
+    const grouped = createGroup(withTrack, ids, groupId, target);
+
+    // `createGroup` declines by returning what it was given — which here is the
+    // document *with* the new group row, not the one this started from. Handing
+    // that back would record the row as an edit of its own, so a ⌘G with
+    // nothing selected left an empty group track behind and one undo step to
+    // remove it. Returning `input` by identity is what makes a group that was
+    // not made cost nothing, the rule every op in `features/timeline` keeps.
+    return grouped === withTrack ? input : grouped;
+  });
+
+  // Only if the group was actually made. A declined `createGroup` leaves the
+  // document by identity, and selecting an id that names nothing would blank
+  // the inspector and let the next Delete act on a phantom.
+  if (doc().elements[groupId] != null) {
+    selectionStore.getState().setIds([groupId]);
+  }
+}
+
+/** Dissolve groups, leaving their contents where they look. */
+export function ungroupClips(ids: string[]): void {
+  const atMs = useTimelineStore.getState().cursor;
+
+  // Losing a group's animation is not something a click should do silently:
+  // there is no way to fold a time-varying transform into a child's static
+  // fields, so `ungroup` keeps only the instant at the playhead.
+  const current = doc();
+  const animated = ids.filter(
+    (id) =>
+      current.elements[id]?.filetype === "group" &&
+      isGroupAnimated(current.elements, id),
+  );
+  if (animated.length > 0) {
+    const ok = window.confirm(
+      "This group is animated. Ungrouping keeps only its transform at the " +
+        "playhead and discards the animation. Continue?",
+    );
+    if (!ok) {
+      return;
+    }
+  }
+
+  commit((input) => {
+    let out = input;
+    for (const id of ids) {
+      out = ungroup(out, id, atMs);
+    }
+    return out;
+  });
+}
+
+/**
+ * Select every clip in the project.
+ *
+ * Groups included: they are elements with a transform, so a select-all that
+ * skipped them would move a group's children out from under it on the next
+ * nudge. `withDescendants` is not needed — selecting the parent and the child
+ * separately is what the timeline's own rubber band produces too.
+ */
+export function selectAllClips(): void {
+  selectionStore.getState().setIds(Object.keys(doc().elements));
+}
+
+export function clearSelection(): void {
+  selectionStore.getState().clear();
 }
 
 export function undo(): void {
