@@ -35,59 +35,47 @@ export class ElementTimelineBottomScroll extends LitElement {
   width: number;
   mouseLeft: number;
   prevLeft: number;
+  isScrollable: boolean;
 
   createRenderRoot() {
     useTimelineStore.subscribe((state) => {
       this.timelineRange = state.range;
       this.timelineScroll = state.scroll;
-      if (!this.isMove) {
-        const scrollMs = pxToMilliseconds(state.scroll, state.range);
-        const per = (scrollMs / (this.renderOption.duration * 1000)) * 100;
 
+      const scrollMs = pxToMilliseconds(state.scroll, state.range);
+      const per = (scrollMs / (this.renderOption.duration * 1000)) * 100;
+
+      // The bar is not in the DOM while the whole project fits on screen, so
+      // both lookups can miss. Nothing to position in that case.
+      const track = document.querySelector<HTMLElement>(
+        ".timeline-bottom-scroll",
+      );
+      const thumb = document.querySelector<HTMLElement>(
+        ".timeline-bottom-scroll-thumb",
+      );
+
+      if (track && thumb) {
         const fullWidth =
-          document.querySelector(".timeline-bottom-scroll").offsetWidth -
-          this.resize.timelineVertical.leftOption;
-        const thumbWidth = document.querySelector(
-          ".timeline-bottom-scroll-thumb",
-        ).offsetWidth;
+          track.offsetWidth - this.resize.timelineVertical.leftOption;
 
-        this.left = (fullWidth - thumbWidth) * (per / 100);
-        this.prevLeft = (fullWidth - thumbWidth) * (per / 100);
+        this.left = Math.max(0, (fullWidth - thumb.offsetWidth) * (per / 100));
 
-        if (this.left <= 0) {
-          this.left = 0;
-          this.prevLeft = 0;
+        if (!this.isMove) {
+          this.prevLeft = this.left;
         }
-
-        this.requestUpdate();
-      } else {
-        const scrollMs = pxToMilliseconds(state.scroll, state.range);
-        const per = (scrollMs / (this.renderOption.duration * 1000)) * 100;
-
-        const fullWidth =
-          document.querySelector(".timeline-bottom-scroll").offsetWidth -
-          this.resize.timelineVertical.leftOption;
-
-        const thumbWidth = document.querySelector(
-          ".timeline-bottom-scroll-thumb",
-        ).offsetWidth;
-
-        this.left = (fullWidth - thumbWidth) * (per / 100);
-
-        if (this.left <= 0) {
-          this.left = 0;
-        }
-
-        this.requestUpdate();
       }
+
+      this.requestUpdate();
     });
 
     uiStore.subscribe((state) => {
       this.resize = state.resize;
+      this.requestUpdate();
     });
 
     renderOptionStore.subscribe((state) => {
       this.renderOption = state.options;
+      this.requestUpdate();
     });
 
     return this;
@@ -100,6 +88,7 @@ export class ElementTimelineBottomScroll extends LitElement {
     this.left = 0;
     this.prevLeft = 0;
     this.width = 100;
+    this.isScrollable = true;
 
     document.addEventListener("mousemove", this._handleMouseMove.bind(this));
     document.addEventListener("mouseup", this._handleMouseUp.bind(this));
@@ -107,6 +96,13 @@ export class ElementTimelineBottomScroll extends LitElement {
 
   render() {
     this.setWidth();
+
+    // The whole range is on screen — there is nothing left to scroll to, so
+    // the bar goes away rather than sitting there inert.
+    if (!this.isScrollable) {
+      return html``;
+    }
+
     return html` <style>
         .timeline-bottom-scroll {
           width: 100%;
@@ -146,7 +142,7 @@ export class ElementTimelineBottomScroll extends LitElement {
 
   setWidth() {
     try {
-      const timelineCanvas = document.querySelector(
+      const timelineCanvas = document.querySelector<HTMLElement>(
         "#elementTimelineCanvasRef",
       );
 
@@ -156,8 +152,16 @@ export class ElementTimelineBottomScroll extends LitElement {
 
       const end = ((projectDuration * 1000) / 5) * timeMagnification;
 
-      this.width = 100 / (end / timelineCanvas.offsetWidth);
-    } catch (error) {}
+      const width = 100 / (end / timelineCanvas.offsetWidth);
+
+      // width >= 100 means the thumb would be as wide as its track: the whole
+      // project is already visible. Not a rounding tolerance — half a pixel of
+      // hidden timeline is not worth a scrollbar.
+      this.isScrollable = Number.isFinite(width) && width < 99.5;
+      this.width = Math.min(width, 100);
+    } catch (error) {
+      this.isScrollable = false;
+    }
   }
 
   _handleMouseUp(e) {
@@ -168,13 +172,21 @@ export class ElementTimelineBottomScroll extends LitElement {
   _handleMouseMove(e) {
     if (!this.isMove) return false;
 
-    const fullWidth =
-      document.querySelector(".timeline-bottom-scroll").offsetWidth -
-      this.resize.timelineVertical.leftOption;
-
-    const thumbWidth = document.querySelector(
+    // Zooming out mid-drag can take the bar out of the DOM under the pointer.
+    const track = document.querySelector<HTMLElement>(".timeline-bottom-scroll");
+    const thumb = document.querySelector<HTMLElement>(
       ".timeline-bottom-scroll-thumb",
-    ).offsetWidth;
+    );
+
+    if (!track || !thumb) {
+      this.isMove = false;
+      return false;
+    }
+
+    const fullWidth =
+      track.offsetWidth - this.resize.timelineVertical.leftOption;
+
+    const thumbWidth = thumb.offsetWidth;
     const dx =
       e.clientX - this.resize.timelineVertical.leftOption - this.mouseLeft;
 
@@ -201,16 +213,6 @@ export class ElementTimelineBottomScroll extends LitElement {
 
   _handleMouseBodyDown(e) {
     if (e.target.className == "timeline-bottom-scroll") {
-      const thumbWidth = document.querySelector(
-        ".timeline-bottom-scroll-thumb",
-      ).offsetWidth;
-
-      const fullWidth =
-        document.querySelector(".timeline-bottom-scroll").offsetWidth -
-        this.resize.timelineVertical.leftOption;
-
-      const per = (e.clientX / (fullWidth - thumbWidth / 2)) * 100;
-
       this.mouseLeft = e.clientX - this.resize.timelineVertical.leftOption;
       this.isMove = true;
 
