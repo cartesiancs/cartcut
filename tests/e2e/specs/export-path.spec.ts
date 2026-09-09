@@ -34,11 +34,15 @@ test("a short project exports through the real Render button", async ({
 
   const { page } = session;
   const durationSec = 5;
-  const width = 640;
-  const height = 360;
-  // The profile's rate, not a literal: the code strip this spec decodes is
-  // generated at the profile's rate, and the index map only reads output frame
-  // N as source frame N while the two agree.
+  // The profile's size and rate, not literals. The instruments are built once
+  // per profile at that profile's pixel dimensions — `full`'s code strip is
+  // 1440x96, which does not fit in a 640x360 frame at all — and this spec
+  // places the strip at its native size, so the project has to be the size the
+  // strip was drawn for or the crop `decodeIndexMap` runs is out of bounds.
+  // The rate has to agree for the same kind of reason: the index map only
+  // reads output frame N as source frame N while the two match.
+  const width = profile.width;
+  const height = profile.height;
   const fps = profile.fps;
   const frames = Math.round(durationSec * fps);
 

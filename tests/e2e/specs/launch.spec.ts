@@ -50,8 +50,17 @@ test("the editor comes up with its bundle evaluated and isolated from the user's
       "useTimelineStore",
     ]),
   );
-  // The five visual filetypes an export knows how to draw.
-  expect(bridge.rendererFiletypes).toEqual(["gif", "image", "shape", "text", "video"]);
+  // Every filetype an export knows how to draw. `template` is one of them: it
+  // composites its own document into a layer and blits it, so it fits
+  // `ElementRenderFunction` like any other clip — see `export/renderers.ts`.
+  expect(bridge.rendererFiletypes).toEqual([
+    "gif",
+    "image",
+    "shape",
+    "template",
+    "text",
+    "video",
+  ]);
 
   // Isolation: a temp userData, and no MCP server bound. The developer's own
   // Cartcut may be running and holding port 9826, and the test instance must
