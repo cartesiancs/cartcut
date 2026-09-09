@@ -7,6 +7,7 @@ import {
   renderOptionStore,
 } from "../../states/renderOptionStore";
 import { getLocationEnv } from "../../functions/getLocationEnv";
+import { IMediaLoadStore, mediaLoadStore } from "../../states/mediaLoadStore";
 
 @customElement("element-timeline-bottom")
 export class ElementTimelineBottomScroll extends LitElement {
@@ -18,6 +19,10 @@ export class ElementTimelineBottomScroll extends LitElement {
 
   @property({ attribute: false })
   fps: number = renderOptionStore.getInitialState().options.fps;
+
+  /** Media probes in flight — the progress bar beside the bolt icon. */
+  @property({ attribute: false })
+  mediaLoading: number = 0;
 
   /** The `claude mcp add …` line, token included, for the user to paste. */
   mcpCommand = "";
@@ -120,6 +125,42 @@ export class ElementTimelineBottomScroll extends LitElement {
         .timeline-bottom-question-icon {
           cursor: pointer;
         }
+
+        .timeline-bottom-load {
+          display: flex;
+          align-items: center;
+          gap: 0.35rem;
+        }
+
+        /*
+         * Indeterminate on purpose: neither the <video> element nor ffprobe
+         * reports how far through a file it is, so a filling bar would be a
+         * number nobody measured. This says "still working" and nothing more.
+         */
+        .timeline-bottom-load-track {
+          width: 60px;
+          height: 3px;
+          border-radius: 2px;
+          background-color: #3a3f44;
+          overflow: hidden;
+        }
+
+        .timeline-bottom-load-bar {
+          width: 40%;
+          height: 100%;
+          border-radius: 2px;
+          background-color: #0d6efd;
+          animation: timeline-bottom-load-slide 1.1s ease-in-out infinite;
+        }
+
+        @keyframes timeline-bottom-load-slide {
+          from {
+            transform: translateX(-100%);
+          }
+          to {
+            transform: translateX(250%);
+          }
+        }
       </style>
 
       <div class="timeline-bottom">
@@ -127,6 +168,22 @@ export class ElementTimelineBottomScroll extends LitElement {
           <span class="bottom-text">${this.fps}fps</span>
         </div>
         <div class="timeline-bottom-grid-end">
+          ${this.mediaLoading > 0
+            ? html`<div
+                class="timeline-bottom-load"
+                title="Reading media metadata"
+              >
+                <span class="bottom-text"
+                  >Loading${this.mediaLoading > 1
+                    ? html` ${this.mediaLoading}`
+                    : ""}</span
+                >
+                <div class="timeline-bottom-load-track">
+                  <div class="timeline-bottom-load-bar"></div>
+                </div>
+              </div>`
+            : ""}
+
           <span
             class="material-symbols-outlined timeline-bottom-question-icon icon-xs ${getLocationEnv() ==
             "electron"
@@ -321,6 +378,10 @@ export class ElementTimelineBottomScroll extends LitElement {
   createRenderRoot() {
     renderOptionStore.subscribe((state: IRenderOptionStore) => {
       this.fps = state.options.fps;
+    });
+
+    mediaLoadStore.subscribe((state: IMediaLoadStore) => {
+      this.mediaLoading = state.pending;
     });
 
     return this;

@@ -110,7 +110,6 @@ export class App extends LitElement {
 
         <offcanvas-list-ui></offcanvas-list-ui>
         <modal-list-ui></modal-list-ui>
-        <toast-list-ui></toast-list-ui>
 
         <div id="menuRightClick"></div>
         <style id="fontStyles" ref="fontStyles"></style>

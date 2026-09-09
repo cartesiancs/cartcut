@@ -22,6 +22,7 @@ import { parseGIF, decompressFrames } from "gifuct-js";
 import { path as pathUtil } from "../../functions/path";
 import { getLocationEnv } from "../../functions/getLocationEnv";
 import { mediaKindOf, type MediaKind, type MediaProbe } from "./mediaElement";
+import { whileLoadingMedia } from "../../states/mediaLoadStore";
 
 /**
  * Long enough for a large file on a slow disk, short enough that a broken one
@@ -291,6 +292,22 @@ export async function probeMedia(
     );
   }
 
+  // Raises the bar in `element-timeline-bottom`. Wrapped here rather than at
+  // each caller so a drop, the asset panel, a recording and an MCP media add
+  // all report the same way, and in a `finally` so a rejected probe — which
+  // this module makes a real possibility — lowers it again.
+  return whileLoadingMedia(() =>
+    probeKind(kind, filepath, localpath, prober, options),
+  );
+}
+
+async function probeKind(
+  kind: MediaKind,
+  filepath: string,
+  localpath: string,
+  prober: MediaProber,
+  options: ProbeOptions,
+): Promise<MediaProbe> {
   switch (kind) {
     case "video": {
       const probed = await prober.video(localpath);

@@ -21,6 +21,7 @@ import { setIn } from "../../utils/immutable";
 import { cursorAtElapsed } from "../timeline/playbackClock";
 import { projectFps } from "../editor/frameRate";
 import { mark as perfMark } from "../debug/frameStats";
+import { mediaLoadStore } from "../../states/mediaLoadStore";
 
 @customElement("element-control")
 export class ElementControl extends LitElement {
@@ -376,13 +377,23 @@ export class ElementControl extends LitElement {
   addVideo(blob, path) {
     const elementId = this.generateUUID();
     const video = document.createElement("video");
-    const toastMetadata = bootstrap.Toast.getInstance(
-      document.getElementById("loadMetadataToast"),
-    );
-    toastMetadata.show();
+    // The probe below is the only thing holding the loading indicator up, so
+    // every way out of it has to put the indicator down — including the two
+    // this method never handled, a file the element cannot decode and an
+    // ffprobe call that rejects. `release` is latched because `end` decrements
+    // a shared count: a second call would take another import's load down.
+    mediaLoadStore.getState().begin();
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      mediaLoadStore.getState().end();
+    };
 
     video.src = blob;
     video.preload = "metadata";
+
+    video.onerror = release;
 
     video.onloadedmetadata = () => {
       let width = video.videoWidth;
@@ -392,13 +403,10 @@ export class ElementControl extends LitElement {
       window.electronAPI.req.ffmpeg.getMetadata(blob, path).then((result) => {
         let blobdata = result.blobdata;
         let metadata = result.metadata;
-        console.log(metadata);
 
         let isExist = false;
 
-        setTimeout(() => {
-          toastMetadata.hide();
-        }, 1000);
+        release();
 
         metadata.streams.forEach((element) => {
           if (element.codec_type == "audio") {
@@ -443,7 +451,7 @@ export class ElementControl extends LitElement {
         this.commitNewElement(elementId);
 
         // this.showVideo(elementId);
-      });
+      }).catch(release);
 
       // ffmpeg.ffprobe(path, (err, metadata) => {
 
