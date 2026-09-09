@@ -232,17 +232,17 @@ export class ElementTimelineBottomScroll extends LitElement {
               <span
                 @click=${() =>
                   window.electronAPI.req.url.openUrl(
-                    "https://github.com/cartesiancs/nugget-app",
+                    "https://github.com/cartesiancs/cartcut",
                   )}
                 class="text-secondary"
                 style="font-size: 13px; cursor: pointer;"
-                >GitHub: https://github.com/cartesiancs/nugget-app</span
+                >GitHub: https://github.com/cartesiancs/cartcut</span
               >
               <br />
               <span
                 @click=${() =>
                   window.electronAPI.req.url.openUrl(
-                    "https://github.com/cartesiancs/nugget-app/issues",
+                    "https://github.com/cartesiancs/cartcut/issues",
                   )}
                 class="text-secondary"
                 style="font-size: 13px; cursor: pointer;"
