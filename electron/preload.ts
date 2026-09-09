@@ -26,6 +26,7 @@ const request = {
   dialog: {
     openDirectory: () => ipcRenderer.invoke("dialog:openDirectory"),
     openFile: (extension) => ipcRenderer.invoke("dialog:openFile", extension),
+    saveTemplate: () => ipcRenderer.invoke("dialog:saveTemplate"),
     exportVideo: (container?: string) =>
       ipcRenderer.invoke("dialog:exportVideo", container),
   },
@@ -52,6 +53,19 @@ const request = {
     userDirectory: () => ipcRenderer.invoke("preset:userDirectory"),
     installLut: (name, extension, bytes) =>
       ipcRenderer.invoke("preset:installLut", name, extension, bytes),
+  },
+  /**
+   * Templates. Enumeration and removal only.
+   *
+   * There is no `install` here on purpose: the renderer extracts a `.cttpl`
+   * with JSZip and writes it out through `filesystem.writeFile` below, because
+   * it already has the zip library and already owns the rule about what makes
+   * an archive a template. See `electron/lib/template.ts`.
+   */
+  template: {
+    list: () => ipcRenderer.invoke("template:list"),
+    userDirectory: () => ipcRenderer.invoke("template:userDirectory"),
+    remove: (id) => ipcRenderer.invoke("template:remove", id),
   },
   project: {
     save: () => ipcRenderer.invoke("dialog:saveProject"),
@@ -119,6 +133,11 @@ const request = {
 
     writeFile: (filename, data, options) =>
       ipcRenderer.invoke("filesystem:writeFile", filename, data, options),
+    // Awaited, directory-creating, and it reports failure — see the header on
+    // `ipcFilesystem.writeFileEnsured` for why `writeFile` above cannot serve
+    // a template install.
+    writeFileEnsured: (filename, base64) =>
+      ipcRenderer.invoke("filesystem:writeFileEnsured", filename, base64),
     readFile: (filename) => ipcRenderer.invoke("filesystem:readFile", filename),
     existFile: (filepath) =>
       ipcRenderer.invoke("filesystem:existFile", filepath),

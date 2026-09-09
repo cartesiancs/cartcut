@@ -16,6 +16,7 @@ import { shellLib } from "./lib/shell.js";
 import { electronInit } from "./lib/init.js";
 import { fontLib } from "./lib/font.js";
 import { presetLib } from "./lib/preset.js";
+import { templateLib } from "./lib/template.js";
 import { ipcExtension } from "./ipc/ipcExtension.js";
 import { ipcStore } from "./ipc/ipcStore.js";
 import { ipcApp } from "./ipc/ipcApp.js";
@@ -115,11 +116,13 @@ ipcMain.handle("dialog:openDirectory", ipcDialog.openDirectory);
 ipcMain.handle("dialog:openFile", ipcDialog.openFile);
 ipcMain.handle("dialog:exportVideo", ipcDialog.exportVideo);
 ipcMain.handle("dialog:saveProject", ipcDialog.saveProject);
+ipcMain.handle("dialog:saveTemplate", ipcDialog.saveTemplate);
 
 ipcMain.handle("filesystem:getDirectory", ipcFilesystem.getDirectory);
 ipcMain.handle("filesystem:mkdir", ipcFilesystem.makeDirectory);
 ipcMain.handle("filesystem:emptyDirSync", ipcFilesystem.emptyDirectorySync);
 ipcMain.handle("filesystem:writeFile", ipcFilesystem.writeFile);
+ipcMain.handle("filesystem:writeFileEnsured", ipcFilesystem.writeFileEnsured);
 ipcMain.handle("filesystem:readFile", ipcFilesystem.readFile);
 ipcMain.handle("filesystem:removeDirectory", ipcFilesystem.removeDirectory);
 ipcMain.handle("filesystem:removeFile", ipcFilesystem.removeFile);
@@ -165,6 +168,15 @@ ipcMain.handle(
   "preset:installLut",
   (_event, name: string, extension: string, bytes: Uint8Array) =>
     presetLib.installLut(name, extension, bytes),
+);
+
+// Enumeration and one delete. Installing a template is the renderer's job:
+// a `.cttpl` is a zip, and the renderer owns the app's only zip library and
+// the rule that decides what makes an archive a template. See `lib/template.ts`.
+ipcMain.handle("template:list", templateLib.list);
+ipcMain.handle("template:userDirectory", templateLib.userDirectory);
+ipcMain.handle("template:remove", (_event, id: string) =>
+  templateLib.remove(id),
 );
 
 ipcMain.handle("desktopCapturer:getSources", ipcDesktopCapturer.getSources);

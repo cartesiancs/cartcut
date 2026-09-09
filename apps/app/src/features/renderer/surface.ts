@@ -118,8 +118,73 @@ export function layerFor(ctx: CanvasRenderingContext2D): Surface | null {
   return layer;
 }
 
+let named = new Map<string, Surface>();
+
+/**
+ * A cleared layer of a caller-chosen size, keyed by a name rather than by a
+ * destination canvas.
+ *
+ * `layerFor` cannot serve this. It keys on `ctx.canvas` and sizes to it, and a
+ * template needs both of those to be different: it composites its own document
+ * at the template's **native** resolution and then blits that through its
+ * transform, and it is asked for while `renderElement` may already be holding
+ * that destination's blend layer for the very same draw. Two callers, one key,
+ * one buffer — the second would clear the first mid-element.
+ *
+ * The key is the placed element's id, so two instances of one template get two
+ * buffers and neither can overwrite the other within a frame. A `Map` rather
+ * than a `WeakMap` because a string is not a weak key; `releaseNamedLayers` is
+ * what keeps that from growing without bound, and the renderer calls it with
+ * the ids still on the timeline.
+ */
+export function namedLayer(
+  key: string,
+  width: number,
+  height: number,
+): Surface | null {
+  if (!(width > 0) || !(height > 0)) {
+    return null;
+  }
+
+  let layer = named.get(key);
+  if (layer == null) {
+    layer = factory(width, height) ?? undefined;
+    if (layer == null) {
+      return null;
+    }
+    named.set(key, layer);
+  } else if (layer.canvas.width !== width || layer.canvas.height !== height) {
+    // Assigning either dimension reallocates and clears, even to the same
+    // value — which is why they are compared first, as `layerFor` does.
+    layer.canvas.width = width;
+    layer.canvas.height = height;
+  }
+
+  layer.ctx.setTransform(1, 0, 0, 1, 0, 0);
+  layer.ctx.globalAlpha = 1;
+  layer.ctx.globalCompositeOperation = "source-over";
+  layer.ctx.clearRect(0, 0, width, height);
+  return layer;
+}
+
+/**
+ * Drop every named layer whose key is no longer in use.
+ *
+ * A deleted template would otherwise pin a full-resolution canvas for the rest
+ * of the session. Called from the paint loop with the ids it just drew, which
+ * is the only place that knows.
+ */
+export function releaseNamedLayers(keep: ReadonlySet<string>): void {
+  for (const key of [...named.keys()]) {
+    if (!keep.has(key)) {
+      named.delete(key);
+    }
+  }
+}
+
 /** Test-only: forget every cached layer, so a suite starts from a clean slate. */
 export function resetLayers(): void {
   // A `WeakMap` cannot be cleared, and replacing it is the whole reset.
   layers = new WeakMap();
+  named = new Map();
 }

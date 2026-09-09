@@ -7,6 +7,7 @@ import "./ControlRender";
 import "./ControlUtilities";
 import "./ControlFilter";
 import "./ControlFx";
+import "./ControlTemplate";
 import "../../features/preview/previewTopBar";
 import "../../features/preview/previewBottomBar";
 import "../../features/record/screenRecord";
@@ -237,6 +238,19 @@ export class Control extends LitElement {
               <button
                 class="btn-nav"
                 data-bs-toggle="pill"
+                data-bs-target="#nav-template"
+                type="button"
+                role="tab"
+                aria-selected="false"
+              >
+                <span class="material-symbols-outlined">
+                  dashboard_customize</span
+                >
+              </button>
+
+              <button
+                class="btn-nav"
+                data-bs-toggle="pill"
                 data-bs-target="#nav-output"
                 type="button"
                 role="tab"
@@ -275,6 +289,10 @@ export class Control extends LitElement {
 
               <div class="tab-pane fade" id="nav-fx" role="tabpanel">
                 <control-ui-fx></control-ui-fx>
+              </div>
+
+              <div class="tab-pane fade" id="nav-template" role="tabpanel">
+                <control-ui-template></control-ui-template>
               </div>
 
               <!--
@@ -449,6 +467,7 @@ export class Control extends LitElement {
           <option-audio></option-audio>
           <option-shape></option-shape>
           <option-groupelement></option-groupelement>
+          <option-template></option-template>
           <!--
             Tag names are not free here. optionGroup resolves a panel by
             prefixing "option-" onto the element's own filetype, so these two

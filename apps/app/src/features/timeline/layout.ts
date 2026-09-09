@@ -12,7 +12,12 @@
  * Now they all consume one `layoutTimeline` result, so they cannot drift.
  */
 
-import { msToPxSigned, pxToMsSigned, spanOf } from "./geometry";
+import {
+  isDurationLocked,
+  msToPxSigned,
+  pxToMsSigned,
+  spanOf,
+} from "./geometry";
 import { cutPointsOn } from "./transitionOps";
 import { freezeMs } from "./transitionGeometry";
 import { clipsOnTrack, type TimelineDocument, type TimelineTrack } from "./tracks";
@@ -94,6 +99,16 @@ export type ClipRect = {
   y: number;
   w: number;
   h: number;
+  /**
+   * Whether this clip refuses to be trimmed, so `hitTest` offers no handles.
+   *
+   * Recorded here rather than looked up in `hitTest`, which is handed a layout
+   * and never the document. It is the same rule the context menu keeps: an
+   * affordance that could only decline is not offered at all — and a trim
+   * handle is worse than a menu item, because it also changes the cursor and
+   * swallows the drag that would have moved the clip.
+   */
+  lockedDuration?: boolean;
 };
 
 /**
@@ -270,6 +285,11 @@ export function layoutTimeline(input: LayoutInput): TimelineLayout {
         y: row.top,
         w,
         h: row.height,
+        // Spread only when true, so an ordinary clip's rect keeps exactly the
+        // keys it has always had. `keyframeMarkers.test.ts` pins that set on
+        // purpose — anything appearing on every clip has to be justified — and
+        // a flag that is false for all but one filetype does not qualify.
+        ...(isDurationLocked(element) ? { lockedDuration: true } : {}),
       });
     }
 
@@ -489,11 +509,12 @@ export function hitTest(
       continue;
     }
 
-    const handle = trimHandleWidth(clip.w);
+    // A locked clip is all body: every part of it drags, and none of it trims.
+    const handle = clip.lockedDuration === true ? 0 : trimHandleWidth(clip.w);
     const zone =
-      x < clip.x + handle
+      handle > 0 && x < clip.x + handle
         ? "trimStart"
-        : x >= clip.x + clip.w - handle
+        : handle > 0 && x >= clip.x + clip.w - handle
           ? "trimEnd"
           : "body";
 

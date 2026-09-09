@@ -225,6 +225,25 @@ export function clipRow(
       row.name = element.name;
       break;
     }
+    // The template's identity and how much of it is still empty — and
+    // emphatically **not** its document. A composed template is a whole second
+    // timeline with baked animation lanes in it, so reporting one would blow
+    // the 25k output cap on a single clip, the same reason a LUT's 4,913 nodes
+    // are reported as a preset id. The slots are `<option-template>`'s
+    // business; an agent addresses a template as one clip, which is what it is.
+    case "template": {
+      row.name = (element as any).name;
+      row.templateId = (element as any).templateId;
+      const fills = (element as any).fills;
+      const filled =
+        fills != null && typeof fills === "object"
+          ? Object.keys(fills).length
+          : 0;
+      if (filled > 0) {
+        row.filledSlots = filled;
+      }
+      break;
+    }
     default:
       break;
   }

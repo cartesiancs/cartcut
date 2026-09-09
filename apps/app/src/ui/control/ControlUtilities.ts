@@ -5,6 +5,11 @@ import {
   controlPanelStore,
   IControlPanelStore,
 } from "../../states/controlPanelStore";
+import { renderOptionStore } from "../../states/renderOptionStore";
+import { useTimelineStore } from "../../states/timelineStore";
+import { serializeRenderOptions } from "../../features/project/renderOptionsFile";
+import { exportTemplate } from "../../features/template/templateExport";
+import { renderTemplateThumbnail } from "../../features/template/templateThumbnail";
 
 @customElement("control-ui-util")
 export class ControlText extends LitElement {
@@ -28,6 +33,62 @@ export class ControlText extends LitElement {
 
   _handleClickOverlayRecord() {
     window.electronAPI.req.overlayRecord.show();
+  }
+
+  private toast(message: string) {
+    (document.querySelector("toast-box") as any)?.showToast({
+      message,
+      delay: "4000",
+    });
+  }
+
+  /**
+   * Package the current project as a `.cttpl`.
+   *
+   * Everything decidable is in `features/template/exportPlan.ts`; this reads
+   * the two stores and reports the result. The warnings it may come back with
+   * are shown rather than swallowed: an author whose template contains an
+   * effect needs to know it will not render inside one, and after the file is
+   * written is too late to be told nothing at all.
+   */
+  private async _handleClickExportTemplate() {
+    const document_ = useTimelineStore.getState().getDocument();
+    const options = renderOptionStore.getState().options;
+
+    // No name prompt: `window.prompt` throws in Electron ("prompt() is and
+    // will not be supported"), and the save dialog `exportTemplate` opens
+    // already asks for a name. The file's name is the template's name.
+    //
+    // Best effort on the thumbnail. A template without one gets an icon on its
+    // tile, which is much better than an export refused because a canvas would
+    // not allocate — so `renderTemplateThumbnail` answers null, never throws.
+    const thumbnail = await renderTemplateThumbnail(
+      useTimelineStore.getState().cursor,
+    );
+
+    const result = await exportTemplate({
+      elements: document_.elements,
+      tracks: document_.tracks,
+      renderOptions: serializeRenderOptions(options, {
+        previewRatio: 1,
+        videoDestination: "",
+      }),
+      thumbnail,
+    });
+
+    if (result.ok) {
+      this.toast(
+        result.warnings.length > 0
+          ? `${result.name} — ${result.warnings.join(" ")}`
+          : result.name,
+      );
+      return;
+    }
+    // A cancelled dialog is not a failure and must not be reported as one.
+    if ("cancelled" in result) {
+      return;
+    }
+    this.toast(result.message);
   }
 
   render() {
@@ -75,6 +136,19 @@ export class ControlText extends LitElement {
           </span>
           <b class="align-self-center text-light text-center"
             >Screen Recorder</b
+          >
+        </div>
+
+        <div
+          class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
+          aria-event="export-template"
+          @click=${() => this._handleClickExportTemplate()}
+        >
+          <span class="material-symbols-outlined icon-lg align-self-center">
+            dashboard_customize
+          </span>
+          <b class="align-self-center text-light text-center"
+            >Export Template</b
           >
         </div>
 

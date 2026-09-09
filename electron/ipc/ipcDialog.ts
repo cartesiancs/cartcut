@@ -53,6 +53,31 @@ export const ipcDialog = {
     }
   },
 
+  /**
+   * Where to write a `.cttpl`.
+   *
+   * Its own dialog rather than a parameter on `saveProject`, because the two
+   * mean different things to the user — one keeps working on this project, the
+   * other publishes a copy of it — and because the extension filter is what
+   * makes the platform append `.cttpl` rather than `.ngt`.
+   */
+  saveTemplate: async () => {
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: "Export Template",
+      buttonLabel: "Export",
+      filters: [
+        {
+          name: "Cartcut Template",
+          extensions: ["cttpl"],
+        },
+      ],
+      properties: [],
+    });
+    if (!canceled) {
+      return filePath.toString();
+    }
+  },
+
   saveProject: async () => {
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
       title: "Save the Project Path to save",

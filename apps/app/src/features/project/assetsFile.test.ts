@@ -596,3 +596,146 @@ describe("relinkAssets — counting and probing", () => {
     expect(result.elements.outside.localpath).toBe("file:///elsewhere/b.mp4");
   });
 });
+
+/**
+ * A template's slot fills.
+ *
+ * The template's own media travels inside its installed archive and is not this
+ * project's to relocate — the element carries the `"TEMPLATE"` sentinel and
+ * nothing else. What the *user* dropped into a slot is a different thing: it is
+ * their own footage, sitting wherever their footage sits, and it has to
+ * relativise and relink exactly like an ordinary clip's source or a project
+ * folder handed to someone else would open with empty slots.
+ */
+describe("template slot fills", () => {
+  const template = (fills: Record<string, any>) => ({
+    filetype: "template",
+    key: "tpl",
+    templateId: "neon",
+    name: "Neon",
+    fills,
+    localpath: "TEMPLATE",
+    trackId: "v1",
+    priority: 1,
+    blob: "",
+    startTime: 0,
+    duration: 6000,
+    location: { x: 0, y: 0 },
+    width: 100,
+    height: 100,
+    ratio: 1,
+    opacity: 100,
+    rotation: 0,
+    animation: {},
+    timelineOptions: { color: "#fff" },
+  });
+
+  const mediaFill = (localpath: string) => ({
+    kind: "media",
+    localpath,
+    offsetMs: 0,
+    sourceDurationMs: 9000,
+  });
+
+  it("records a fill sitting inside the project folder", () => {
+    const file = serializeAssetPaths(
+      { tpl: template({ hero: mediaFill("file:///p/proj/mine.mp4") }) } as any,
+      PROJECT,
+    );
+    expect(file.entries["tpl#fill:hero"]).toEqual({
+      localpath: { rel: "mine.mp4", abs: "file:///p/proj/mine.mp4" },
+    });
+  });
+
+  it("does not record the template's own sentinel", () => {
+    const file = serializeAssetPaths(
+      { tpl: template({}) } as any,
+      PROJECT,
+    );
+    expect(file.entries.tpl).toBeUndefined();
+  });
+
+  it("relinks a fill when the folder has moved", async () => {
+    const result = await roundTrip(
+      { tpl: template({ hero: mediaFill("file:///p/proj/mine.mp4") }) },
+      PROJECT,
+      "/q/moved/promo.ngt",
+      existsOnly("/q/moved/mine.mp4"),
+    );
+    expect(result.elements.tpl.fills.hero.localpath).toBe(
+      "file:///q/moved/mine.mp4",
+    );
+  });
+
+  it("keeps everything else about the fill", async () => {
+    const result = await roundTrip(
+      {
+        tpl: template({
+          hero: { ...mediaFill("file:///p/proj/mine.mp4"), offsetMs: 4000 },
+        }),
+      },
+      PROJECT,
+      "/q/moved/promo.ngt",
+      existsOnly("/q/moved/mine.mp4"),
+    );
+    expect(result.elements.tpl.fills.hero).toEqual({
+      kind: "media",
+      localpath: "file:///q/moved/mine.mp4",
+      offsetMs: 4000,
+      sourceDurationMs: 9000,
+    });
+  });
+
+  it("handles two slots on one template", async () => {
+    const result = await roundTrip(
+      {
+        tpl: template({
+          a: mediaFill("file:///p/proj/one.mp4"),
+          b: mediaFill("file:///p/proj/two.mp4"),
+        }),
+      },
+      PROJECT,
+      "/q/moved/promo.ngt",
+      existsOnly("/q/moved/one.mp4", "/q/moved/two.mp4"),
+    );
+    expect(result.elements.tpl.fills.a.localpath).toBe(
+      "file:///q/moved/one.mp4",
+    );
+    expect(result.elements.tpl.fills.b.localpath).toBe(
+      "file:///q/moved/two.mp4",
+    );
+  });
+
+  it("ignores a text fill, which names no file", () => {
+    const file = serializeAssetPaths(
+      { tpl: template({ name: { kind: "text", text: "JUN" } }) } as any,
+      PROJECT,
+    );
+    expect(Object.keys(file.entries)).toEqual([]);
+  });
+
+  it("leaves a fill alone when neither candidate is on disk", async () => {
+    const result = await roundTrip(
+      { tpl: template({ hero: mediaFill("file:///p/proj/gone.mp4") }) },
+      PROJECT,
+      "/q/moved/promo.ngt",
+      existsOnly(),
+    );
+    expect(result.elements.tpl.fills.hero.localpath).toBe(
+      "file:///p/proj/gone.mp4",
+    );
+    expect(result.missing).toBe(1);
+  });
+
+  it("survives a malformed fills record without throwing", () => {
+    for (const fills of [null, "x", 7, { a: null }, { a: "x" }]) {
+      expect(() =>
+        serializeAssetPaths({ tpl: template(fills as any) } as any, PROJECT),
+      ).not.toThrow();
+    }
+  });
+
+  it("reports no asset fields on the template element itself", () => {
+    expect(assetFieldsOf(template({}) as any)).toEqual([]);
+  });
+});

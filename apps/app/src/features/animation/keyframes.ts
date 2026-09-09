@@ -1006,7 +1006,11 @@ export function emptyAnimation(filetype: string): any {
     filetype === "video" ||
     filetype === "text" ||
     filetype === "shape" ||
-    filetype === "group"
+    filetype === "group" ||
+    // A template animates the five like any other box. Its contents are the
+    // author's and its length is fixed, so these are the whole of what a user
+    // may move on it — which is exactly the set every visual element has.
+    filetype === "template"
   ) {
     return {
       position: vector(),

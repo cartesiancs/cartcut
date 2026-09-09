@@ -224,16 +224,60 @@ type Maskable = {
   mask?: MaskType;
 };
 
-type TimelineElementType =
-  | "video"
-  | "image"
-  | "gif"
-  | "shape"
-  | "text"
-  | "audio"
-  | "group"
-  | "effect"
-  | "transition";
+/**
+ * A clip the author has offered as a slot in an exported template.
+ *
+ * Authoring metadata and nothing else: it changes no pixel and no timing in the
+ * project it is written in. It matters only inside a `.cttpl`, where
+ * `features/template/slots.ts#slotsOf` walks the archive's document and turns
+ * every marked clip into a slot the template's user can fill.
+ *
+ * Absent means "not a slot" and clearing **deletes the key**, so a project
+ * nobody has marked up saves byte-identically to one written before the
+ * feature and `SCHEMA_VERSION` did not move — the rule `blend`, `lut` and
+ * `mask` all follow.
+ *
+ * Mixed into video, image, gif and text alone: those are the four things a
+ * person can hand a replacement for. A shape's fill, an effect's parameters and
+ * a transition's preset are all settings rather than sources, and a group holds
+ * a transform rather than content.
+ *
+ * `slotId` is deliberately not the element's key. Two clips may share one id —
+ * the same shot cut in twice, a title repeated in the outro — and then one
+ * replacement fills both, which is what `slotsOf` grouping on this field buys.
+ */
+type Replaceable = {
+  replaceable?: {
+    slotId: string;
+    /** Shown in `<option-template>`; the source's filename when absent. */
+    label?: string;
+  };
+};
+
+/**
+ * Every filetype, as a value rather than only a type.
+ *
+ * A runtime list for the reason `OWN_ANIMATABLE_PROPERTIES` is one: `electron/`
+ * cannot import this module — `rootDir` is pinned to `electron/` — so
+ * `mcp/tools/define.ts` keeps a hand-copied `FILETYPES`, and a test can only
+ * pin that copy against something it can actually import. Until this existed
+ * the copy was checked by eye, and the note in `CLAUDE.md` records it having
+ * been wrong twice in opposite directions.
+ */
+export const FILETYPES = [
+  "video",
+  "image",
+  "gif",
+  "shape",
+  "text",
+  "audio",
+  "group",
+  "effect",
+  "transition",
+  "template",
+] as const;
+
+type TimelineElementType = (typeof FILETYPES)[number];
 
 type TimelinePlaced = {
   filetype: TimelineElementType;
@@ -403,7 +447,8 @@ export type ImageElementType = TimelinePlaced &
   Animatable &
   Blendable &
   Gradable &
-  Maskable & {
+  Maskable &
+  Replaceable & {
     filetype: "image";
   };
 
@@ -411,7 +456,8 @@ export type GifElementType = TimelinePlaced &
   Visual &
   Blendable &
   Gradable &
-  Maskable & {
+  Maskable &
+  Replaceable & {
     filetype: "gif";
   };
 
@@ -436,7 +482,8 @@ export type VideoElementType = TimelinePlaced &
   Leveled &
   Blendable &
   Gradable &
-  Maskable & {
+  Maskable &
+  Replaceable & {
     filetype: "video";
     /**
      * Window into the *source file*, in source milliseconds — never a timeline
@@ -535,7 +582,8 @@ export type TextElementType = TimelinePlaced &
   Animatable &
   Blendable &
   Gradable &
-  Maskable & {
+  Maskable &
+  Replaceable & {
     filetype: "text";
     text: string;
     textcolor: string;
@@ -613,6 +661,68 @@ export type GroupElementType = TimelinePlaced &
     filetype: "group";
     /** Shown on the group's bar. Every other clip is named by its source file. */
     name: string;
+  };
+
+/**
+ * What the user has dropped into one of a template's slots.
+ *
+ * `offsetMs` is an in-point in the **source file**, not a timeline offset: a
+ * slot's span is fixed by the template, so a longer source is used head-first
+ * and this is which head. `features/template/compose.ts` turns it into the
+ * placeholder's `trim` window, clamped so a short source cannot be scrolled off
+ * its own end.
+ */
+export type TemplateFill =
+  | {
+      kind: "media";
+      localpath: string;
+      offsetMs: number;
+      /** The replacement's full length, probed once when it was chosen. */
+      sourceDurationMs: number;
+    }
+  | { kind: "text"; text: string };
+
+/**
+ * An installed template, placed once: a whole edit standing in for one clip.
+ *
+ * The nested-composition element, and the only one whose picture is not drawn
+ * by a renderer reading this element's own fields. `renderer/template.ts`
+ * resolves `templateId` through `features/template/templateRegistry.ts`,
+ * composites that document into a layer of the template's native size, and
+ * blits the layer through this element's transform — so the template scales,
+ * rotates, fades and keyframes exactly like an image, with no special case in
+ * `drawDirect`, `sampledBoxOf`, the hit test or the preview's grips.
+ *
+ * **It stores a reference, not a copy**, which is the decision the whole
+ * feature turns on. `HistoryEntry` keeps fifty snapshots of the element map and
+ * a baked animation lane runs to 36,000 samples; an inner document inlined here
+ * would ride in every one of them, would force `normalizeDocument` to recurse,
+ * and would have to be whitelisted past `agent/serialize.ts`'s output cap. The
+ * cost is the contract a LUT already has and is stated the same way: a template
+ * that is not installed **draws nothing and reports nothing**. `name` is on the
+ * element rather than looked up, so the bar still says what is missing.
+ *
+ * Deliberately not `Blendable`, `Gradable` or `Maskable`. A template's contents
+ * are the author's; what the user may control is where it sits and how solid it
+ * is, and nothing else. Leaving the three off also keeps `BLENDABLE_FILETYPES`,
+ * `GRADABLE_FILETYPES` and `MASKABLE_FILETYPES` the same five they have always
+ * been.
+ *
+ * `duration` is fixed at the template's own length —
+ * `features/timeline/templateOps.ts#isDurationLocked` is the single predicate
+ * every trim, split and speed op declines on, and `layout.ts#hitTest` reads it
+ * so the trim handles are never offered in the first place.
+ */
+export type TemplateElementType = TimelinePlaced &
+  Visual &
+  Animatable & {
+    filetype: "template";
+    /** Which installed template this is. Resolved through the registry. */
+    templateId: string;
+    /** Shown on the bar, as a group's is. Survives the template going missing. */
+    name: string;
+    /** slotId -> the user's replacement. A slot with no entry keeps its placeholder. */
+    fills: Record<string, TemplateFill>;
   };
 
 /**
@@ -739,7 +849,8 @@ export type TimelineElement =
   | AudioElementType
   | GroupElementType
   | EffectElementType
-  | TransitionElementType;
+  | TransitionElementType
+  | TemplateElementType;
 
 /** Elements the compositor draws. Audio has no picture; a group draws nothing. */
 export type VisualTimelineElement = Exclude<
@@ -776,6 +887,13 @@ export function isVisualTimelineElement(
   // This list is negative, so a filetype added later is visual by default and
   // will fail at `renderers[element.filetype]` with an undefined call. Add the
   // exclusion here at the same time as the type.
+  //
+  // `template` is the one filetype that has taken that default on purpose. It
+  // does paint itself onto whatever is there — `renderer/template.ts` composites
+  // the referenced document into a layer of its own and blits it once — so it
+  // fits `ElementRenderFunction` exactly, and being visual is what gives it the
+  // transform, opacity, mask-free blit and control outline every other element
+  // gets from `renderElement` without asking.
   return (
     element.filetype !== "audio" &&
     element.filetype !== "group" &&
@@ -800,6 +918,12 @@ export function isTransitionElement(
   element: TimelineElement,
 ): element is TransitionElementType {
   return element.filetype === "transition";
+}
+
+export function isTemplateElement(
+  element: TimelineElement | undefined | null,
+): element is TemplateElementType {
+  return element?.filetype === "template";
 }
 
 /**
@@ -835,7 +959,8 @@ export type AnimatableTimelineElement =
   | TextElementType
   | ShapeElementType
   | GroupElementType
-  | EffectElementType;
+  | EffectElementType
+  | TemplateElementType;
 
 export function canAnimate(
   element: TimelineElement,
@@ -857,7 +982,11 @@ export function canAnimate(
     // the context menu, with no group-specific code in any of them.
     element.filetype === "group" ||
     // Opacity only — see `animatableProperties`.
-    element.filetype === "effect"
+    element.filetype === "effect" ||
+    // A template's five tracks are the whole of what a user may control on it:
+    // its length, its contents and its timing all belong to the author, so
+    // where it sits and how solid it is are what is left.
+    element.filetype === "template"
   );
 }
 

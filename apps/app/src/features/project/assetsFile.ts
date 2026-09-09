@@ -88,6 +88,7 @@ const SENTINELS = new Set([
   "EFFECT",
   "TRANSITION",
   "GROUP",
+  "TEMPLATE",
   "/TEXTELEMENT",
   "default",
 ]);
@@ -113,10 +114,38 @@ export function assetFieldsOf(element: TimelineElement): AssetField[] {
       return ["localpath"];
     case "text":
       return ["fontpath"];
-    // group, shape, effect, transition carry a sentinel and nothing else.
+    // group, shape, effect, transition and template carry a sentinel and
+    // nothing else. A template's own media lives one level down, inside its
+    // installed `template.ngt` — but the *fills* a user has put into its slots
+    // are their own files and do need recording. Those are not a field on the
+    // element, so they are enumerated separately below.
     default:
       return [];
   }
+}
+
+/**
+ * The entry key for one of a template's slot fills.
+ *
+ * A composite rather than a new shape for `AssetPathsFile`: the entries map is
+ * keyed by element id, a fill is one level below that, and threading a second
+ * dimension through the type would mean a `version: 2` on a file whose only
+ * change is that some keys now have a suffix. An element id is a uuid, so `#`
+ * cannot occur in one and the split is unambiguous.
+ */
+export function fillEntryKey(elementId: string, slotId: string): string {
+  return `${elementId}#fill:${slotId}`;
+}
+
+const FILL_KEY = /^([^#]+)#fill:([\s\S]+)$/;
+
+function parseFillKey(
+  key: string,
+): { elementId: string; slotId: string } | null {
+  const match = FILL_KEY.exec(key);
+  return match == null
+    ? null
+    : { elementId: match[1], slotId: match[2] };
 }
 
 /** Whether a field's value is something worth trying to locate on disk. */
@@ -146,9 +175,62 @@ function assetPathsOf(
         found.push({ id, field, value });
       }
     }
+
+    // A template's slot fills. The template's own media travels inside the
+    // installed archive and is not this project's to relocate, but what the
+    // user dropped into a slot is theirs and sits wherever their footage does —
+    // so it relativises and relinks exactly like an ordinary clip's source.
+    if (element.filetype === "template") {
+      const fills = (element as { fills?: unknown }).fills;
+      if (fills != null && typeof fills === "object") {
+        for (const slotId of Object.keys(fills).sort()) {
+          const fill = (fills as Record<string, unknown>)[slotId];
+          const value = (fill as { localpath?: unknown })?.localpath;
+          if (isRealAssetPath(value)) {
+            found.push({ id: fillEntryKey(id, slotId), field: "localpath", value });
+          }
+        }
+      }
+    }
   }
 
   return found;
+}
+
+/**
+ * Write one resolved path back, whether it is a field or a slot fill.
+ *
+ * The one place the composite key is unpacked. Everything upstream of this
+ * treats a fill as just another `(id, field, value)`, which is what kept
+ * `relinkAssets`'s probe batching and decline-by-identity working unchanged.
+ */
+function writeAssetPath(
+  elements: Record<string, TimelineElement>,
+  id: string,
+  field: AssetField,
+  value: string,
+): void {
+  const fill = parseFillKey(id);
+  if (fill == null) {
+    elements[id] = { ...elements[id], [field]: value } as TimelineElement;
+    return;
+  }
+
+  const element = elements[fill.elementId] as
+    | (TimelineElement & { fills?: Record<string, unknown> })
+    | undefined;
+  const existing = element?.fills?.[fill.slotId];
+  if (element == null || existing == null || typeof existing !== "object") {
+    return;
+  }
+
+  elements[fill.elementId] = {
+    ...element,
+    fills: {
+      ...element.fills,
+      [fill.slotId]: { ...existing, localpath: value },
+    },
+  } as TimelineElement;
 }
 
 /**
@@ -338,7 +420,7 @@ export async function relinkAssets(
 
   const next: Record<string, TimelineElement> = { ...elements };
   for (const { id, field, value } of updates) {
-    next[id] = { ...next[id], [field]: value } as TimelineElement;
+    writeAssetPath(next, id, field, value);
   }
 
   return { elements: next, relinked: updates.length, missing: missing.size };

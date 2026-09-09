@@ -78,6 +78,35 @@ export const ipcFilesystem = {
     });
   },
 
+  /**
+   * Write a file the caller named, creating its parent directories, and say
+   * whether it worked.
+   *
+   * `writeFile` above cannot serve a template. It calls the **callback** form
+   * of `fs.writeFile` and returns before the callback runs, so `await` resolves
+   * ahead of the bytes and a failure comes back indistinguishable from success
+   * — the defect `saveGeneratedAsset` below already documents. That is survivable
+   * for a `.ngt` the user watched save; it is not survivable for an install,
+   * which writes a dozen files and must know whether the folder it just made is
+   * a template or a half of one.
+   *
+   * The `mkdir` matters just as much: a `.cttpl` carries `assets/clip.mp4`, and
+   * `fs.writeFile` does not create `assets/`. Every asset in every imported
+   * template would fail, one silent ENOENT at a time.
+   *
+   * Data arrives base64-encoded, which is what the renderer can hand across IPC
+   * without a Buffer.
+   */
+  writeFileEnsured: async (event, filename: string, base64: string) => {
+    try {
+      await fsp.mkdir(path.dirname(filename), { recursive: true });
+      await fsp.writeFile(filename, Buffer.from(base64, "base64"));
+      return { status: true };
+    } catch (error) {
+      return { status: false, error: String(error) };
+    }
+  },
+
   readFile: async (event, filename) => {
     let data = await fsp.readFile(filename);
     return data;

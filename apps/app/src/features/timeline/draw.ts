@@ -227,6 +227,14 @@ export function clipLabel(element: TimelineElement): string {
   if (element.filetype === "group") {
     return (element as any).name || "Group";
   }
+  // A template names itself for the same reason, and for one more: the name is
+  // on the element rather than looked up in the registry, so a project opened
+  // without its templates installed still says on the bar what is missing.
+  // This module could not look it up in any case — it is DOM-free and reads no
+  // disk.
+  if (element.filetype === "template") {
+    return (element as any).name || "Template";
+  }
   // An effect's `localpath` is the placeholder "EFFECT" — its real name lives
   // in a preset manifest on disk, which this module must not read: `draw.ts` is
   // DOM-free and tested against a Skia canvas under `environment: "node"`.

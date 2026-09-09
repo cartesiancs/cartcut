@@ -18,6 +18,8 @@ import { v4 as uuidv4 } from "uuid";
 import { renderText } from "../renderer/text";
 import { renderImage } from "../renderer/image";
 import { renderShape, shapeDrawScale } from "../renderer/shape";
+import { renderTemplate } from "../renderer/template";
+import { assetTimeline } from "../template/assetTimeline";
 import { renderGif } from "../renderer/gif";
 import { renderVideoWithoutWait } from "../renderer/video";
 import { loadedAssetStore } from "../asset/loadedAssetStore";
@@ -319,6 +321,7 @@ export class PreviewCanvas extends LitElement {
     gif: renderGif,
     text: renderText,
     shape: renderShape,
+    template: renderTemplate,
   };
 
   constructor() {
@@ -681,7 +684,7 @@ export class PreviewCanvas extends LitElement {
     // something unrelated triggers a repaint.
     void loadedAssetStore
       .getState()
-      .loadAssetsNeededAtTime(this.timelineCursor, this.timeline)
+      .loadAssetsNeededAtTime(this.timelineCursor, assetTimeline(this.timeline))
       .then((loadedSomething) => {
         if (loadedSomething) {
           this.scheduleDraw();
@@ -702,7 +705,10 @@ export class PreviewCanvas extends LitElement {
     loadedAssetStore
       .getState()
       .syncPlayback(
-        this.timeline,
+        // Expanded, so a template's own clips and its music start and stop with
+        // the playhead like anything else. The compositor above is deliberately
+        // handed the unexpanded map — see `template/assetTimeline.ts`.
+        assetTimeline(this.timeline),
         this.timelineCursor,
         this.timelineControl.isPlay,
         () => this.scheduleDraw(),
@@ -1534,7 +1540,7 @@ export class PreviewCanvas extends LitElement {
   public stopPlay() {
     loadedAssetStore
       .getState()
-      .syncPlayback(this.timeline, this.timelineCursor, false, () =>
+      .syncPlayback(assetTimeline(this.timeline), this.timelineCursor, false, () =>
         this.scheduleDraw(),
       );
     this.drawCanvas(this.canvas);
@@ -1543,7 +1549,7 @@ export class PreviewCanvas extends LitElement {
   public startPlay() {
     loadedAssetStore
       .getState()
-      .syncPlayback(this.timeline, this.timelineCursor, true);
+      .syncPlayback(assetTimeline(this.timeline), this.timelineCursor, true);
   }
 
   createShape(x: number, y: number) {

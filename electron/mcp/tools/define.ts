@@ -151,6 +151,7 @@ export const FILETYPES = [
   "group",
   "transition",
   "effect",
+  "template",
 ] as const;
 
 /**

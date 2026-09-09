@@ -24,6 +24,12 @@ const elementUtils = {
         "group",
         "effect",
         "transition",
+        // A template addresses no source window and has no `speed` — its own
+        // document holds both, one level down. Listing it matters for the
+        // reason above: unlisted answers "undefined", which is not "dynamic"
+        // (so `isDynamicElement` is right by accident) but is also not
+        // "static", and a call site testing for that explicitly drops it.
+        "template",
       ],
       dynamic: ["video", "audio", "mp4", "mp3", "mov"],
     };

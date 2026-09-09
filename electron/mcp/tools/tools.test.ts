@@ -16,6 +16,7 @@ import {
   ANIMATABLE,
   BLEND_MODES,
   EASINGS,
+  FILETYPES,
   MASK_SHAPES,
   PRESETS,
   type Registrar,
@@ -200,6 +201,18 @@ describe("every tool is usable as declared", () => {
       ...MASK_ANIMATABLE_PROPERTIES,
     ];
     expect([...ANIMATABLE].sort()).toEqual([...union].sort());
+  });
+
+  it("advertises exactly the filetypes the renderer defines", async () => {
+    // The gap this closes was checked by eye until now, and `CLAUDE.md` records
+    // the note about it having been wrong twice in opposite directions — once
+    // claiming transitions did not exist, once claiming this array omitted them.
+    // A tool that filters by filetype can only offer what is named here, so a
+    // missing entry is a whole element type an agent cannot see or ask about.
+    const { FILETYPES: renderer } = await import(
+      "../../../apps/app/src/@types/timeline"
+    );
+    expect([...FILETYPES].sort()).toEqual([...renderer].sort());
   });
 
   it("advertises exactly the mask shapes the renderer can draw", async () => {

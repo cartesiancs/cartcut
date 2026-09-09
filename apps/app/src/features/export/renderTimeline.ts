@@ -6,6 +6,8 @@ import {
   type TimelineRenderers,
 } from "../renderer/timeline";
 import { preloadLutsForDocument } from "../lut/lutRegistry";
+import { assetTimeline } from "../template/assetTimeline";
+import { preloadTemplatesForDocument } from "../template/templateRegistry";
 import { createExportFxRuntime } from "../renderer/fx/createRuntime";
 import { hasFxElements } from "../renderer/fx/planFrame";
 import { setLutBlocking } from "../renderer/lut/apply";
@@ -105,6 +107,25 @@ export async function renderTimeline(
    */
   await preloadLutsForDocument(timeline);
 
+  /**
+   * And every template, for exactly the same reason.
+   *
+   * `templateFor` answers `null` until a document has been read, which the
+   * preview recovers from on its next repaint and an export cannot: a template
+   * that arrived on frame three would leave frames one and two showing nothing
+   * where it sits, and nothing downstream would ever say so.
+   */
+  await preloadTemplatesForDocument(timeline);
+
+  /**
+   * The map the decoders work from, with every template's contents flattened in.
+   *
+   * Only the asset half takes this. The picture is still drawn from `timeline`,
+   * where a template is one element that composites its own document — handing
+   * the expansion to `renderTimelineAtTime` would draw every inner clip twice.
+   */
+  const assets = assetTimeline(timeline);
+
   // The per-clip grade runs on the GPU and `captureFrame` reads the canvas
   // back with `getImageData` on the next line, so that read has to see the
   // result. Same split the compositor's `blocking` makes, and the same one
@@ -114,7 +135,7 @@ export async function renderTimeline(
   // Export never plays the `<audio>` handles — FFmpeg rebuilds the whole audio
   // graph from the timeline itself — so decoding them here buys nothing but
   // latency, memory, and a set of media elements nobody owns the state of.
-  await assetStore.loadEntireTimeline(timeline, { audio: false });
+  await assetStore.loadEntireTimeline(assets, { audio: false });
 
   const totalFrames = frameCount(options);
 
@@ -153,7 +174,7 @@ export async function renderTimeline(
       const timeInMs = frameTimeMs(currentFrame, fps);
 
       await profiler.measureAsync("seek", () =>
-        assetStore.seek(timeline, timeInMs, fps),
+        assetStore.seek(assets, timeInMs, fps),
       );
 
       // A seek that lands after the abort would otherwise composite and ship a

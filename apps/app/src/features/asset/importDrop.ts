@@ -16,6 +16,9 @@ import { collectDroppedPaths } from "./droppedFiles";
 import { planImport, placeImported, type ImportItem } from "./importMedia";
 import type { DropTarget } from "./dropTarget";
 import { v4 as uuidv4 } from "uuid";
+import { addTemplateToTimeline } from "../template/addTemplate";
+import { installTemplateFromPath } from "../template/templateInstall";
+import { templateFor } from "../template/templateRegistry";
 
 /** Where a drop lands when it did not land on the timeline itself. */
 export function atPlayhead(): DropTarget {
@@ -65,6 +68,42 @@ export function pathsFromDataTransfer(dataTransfer: DataTransfer | null): string
 }
 
 /**
+ * Install dropped `.cttpl` files, then place each on the timeline.
+ *
+ * Installing is the whole reason a template drop is not an import: the archive
+ * has to be unpacked into the library before anything can reference it, and
+ * from then on it is available to every project rather than to this one.
+ *
+ * Each lands after the last, so dropping three templates gives three bars in a
+ * row rather than three stacked on one instant.
+ */
+async function importTemplatesAt(
+  paths: readonly string[],
+  target: DropTarget,
+): Promise<void> {
+  let startMs = target.startMs;
+
+  for (const path of paths) {
+    const installed = await installTemplateFromPath(path);
+    if (!installed.ok) {
+      toast(installed.message);
+      continue;
+    }
+
+    const added = await addTemplateToTimeline(installed.id, {
+      startMs,
+      trackId: target.trackId,
+    });
+    if (!added.ok) {
+      toast(added.message);
+      continue;
+    }
+
+    startMs += templateFor(installed.id)?.durationMs ?? 0;
+  }
+}
+
+/**
  * Probe every path and place the readable ones as one undo step.
  *
  * Awaits the probes before touching the store, so the transform stays pure and
@@ -83,7 +122,30 @@ export async function importPathsAt(
     return [];
   }
 
-  const plan = await planImport(paths);
+  // Templates are partitioned out **above** `planImport`, deliberately. A
+  // `.cttpl` is not media, and `probeMedia` is this app's single gate on what
+  // counts as media — letting one reach it would mean teaching that gate about
+  // a format it has no business knowing, and the reward would be a toast
+  // saying Cartcut has no renderer for a file it can in fact open.
+  const templates: string[] = [];
+  const media: (string | ImportItem)[] = [];
+  for (const entry of paths) {
+    const path = typeof entry === "string" ? entry : entry.path;
+    if (/\.cttpl$/i.test(path)) {
+      templates.push(path);
+    } else {
+      media.push(entry);
+    }
+  }
+
+  if (templates.length > 0) {
+    await importTemplatesAt(templates, target);
+  }
+  if (media.length === 0) {
+    return [];
+  }
+
+  const plan = await planImport(media);
 
   if (plan.skipped.length > 0) {
     const first = plan.skipped[0];

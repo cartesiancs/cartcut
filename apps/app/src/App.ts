@@ -6,6 +6,9 @@ import { loadPresets } from "./features/fx/presetRegistry";
 import "./features/demo/warningDemoEnv";
 import "./features/gpt/chatSidebar";
 import { installLutResolver } from "./features/lut/lutRegistry";
+import { installTemplateResolver } from "./features/renderer/template";
+import { exportElementRenderers } from "./features/export/renderers";
+import { templateFor, refreshTemplateLibrary } from "./features/template/templateRegistry";
 
 @customElement("app-root")
 export class App extends LitElement {
@@ -49,6 +52,23 @@ export class App extends LitElement {
     // it arrives, and the first repaint after it lands picks it up.
     // `loadPresets` never throws, so there is nothing here to catch.
     void loadPresets();
+
+    // The same pair for templates, and in the same order and for the same
+    // reason: install the resolver first so no repaint can ask for a template
+    // before there is anything to ask.
+    //
+    // The table it composites a template's document with is the *export*
+    // table, whose only difference from the preview's is that its video
+    // renderer awaits `seeked` before drawing. Awaiting is the safe half of
+    // that choice — the preview repaints continuously, so a frame drawn a
+    // moment late is a frame nobody saw — and it is what stops a template's
+    // clips showing whatever their decoders happened to be holding.
+    installTemplateResolver(templateFor, exportElementRenderers);
+
+    // Un-awaited, exactly as `loadPresets` is: a template that has not been
+    // enumerated yet draws nothing, which is the contract, and the first
+    // repaint after the list lands picks it up.
+    void refreshTemplateLibrary();
 
     return this;
   }

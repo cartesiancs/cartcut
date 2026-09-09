@@ -65,6 +65,31 @@ export function isDynamicElement(
 }
 
 /**
+ * Whether this element's length belongs to its author rather than to the user.
+ *
+ * True for a `template` and nothing else. A template is a whole edit standing
+ * in for one clip: its timing is what was authored, and a user who could trim
+ * or split it would be cutting the author's work apart while the composition
+ * inside went on running to its own clock.
+ *
+ * It lives here, in the module that owns the trim/duration/speed invariants,
+ * because that is what it is a statement about — and because putting it here
+ * means `clipEdit.ts` can read it without importing anything from the template
+ * feature, which would close a cycle through `placement.ts`.
+ *
+ * **Every operation that would change a length declines on this**, and
+ * `layout.ts#hitTest` reads it too, so the trim handles are never drawn on a
+ * template in the first place. Written once so `splitAt`, `trimStart`,
+ * `trimEnd`, `setClipSpeed` and `canJoin` cannot drift apart, and so a second
+ * fixed-length element type would not mean finding all of them again.
+ */
+export function isDurationLocked(
+  element: TimelineElement | undefined | null,
+): boolean {
+  return element?.filetype === "template";
+}
+
+/**
  * Playback rate, guarded.
  *
  * `speed` is absent on hand-authored fixtures and a zero would turn every span

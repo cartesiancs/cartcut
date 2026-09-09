@@ -18,6 +18,7 @@
 import type { TimelineElement } from "../../@types/timeline";
 import {
   ADJACENCY_EPSILON_MS,
+  isDurationLocked,
   isDynamicElement,
   spanEnd,
   spanStart,
@@ -77,6 +78,18 @@ function canJoin(left: TimelineElement, right: TimelineElement): boolean {
   if (left.filetype !== right.filetype) {
     return false;
   }
+
+  // A template is never half of a cut. The `localpath` test below is what
+  // decides two clips share a source, and every template carries the same
+  // `"TEMPLATE"` sentinel — so two *different* templates sitting edge to edge
+  // passed every test here, and merging them dropped one while the survivor
+  // claimed its span and went on rendering only its own six seconds. The
+  // length guard is the honest statement of why: merging changes a duration,
+  // and a template's belongs to its author.
+  if (isDurationLocked(left) || isDurationLocked(right)) {
+    return false;
+  }
+
   if (left.localpath !== right.localpath) {
     return false;
   }

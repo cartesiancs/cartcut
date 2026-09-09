@@ -93,6 +93,13 @@ import {
   removeFromParent,
   ungroup,
 } from "../timeline/groupOps";
+import { addTemplateToTimeline } from "../template/addTemplate";
+import {
+  clearReplaceable,
+  isReplaceable,
+  replaceableOf,
+  setReplaceable,
+} from "../timeline/templateOps";
 import { parentOf, withDescendants } from "../timeline/hierarchy";
 import { canDetachAudio } from "../timeline/audio";
 import { detachAudioFrom } from "../timeline/audioOps";
@@ -101,6 +108,7 @@ import {
   ASSET_MIME,
   FX_PRESET_MIME,
   LUT_PRESET_MIME,
+  TEMPLATE_MIME,
   dropIntent,
 } from "../asset/dropIntent";
 import { dropTargetAt } from "../asset/dropTarget";
@@ -749,6 +757,60 @@ export class elementTimelineCanvas extends LitElement {
     return rows.join("\n          ");
   }
 
+  // ----------------------------------------------------------- template slots
+
+  /** Mark the right-clicked clips as slots in an exported template. */
+  public markSelectedReplaceable() {
+    const ids = [...this.targetIdDuringRightClick];
+    this.commit((doc) => setReplaceable(doc, ids, uuidv4));
+    this.drawCanvas();
+  }
+
+  /** Unmark them. */
+  public unmarkSelectedReplaceable() {
+    const ids = [...this.targetIdDuringRightClick];
+    this.commit((doc) => clearReplaceable(doc, ids));
+    this.drawCanvas();
+  }
+
+  /**
+   * The replaceable entries, chosen from what is selected.
+   *
+   * Offered only when the op would do something — the rule this menu already
+   * keeps for grouping and for detaching audio, and the reason is unchanged:
+   * `menu-dropdown-item` has no disabled state, so an entry that could only
+   * decline is worse than no entry.
+   */
+  private replaceableMenuTemplate(): string {
+    const ids = this.targetIdDuringRightClick;
+    if (ids.length === 0) {
+      return "";
+    }
+
+    const doc = this.currentDoc();
+    const call = (method: string, label: string, icon: string) =>
+      `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').${method}()" item-name="${label}" item-icon="${icon}"> </menu-dropdown-item>`;
+
+    const rows: string[] = [];
+    if (
+      ids.some(
+        (id) =>
+          isReplaceable(doc.elements[id]) && replaceableOf(doc, id) == null,
+      )
+    ) {
+      rows.push(
+        call("markSelectedReplaceable", "Mark replaceable", "swap_horiz"),
+      );
+    }
+    if (ids.some((id) => replaceableOf(doc, id) != null)) {
+      rows.push(
+        call("unmarkSelectedReplaceable", "Unmark replaceable", "block"),
+      );
+    }
+
+    return rows.join("\n          ");
+  }
+
   // ----------------------------------------------------------------- audio
 
   /**
@@ -1322,6 +1384,27 @@ export class elementTimelineCanvas extends LitElement {
       this.projectFps(),
     );
 
+    if (intent === "template") {
+      const templateId = e.dataTransfer?.getData(TEMPLATE_MIME);
+      if (!templateId) {
+        return;
+      }
+      e.preventDefault();
+      void addTemplateToTimeline(templateId, {
+        startMs: target.startMs,
+        trackId: target.trackId,
+      }).then((result) => {
+        if (!result.ok) {
+          (document.querySelector("toast-box") as any)?.showToast({
+            message: result.message,
+            delay: "3000",
+          });
+        }
+        this.drawCanvas();
+      });
+      return;
+    }
+
     if (intent === "lut-preset") {
       const presetId = e.dataTransfer?.getData(LUT_PRESET_MIME);
       if (!presetId) {
@@ -1729,6 +1812,7 @@ export class elementTimelineCanvas extends LitElement {
           ${this.audioMenuTemplate()}
           ${this.rasterizeMenuTemplate()}
           ${this.groupMenuTemplate()}
+          ${this.replaceableMenuTemplate()}
           <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').removeSeletedElements()" item-name="Remove" item-icon="delete"> </menu-dropdown-item>
           <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').rippleDeleteSelected()" item-name="Remove and close gap" item-icon="delete_sweep"> </menu-dropdown-item>
         </menu-dropdown-body>`;

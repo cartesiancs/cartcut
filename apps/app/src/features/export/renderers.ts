@@ -21,6 +21,7 @@ import { renderVideoWithWait } from "../renderer/video";
 import { renderGif } from "../renderer/gif";
 import { renderText } from "../renderer/text";
 import { renderShape } from "../renderer/shape";
+import { renderTemplate } from "../renderer/template";
 import type { TimelineRenderers } from "../renderer/timeline";
 
 export const exportElementRenderers: TimelineRenderers = {
@@ -29,4 +30,10 @@ export const exportElementRenderers: TimelineRenderers = {
   gif: renderGif,
   text: renderText,
   shape: renderShape,
+  // A template composites its own document into a layer and blits it, and the
+  // table it renders that document with is whichever one was installed on the
+  // resolver — this one, during an export. So a template's contents are drawn
+  // by `renderVideoWithWait` here and by `renderVideoWithoutWait` in the
+  // preview, exactly as a top-level clip is.
+  template: renderTemplate,
 };

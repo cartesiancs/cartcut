@@ -22,6 +22,7 @@ import type { TimelineElement } from "../../@types/timeline";
 import {
   MIN_SOURCE_MS,
   MIN_TIMELINE_MS,
+  isDurationLocked,
   isDynamicElement,
   sourceDurationOf,
   spanLength,
@@ -64,6 +65,12 @@ export function trimStart(
   element: TimelineElement,
   deltaMs: number,
 ): TimelineElement {
+  // A template's length is the author's. Returning the element by identity is
+  // what `withCheckpoint` reads as "nothing happened", so a drag that lands on
+  // one costs no undo step.
+  if (isDurationLocked(element)) {
+    return element;
+  }
   if (!isDynamicElement(element)) {
     const room = element.duration - MIN_TIMELINE_MS;
     const applied = clamp(deltaMs, -element.startTime, room);
@@ -117,6 +124,9 @@ export function trimEnd(
   element: TimelineElement,
   deltaMs: number,
 ): TimelineElement {
+  if (isDurationLocked(element)) {
+    return element;
+  }
   if (!isDynamicElement(element)) {
     const applied = Math.max(deltaMs, MIN_TIMELINE_MS - element.duration);
     return { ...element, duration: element.duration + applied };
@@ -155,6 +165,13 @@ export function splitAt(
   element: TimelineElement,
   atMs: number,
 ): { left: TimelineElement; right: TimelineElement } | null {
+  // A template cannot be cut in two. Without this the branch below would take
+  // the non-dynamic path — a template has no `trim` — and produce two halves
+  // that each still render the whole composition, each to its own clock.
+  if (isDurationLocked(element)) {
+    return null;
+  }
+
   const offset = atMs - element.startTime;
   if (offset <= 0 || offset >= spanLength(element)) {
     return null;

@@ -450,6 +450,141 @@ Opacity is the one deliberate divergence from AE: parenting there does not pass
 opacity down, and `inheritedOpacityOf` does, so that fading a group fades what
 is in it. The reasoning is at the function.
 
+## Templates
+
+A **template** is a whole edit standing in for one clip: one bar on a video
+track, one name, its contents invisible to the timeline and its length fixed.
+Its author marks some clips **replaceable**, and whoever uses it swaps their own
+footage and words into those slots. CapCut's arrangement, and the vocabulary is
+deliberately theirs.
+
+```
+apps/app/src/features/template/archive.ts     what makes a .cttpl a template
+apps/app/src/features/template/slots.ts       slotsOf — the slot list, derived
+apps/app/src/features/template/compose.ts     composeTemplate / expandTemplates
+apps/app/src/features/template/templateDocument.ts  reading an installed .ngt
+apps/app/src/features/template/templateRegistry.ts  lazy load, the resolver
+apps/app/src/features/template/exportPlan.ts  staging, pure
+apps/app/src/features/template/templateExport.ts / templateInstall.ts  the IO
+apps/app/src/features/timeline/templateOps.ts fills, marks, and the factory
+apps/app/src/features/renderer/template.ts    the nested render
+electron/lib/templateScan.ts                  the folder walk, no Electron
+```
+
+### The decision the whole feature turns on
+
+**A template element stores a reference, not a copy.** It holds a `templateId`
+and the user's `fills`; the document behind it is resolved at draw time from
+`templateRegistry.ts`, exactly as `element.lut.presetId` resolves through
+`lutRegistry.ts`.
+
+Inlining the document was the alternative and is wrong three times over:
+`HistoryEntry` keeps fifty snapshots of the element map and a baked animation
+lane runs to 36,000 samples; `normalizeDocument` would have to recurse; and
+`agent/serialize.ts` would have to whitelist a nested tree past a 25k output
+cap.
+
+The registry brings its contract with it: **a template that is not installed
+draws nothing and reports nothing.** The consequence is stated rather than
+hidden — a project that uses a template needs that template installed, the same
+as a LUT preset. `name` lives on the element, not in the registry, so the bar
+still says what is missing.
+
+`template` is the one filetype that takes `isVisualTimelineElement`'s *negative*
+default on purpose: it paints itself onto whatever is there, so it fits
+`ElementRenderFunction` exactly and inherits transform, opacity, keyframes,
+group parenting and the control outline without any of them knowing it exists.
+
+### The archive
+
+```
+name.cttpl                 (a zip)
+├── template.ngt           REQUIRED, at the root — a real .ngt
+├── template.json          optional  { name, author?, thumbnail? }
+├── thumbnail.png          optional
+└── assets/…               media, at any subdirectory depth
+```
+
+**No `template.ngt` at the root → not a template → refuse.** One level down does
+not count; that is what zipping the folder rather than its contents produces.
+
+Inside the `.ngt`, media is referenced the way a portable project already
+references it — absolute in `timeline.json`, relative in `assetPaths.json` — so
+installing is: extract, then hand the extracted `template.ngt` to the existing
+`relinkAssets`. **The format needed almost no new path code**, and the
+subdirectory rule comes free: `relativizeInside` emits multi-segment POSIX
+relatives and `resolveInside` splits them at any depth.
+
+Slot definitions are **not** in `template.json`. They are an optional
+`replaceable` field on the inner elements, and `slotsOf` derives the list by
+walking the document — one source of truth, and a slot cannot outlive the clip
+it names. `template.json` carries presentation only.
+
+### Four things that are easy to get wrong
+
+- **Every composed key is namespaced** `outerId::innerKey`. `loadedAssetStore`
+  caches video and audio decoders by element id, so two copies of one template
+  would otherwise share one decoder and seek each other backwards.
+- **`expandTemplates` is for the asset layer, never the renderer.** It flattens
+  each template's contents onto the real timeline so `loadAssetsNeededAtTime`,
+  `syncPlayback`, `seek` and the export's audio planner work unchanged — and
+  handing it to `renderTimelineAtTime` would draw every inner clip twice, once
+  nested and once loose. `template/assetTimeline.ts` is the seam.
+- **The nested render must not paint a background.** `renderTimelineAtTime`
+  fills its frame before drawing, so the template's layer gets a transparent
+  one. Get it wrong and everything beneath the template is blanked — which
+  looks exactly like a template that is simply full-bleed.
+- **A fill moves the trim window, never the duration.** A slot's span is the
+  author's; the user chooses which part of their own footage lands in it. That
+  keeps `duration === trim.endTime - trim.startTime` satisfied and is the
+  difference between a template and a project.
+
+### The length belongs to the author
+
+`geometry.ts#isDurationLocked` is the single predicate, and it lives there
+because it is a statement about the duration invariants. Split, trim, speed and
+merge all decline on it, and `layout.ts#hitTest` reads it so the trim handles
+are never drawn — the rule the context menu already keeps, that an affordance
+which could only decline is not offered.
+
+Two of those were real hazards rather than tidiness, and both were silent.
+`clipEdit.ts#splitAt` takes its non-dynamic branch for anything without a
+`trim`, so it cut a template into two halves that each rendered the whole thing.
+And `mergeOps.ts#canJoin` decides two clips share a source by comparing
+`localpath` — every template carries the same `"TEMPLATE"` sentinel, so two
+*different* templates sitting edge to edge looked like two halves of one cut.
+`templateLock.test.ts` pins both.
+
+### Known limits, stated rather than discovered
+
+- **Effects and transitions inside a template do not render.** The nested render
+  passes `fx = null`: `FxRuntime`'s compositor holds one shared scratch surface
+  and entering it from inside a nested render would clear the frame it is
+  composing. `paint` skips both silently, so `templateExport.ts` **warns at
+  export**, where someone can still act on it. Making the compositor re-entrant
+  is the phase-2 work.
+- **Nesting is capped at one level.** `composeTemplate` strips a nested template
+  silently — by then there is nobody to tell — and `planTemplateExport` refuses
+  outright, which is the half someone can act on.
+- **A project needs its templates installed.** The LUT contract, above.
+
+`SCHEMA_VERSION` did not move. `replaceable` is an optional field that clearing
+deletes, so a project nobody has marked up saves byte-identically to one written
+before the feature.
+
+### Two things this feature fixed on its way past
+
+- **`FILETYPES` is now pinned.** `@types/timeline.ts` exports it as a runtime
+  list and `tools.test.ts` compares `define.ts`'s hand-copy against it. The
+  "Known rough edges" note below records that entry having been wrong twice in
+  opposite directions; it was checked by eye until now.
+- **`ipcFilesystem.writeFileEnsured`.** The existing `writeFile` calls the
+  *callback* form of `fs.writeFile` and returns before it runs, so a failure is
+  indistinguishable from success — and it does not create parent directories,
+  which every template install needs for `assets/`. The first version of the
+  export reported a `.cttpl` it had not written. Anything that must know whether
+  its bytes landed should use the new one.
+
 ## Masks
 
 **One mask per clip**, cutting its picture to a shape: `rectangle`, `star`,
@@ -851,10 +986,12 @@ npm run test:e2e:check      # typecheck the suite on its own
 
   The last narrow claim — that **`FILETYPES` in
   `electron/mcp/tools/define.ts` still omits `effect` and `transition`** — has
-  now gone the same way. The array holds all nine filetypes; a tool that filters
-  by filetype can name every one of them. Checked 2026-09-01, which is the
-  standing instruction this bullet gives about itself: verify before believing
-  any claim in it, including this one.
+  now gone the same way. That list is no longer checked by eye at all:
+  `@types/timeline.ts` exports `FILETYPES` as a runtime value and
+  `tools.test.ts` asserts the hand-copy matches it, so a filetype missing from
+  the agent's view is now a failing test rather than a note in this file. The
+  standing instruction this bullet gives about itself still holds for the rest
+  of it: verify before believing any claim in it, including this one.
 - **`fluent-ffmpeg` cannot read this ffmpeg's capabilities.** The bundled
   binary is ffmpeg 9, whose `-formats` output puts *two* spaces between the flag
   column and the name (it gained a third flag for devices); `fluent-ffmpeg`
