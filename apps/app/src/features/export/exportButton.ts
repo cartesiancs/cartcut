@@ -187,7 +187,6 @@ export class ExportButton extends LitElement {
         aria-label="Export progress"
         style="position: fixed; top: 0px; left: 0px; z-index: 6000; visibility: hidden;"
       >
-        <b class="export-popover-title">Progress</b>
         <div class="export-progress">
           <div
             class="export-progress-bar"
