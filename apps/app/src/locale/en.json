@@ -48,7 +48,8 @@
     "audio": "Audio",
     "volume": "Volume",
     "speed": "Speed",
-    "no_selection": "Nothing selected yet. Pick a clip on the timeline to see its options."
+    "no_selection": "Nothing selected yet. Pick a clip on the timeline to see its options.",
+    "background": "Background"
   },
   "modal": {
     "change_language": "Change Language",

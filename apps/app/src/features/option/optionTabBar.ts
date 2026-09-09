@@ -23,7 +23,15 @@ import { customElement, property } from "lit/decorators.js";
 
 export type OptionTab = "media" | "mask" | "animation";
 
-const TABS: Array<{ id: OptionTab; label: string; icon: string }> = [
+/** One button. `id` is whatever the owning inspector wants to switch on. */
+export interface OptionTabSpec {
+  id: string;
+  label: string;
+  icon: string;
+}
+
+/** The clip inspectors' three, and the default when no list is given. */
+const CLIP_TABS: OptionTabSpec[] = [
   { id: "media", label: "Media", icon: "movie" },
   { id: "animation", label: "Animation", icon: "animation" },
   { id: "mask", label: "Mask", icon: "crop" },
@@ -32,7 +40,18 @@ const TABS: Array<{ id: OptionTab; label: string; icon: string }> = [
 @customElement("option-tab-bar")
 export class OptionTabBar extends LitElement {
   @property({ type: String })
-  active: OptionTab = "media";
+  active: string = "media";
+
+  /**
+   * Which buttons to draw.
+   *
+   * Defaulted rather than required, because the four clip inspectors all want
+   * the same three and said so by not passing anything. `ControlSetting` is
+   * the one caller with a different pair — it describes the project rather than
+   * a clip, so Media/Mask/Animation mean nothing there — and it passes its own.
+   */
+  @property({ attribute: false })
+  tabs: OptionTabSpec[] = CLIP_TABS;
 
   createRenderRoot() {
     // The timeline canvas clears the selection on any document mousedown that
@@ -42,7 +61,7 @@ export class OptionTabBar extends LitElement {
     return this;
   }
 
-  private select(tab: OptionTab) {
+  private select(tab: string) {
     if (tab === this.active) {
       return;
     }
@@ -54,7 +73,7 @@ export class OptionTabBar extends LitElement {
   render() {
     return html`
       <div class="d-flex gap-1 mb-2">
-        ${TABS.map(
+        ${this.tabs.map(
           (tab) => html`
             <button
               class="btn btn-xs ${this.active === tab.id

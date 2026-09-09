@@ -47,12 +47,10 @@ export async function selectProjectFolder(): Promise<void> {
 
   projectStore.getState().updateProjectFolder(dir);
 
-  // Kept in sync for `event.ts`, `Modal.ts` and `ControlRender.ts`, which still
-  // read the project root off this input.
-  const projectFolderInput: any = document.querySelector("#projectFolder");
-  if (projectFolderInput != null) {
-    projectFolderInput.value = dir;
-  }
+  // The `#projectFolder` input this used to mirror into is gone with the
+  // settings panel's own picker, and nothing reads it any more — `event.ts` and
+  // `Modal.ts`, the two the mirror existed for, both stopped. `projectStore`
+  // above is the one answer to "where is the project" now.
 
   assetStore.getState().setDirectory(dir);
 }

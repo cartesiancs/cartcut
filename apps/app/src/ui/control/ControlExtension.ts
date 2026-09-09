@@ -7,14 +7,18 @@ export class ControlExtension extends LitElement {
     return this;
   }
 
+  /**
+   * Open an extension folder.
+   *
+   * Reads the picked directory directly. It used to go via the `#projectFolder`
+   * input in the settings panel — which has been removed, and which it was
+   * misusing anyway: it read the input's `.value` into a string and then
+   * assigned `.value` *on that string*, so `dir` was always `"undefined"` and
+   * the picked folder was discarded.
+   */
   extTest() {
     window.electronAPI.req.dialog.openDirectory().then((result) => {
-      const projectFolder = document.querySelector("#projectFolder").value;
-
-      projectFolder.value = result || "/";
-      const dir = String(projectFolder.value);
-
-      window.electronAPI.req.extension.openDir(dir);
+      window.electronAPI.req.extension.openDir(String(result || "/"));
     });
   }
 

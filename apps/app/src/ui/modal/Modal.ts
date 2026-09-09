@@ -12,6 +12,21 @@ export class ModalList extends LitElement {
   private lc = new LocaleController(this);
 
   /**
+   * Where the web build's finished render landed.
+   *
+   * The web build finishes an export over socket.io rather than over IPC, and
+   * `exportSession.installHttpRenderListeners` announces it as a document
+   * event. This modal used to live inside the export *settings* panel, which
+   * meant the dialog only existed while that panel happened to be mounted —
+   * the same mistake the Render button itself was moved out of it for. It is
+   * here with every other modal now.
+   */
+  @property()
+  httpRenderedVideoSrc = "";
+
+  private httpRenderDoneModal: any;
+
+  /**
    * The `#shortKey` help table.
    *
    * Rendered from `features/editor/shortcuts` rather than written out here.
@@ -44,6 +59,17 @@ export class ModalList extends LitElement {
   }
 
   createRenderRoot() {
+    document.addEventListener("cartcut:http-render-done", (event: any) => {
+      this.httpRenderedVideoSrc = `/api/file?path=${event.detail.path}`;
+      // Built on demand rather than in `updated()`: this modal's markup is in
+      // this component's own template, so by the time the event can arrive it
+      // is certainly in the DOM, and there is no first-render race to guard.
+      this.httpRenderDoneModal ??= new bootstrap.Modal("#httpRenderDone", {
+        keyboard: false,
+      });
+      this.httpRenderDoneModal.show();
+    });
+
     return this;
   }
 
@@ -150,6 +176,37 @@ export class ModalList extends LitElement {
           >Close</dds-modal-button
         >
       </dds-modal>
+
+      <!--
+        The web build's render-done dialog. Raw Bootstrap markup rather than
+        dds-modal, kept as it was: it is shown imperatively by id from
+        createRenderRoot above, and this is the shape that was known to work.
+      -->
+      <div
+        class="modal fade"
+        id="httpRenderDone"
+        data-bs-keyboard="false"
+        tabindex="-1"
+      >
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content bg-dark">
+            <div class="modal-body">
+              <h5 class="modal-title text-white font-weight-lg">Render Done</h5>
+
+              <div class="mt-3">
+                <div class="flex row mb-3">
+                  <button
+                    class="btn btn-sm btn-default text-light mt-1"
+                    @click=${() => window.open(this.httpRenderedVideoSrc)}
+                  >
+                    Show File
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <dds-modal modal-id="progressError" modal-title="Error">
         <dds-content>

@@ -47,17 +47,18 @@ Three files of production code changed to make this possible, none of which
 alter behaviour:
 
 - `apps/app/src/features/export/renderers.ts` — new. The renderer table that was
-  inline in `ControlRender.handleClickRenderV2Button`, so the reference render
-  and the export provably use the same one.
-- `apps/app/src/ui/control/ControlRender.ts` — uses that constant.
+  inline in the old `ControlRender` panel, so the reference render and the
+  export provably use the same one.
+- `apps/app/src/features/export/exportSession.ts` — uses that constant.
 - `apps/app/src/index.ts` — extends the diagnostics already exported on
   `window.CARTCUT` (documented there since before this suite) with pure
   re-exports of `renderTimelineAtTime`, the stores and the FX runtime factories.
 
 ## How it drives the editor
 
-**By clicking**, wherever the wiring is what is under test: the settings panel,
-the sidebar tabs, the export codec panel, the fx preset grid, and Render itself.
+**By clicking**, wherever the wiring is what is under test: the settings and
+export codec panel (`#nav-home`, opened with `openSettingsTab`), the
+sidebar tabs, the fx preset grid, and Render itself.
 
 **By command**, for bulk placement — twenty clips and three hundred keyframes
 driven by synthetic mouse events would add flake without adding coverage. Those

@@ -54,8 +54,8 @@ import "./features/option/optionEffect";
 import "./features/option/optionTransition";
 
 import "./features/input/inputText";
-// The title bar's export trigger. The settings it exports with stay in
-// `ui/control/ControlRender.ts`; this is the button and the progress popover.
+// The title bar's export trigger. The settings it exports with live in
+// `ui/control/ControlSetting.ts`; this is the button and the progress popover.
 import "./features/export/exportButton";
 
 import { Toast } from "./features/toast/toast";

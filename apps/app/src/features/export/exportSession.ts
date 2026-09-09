@@ -201,6 +201,13 @@ export function installHttpRenderListeners(): void {
 }
 
 async function requestHttpRender(): Promise<void> {
+  // Installed here rather than at startup, because this is the only thing that
+  // needs the socket and the dependency should be visible from it. It used to
+  // work only as a side effect of the export *settings* panel having been
+  // mounted, which is why it went missing when that panel moved. Idempotent and
+  // web-only, so calling it on every render costs nothing.
+  installHttpRenderListeners();
+
   const tempPath = await window.electronAPI.req.app.getTempPath();
   const renderOptionState = renderOptionStore.getState().options;
   const elementControlComponent: any =

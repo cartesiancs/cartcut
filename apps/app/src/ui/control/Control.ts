@@ -3,7 +3,6 @@ import { customElement, property } from "lit/decorators.js";
 import "./ControlSetting";
 import "./ControlText";
 import "./ControlExtension";
-import "./ControlRender";
 import "./ControlUtilities";
 import "./ControlFilter";
 import "./ControlFx";
@@ -247,17 +246,6 @@ export class Control extends LitElement {
                   dashboard_customize</span
                 >
               </button>
-
-              <button
-                class="btn-nav"
-                data-bs-toggle="pill"
-                data-bs-target="#nav-output"
-                type="button"
-                role="tab"
-                aria-selected="false"
-              >
-                <span class="material-symbols-outlined"> output</span>
-              </button>
             </div>
             <div
               class="tab-content overflow-y-scroll overflow-x-hidden  p-2 h-100"
@@ -304,10 +292,6 @@ export class Control extends LitElement {
               -->
               <div class="tab-pane fade" id="nav-filter" role="tabpanel">
                 <control-ui-filter />
-              </div>
-
-              <div class="tab-pane fade" id="nav-output" role="tabpanel">
-                <control-ui-render />
               </div>
             </div>
           </div>

@@ -7,8 +7,9 @@
  * the only thing preventing the user from editing during a render; see
  * `asset/videoScope.ts` for what had to happen before it could be removed.
  *
- * The settings themselves stay in `ui/control/ControlRender.ts`. This is the
- * trigger only, and it drives `exportSession` exactly as File → Export does.
+ * The settings themselves live in `ui/control/ControlSetting.ts`, under its
+ * Export tab. This is the trigger only, and it drives `exportSession` exactly
+ * as File → Export does.
  */
 
 import { LitElement, html, type TemplateResult } from "lit";

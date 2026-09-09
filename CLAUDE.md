@@ -968,8 +968,8 @@ Accessibility prompt.
 ## Exporting
 
 The trigger is one button on the **title bar**, and it is the only one: the
-settings panel under `#nav-output` chooses the codec and the preset, and starting
-a render is not its job. Menu, button and keystroke are one code path, the rule
+settings panel under `#nav-home` chooses the codec and the preset, under its
+Export tab, and starting a render is not its job. Menu, button and keystroke are one code path, the rule
 `features/editor/actions.ts` states for the toolbar.
 
 ```
@@ -1111,7 +1111,7 @@ npm run test:e2e:check      # typecheck the suite on its own
   They were believed not to reach the FFmpeg export, on the strength of its
   `[0:v]null[vout]` video branch — but that reading looks wrong for the v2 path:
   input 0 is `-f rawvideo -i pipe:0`, i.e. frames the *renderer* drew, and
-  `ControlRender` hands the exporter `renderVideoWithWait`, which runs
+  `export/renderers.ts` hands the exporter `renderVideoWithWait`, which runs
   `VideoFilterPipeline` whenever `filter.enable` is set. So `null` is a
   pass-through of already-filtered frames rather than a discard. The stale note
   does still hold for `electron/render/renderMain.ts`, the legacy `RENDER` ipc

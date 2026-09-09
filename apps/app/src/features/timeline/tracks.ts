@@ -205,7 +205,7 @@ export function paintOrder(doc: TimelineDocument): string[] {
  * Write the derived paint rank back into `priority`.
  *
  * `priority` is no longer authored — it exists so that everything still reading
- * it (`renderer/timeline.ts`, `export/renderTimeline.ts`, `ControlRender`,
+ * it (`renderer/timeline.ts`, `export/renderTimeline.ts`,
  * `elementControlAsset`'s `z-index`, `renderMain`'s insertion order) keeps
  * producing identical output while the UI moves onto tracks. It is removed in
  * the final cleanup phase.

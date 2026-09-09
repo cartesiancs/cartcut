@@ -20,6 +20,10 @@
  * panes keep their DOM, so a control can be *present* and still be zero-area
  * because its pane is hidden. Anything that clicks has to open the owning tab
  * first, which is what `openTab` is for.
+ *
+ * `#nav-home` has a second tab bar *inside* it — Canvas and Export — with the
+ * same mounted-but-`d-none` behaviour one level down, which is what
+ * `openSettingsTab` handles.
  */
 
 import { expect, type Locator, type Page } from "@playwright/test";
@@ -33,8 +37,7 @@ export type SidebarTab =
   | "#nav-text"
   | "#nav-util"
   | "#nav-option"
-  | "#nav-fx"
-  | "#nav-output";
+  | "#nav-fx";
 
 export async function openTab(page: Page, target: SidebarTab): Promise<void> {
   await page.locator(`#sidebar button[data-bs-target="${target}"]`).click();
@@ -46,26 +49,60 @@ export async function openTab(page: Page, target: SidebarTab): Promise<void> {
   }, target, { timeout: 15_000 });
 }
 
+/**
+ * Open `#nav-home` and switch to one of its two panes.
+ *
+ * The project settings and the export settings were two sidebar tabs,
+ * `#nav-home` and `#nav-output`. They are one panel now, split by a Canvas /
+ * Export tab bar, so reaching a control takes both steps: open the sidebar tab,
+ * then pick the half it lives in.
+ *
+ * Both panes stay mounted and the inactive one carries `d-none`, so a control
+ * in it is present but zero-area — the same trap the sidebar's own panes set,
+ * and the reason this cannot just fill by id.
+ */
+export async function openSettingsTab(
+  page: Page,
+  tab: "canvas" | "export" = "canvas",
+): Promise<void> {
+  await openTab(page, "#nav-home");
+  await page.locator(`#nav-home [data-panel="${tab}"]`).click();
+
+  // A control that exists only in the requested pane, so this waits on the tab
+  // switch having landed rather than merely on the sidebar pane being open.
+  const witness =
+    tab === "canvas" ? "#projectFps" : "#nav-home select[data-setting], #nav-home .btn-group";
+  await expect(page.locator(witness).first()).toBeVisible({ timeout: 15_000 });
+}
+
 // ------------------------------------------------------------ project setup
 
 /**
  * Point the project at a folder, through the real picker.
  *
- * `ControlRender.handleClickRenderV2Button` refuses to export at all while
- * `#projectFolder` is empty — it toasts "Select a project folder" and returns —
- * so this is a precondition for the render spec, not decoration.
+ * The settings panel's own "Select Folder" button is gone; `<asset-browser>` in
+ * `#nav-draft` offers the same `selectProjectFolder()` on its empty state, and
+ * that is now the only one. Both wrote the same two stores, so this is the same
+ * wiring under test as before — reached from the panel that shows the files.
+ *
+ * The button is *replaced* by the file list once a directory is set, so its
+ * disappearance is the signal that the pick landed. There is no store to poll:
+ * `projectStore` is not among the diagnostics `index.ts` exposes on `CARTCUT`.
  */
 export async function setProjectFolder(session: AppSession, dir: string): Promise<void> {
   const { page } = session;
-  await openTab(page, "#nav-home");
+  await openTab(page, "#nav-draft");
+
+  const picker = page.locator("asset-browser button", { hasText: "Select Folder" });
   await session.answerOpenDialog([dir]);
-  await page.locator("#projectFolder ~ button").click();
-  await expect(page.locator("#projectFolder")).toHaveValue(dir, { timeout: 15_000 });
+  await picker.click();
+
+  await expect(picker).toHaveCount(0, { timeout: 15_000 });
 }
 
 /** Set the export length via the minute/second inputs. */
 export async function setDuration(page: Page, seconds: number): Promise<void> {
-  await openTab(page, "#nav-home");
+  await openSettingsTab(page);
   const minutes = Math.floor(seconds / 60);
   const rest = seconds - minutes * 60;
 
@@ -84,7 +121,7 @@ export async function setDuration(page: Page, seconds: number): Promise<void> {
 }
 
 export async function setResolution(page: Page, width: number, height: number): Promise<void> {
-  await openTab(page, "#nav-home");
+  await openSettingsTab(page);
 
   const preset = { "1920x1080": "1920x1080 (desktop)", "3840x2160": "3840x2160 (4k)", "1080x1080": "1080x1080 (square)", "1080x1920": "1080x1920 (mobile)" }[`${width}x${height}`];
 
@@ -105,7 +142,7 @@ export async function setResolution(page: Page, width: number, height: number): 
 }
 
 export async function setBackgroundColor(page: Page, hex: string): Promise<void> {
-  await openTab(page, "#nav-home");
+  await openSettingsTab(page);
   await page.locator("#backgroundColor").fill(hex);
   await page.locator("#backgroundColor").dispatchEvent("input");
   await expect
@@ -116,16 +153,16 @@ export async function setBackgroundColor(page: Page, hex: string): Promise<void>
 /**
  * Set the project frame rate.
  *
- * A real UI action now. It used to write the store directly, because
- * `ControlSetting`'s fps field shipped `disabled` at a hardcoded 60 and there
- * was no control to drive — which meant the one part of the frame-rate path the
- * user actually touches was the one part nothing tested.
+ * A real UI action now. It used to write the store directly, because the fps
+ * field shipped `disabled` at a hardcoded 60 and there was no control to drive
+ * — which meant the one part of the frame-rate path the user actually touches
+ * was the one part nothing tested. The field is in #nav-home's Canvas tab.
  *
  * The store poll stays: the assertion is not "the field accepted the text" but
  * "the field's handler reached the store", which is the wiring under test.
  */
 export async function setFps(page: Page, fps: number): Promise<void> {
-  await openTab(page, "#nav-home");
+  await openSettingsTab(page);
   await page.locator("#projectFps").fill(String(fps));
   await page.locator("#projectFps").dispatchEvent("change");
 
@@ -139,8 +176,8 @@ export async function setFps(page: Page, fps: number): Promise<void> {
 export type ExportPresetName = "high" | "medium" | "low";
 
 export async function setExportPreset(page: Page, name: ExportPresetName): Promise<void> {
-  await openTab(page, "#nav-output");
-  await page.locator("#nav-output button", { hasText: new RegExp(`^\\s*${name}\\s*$`, "i") }).first().click();
+  await openSettingsTab(page, "export");
+  await page.locator("#nav-home button", { hasText: new RegExp(`^\\s*${name}\\s*$`, "i") }).first().click();
   await expect
     .poll(() =>
       page.evaluate(() => (globalThis as any).CARTCUT.renderOptionStore.getState().options.exportSettings),
@@ -150,9 +187,9 @@ export async function setExportPreset(page: Page, name: ExportPresetName): Promi
 
 /** Open the advanced panel and set one `select[data-setting=...]`. */
 export async function setExportSetting(page: Page, key: string, value: string): Promise<void> {
-  await openTab(page, "#nav-output");
-  const advanced = page.locator("#nav-output", { hasText: "Advanced settings" });
-  const select = page.locator(`#nav-output select[data-setting="${key}"]`);
+  await openSettingsTab(page, "export");
+  const advanced = page.locator("#nav-home", { hasText: "Advanced settings" });
+  const select = page.locator(`#nav-home select[data-setting="${key}"]`);
   if ((await select.count()) === 0 || !(await select.first().isVisible())) {
     await advanced.locator("button", { hasText: /advanced/i }).first().click();
   }
