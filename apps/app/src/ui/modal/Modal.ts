@@ -5,7 +5,7 @@ import {
   shortcutLabelWithAlternates,
   shortcutsByGroup,
 } from "../../features/editor/shortcuts";
-import { renderProgress } from "./renderProgress";
+import { exportStore } from "../../states/exportStore";
 
 @customElement("modal-list-ui")
 export class ModalList extends LitElement {
@@ -47,9 +47,21 @@ export class ModalList extends LitElement {
     return this;
   }
 
+  /**
+   * Reveal the file this export actually wrote.
+   *
+   * It used to open `#projectFolder`, which is the asset browser's directory
+   * and has nothing to do with where the save dialog put the video — so the
+   * button reliably opened the wrong folder. `showItemInFolder` rather than
+   * `openDirectory` because the destination is a *file*, and `openPath` on a
+   * file hands it to a video player instead of revealing it.
+   */
   openRenderedVideoFolder() {
-    const projectFolder = document.querySelector("#projectFolder").value;
-    window.electronAPI.req.filesystem.openDirectory(projectFolder);
+    const destination = exportStore.getState().destination;
+    if (destination === "") {
+      return;
+    }
+    window.electronAPI.req.filesystem.showItemInFolder(destination);
   }
 
   forceClose() {
@@ -67,22 +79,6 @@ export class ModalList extends LitElement {
 
   _handleClickRestart() {
     window.electronAPI.req.app.restart();
-  }
-
-  /**
-   * Dismissing the progress dialog used to hide it and leave the frame loop
-   * running to completion. It now stops the export as well.
-   */
-  _handleClickCancelRender() {
-    // The button dismisses the dialog immediately, well before
-    // `render:v2:cancelled` comes back, so the ticker must be stopped here
-    // rather than waiting for the event — otherwise it keeps writing into a
-    // modal nobody can see.
-    renderProgress.stop();
-    const control = document.querySelector("control-ui-render") as
-      | (HTMLElement & { cancelExport?: () => void })
-      | null;
-    control?.cancelExport?.();
   }
 
   render() {
@@ -108,41 +104,6 @@ export class ModalList extends LitElement {
           button-text-color="text-dark"
           is-dismiss="true"
           >취소</dds-modal-button
-        >
-      </dds-modal>
-
-      <dds-modal modal-id="progressRender" modal-title="Rendering...">
-        <dds-content>
-          <div class="mb-3">
-            <div class="progress">
-              <!-- Zero, not the 25% this was authored at: the dialog is shown
-                   before the first frame is drawn, so a hardcoded quarter was
-                   on screen for the whole of asset loading and was the first
-                   value every e2e artifact recorded. -->
-              <div
-                id="progress"
-                class="progress-bar"
-                role="progressbar"
-                style="width: 0%;"
-                aria-valuenow="0"
-                aria-valuemin="0"
-                aria-valuemax="100"
-              >
-                0%
-              </div>
-            </div>
-            <b class="text-secondary"
-              ><i class="fas fa-info-circle"></i>
-              <span id="remainingTime">Estimating…</span>
-            </b>
-          </div>
-        </dds-content>
-        <dds-modal-button
-          button-color="btn-light"
-          button-text-color="text-dark"
-          is-dismiss="true"
-          @click=${this._handleClickCancelRender}
-          >Cancel</dds-modal-button
         >
       </dds-modal>
 

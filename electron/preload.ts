@@ -137,6 +137,8 @@ const request = {
   filesystem: {
     getDirectory: (dir) => ipcRenderer.invoke("filesystem:getDirectory", dir),
     openDirectory: (path) => ipcRenderer.send("OPEN_PATH", path),
+    showItemInFolder: (path) =>
+      ipcRenderer.send("SHOW_ITEM_IN_FOLDER", path),
     test: () => ipcRenderer.invoke("filesystem:test"),
     mkdir: (path, options) =>
       ipcRenderer.invoke("filesystem:mkdir", path, options),

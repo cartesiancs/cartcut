@@ -1,99 +1,68 @@
 import type { Timeline } from "../../@types/timeline";
-import { buildCostCurve, type CostCurve } from "../../features/export/cost";
+import { exportStore } from "../../states/exportStore";
+import { buildCostCurve, type CostCurve } from "./cost";
 import {
   COUNTDOWN_TICK_MS,
   countdownSeconds,
   createCountdown,
   tickCountdown,
   type CountdownState,
-} from "../../features/export/countdown";
+} from "./countdown";
 import {
   createEtaState,
   finishTailMs,
   observeEta,
   readEta,
   type EtaState,
-} from "../../features/export/eta";
-import { formatRemaining } from "../../utils/time";
+} from "./eta";
 
 /**
- * The export progress dialog's bar and its remaining-time line.
+ * The export's progress estimate, and the ticker that keeps it moving.
  *
- * A module singleton rather than state on `ControlRender`, and it has to be:
+ * A module singleton rather than state on a component, and it has to be:
  * `finishStream` closes FFmpeg's stdin and returns without waiting, so
  * `requestIPCVideoExport` resolves while FFmpeg is still muxing and the click
  * handler's `finally` runs during the tail. The finalizing phase therefore
  * outlives the function that started the export, and only `PROCESSING_FINISH`
- * in `event.ts` can end it. Shaped after `utils/modal.ts#rendererModal`, which
- * is the existing precedent for one imperative object that both `event.ts` and
- * a component drive.
+ * in `event.ts` can end it.
  *
- * Its strings are hardcoded English, like the rest of this dialog
- * (`"Rendering..."`, `"Cancel"`) — `LocaleController` needs a Lit host and this
- * is not a component.
+ * It used to paint `#progress` and `#remainingTime` inside a Bootstrap modal.
+ * That modal is gone — it was also, incidentally, the only thing stopping the
+ * user editing during a render — so this now **publishes into `exportStore`**
+ * and the title bar's button draws from there. The maths did not move: `eta`,
+ * `cost` and `countdown` are reached through exactly the same three calls.
+ *
+ * The phase lives in the store too, so there is one answer to "is an export
+ * running" rather than two that can disagree.
  */
-type Phase = "idle" | "running" | "finalizing";
-
-const ESTIMATING_LABEL = "Estimating…";
-const FINALIZING_LABEL = "Finalizing…";
 
 /**
- * The eye cannot read faster than this, and each write invalidates layout on a
- * thread that is also drawing frames.
+ * The eye cannot read faster than this, and each write now wakes a Lit render
+ * on a thread that is also drawing frames and pushing 8MB into a pipe.
  */
 const BAR_PAINT_MS = 100;
 
-let phase: Phase = "idle";
 let timer: number | null = null;
 let curve: CostCurve | null = null;
 let eta: EtaState | null = null;
 let countdown: CountdownState | null = null;
 let lastBarPaintAt = 0;
-let lastBarText = "";
-let lastRemainingText = "";
+/** The percentage last published, so the ticker can republish it unchanged. */
+let lastPercent = 0;
 
-function progressBar(): HTMLElement | null {
-  return document.querySelector("#progress");
+function isRunning(): boolean {
+  return exportStore.getState().phase === "running";
 }
 
-function remainingLine(): HTMLElement | null {
-  return document.querySelector("#remainingTime");
-}
-
-function paintBar(percent: number): void {
-  const bar = progressBar();
-  if (bar == null) {
-    return;
-  }
-  const clamped = Math.max(0, Math.min(100, percent));
-  const text = `${Math.round(clamped)}%`;
-  bar.style.width = `${clamped}%`;
-  bar.setAttribute("aria-valuenow", String(Math.round(clamped)));
-  // `#progress`'s text is scraped by the e2e harness and parsed as a number, and
-  // a parse failure there does not reset its stall timer — so this element
-  // carries a percentage and nothing else. Every other state goes to
-  // `#remainingTime`.
-  if (text !== lastBarText) {
-    bar.textContent = text;
-    lastBarText = text;
-  }
-}
-
-function paintRemaining(text: string): void {
-  if (text === lastRemainingText) {
-    return;
-  }
-  const line = remainingLine();
-  if (line == null) {
-    return;
-  }
-  line.textContent = text;
-  lastRemainingText = text;
-}
-
-/** The interval body. Owns `#remainingTime`; never touches the bar. */
+/**
+ * The interval body. Owns the remaining time; republishes the last percentage.
+ *
+ * `report` takes both numbers together so the button is woken once rather than
+ * twice, and declines outright when neither the whole percent nor the whole
+ * second has moved — which is what makes a 250ms ticker free.
+ */
 function tick(): void {
-  if (phase !== "running" || eta == null || countdown == null) {
+  if (!isRunning() || eta == null || countdown == null) {
     return;
   }
 
@@ -102,15 +71,16 @@ function tick(): void {
   const estimate = reading.kind === "remaining" ? reading.ms : null;
   countdown = tickCountdown(countdown, estimate, now);
 
-  if (reading.kind === "finalizing") {
-    paintRemaining(FINALIZING_LABEL);
-    return;
-  }
-  if (!countdown.primed) {
-    paintRemaining(ESTIMATING_LABEL);
-    return;
-  }
-  paintRemaining(`${formatRemaining(countdownSeconds(countdown) * 1000)} left`);
+  // `null` is "no number to show": the component draws "Estimating…" before
+  // the first real reading and "Finalizing…" once the tail has begun. Both
+  // strings belong to the component, which is the half that can reach a
+  // `LocaleController`.
+  const remainingMs =
+    reading.kind === "finalizing" || !countdown.primed
+      ? null
+      : countdownSeconds(countdown) * 1000;
+
+  exportStore.getState().report(lastPercent, remainingMs);
 }
 
 function clearTimer(): void {
@@ -120,17 +90,32 @@ function clearTimer(): void {
   }
 }
 
-export const renderProgress = {
+/** Drop the ticker and every estimate, without touching the phase. */
+function reset(): void {
+  clearTimer();
+  curve = null;
+  eta = null;
+  countdown = null;
+  lastBarPaintAt = 0;
+  lastPercent = 0;
+}
+
+export const exportProgress = {
   /**
-   * Reset the dialog and start estimating.
+   * Throw away the last run's estimate and start a new one.
    *
-   * Stops anything already running first, which is also what clears the
-   * previous export's numbers — `#remainingTime` used to keep the last run's
-   * value on screen until the first sample of the next one landed, and the bar
-   * was authored at a hardcoded 25%.
+   * **`reset`, not `stop`.** `stop` settles the phase, and `exportSession`
+   * calls this immediately *before* `exportStore.begin` — so dispatching
+   * `settled` here would knock the phase back to idle one line after the
+   * session set it running, and the title-bar button would sit as a pill for
+   * the whole export.
+   *
+   * Clearing the numbers is the other half: the remaining-time line used to
+   * keep the previous run's value on screen until the first sample of the next
+   * one landed, and the bar was authored at a hardcoded 25%.
    */
   begin(timeline: Timeline, totalFrames: number, fps: number): void {
-    this.stop();
+    reset();
 
     curve = buildCostCurve(timeline, totalFrames, fps);
     eta = createEtaState({
@@ -138,13 +123,6 @@ export const renderProgress = {
       tailMs: finishTailMs(totalFrames),
     });
     countdown = createCountdown(performance.now());
-    lastBarPaintAt = 0;
-    lastBarText = "";
-    lastRemainingText = "";
-    phase = "running";
-
-    paintBar(0);
-    paintRemaining(ESTIMATING_LABEL);
 
     timer = window.setInterval(tick, COUNTDOWN_TICK_MS);
   },
@@ -154,16 +132,16 @@ export const renderProgress = {
    *
    * On the hot path. The estimate is folded in on **every** frame — about ten
    * flops and one object literal, against a frame that costs milliseconds — and
-   * only the bar's DOM writes are throttled. Separating the two is the point:
-   * the old code sampled and painted together, so the estimator saw a tenth of
-   * the data it could have.
+   * only the store writes are throttled. Separating the two is the point: the
+   * old code sampled and painted together, so the estimator saw a tenth of the
+   * data it could have.
    *
    * `currentFrame` is 0-based and names the frame just finished, so the count
    * done is one more than it. Without the `+ 1` the bar tops out at
    * `(N-1)/N` and never reaches 100%.
    */
   onFrame(currentFrame: number, totalFrames: number): void {
-    if (phase !== "running" || eta == null || curve == null) {
+    if (!isRunning() || eta == null || curve == null) {
       return;
     }
 
@@ -183,7 +161,8 @@ export const renderProgress = {
     // this one advances at a roughly constant rate in *time*, which is most of
     // what makes a progress bar feel honest. It also keeps the bar and the
     // remaining time consistent with each other, since both read the same axis.
-    paintBar(curve.total > 0 ? (units / curve.total) * 100 : 0);
+    lastPercent = curve.total > 0 ? (units / curve.total) * 100 : 0;
+    exportStore.getState().report(lastPercent, readRemaining());
   },
 
   /**
@@ -193,18 +172,20 @@ export const renderProgress = {
    * static until the main process reports the file is written.
    */
   finalizing(): void {
-    if (phase === "idle") {
+    if (exportStore.getState().phase === "idle") {
       return;
     }
-    phase = "finalizing";
     clearTimer();
-    paintBar(100);
-    paintRemaining(FINALIZING_LABEL);
+    lastPercent = 100;
+    // `null` remaining is what the button draws as "Finalizing…".
+    exportStore.getState().report(100, null);
+    exportStore.getState().dispatch("frameLoopDone");
   },
 
   /** `PROCESSING_FINISH`. */
   finish(): void {
-    paintBar(100);
+    lastPercent = 100;
+    exportStore.getState().report(100, null);
     this.stop();
   },
 
@@ -216,10 +197,19 @@ export const renderProgress = {
    * dialog before `render:v2:cancelled` arrives.
    */
   stop(): void {
-    clearTimer();
-    phase = "idle";
-    curve = null;
-    eta = null;
-    countdown = null;
+    reset();
+    exportStore.getState().dispatch("settled");
   },
 };
+
+/** The remaining time as `tick` would compute it, for the per-frame write. */
+function readRemaining(): number | null {
+  if (eta == null || countdown == null) {
+    return null;
+  }
+  const reading = readEta(eta, performance.now());
+  if (reading.kind === "finalizing" || !countdown.primed) {
+    return null;
+  }
+  return countdownSeconds(countdown) * 1000;
+}

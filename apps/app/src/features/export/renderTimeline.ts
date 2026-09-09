@@ -9,6 +9,8 @@ import { preloadLutsForDocument } from "../lut/lutRegistry";
 import { assetTimeline } from "../template/assetTimeline";
 import { preloadTemplatesForDocument } from "../template/templateRegistry";
 import { createExportFxRuntime } from "../renderer/fx/createRuntime";
+import { releaseOverlayScope } from "../renderer/fx/overlaySource";
+import { createVideoScope, withVideoScope } from "../asset/videoScope";
 import { hasFxElements } from "../renderer/fx/planFrame";
 import { setLutBlocking } from "../renderer/lut/apply";
 import { frameCount, frameTimeMs, inFlightWindow } from "./frames";
@@ -78,6 +80,24 @@ export async function renderTimeline(
   const profiler = createFrameProfiler();
 
   /**
+   * This export's own decoders.
+   *
+   * The frame loop runs in the editor's renderer, and the preview repaints on
+   * every store write — its draw path calls `syncPlayback` and
+   * `releaseUnusedVideos` *with a cursor*, either of which would move or drop a
+   * handle mid-frame. Until the export button reached the title bar, the only
+   * thing preventing that was the progress modal's backdrop blocking the
+   * mouse, which is a property of the UI rather than of the code.
+   *
+   * Owned here rather than held in the store on purpose: an export that is
+   * cancelled halfway cannot then leave an orphan behind, because the only
+   * reference to it dies with this call. It also means the handles are
+   * released deterministically at the end of a run instead of sitting in the
+   * shared cache until the preview's decoder window happens to evict them.
+   */
+  const scope = createVideoScope(`export:${Date.now()}`);
+
+  /**
    * Effects and transitions for this export.
    *
    * Its own context and compositor, separate from the preview's: this one
@@ -94,7 +114,7 @@ export async function renderTimeline(
    * `null` where there is no WebGL, and every frame then renders exactly as it
    * did before this feature — no effects, no transitions, no crash.
    */
-  const fx = hasFxElements(timeline) ? createExportFxRuntime(fps) : null;
+  const fx = hasFxElements(timeline) ? createExportFxRuntime(fps, scope.id) : null;
 
   /**
    * Read every LUT this project refers to *before* the first frame.
@@ -135,7 +155,10 @@ export async function renderTimeline(
   // Export never plays the `<audio>` handles — FFmpeg rebuilds the whole audio
   // graph from the timeline itself — so decoding them here buys nothing but
   // latency, memory, and a set of media elements nobody owns the state of.
-  await assetStore.loadEntireTimeline(assets, { audio: false });
+  // Into the scope, not the shared cache. Images and gifs still go to the
+  // shared one — they are keyed by path and immutable once decoded, so nothing
+  // can move one under a frame loop.
+  await assetStore.loadExportScope(scope, assets);
 
   const totalFrames = frameCount(options);
 
@@ -174,7 +197,7 @@ export async function renderTimeline(
       const timeInMs = frameTimeMs(currentFrame, fps);
 
       await profiler.measureAsync("seek", () =>
-        assetStore.seek(assets, timeInMs, fps),
+        assetStore.seekScope(scope, assets, timeInMs, fps),
       );
 
       // A seek that lands after the abort would otherwise composite and ship a
@@ -182,17 +205,24 @@ export async function renderTimeline(
       throwIfAborted(signal);
 
       profiler.measure("composite", () =>
-        renderTimelineAtTime(
-          ctx,
-          timeline,
-          timeInMs,
-          elementRenderers,
-          backgroundColor,
-          width,
-          height,
-          undefined,
-          undefined,
-          fx,
+        // Synchronous, which is what makes a dynamic extent safe: every
+        // renderer in the chain is, so the scope cannot leak past this call.
+        // It is also what covers a template's *nested* clips, which follow the
+        // one renderer table `App.ts` installs globally rather than the table
+        // passed here. See `withVideoScope`.
+        withVideoScope(scope, () =>
+          renderTimelineAtTime(
+            ctx,
+            timeline,
+            timeInMs,
+            elementRenderers,
+            backgroundColor,
+            width,
+            height,
+            undefined,
+            undefined,
+            fx,
+          ),
         ),
       );
 
@@ -222,6 +252,11 @@ export async function renderTimeline(
     // Settle them before unwinding so no write is still running against a pipe
     // the caller is about to tear down.
     await Promise.allSettled(inFlight);
+    // Every decoder this export opened, whether it finished, failed or was
+    // cancelled. Nothing else can reach them, so nothing else would ever free
+    // them.
+    assetStore.releaseVideoScope(scope);
+    releaseOverlayScope(scope.id);
     // Compiled programs, render targets and uploaded textures all belong to
     // this export's context. An export that is cancelled halfway leaks every
     // one of them without this.

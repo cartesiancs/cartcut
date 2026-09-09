@@ -101,6 +101,7 @@ ipcMain.handle("GET_METADATA", async (evt, bloburl, mediapath) => {
 ipcMain.on("INIT", electronInit.init);
 ipcMain.on("SELECT_DIR", ipcDialog.openDirectory);
 ipcMain.on("OPEN_PATH", shellLib.openPath);
+ipcMain.on("SHOW_ITEM_IN_FOLDER", shellLib.showItemInFolder);
 ipcMain.on("OPEN_URL", shellLib.openUrl);
 ipcMain.on("RENDER", renderMain.start);
 

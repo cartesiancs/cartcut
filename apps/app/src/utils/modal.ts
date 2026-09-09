@@ -46,7 +46,9 @@ class ModalClass {
 }
 
 export const rendererModal = {
-  progressModal: new ModalClass("progressRender"),
+  // No `progressModal` any more. The render dialog it named is gone: progress
+  // is the title bar's ring and its popover, which is what lets the user keep
+  // editing — the modal's backdrop was the only thing stopping them.
   progressFinish: new ModalClass("progressFinish"),
   progressError: new ModalClass("progressError"),
   whenClose: new ModalClass("whenClose"),

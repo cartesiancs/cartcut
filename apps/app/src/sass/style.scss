@@ -235,8 +235,30 @@ element-timeline-range {
   color: #6c757d;
   font-size: 12px;
   font-weight: 700;
-  justify-content: center;
+  justify-content: space-between;
   align-items: center;
+  gap: 0.5rem;
+
+  // The OS draws the window buttons on top of this strip, and it draws them on
+  // opposite sides on the two platforms — macOS puts the traffic lights at the
+  // left (`trafficLightPosition { x: 10, y: 10 }`), Windows and Linux put
+  // `titleBarOverlay` at the right. Both in `electron/lib/window.ts`. One
+  // symmetric padding would hide the title on one platform and the export
+  // button on the other, and only on the machine you are not developing on.
+  &.top-bar-mac {
+    padding-left: 78px;
+    padding-right: 10px;
+  }
+
+  &.top-bar-pc {
+    padding-left: 10px;
+    padding-right: 146px;
+  }
+
+  // The title stays a drag handle; the button opts out for itself.
+  b {
+    -webkit-app-region: drag;
+  }
 }
 
 .toast-container {

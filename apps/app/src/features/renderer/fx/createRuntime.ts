@@ -71,6 +71,8 @@ function runtimeWith(
   fps: number,
   blocking: boolean,
   playing: boolean,
+  /** Which overlay handle set this runtime draws from. "" is the preview's. */
+  scope: string,
   compositor?: FxCompositor,
 ): FxRuntime {
   return {
@@ -91,7 +93,7 @@ function runtimeWith(
       if (preset == null) {
         return null;
       }
-      return overlayFrame(elementId, element, preset, timeInMs, playing);
+      return overlayFrame(scope, elementId, element, preset, timeInMs, playing);
     },
   };
 }
@@ -121,7 +123,7 @@ export function previewFxRuntime(
   if (previewCompositor == null) {
     previewCompositor = new FxCompositor(gl, { blocking: false });
   }
-  return runtimeWith(gl, fps, false, playing, previewCompositor);
+  return runtimeWith(gl, fps, false, playing, "", previewCompositor);
 }
 
 /**
@@ -131,7 +133,18 @@ export function previewFxRuntime(
  * preview may still be painting. `dispose` on the returned compositor is the
  * caller's job — `renderTimeline` does it in a `finally`.
  */
-export function createExportFxRuntime(fps: number): FxRuntime | null {
+export function createExportFxRuntime(
+  fps: number,
+  /**
+   * The overlay scope this export owns, matching its `VideoScope.id`.
+   *
+   * Defaults to the preview's, which is right for the single-frame callers —
+   * the contact sheet, the template thumbnail and the e2e reference render.
+   * They draw one frame of the *live* document and want the handles everyone
+   * else has; only a running frame loop needs a set nobody can take from it.
+   */
+  scope: string = "",
+): FxRuntime | null {
   let gl: WebGLRenderingContext | null = null;
   try {
     const canvas = document.createElement("canvas");
@@ -148,5 +161,5 @@ export function createExportFxRuntime(fps: number): FxRuntime | null {
   }
   // Overlays are positioned exactly during export: the frame loop samples one
   // instant at a time and must be reproducible, so nothing is left rolling.
-  return runtimeWith(gl, fps, true, false);
+  return runtimeWith(gl, fps, true, false, scope);
 }

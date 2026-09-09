@@ -1,16 +1,22 @@
 /**
- * Clicking Render, and waiting the way a person would have to.
+ * Clicking Export, and waiting the way a person would have to.
  *
  * The click is genuine: `dialog.showSaveDialog` is stubbed in the main process
- * (see `launch.ts`), so `ControlRender.handleClickRenderV2Button` runs exactly
- * as it does for a user — the project-folder gate, the existing-file removal,
- * the progress modal, the abort controller and the frame loop all included.
+ * (see `launch.ts`), so `features/export/exportSession.ts#startExport` runs
+ * exactly as it does for a user — the existing-file removal, the snapshot, the
+ * abort controller and the frame loop all included.
  *
- * Completion is taken from the IPC events, not from the modal. `PROCESSING_FINISH`
+ * Progress is read from `exportStore` rather than scraped out of a dialog.
+ * There is no dialog any more: the export button lives on the title bar, shows
+ * a ring, and opens a popover only when clicked — which is what lets the user
+ * keep editing while a render runs.
+ *
+ * Completion is taken from the IPC events, not from the UI. `PROCESSING_FINISH`
  * and `render:v2:error` are what the main process actually emits, and the second
  * exists precisely because FFmpeg can fail *after* the last frame is written —
- * a run that watched only the progress bar would call that a success. The modal
- * is checked too, but as a UI assertion rather than as the completion signal.
+ * a run that watched only the progress bar would call that a success. The
+ * completion dialog is checked too, but as a UI assertion rather than as the
+ * completion signal.
  *
  * The stall detector is the other half. An export that deadlocks — a pipe that
  * stops draining, a seek that never resolves — otherwise burns the whole test
@@ -22,7 +28,6 @@
 import { expect, type Page } from "@playwright/test";
 
 import type { AppSession } from "./launch";
-import { openTab } from "./ui";
 
 export type ExportOutcome = {
   destination: string;
@@ -34,11 +39,12 @@ export type ExportOutcome = {
   /**
    * Progress samples, for the artifact — enough to see a stall's shape.
    *
-   * `remaining` is the countdown the user was actually reading. It is recorded
-   * because the property that matters about it is a property of the *sequence*
-   * — it must never increase — and a single reading cannot show that.
+   * `remainingMs` is the countdown the user was actually reading. It is
+   * recorded because the property that matters about it is a property of the
+   * *sequence* — it must never increase — and a single reading cannot show
+   * that.
    */
-  progress: Array<{ atMs: number; percent: number; remaining: string }>;
+  progress: Array<{ atMs: number; percent: number; remainingMs: number | null }>;
 };
 
 /** Longest the frame counter may stand still before the export is called stuck. */
@@ -76,33 +82,48 @@ async function renderEvents(page: Page): Promise<RenderEvent[]> {
 }
 
 /**
- * The frame loop's own counter, read off the progress bar the app maintains,
- * alongside the remaining-time line beside it.
+ * The frame loop's own counter and the countdown beside it, from the store.
  *
  * Both in one `evaluate` so they describe the same instant — and note that a
- * `null` percent does not reset the stall timer below, which is why `#progress`
- * must only ever carry a number. Everything else the dialog has to say goes to
- * `#remainingTime`.
+ * `null` percent does not reset the stall timer below, so "no export running"
+ * must read as `null` rather than as a stale number.
+ *
+ * `remainingMs` is a number now rather than a rendered string, which makes the
+ * property that actually matters about it — that it never increases —
+ * assertable without parsing "1m 20s left".
  */
 async function progressSample(
   page: Page,
-): Promise<{ percent: number | null; remaining: string }> {
+): Promise<{ percent: number | null; remainingMs: number | null }> {
   return page.evaluate(() => {
-    const bar = document.querySelector("#progress") as HTMLElement | null;
-    const line = document.querySelector("#remainingTime") as HTMLElement | null;
-    const remaining = (line?.textContent ?? "").trim();
-    if (bar == null) return { percent: null, remaining };
-    const value = Number((bar.textContent ?? "").trim().replace("%", ""));
-    return { percent: Number.isFinite(value) ? value : null, remaining };
+    const state = (globalThis as any).CARTCUT?.exportStore?.getState?.();
+    if (state == null || state.phase === "idle") {
+      return { percent: null, remainingMs: null };
+    }
+    return { percent: state.percent, remainingMs: state.remainingMs };
   });
 }
 
-/** Non-null exactly while `handleClickRenderV2Button` is inside its try block. */
+/**
+ * Is an export occupying the encoder?
+ *
+ * True through `finalizing` and `cancelling` as well as `running` — the main
+ * process refuses a second export until FFmpeg has been reaped, and this is
+ * the same question it answers.
+ */
 async function exportRunning(page: Page): Promise<boolean> {
   return page.evaluate(() => {
-    const panel: any = document.querySelector("control-ui-render");
-    return panel?.exportController != null;
+    const state = (globalThis as any).CARTCUT?.exportStore?.getState?.();
+    return state != null && state.phase !== "idle";
   });
+}
+
+/** Which phase the export is in, for a spec that cares about the difference. */
+export async function exportPhase(page: Page): Promise<string> {
+  return page.evaluate(
+    () =>
+      (globalThis as any).CARTCUT?.exportStore?.getState?.()?.phase ?? "idle",
+  );
 }
 
 export type RunExportOptions = {
@@ -123,26 +144,22 @@ export async function runExport(
   const deadline = Date.now() + (options.timeoutMs ?? 6 * 60 * 60_000);
 
   await installRenderListeners(page);
-  await openTab(page, "#nav-output");
-
-  // The export refuses outright while `#projectFolder` is empty, and does it
-  // with a toast rather than an exception — which would otherwise look like an
-  // export that finished instantly.
-  const projectFolder = await page.locator("#projectFolder").inputValue();
-  expect(projectFolder, "a project folder must be set before Render — see setProjectFolder()").not.toBe("");
 
   await session.answerSaveDialog(options.destination);
 
   const startedAt = Date.now();
-  const renderButton = page.locator("control-ui-render button.btn-blue-fill", { hasText: "Render" });
-  await expect(renderButton).toBeVisible();
-  await renderButton.click();
+  // The title bar, not the settings panel: the trigger is visible whatever
+  // panel is open, so there is no tab to switch to first. The project-folder
+  // gate is gone too — the save dialog decides where the file lands.
+  const exportButton = page.locator("export-button .export-trigger");
+  await expect(exportButton).toBeVisible();
+  await exportButton.click();
 
   // The click resolves as soon as the handler yields at its first await, so the
   // export is still starting here.
   const progress: ExportOutcome["progress"] = [];
   let lastPercent = -1;
-  let lastRemaining = "";
+  let lastRemainingMs: number | null = null;
   let lastMoveAt = Date.now();
   let sawRunning = false;
 
@@ -185,8 +202,11 @@ export async function runExport(
     const running = await exportRunning(page);
     if (running) sawRunning = true;
 
-    const { percent, remaining } = await progressSample(page);
-    if (percent != null && (percent !== lastPercent || remaining !== lastRemaining)) {
+    const { percent, remainingMs } = await progressSample(page);
+    if (
+      percent != null &&
+      (percent !== lastPercent || remainingMs !== lastRemainingMs)
+    ) {
       // Only the *bar* clears the stall timer. The countdown ticks once a
       // second on a timer of its own, by design — it keeps moving precisely
       // when the frame loop does not — so letting it reset `lastMoveAt` would
@@ -195,15 +215,14 @@ export async function runExport(
         lastMoveAt = Date.now();
       }
       lastPercent = percent;
-      lastRemaining = remaining;
-      progress.push({ atMs: Date.now() - startedAt, percent, remaining });
+      lastRemainingMs = remainingMs;
+      progress.push({ atMs: Date.now() - startedAt, percent, remainingMs });
       options.onProgress?.(percent);
     }
 
-    // The frame loop can finish and hand off to FFmpeg's own flush, during
-    // which nothing moves and `exportController` is already null. Only treat a
-    // vanished controller as an end state once an event has had a chance to
-    // arrive.
+    // The frame loop can finish and hand off to FFmpeg's own flush. The phase
+    // stays non-idle through that, so this only fires once the store has
+    // genuinely settled — and even then an event is given a chance to arrive.
     if (sawRunning && !running) {
       const settled = await waitForTerminalEvent(page, 120_000);
       if (settled == null) {
@@ -250,8 +269,28 @@ async function waitForTerminalEvent(page: Page, timeoutMs: number): Promise<Rend
  * process reported, the other says what the user was shown, and a divergence
  * between them is itself a bug worth failing on.
  */
+/**
+ * Dismiss the "Rendering is complete" dialog.
+ *
+ * It is a Bootstrap modal, so its backdrop sits over the whole window — the
+ * title bar's export button included. A second export cannot be clicked until
+ * it is closed, which is true for a user as well as for a spec.
+ */
+export async function dismissExportModals(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    for (const id of ["progressFinish", "progressError"]) {
+      const el = document.querySelector(`#${id}`);
+      if (el == null) continue;
+      (globalThis as any).bootstrap?.Modal?.getInstance?.(el)?.hide();
+    }
+  });
+  await page
+    .locator(".modal-backdrop")
+    .waitFor({ state: "detached", timeout: 10_000 })
+    .catch(() => {});
+}
+
 export async function exportModalState(page: Page): Promise<{
-  progressVisible: boolean;
   finishVisible: boolean;
   errorVisible: boolean;
   errorMessage: string;
@@ -261,8 +300,9 @@ export async function exportModalState(page: Page): Promise<{
       const el = document.querySelector(`#${id}`) as HTMLElement | null;
       return el != null && el.classList.contains("show");
     };
+    // No `progressVisible`: the render dialog is gone, and progress is the
+    // title bar's ring.
     return {
-      progressVisible: shown("progressRender"),
       finishVisible: shown("progressFinish"),
       errorVisible: shown("progressError"),
       errorMessage: (document.querySelector("#progressErrorMsg")?.textContent ?? "").trim(),

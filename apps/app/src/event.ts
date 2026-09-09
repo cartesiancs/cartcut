@@ -4,38 +4,34 @@
 import cloneDeep from "lodash/cloneDeep";
 
 import { rendererModal } from "./utils/modal";
-import { renderProgress } from "./ui/modal/renderProgress";
+import { exportProgress } from "./features/export/exportProgress";
+import { exportStore } from "./states/exportStore";
+import { clearCancelTimeout } from "./features/export/exportSession";
 import { runMenuCommand } from "./features/editor/menuCommands";
 import { installTextEditingShortcuts } from "./features/editor/textEditing";
 
+// The legacy `PROCESSING` channel. Nothing in the renderer drives it any more
+// (`render/renderMain.ts` is the unused fluent-ffmpeg path), but a number
+// arriving here still belongs on the ring.
 window.electronAPI.res.render.progressing((evt, prog) => {
-  rendererModal.progressModal.show();
-  document.querySelector("#progress").style.width = `${prog}%`;
-  document.querySelector("#progress").innerHTML = `${Math.round(prog)}%`;
+  exportStore.getState().report(prog, null);
 });
 
-window.electronAPI.res.render.finish((evt) => {
-  // The end of the finalizing phase `ControlRender` handed over — FFmpeg has
+window.electronAPI.res.render.finish((evt, detail) => {
+  // The end of the finalizing phase `exportSession` handed over — FFmpeg has
   // finished muxing, which nothing before this point can know.
-  renderProgress.finish();
-  rendererModal.progressModal.hide();
+  clearCancelTimeout();
+  // Main is authoritative about the file it actually wrote; the value set when
+  // the export began is only what we asked for. "Open Saved Folder" reads it.
+  if (detail?.destination) {
+    exportStore.getState().setDestination(detail.destination);
+  }
+  exportProgress.finish();
   rendererModal.progressFinish.show();
-
-  document.querySelector("#progress").style.width = `100%`;
-  document.querySelector("#progress").innerHTML = `100%`;
-
-  const projectFolder = document.querySelector("#projectFolder").value;
-
-  window.electronAPI.req.filesystem.emptyDirSync(
-    `${projectFolder}/renderAnimation`,
-  );
-  window.electronAPI.req.filesystem.removeDirectory(
-    `${projectFolder}/renderAnimation`,
-  );
 });
 
 window.electronAPI.res.render.error((evt, errormsg) => {
-  rendererModal.progressModal.hide();
+  exportProgress.stop();
   rendererModal.progressError.show();
 
   document.querySelector("#progressErrorMsg").innerHTML = `${errormsg}`;
@@ -51,8 +47,8 @@ window.electronAPI.res.render.error((evt, errormsg) => {
  * file.
  */
 window.electronAPI.res.render.v2Error((evt, detail) => {
-  renderProgress.stop();
-  rendererModal.progressModal.hide();
+  clearCancelTimeout();
+  exportProgress.stop();
   rendererModal.progressError.show();
 
   const message = detail?.message ?? "Export failed";
@@ -65,9 +61,16 @@ window.electronAPI.res.render.v2Error((evt, detail) => {
   console.error("[render:v2]", message, detail?.stderrTail);
 });
 
+/**
+ * The main process has reaped FFmpeg and deleted the partial file.
+ *
+ * This is what settles the `cancelling` phase. Until it arrives a new export
+ * would be refused by `ipcRenderV2.start`, so the button stays a spinning ring
+ * rather than offering something that cannot work.
+ */
 window.electronAPI.res.render.v2Cancelled(() => {
-  renderProgress.stop();
-  rendererModal.progressModal.hide();
+  clearCancelTimeout();
+  exportProgress.stop();
 });
 
 window.electronAPI.res.app.forceClose((evt) => {

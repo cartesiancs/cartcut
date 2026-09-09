@@ -3,6 +3,7 @@ import { createCanvas, type Canvas } from "@napi-rs/canvas";
 import type { Timeline, VisualTimelineElement } from "../../@types/timeline";
 import type { RenderOptions } from "../../states/renderOptionStore";
 import type { ILoadedAssetStore } from "../asset/loadedAssetStore";
+import type { VideoScope } from "../asset/videoScope";
 import type { TimelineRenderers } from "../renderer/timeline";
 import { imageElement, shapeElement, audioElement } from "../renderer/testing";
 import { DEFAULT_EXPORT_SETTINGS } from "./settings";
@@ -57,11 +58,16 @@ const renderers = {
 
 function makeStore(calls: string[] = []) {
   return {
-    loadEntireTimeline: vi.fn(async () => {
+    loadExportScope: vi.fn(async () => {
       calls.push("load");
     }),
-    seek: vi.fn(async (_timeline: Timeline, time: number) => {
-      calls.push(`seek:${time}`);
+    seekScope: vi.fn(
+      async (_scope: VideoScope, _timeline: Timeline, time: number) => {
+        calls.push(`seek:${time}`);
+      },
+    ),
+    releaseVideoScope: vi.fn(() => {
+      calls.push("release");
     }),
   } as unknown as ILoadedAssetStore;
 }
@@ -94,7 +100,7 @@ describe("renderTimeline", () => {
 
     await renderTimeline(store, {}, renderers, options, () => {});
 
-    expect(store.loadEntireTimeline).toHaveBeenCalledTimes(1);
+    expect(store.loadExportScope).toHaveBeenCalledTimes(1);
     expect(calls[0]).toBe("load");
     expect(calls.filter((c) => c === "load")).toHaveLength(1);
   });
@@ -121,16 +127,20 @@ describe("renderTimeline", () => {
       "frame",
       "seek:750",
       "frame",
+      // Last, and only once: the scope outlives every frame and is dropped in
+      // the `finally`.
+      "release",
     ]);
   });
 
   it("maps frame index to timecode by fps", async () => {
     const seeks: number[] = [];
     const store = {
-      loadEntireTimeline: vi.fn(async () => {}),
-      seek: vi.fn(async (_t: Timeline, time: number) => {
+      loadExportScope: vi.fn(async () => {}),
+      seekScope: vi.fn(async (_s: VideoScope, _t: Timeline, time: number) => {
         seeks.push(time);
       }),
+      releaseVideoScope: vi.fn(),
     } as unknown as ILoadedAssetStore;
 
     await renderTimeline(
@@ -329,14 +339,75 @@ describe("renderTimeline", () => {
     expect(frames).toEqual([]);
   });
 
-  it("skips decoding audio handles, which export never reads", async () => {
+  it("loads into a scope of its own, never the shared cache", async () => {
+    // The whole of the background-export safety rests on this: the preview's
+    // draw path seeks and releases handles in `_loadedElementVideo`, so an
+    // export that decoded into it would have frames moved under its loop.
+    // Audio is skipped as it always was — FFmpeg rebuilds that graph itself.
     const store = makeStore();
     await renderTimeline(store, {}, renderers, options, () => {});
 
-    expect(store.loadEntireTimeline).toHaveBeenCalledWith(
+    expect(store.loadExportScope).toHaveBeenCalledTimes(1);
+    const [scope, timeline] = (store.loadExportScope as any).mock.calls[0];
+    expect(timeline).toEqual({});
+    expect(scope.videos).toEqual({});
+    expect(scope.id).toMatch(/^export:/);
+  });
+
+  it("seeks the same scope it loaded, every frame", async () => {
+    const store = makeStore();
+    await renderTimeline(
+      store,
       {},
-      { audio: false },
+      renderers,
+      { ...options, fps: 4, duration: 1 },
+      () => {},
     );
+
+    const loaded = (store.loadExportScope as any).mock.calls[0][0];
+    const seeks = (store.seekScope as any).mock.calls;
+    expect(seeks).toHaveLength(4);
+    for (const call of seeks) {
+      expect(call[0]).toBe(loaded);
+    }
+  });
+
+  it("releases its scope when the run finishes", async () => {
+    const store = makeStore();
+    await renderTimeline(store, {}, renderers, options, () => {});
+
+    const loaded = (store.loadExportScope as any).mock.calls[0][0];
+    expect(store.releaseVideoScope).toHaveBeenCalledWith(loaded);
+  });
+
+  it("releases its scope when a frame callback throws", async () => {
+    // Nothing else holds a reference, so a leaked scope is a set of decoders
+    // nobody will ever free.
+    const store = makeStore();
+
+    await expect(
+      renderTimeline(store, {}, renderers, options, () => {
+        throw new Error("pipe closed");
+      }),
+    ).rejects.toThrow("pipe closed");
+
+    const loaded = (store.loadExportScope as any).mock.calls[0][0];
+    expect(store.releaseVideoScope).toHaveBeenCalledWith(loaded);
+  });
+
+  it("releases its scope when the export is aborted", async () => {
+    const store = makeStore();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      renderTimeline(store, {}, renderers, options, () => {}, {
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow();
+
+    const loaded = (store.loadExportScope as any).mock.calls[0][0];
+    expect(store.releaseVideoScope).toHaveBeenCalledWith(loaded);
   });
 
   it("composites the timeline onto a canvas at the requested size", async () => {

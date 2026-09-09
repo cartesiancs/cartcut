@@ -171,6 +171,11 @@ export function enableIpcWrapper() {
         openDirectory: async function (lang) {
           return "none";
         },
+        // There is no OS file manager behind a browser tab; the completion
+        // dialog's button simply does nothing rather than throwing.
+        showItemInFolder: async function (path) {
+          return "none";
+        },
         mkdir: async function (lang) {
           return "none";
         },

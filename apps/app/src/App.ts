@@ -7,6 +7,7 @@ import "./features/demo/warningDemoEnv";
 import "./features/gpt/chatSidebar";
 import { installLutResolver } from "./features/lut/lutRegistry";
 import { installTemplateResolver } from "./features/renderer/template";
+import { IS_MAC } from "./utils/platform";
 import { exportElementRenderers } from "./features/export/renderers";
 import { templateFor, refreshTemplateLibrary } from "./features/template/templateRegistry";
 
@@ -81,8 +82,9 @@ export class App extends LitElement {
     return html`
       <asset-upload-drop></asset-upload-drop>
 
-      <div class="top-bar">
+      <div class="top-bar ${IS_MAC ? "top-bar-mac" : "top-bar-pc"}">
         <b>${this.topBarTitle}</b>
+        <export-button></export-button>
       </div>
 
       <body class="h-100 bg-dark">

@@ -54,6 +54,9 @@ import "./features/option/optionEffect";
 import "./features/option/optionTransition";
 
 import "./features/input/inputText";
+// The title bar's export trigger. The settings it exports with stay in
+// `ui/control/ControlRender.ts`; this is the button and the progress popover.
+import "./features/export/exportButton";
 
 import { Toast } from "./features/toast/toast";
 import { ToastBox } from "./features/toast/toastBox";
@@ -132,6 +135,10 @@ export { renderOptionStore } from "./states/renderOptionStore";
 export { selectionStore } from "./states/selectionStore";
 export { previewViewportStore } from "./states/previewViewportStore";
 export { proxyStore } from "./states/proxyStore";
+// How far along an export is, and whether one is running at all. `harness/
+// export.ts` reads this instead of scraping a progress dialog that no longer
+// exists.
+export { exportStore } from "./states/exportStore";
 export { renderTimelineAtTime } from "./features/renderer/timeline";
 export { exportElementRenderers } from "./features/export/renderers";
 export {

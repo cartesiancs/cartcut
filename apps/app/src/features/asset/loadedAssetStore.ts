@@ -23,6 +23,11 @@ import {
   type SeekRequest,
 } from "../timeline/playback";
 import { runAssetBatch, type AssetLoadTask } from "./assetBatch";
+import {
+  activeVideoScope,
+  type VideoMetadataPerElement,
+  type VideoScope,
+} from "./videoScope";
 import { SCHEMA_VERSION, type TimelineTrack } from "../timeline/tracks";
 
 type GifMetadata = {
@@ -31,38 +36,27 @@ type GifMetadata = {
 };
 
 /**
- * A decoded video, addressed by the element that asked for it.
- *
- * It deliberately holds **no copy of the element**. It used to, and because
- * every edit returns a new object while this entry was never refreshed, the
- * copy froze at load time — so a moved clip played footage offset by exactly
- * the drag distance. The live element is now passed in at every call site
- * instead, which makes that class of bug unrepresentable.
+ * Re-exported so `renderer/filter/videoPipeline.ts` and the rest go on
+ * importing it from here. It lives in `videoScope.ts` because that module is
+ * DOM-free and this one builds canvases at load.
  */
-export type VideoMetadataPerElement = {
-  elementId: string;
-  /** The source this was decoded from, so a changed path can be detected. */
-  localpath: string;
-  /**
-   * The file this handle actually opened — the proxy when one is in use.
-   *
-   * Distinct from `localpath`, which stays the element's own path so every
-   * other consumer is unaffected. Compared on each reconcile so that toggling
-   * proxies, or a proxy finishing generation mid-session, rebuilds the handles
-   * that are now pointing at the wrong rendition.
-   */
-  playbackPath: string;
-  path: string;
-  object: HTMLVideoElement;
-};
+export type { VideoMetadataPerElement } from "./videoScope";
 
-/** What a load pass may skip. */
+/** What a load pass may skip, and where its video handles land. */
 export type AssetLoadOptions = {
   /**
    * Decode `<audio>` handles. Export passes `false`: FFmpeg reconstructs the
    * audio graph from the timeline, so the renderer never reads them.
    */
   audio?: boolean;
+  /**
+   * Put decoded videos here rather than in the shared cache.
+   *
+   * Set only by `loadExportScope`. With a scope, the stale-handle sweep at the
+   * top of the pass is skipped as well — a fresh scope has nothing stale in it,
+   * and running the sweep would have an export release the *preview's* handles.
+   */
+  scope?: VideoScope;
 };
 
 export interface ILoadedAssetStore {
@@ -122,6 +116,8 @@ export interface ILoadedAssetStore {
   loadElementVideo: (
     elementId: string,
     videoElement: VideoElementType,
+    /** Where the handle lands. Absent means the shared cache. */
+    scope?: VideoScope,
   ) => Promise<void>;
   getElementVideo: (elementId: string) => VideoMetadataPerElement | null;
 
@@ -152,6 +148,37 @@ export interface ILoadedAssetStore {
    * of an export shows the previous frame. See `frames.ts#frameSampleMs`.
    */
   seek: (timeline: Timeline, time: number, fps: number) => Promise<void>;
+
+  /**
+   * Decode everything an export will draw, with the videos in a scope of its own.
+   *
+   * Replaces `loadEntireTimeline` on the export path. Images and gifs stay in
+   * the shared cache — they are keyed by path and immutable once decoded, so
+   * nothing can move one under a frame loop — and only `<video>`, which carries
+   * mutable seek state, is separated.
+   *
+   * Audio is never loaded: FFmpeg rebuilds the whole audio graph from the
+   * timeline sent at `render:v2:start`.
+   */
+  loadExportScope: (scope: VideoScope, timeline: Timeline) => Promise<void>;
+
+  /** `seek`, against a scope's handles rather than the shared ones. */
+  seekScope: (
+    scope: VideoScope,
+    timeline: Timeline,
+    time: number,
+    fps: number,
+  ) => Promise<void>;
+
+  /**
+   * Silence and drop every handle in a scope.
+   *
+   * Called from `renderTimeline`'s `finally`, so an export releases its
+   * decoders deterministically at the end of its run rather than leaving them
+   * in the shared cache until the preview's decoder window happens to evict
+   * them.
+   */
+  releaseVideoScope: (scope: VideoScope) => void;
 
   /**
    * Bring every decoded handle in line with the timeline.
@@ -272,7 +299,7 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
     return get()._loadedGif[localpath] ?? null;
   },
 
-  async loadElementVideo(elementId, videoElement) {
+  async loadElementVideo(elementId, videoElement, scope) {
     return new Promise((resolve, reject) => {
       const video = document.createElement("video");
       video.playbackRate = videoElement.speed;
@@ -283,9 +310,14 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
       // the MCP tools — goes on reading `element.localpath` and never learns
       // that a smaller file is what actually decoded, which is exactly the
       // property that let this feature be added without touching any of them.
-      // Export does not come through here at all: it drives handles built by
-      // `loadEntireTimeline` and reads `localpath` directly, so a delivered
-      // file is always cut from the originals.
+      //
+      // This comment used to claim export did not come through here and that a
+      // delivered file was therefore always cut from the originals. That is
+      // simply false — `loadExportScope` reaches this function like everything
+      // else, so an export encodes whatever rendition `playbackPathFor`
+      // answers with, and `proxyStore`'s default mode is "prefer". Left as it
+      // is on purpose: changing it changes what the app renders, which is a
+      // separate decision from where the render runs.
       const playbackPath = toLocalPath(playbackPathFor(videoElement.localpath));
       video.src = playbackPath;
 
@@ -297,7 +329,7 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
           // any remembered request would suppress its first real placement.
           this._lastSeekRequests.delete(elementId);
           this._awaitedSeeks.delete(elementId);
-          this._loadedElementVideo[elementId] = {
+          const meta: VideoMetadataPerElement = {
             elementId,
             localpath: videoElement.localpath,
             // What this handle is actually decoding. `localpath` above stays
@@ -309,6 +341,15 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
             path: getPath(videoElement.localpath),
             object: video,
           };
+          // The scope this load belongs to owns the handle. Without the
+          // parameter an export's decoder would land in the shared cache and
+          // the preview would seek it on its next repaint.
+          if (scope != null) {
+            scope.videos[elementId] = meta;
+            scope.lastSeekRequests.delete(elementId);
+          } else {
+            this._loadedElementVideo[elementId] = meta;
+          }
           resolve();
         },
         { once: true },
@@ -324,6 +365,21 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
     });
   },
   getElementVideo(elementId) {
+    // **The seam that makes a background export safe.**
+    //
+    // The active scope answers alone — there is deliberately no fallback to
+    // the shared map. A handle an export did not load is a handle nothing has
+    // placed, and drawing the preview's copy of it would be exactly the
+    // corruption this scope exists to prevent: it turns a visible "this clip
+    // is missing" into an invisible "this clip is at the preview's playhead".
+    //
+    // Scoping the *lookup* rather than the renderer table is what covers a
+    // template's nested clips too — `App.ts` installs one table on the
+    // template resolver globally, so a per-caller table would never reach them.
+    const scope = activeVideoScope();
+    if (scope != null) {
+      return scope.videos[elementId] ?? null;
+    }
     return get()._loadedElementVideo[elementId] ?? null;
   },
 
@@ -368,10 +424,18 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
     );
   },
   async _loadAssetsWithFilter(timeline, filter, options, cursorMs) {
+    const scope = options?.scope;
+
     // Drop handles for clips that are gone or now point at another file, so
     // the cache cannot outlive the timeline it was built from — and, when a
     // cursor is supplied, for clips that have drifted out of reach of it.
-    get().releaseUnusedVideos(timeline, cursorMs);
+    //
+    // Skipped for a scope load. A fresh scope has nothing stale in it, and
+    // this sweep reads `_loadedElementVideo` — so running it would have an
+    // export release the *preview's* handles, which is the bug inverted.
+    if (scope == null) {
+      get().releaseUnusedVideos(timeline, cursorMs);
+    }
 
     const idElementPairs = Object.entries(timeline);
     const visibleElements = idElementPairs.filter(
@@ -405,15 +469,22 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
             });
           }
           break;
-        case "video":
-          if (store._loadedElementVideo[elementId] == null) {
+        case "video": {
+          // A scope has its own handle record and its own in-flight set. The
+          // second is what closes a real defect for the export: `runAssetBatch`
+          // skips a key already in flight, so a clip the preview had started
+          // decoding made `loadEntireTimeline` resolve without it.
+          const videos = scope?.videos ?? store._loadedElementVideo;
+          const inFlight = scope?.loading ?? store._loadingElementVideo;
+          if (videos[elementId] == null) {
             tasks.push({
               key: elementId,
-              inFlight: store._loadingElementVideo,
-              start: () => store.loadElementVideo(elementId, element),
+              inFlight,
+              start: () => store.loadElementVideo(elementId, element, scope),
             });
           }
           break;
+        }
       }
     }
 
@@ -457,58 +528,39 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
    * export shows the right frame or the one before it.
    */
   async seek(timeline, time, fps) {
-    const metas = Object.values(get()._loadedElementVideo).filter((meta) => {
-      const element = timeline[meta.elementId];
-      return (
-        element != null &&
-        isVisualTimelineElement(element) &&
-        // The *unbiased* instant. Visibility is a question about the timeline
-        // moment, and asking it half a frame late would let a clip appear or
-        // vanish one frame off. Only the address inside a visible clip moves.
-        isElementVisibleAtTime(time, timeline, element)
-      );
-    });
-
-    await Promise.all(
-      metas.map(
-        (meta) =>
-          new Promise<void>((resolve) => {
-            const element = timeline[meta.elementId] as VideoElementType;
-            const video = meta.object;
-            // Deliberately NOT clamped to the trim window. Inside a transition
-            // this clip is being asked for frames past its out-point — or
-            // before its in-point — which is the whole mechanism, and
-            // `sourceTimeAt` extrapolates there correctly because it is linear.
-            // `maxTransitionMs` already guarantees the frames exist in the file.
-            //
-            // The half-frame goes in on the *timeline* side of `sourceTimeAt`,
-            // not after it. That is what makes it correct for a retimed clip:
-            // the conversion multiplies by `speed`, so a 2x clip needs two
-            // source frames of offset per timeline frame and a 0.25x clip a
-            // quarter of one. Adding a fixed offset to the source time instead
-            // would be right only at speed 1.
-            const want = sourceTimeAt(element, frameSampleMs(time, fps)) / 1000;
-
-            video.playbackRate = speedOf(element);
-
-            // Export drives the handles itself rather than through
-            // `syncPlayback`, so it has to keep the request record honest — a
-            // stale entry would suppress the preview's next placement when the
-            // export finishes and the user scrubs.
-            get()._lastSeekRequests.set(meta.elementId, want);
-
-            // Assigning the position it already holds fires no `seeked`, so
-            // waiting for one would stall the export's frame loop forever.
-            if (Math.abs(video.currentTime - want) < 1e-3) {
-              resolve();
-              return;
-            }
-
-            video.addEventListener("seeked", () => resolve(), { once: true });
-            video.currentTime = want;
-          }),
-      ),
+    await seekHandles(
+      get()._loadedElementVideo,
+      get()._lastSeekRequests,
+      timeline,
+      time,
+      fps,
     );
+  },
+
+  async loadExportScope(scope, timeline) {
+    await get()._loadAssetsWithFilter(timeline, null, {
+      audio: false,
+      scope,
+    });
+  },
+
+  async seekScope(scope, timeline, time, fps) {
+    await seekHandles(
+      scope.videos,
+      scope.lastSeekRequests,
+      timeline,
+      time,
+      fps,
+    );
+  },
+
+  releaseVideoScope(scope) {
+    for (const elementId of Object.keys(scope.videos)) {
+      releaseHandle(scope.videos[elementId].object);
+      delete scope.videos[elementId];
+    }
+    scope.loading.clear();
+    scope.lastSeekRequests.clear();
   },
 
   syncPlayback(timeline, cursorMs, isPlaying, onSeeksLand) {
@@ -590,12 +642,7 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
         continue;
       }
 
-      // Nothing else will ever visit this handle again, so silence it before
-      // letting go — otherwise a deleted clip keeps playing.
-      meta.object.pause();
-      meta.object.muted = true;
-      meta.object.removeAttribute("src");
-      meta.object.load();
+      releaseHandle(meta.object);
       delete loaded[elementId];
       get()._loadingElementVideo.delete(elementId);
       get()._lastSeekRequests.delete(elementId);
@@ -617,6 +664,91 @@ function asDocument(timeline: Timeline) {
     tracks: [] as TimelineTrack[],
     elements: timeline,
   };
+}
+
+
+/**
+ * Seek every handle in `videos` that is visible at `time`, and wait.
+ *
+ * Shared by `seek` (the shared cache) and `seekScope` (an export's own), so
+ * the two cannot drift — the frame-addressing rules below are the difference
+ * between an export showing the right frame and the one before it.
+ *
+ * The export path needs frame-exact positioning, so unlike the preview it
+ * waits.
+ */
+async function seekHandles(
+  videos: Record<string, VideoMetadataPerElement>,
+  lastSeekRequests: Map<string, number>,
+  timeline: Timeline,
+  time: number,
+  fps: number,
+): Promise<void> {
+  const metas = Object.values(videos).filter((meta) => {
+    const element = timeline[meta.elementId];
+    return (
+      element != null &&
+      isVisualTimelineElement(element) &&
+      // The *unbiased* instant. Visibility is a question about the timeline
+      // moment, and asking it half a frame late would let a clip appear or
+      // vanish one frame off. Only the address inside a visible clip moves.
+      isElementVisibleAtTime(time, timeline, element)
+    );
+  });
+
+  await Promise.all(
+    metas.map(
+      (meta) =>
+        new Promise<void>((resolve) => {
+          const element = timeline[meta.elementId] as VideoElementType;
+          const video = meta.object;
+          // Deliberately NOT clamped to the trim window. Inside a transition
+          // this clip is being asked for frames past its out-point — or
+          // before its in-point — which is the whole mechanism, and
+          // `sourceTimeAt` extrapolates there correctly because it is linear.
+          // `maxTransitionMs` already guarantees the frames exist in the file.
+          //
+          // The half-frame goes in on the *timeline* side of `sourceTimeAt`,
+          // not after it. That is what makes it correct for a retimed clip:
+          // the conversion multiplies by `speed`, so a 2x clip needs two
+          // source frames of offset per timeline frame and a 0.25x clip a
+          // quarter of one. Adding a fixed offset to the source time instead
+          // would be right only at speed 1.
+          const want = sourceTimeAt(element, frameSampleMs(time, fps)) / 1000;
+
+          video.playbackRate = speedOf(element);
+
+          // The caller drives the handles itself rather than through
+          // `syncPlayback`, so it has to keep its own request record honest —
+          // a stale entry would suppress the next placement.
+          lastSeekRequests.set(meta.elementId, want);
+
+          // Assigning the position it already holds fires no `seeked`, so
+          // waiting for one would stall the export's frame loop forever.
+          if (Math.abs(video.currentTime - want) < 1e-3) {
+            resolve();
+            return;
+          }
+
+          video.addEventListener("seeked", () => resolve(), { once: true });
+          video.currentTime = want;
+        }),
+    ),
+  );
+}
+
+/**
+ * Silence a handle and let go of it.
+ *
+ * Shared by `releaseUnusedVideos` and `releaseVideoScope`: nothing will ever
+ * visit this handle again, so it has to be silenced before it is dropped —
+ * otherwise a deleted clip keeps playing.
+ */
+function releaseHandle(video: HTMLVideoElement): void {
+  video.pause();
+  video.muted = true;
+  video.removeAttribute("src");
+  video.load();
 }
 
 function getPath(path: string) {

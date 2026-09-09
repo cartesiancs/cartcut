@@ -40,8 +40,43 @@ type Handle = {
 const handles = new Map<string, Handle>();
 const failed = new Set<string>();
 
-function keyOf(elementId: string, source: string): string {
-  return elementId + "|" + source;
+/**
+ * The scope separator.
+ *
+ * A NUL cannot appear in an element id or a file path, so splitting on it is
+ * exact — unlike "|", which the `elementId|source` half already uses and which
+ * a path is free to contain.
+ */
+const SCOPE_SEP = "\u0000";
+
+/**
+ * Which frame loop this handle belongs to.
+ *
+ * The preview's scope is the empty string. An export passes its video scope's
+ * id, for the same reason `loadedAssetStore` gained one: `overlayFrame`
+ * assigns `currentTime` and calls `play()` on every frame, and
+ * `releaseUnusedOverlays` runs from the preview's draw path — so deleting an
+ * effect mid-render used to tear a handle out from under the export.
+ *
+ * Exported for the suite: the property that matters is that two scopes cannot
+ * collide, and that is a statement about this function.
+ */
+export function overlayScopeKey(
+  scope: string,
+  elementId: string,
+  source: string,
+): string {
+  return scope + SCOPE_SEP + elementId + "|" + source;
+}
+
+/** The element id inside a scoped key, or null when the scope does not match. */
+function elementIdIn(key: string, scope: string): string | null {
+  const split = key.indexOf(SCOPE_SEP);
+  if (key.slice(0, split) !== scope) {
+    return null;
+  }
+  const rest = key.slice(split + SCOPE_SEP.length);
+  return rest.slice(0, rest.lastIndexOf("|"));
 }
 
 /**
@@ -67,6 +102,7 @@ export function overlaySourceOf(preset: FxPreset): string | null {
  * frame-accurate.
  */
 export function overlayFrame(
+  scope: string,
   elementId: string,
   element: EffectElementType,
   preset: FxPreset,
@@ -78,7 +114,7 @@ export function overlayFrame(
     return null;
   }
 
-  const key = keyOf(elementId, source);
+  const key = overlayScopeKey(scope, elementId, source);
   if (failed.has(key)) {
     return null;
   }
@@ -177,16 +213,38 @@ function create(key: string, source: string): Handle | null {
  */
 export function releaseUnusedOverlays(liveElementIds: Set<string>): void {
   for (const [key, handle] of handles) {
-    const elementId = key.slice(0, key.lastIndexOf("|"));
-    if (liveElementIds.has(elementId)) {
+    // The preview's own scope alone. An export's handles are not this
+    // function's to drop — that is the whole reason the key carries a scope.
+    const elementId = elementIdIn(key, "");
+    if (elementId == null || liveElementIds.has(elementId)) {
       continue;
     }
-    handle.video.pause();
-    handle.video.removeAttribute("src");
-    handle.video.load();
-    handles.delete(key);
-    failed.delete(key);
+    releaseOverlayHandle(key, handle);
   }
+}
+
+/**
+ * Drop every handle belonging to one scope.
+ *
+ * Called from `renderTimeline`'s `finally`, beside `releaseVideoScope`, so an
+ * export lets go of its overlay decoders whether it finished, failed or was
+ * cancelled.
+ */
+export function releaseOverlayScope(scope: string): void {
+  for (const [key, handle] of handles) {
+    if (elementIdIn(key, scope) == null) {
+      continue;
+    }
+    releaseOverlayHandle(key, handle);
+  }
+}
+
+function releaseOverlayHandle(key: string, handle: Handle): void {
+  handle.video.pause();
+  handle.video.removeAttribute("src");
+  handle.video.load();
+  handles.delete(key);
+  failed.delete(key);
 }
 
 /** For tests and for tearing a render window down. */

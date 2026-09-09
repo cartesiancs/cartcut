@@ -965,6 +965,116 @@ Still not wired, though the pure module and its suite exist: **auto zoom**
 gives position but not clicks — which means a native module and, on macOS, the
 Accessibility prompt.
 
+## Exporting
+
+The trigger is one button on the **title bar**, and it is the only one: the
+settings panel under `#nav-output` chooses the codec and the preset, and starting
+a render is not its job. Menu, button and keystroke are one code path, the rule
+`features/editor/actions.ts` states for the toolbar.
+
+```
+apps/app/src/features/export/exportSession.ts   startExport / cancelExport — the one path
+apps/app/src/features/export/exportPhase.ts     the four phases, as a pure table
+apps/app/src/states/exportStore.ts              phase, percent, remainingMs, destination
+apps/app/src/features/export/exportProgress.ts  the ETA singleton — publishes, never paints
+apps/app/src/features/export/snapshot.ts        what the frame loop reads, detached
+apps/app/src/features/export/exportButton.ts    <export-button>, the ring and its popover
+apps/app/src/features/export/exportRing.ts      ringDash — pure, node-tested
+apps/app/src/features/asset/videoScope.ts       the decoders an export owns
+```
+
+### The modal was the safety, and it is gone
+
+Clicking Render used to open a Bootstrap dialog whose backdrop covered the
+window. Nobody chose that as a concurrency control, but it was one: **the export
+frame loop runs in the editor's own renderer and drove the same `<video>`
+handles as the preview.** `previewCanvas` repaints on every store write, and its
+draw path calls `syncPlayback` and `releaseUnusedVideos(timeline, cursorMs)` —
+the second of which `loadedAssetStore` already documented as the thing an export
+"must never" suffer. Editing during a render would have produced a plausible
+wrong frame, or a frame loop waiting forever on a `seeked` for a handle that had
+been torn down.
+
+So an export now owns its decoders. `videoScope.ts` holds a named set of
+handles, and `withVideoScope(scope, draw)` makes it answer `getElementVideo` for
+the duration of one composite.
+
+Four things about it are easy to get wrong:
+
+- **The seam is `getElementVideo`, not the renderer table.** `renderVideoWithWait`
+  and `renderVideoWithoutWait` differ only in `waitFilter` and both resolve
+  through the same lookup — and `App.ts` installs the *export* table on the
+  template resolver globally, so a per-caller table would never reach a
+  template's nested clips at all.
+- **The dynamic extent is only safe because every renderer is synchronous.**
+  `renderer/{timeline,element,video,image,gif,text,shape,template}.ts` and
+  `fx/compositor.ts` all are. The moment one gains an `await`, the export's scope
+  leaks into whatever runs next and the preview draws the export's frames.
+- **No fallback to the shared map inside a scope.** A silent fallback restores
+  the bug exactly, and converts a visible "this clip is missing" into an
+  invisible "this clip is at the preview's playhead".
+- **Overlay effects are a second decoder set**, in `fx/overlaySource.ts`, keyed
+  by scope for the same reason. `releaseUnusedOverlays` runs from the preview's
+  draw path and sweeps the preview's scope alone.
+
+Images and gifs stay shared: keyed by path, immutable once decoded, so nothing
+can move one under a frame loop. The contact sheet, the template thumbnail and
+the e2e reference render stay on the shared set too — they draw one frame of the
+*live* document, which is what `seek`'s unchanged signature keeps them doing.
+
+### What else the loop reads
+
+`snapshot.ts` copies the element map and each element, and **not one level
+deeper**. The document is immutable by convention, so `animation`, `mask`,
+`filter` and `lut` are safe to share — and a deep clone would not be: one baked
+lane is 36,000 samples per property. The shallow element copy exists for the two
+places that still write a field onto a live element, `elementTimeline.ts`'s
+`.blob` and `optionImage.ts`'s `.localpath`; the second would make a clip vanish
+from the delivered file mid-render.
+
+### The phases
+
+`idle → running → finalizing → idle`, plus `cancelling`. That last one is not
+decoration: aborting is instant in the renderer and slow in main, which is still
+SIGKILLing FFmpeg — and `ipcRenderV2.start` throws "An export is already
+running" throughout. With the button permanently on screen that window is one
+double-click away. `render:v2:cancelled` settles it, and `exportSession` arms a
+timeout in case it never arrives.
+
+`nextPhase` returns its input **by identity** for a transition that does not
+apply, and `exportStore` compares before writing, so the duplicate `settled`
+that the click handler's `finally` and the IPC event race over costs no repaint.
+`report` declines on an unchanged whole percent and whole second for the same
+reason: at one write per frame an 18,000-frame export would be 18,000 Lit
+renders on the thread pushing 8MB a frame into a pipe.
+
+**`exportProgress.begin` calls `reset`, never `stop`.** `stop` dispatches
+`settled`, and the session calls `begin` one line *before* `exportStore.begin` —
+so settling there would knock the phase back to idle and the button would sit as
+a pill for the whole export. `eta.ts`, `cost.ts` and `countdown.ts` are untouched
+by any of this; the singleton publishes where it used to paint.
+
+### Playback during a render is allowed
+
+Scrub, play, edit, undo — none of it can reach the export's handles now, and its
+audio was reconstructed in the main process from the timeline sent at
+`render:v2:start`. The cost is contention: both get slower and the preview drops
+frames. That is the trade, and it is stated rather than discovered.
+
+### How it is known to be right
+
+`tests/e2e/specs/background-export.spec.ts` exports the same project twice —
+once undisturbed, once while the playhead is scrubbed at 60Hz across a
+twenty-second timeline — and requires the two files to agree frame for frame.
+Asserting the *difference* is what lets it stay green while the seek defect in
+FINDINGS #1 is open: that afflicts both runs and cancels.
+
+The twenty seconds are load-bearing. `decoderWindow.ts` only releases a decoder
+more than 10s ahead or 6s behind the playhead, so a short project never triggers
+a release and the spec would pass with or without the scope — which a first
+draft of it did. With the scope removed the disturbed export **deadlocks**,
+which is how the spec is known to measure something.
+
 ## Testing
 
 Vitest, suites co-located with sources. The `features/timeline/` and

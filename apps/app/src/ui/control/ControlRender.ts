@@ -1,9 +1,6 @@
 import { LitElement, html } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { useTimelineStore } from "../../states/timelineStore";
 import { LocaleController } from "../../controllers/locale";
-import { getLocationEnv } from "../../functions/getLocationEnv";
-import axios from "axios";
 import {
   renderOptionStore,
   type IRenderOptionStore,
@@ -32,18 +29,19 @@ import {
   type ExportSettings,
   type PresetName,
 } from "../../features/export/settings";
-import { v4 as uuidv4 } from "uuid";
-import { io } from "socket.io-client";
-import { rendererModal } from "../../utils/modal";
-import { requestIPCVideoExport } from "../../features/export/ipc";
-import { exportElementRenderers } from "../../features/export/renderers";
-import type { ExportOptions } from "../../features/export/types";
-import { frameCount } from "../../features/export/frames";
-import { renderProgress } from "../modal/renderProgress";
+import { installHttpRenderListeners } from "../../features/export/exportSession";
 import { IS_MAC } from "../../utils/platform";
 
-let socket;
-
+/**
+ * The export *settings*, and nothing else.
+ *
+ * Starting a render lives in `features/export/exportSession.ts` and is reached
+ * from the title bar's `<export-button>` and from File → Export. It used to be
+ * a method on this component, which meant the export could only be started
+ * from a panel that happened to be mounted — and `disconnectedCallback` here
+ * stopped the progress ticker, which is actively wrong now that an export
+ * outlives whatever started it.
+ */
 @customElement("control-ui-render")
 export class ControlRender extends LitElement {
   private lc = new LocaleController(this);
@@ -67,31 +65,9 @@ export class ControlRender extends LitElement {
   @state()
   private showAdvanced = false;
 
-  /** Non-null only while an export is running. See `cancelExport`. */
-  exportController: AbortController | null = null;
-
   constructor() {
     super();
     this.hasUpdatedOnce = false;
-  }
-
-  /**
-   * Stop the running export.
-   *
-   * The progress modal's only button used to be `Close`, which hid the dialog
-   * and left the frame loop running to completion against a pipe the user had
-   * stopped watching.
-   */
-  cancelExport() {
-    renderProgress.stop();
-    this.exportController?.abort();
-  }
-
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    // The progress ticker is a module singleton and outlives this component by
-    // design, so it has to be told when the component that started it goes.
-    renderProgress.stop();
   }
 
   private get settings(): ExportSettings {
@@ -107,26 +83,13 @@ export class ControlRender extends LitElement {
       this.renderOption = state.options;
     });
 
-    if (getLocationEnv() == "web") {
-      socket = io();
-
-      socket.on("render:progress", (msg) => {
-        rendererModal.progressModal.show();
-        document.querySelector("#progress").style.width = `${msg}%`;
-        document.querySelector("#progress").innerHTML = `${Math.round(msg)}%`;
-      });
-
-      socket.on("render:done", (path) => {
-        rendererModal.progressModal.hide();
-
-        document.querySelector("#progress").style.width = `100%`;
-        document.querySelector("#progress").innerHTML = `100%`;
-
-        this.videoSrc = `/api/file?path=${path}`;
-
-        this.httpRenderDoneModal.show();
-      });
-    }
+    // The web build's render finishes over socket.io rather than over IPC, and
+    // this panel owns the dialog it opens.
+    installHttpRenderListeners();
+    document.addEventListener("cartcut:http-render-done", (event: any) => {
+      this.videoSrc = `/api/file?path=${event.detail.path}`;
+      this.httpRenderDoneModal?.show();
+    });
 
     return this;
   }
@@ -144,61 +107,6 @@ export class ControlRender extends LitElement {
     this.hasUpdatedOnce = true;
 
     this.syncSelects();
-  }
-
-  async requestHttpRender() {
-    const tempPath = await window.electronAPI.req.app.getTempPath();
-    const renderOptionState = renderOptionStore.getState().options;
-    const elementControlComponent = document.querySelector("element-control");
-
-    const projectDuration = renderOptionState.duration;
-    const projectFolder = tempPath.path;
-    const projectRatio = elementControlComponent.previewRatio;
-    const previewSizeH = renderOptionState.previewSize.h;
-    const previewSizeW = renderOptionState.previewSize.w;
-    const settings = renderOptionState.exportSettings;
-    const uuidKey = uuidv4();
-
-    if (projectFolder == "") {
-      document
-        .querySelector("toast-box")
-        .showToast({ message: "Select a project folder", delay: "4000" });
-
-      return 0;
-    }
-
-    // Spreading the store also carries `fps` and `duration`, which
-    // `renderTimeline` destructures — the hand-built object below used to omit
-    // them, leaving the offscreen render loop with an undefined frame count.
-    let options = {
-      ...renderOptionState,
-      videoDuration: projectDuration,
-      videoDestination: `${projectFolder}/${uuidKey}.${settings.container}`,
-      videoDestinationFolder: projectFolder,
-      videoBitrate: settings.videoBitrate,
-      previewRatio: projectRatio,
-      previewSize: {
-        w: previewSizeW,
-        h: previewSizeH,
-      },
-    };
-
-    let timeline = Object.fromEntries(
-      Object.entries(useTimelineStore.getState().timeline).sort(
-        ([, valueA]: any, [, valueB]: any) => valueA.priority - valueB.priority,
-      ),
-    );
-
-    for (const key in timeline) {
-      if (Object.prototype.hasOwnProperty.call(timeline, key)) {
-        timeline[key].localpath = `file:/${timeline[key].localpath}`;
-      }
-    }
-
-    axios.post("/api/render", {
-      options: options,
-      timeline: timeline,
-    });
   }
 
   handleClickActionButton() {
@@ -472,95 +380,6 @@ export class ControlRender extends LitElement {
     `;
   }
 
-  async handleClickRenderV2Button() {
-    const renderOptionState = renderOptionStore.getState().options;
-
-    const optionsWithoutDestination: Omit<ExportOptions, "videoDestination"> = {
-      ...renderOptionState,
-      videoDuration: renderOptionState.duration,
-      videoBitrate: renderOptionState.exportSettings.videoBitrate,
-    };
-
-    const elementRenderers = exportElementRenderers;
-
-    const env = getLocationEnv();
-    if (env == "electron") {
-      const projectFolder = document.querySelector("#projectFolder").value;
-      if (projectFolder == "") {
-        document
-          .querySelector("toast-box")
-          .showToast({ message: "Select a project folder", delay: "4000" });
-        return;
-      }
-
-      const ipc = window.electronAPI.req;
-
-      const videoDestination = await ipc.dialog.exportVideo(
-        renderOptionState.exportSettings.container,
-      );
-      if (videoDestination == null) {
-        return;
-      }
-
-      const fileExists = await ipc.filesystem.existFile(videoDestination);
-      if (fileExists) {
-        await ipc.filesystem.removeFile(videoDestination);
-      }
-
-      const options = {
-        ...optionsWithoutDestination,
-        videoDestination,
-      };
-
-      const timeline = useTimelineStore.getState().timeline;
-
-      // Before the dialog, so the bar and the remaining-time line are reset
-      // rather than still showing the previous export's numbers.
-      renderProgress.begin(
-        timeline,
-        frameCount(options),
-        renderOptionState.fps,
-      );
-      rendererModal.progressModal.show();
-
-      const controller = new AbortController();
-      this.exportController = controller;
-
-      try {
-        await requestIPCVideoExport(
-          timeline,
-          elementRenderers,
-          options,
-          (currentFrame, totalFrames) =>
-            renderProgress.onFrame(currentFrame, totalFrames),
-          controller.signal,
-        );
-
-        // The frame loop is done; FFmpeg is not. `finishStream` only closes its
-        // stdin, so the mux still has seconds to run and nothing reports on it
-        // until `PROCESSING_FINISH` reaches `event.ts`.
-        renderProgress.finalizing();
-      } catch (error) {
-        // Un-awaited, this was an unhandled rejection and the modal froze at
-        // whatever percent it had reached.
-        renderProgress.stop();
-        rendererModal.progressModal.hide();
-        if ((error as Error)?.name !== "AbortError") {
-          document.querySelector("toast-box")?.showToast({
-            message: `Export failed: ${(error as Error)?.message ?? error}`,
-            delay: "6000",
-          });
-        }
-      } finally {
-        if (this.exportController === controller) {
-          this.exportController = null;
-        }
-      }
-    } else {
-      this.requestHttpRender();
-    }
-  }
-
   render() {
     const activePreset = detectPreset(this.settings);
 
@@ -609,12 +428,11 @@ export class ControlRender extends LitElement {
         ${this.renderVideoSection()} ${this.renderAudioSection()}
       </div>
 
-      <button
-        class="btn btn-blue-fill ${getLocationEnv() == "demo" ? "d-none" : ""}"
-        @click=${this.handleClickRenderV2Button}
-      >
-        Render
-      </button>
+      <!--
+        No Render button here any more. The trigger is <export-button> in the
+        title bar, so it is reachable whatever panel is open and whatever the
+        user is doing; this panel is the settings it exports with.
+      -->
 
       <div
         class="modal fade"

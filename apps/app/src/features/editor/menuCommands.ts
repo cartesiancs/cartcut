@@ -35,6 +35,7 @@ import { useTimelineStore } from "../../states/timelineStore";
 import { atPlayhead, importPathsAt } from "../asset/importDrop";
 import { spanEnd } from "../timeline/geometry";
 import { rendererModal } from "../../utils/modal";
+import { startExport } from "../export/exportSession";
 import {
   clearSelection,
   copySelection,
@@ -175,9 +176,10 @@ const COMMANDS: Record<MenuCommandId, () => void> = {
     });
   },
   "file.exportVideo": () => {
-    // The Render panel's own button, so the export runs with the settings the
-    // user is looking at rather than with a second set assembled here.
-    document.querySelector("control-ui-render")?.handleClickRenderV2Button();
+    // The same call the title bar's button makes. It used to reach into
+    // `<control-ui-render>` and invoke a method on it, which only worked while
+    // that panel was mounted.
+    void startExport();
   },
 
   // -------------------------------------------------------------------- Edit
