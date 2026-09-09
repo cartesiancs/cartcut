@@ -234,6 +234,7 @@ export class ExportButton extends LitElement {
           display: flex;
           align-items: center;
           justify-content: center;
+          gap: 4px;
           height: 20px;
           padding: 0 10px;
           border: 1px solid #3a3f44;
@@ -246,6 +247,10 @@ export class ExportButton extends LitElement {
         }
         .export-trigger:hover {
           background-color: #2b2f36;
+        }
+        .export-trigger .export-icon {
+          font-size: 13px;
+          line-height: 1;
         }
         .export-trigger.is-ring {
           width: ${RING_SIZE}px;
@@ -348,7 +353,11 @@ export class ExportButton extends LitElement {
         aria-label=${idle ? "Export video" : "Export progress"}
         @click=${this._handleClickTrigger}
       >
-        ${idle ? "export" : this.renderRing()}
+        ${idle
+          ? html`<span class="material-symbols-outlined export-icon"
+                >ios_share</span
+              ><span>Export</span>`
+          : this.renderRing()}
       </button>
 
       ${this.renderPopover()}
