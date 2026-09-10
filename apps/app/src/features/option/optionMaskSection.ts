@@ -76,6 +76,12 @@ export class OptionMaskSection extends LitElement {
     // before any button in here receives its own — so without this, clicking a
     // shape would act on nothing.
     this.setAttribute("data-keeps-selection", "");
+    // A spinner drag abandoned with Escape. `onCancel` bubbles, so one listener
+    // covers all seven fields. The bounds above mirror what `coerceMask`
+    // enforces — size and feather non-negative, roundness 0-100, position and
+    // rotation deliberately free — so the drag stops where the op would have
+    // stopped it instead of showing a number the store is about to overrule.
+    this.addEventListener("onCancel", () => this.gesture.cancel());
     return this;
   }
 
@@ -307,6 +313,8 @@ export class OptionMaskSection extends LitElement {
             <number-input
               aria-event="mask-x"
               .value=${mask.location.x}
+              step="1"
+              sensitivity="1"
               @onChange=${(e: Event) =>
                 this.commitField(
                   { location: { x: this.numberAt(e), y: mask.location.y } },
@@ -319,6 +327,8 @@ export class OptionMaskSection extends LitElement {
             <number-input
               aria-event="mask-y"
               .value=${mask.location.y}
+              step="1"
+              sensitivity="1"
               @onChange=${(e: Event) =>
                 this.commitField(
                   { location: { x: mask.location.x, y: this.numberAt(e) } },
@@ -337,6 +347,9 @@ export class OptionMaskSection extends LitElement {
             <number-input
               aria-event="mask-w"
               .value=${mask.size.width}
+              min="0"
+              step="1"
+              sensitivity="1"
               @onChange=${(e: Event) =>
                 this.commitField(
                   { size: { width: this.numberAt(e), height: mask.size.height } },
@@ -349,6 +362,9 @@ export class OptionMaskSection extends LitElement {
             <number-input
               aria-event="mask-h"
               .value=${mask.size.height}
+              min="0"
+              step="1"
+              sensitivity="1"
               @onChange=${(e: Event) =>
                 this.commitField(
                   { size: { width: mask.size.width, height: this.numberAt(e) } },
@@ -366,6 +382,7 @@ export class OptionMaskSection extends LitElement {
           html`<number-input
             aria-event="mask-rotation"
             .value=${mask.rotation}
+            sensitivity="0.5"
             @onChange=${(e: Event) =>
               this.commitField({ rotation: this.numberAt(e) }, [
                 { property: "maskRotation", lane: "x", value: this.numberAt(e) },
@@ -378,6 +395,8 @@ export class OptionMaskSection extends LitElement {
           html`<number-input
             aria-event="mask-feather"
             .value=${mask.feather}
+            min="0"
+            sensitivity="0.2"
             @onChange=${(e: Event) =>
               this.commitField({ feather: this.numberAt(e) }, [
                 { property: "maskFeather", lane: "x", value: this.numberAt(e) },
@@ -390,6 +409,7 @@ export class OptionMaskSection extends LitElement {
           html`<number-input
             aria-event="mask-roundness"
             .value=${mask.roundness}
+            min="0"
             max="100"
             @onChange=${(e: Event) =>
               this.commitField({ roundness: this.numberAt(e) }, [

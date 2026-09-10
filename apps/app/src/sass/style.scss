@@ -339,6 +339,39 @@ element-timeline-range {
   background-color: $button-background-color;
 }
 
+// A number field you can drag.
+//
+// The cursor is the whole affordance — nothing else on the field says so — and
+// it flips to a caret once the field has focus, which is the moment a click
+// stops meaning "grab this" and starts meaning "type here".
+.scrub-number {
+  cursor: ew-resize;
+}
+
+.scrub-number:focus {
+  cursor: text;
+}
+
+// Chromium's spin buttons occupy the right ~16px of a number input, and a
+// mousedown there is a spinner click rather than the start of a drag. The
+// affordance and the control cannot share the same pixels.
+.scrub-number::-webkit-inner-spin-button,
+.scrub-number::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+// While a scrub is running. The `cursor` half only ever shows on the fallback
+// path — with the pointer lock granted the cursor is hidden outright — but
+// `user-select` matters either way, or the drag paints a selection across every
+// label it crosses. `!important` and the descendant selector are both needed:
+// `.btn-nav` and friends set a cursor of their own, so inheritance alone loses.
+body.is-scrubbing,
+body.is-scrubbing * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}
+
 .form-transparent {
   background-color: transparent;
   outline: 0;

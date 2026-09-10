@@ -9,6 +9,8 @@ import "../../components/input/input";
 import "../../features/option/optionTabBar";
 import type { OptionTabSpec } from "../../features/option/optionTabBar";
 import { FPS_PRESETS } from "../../features/timeline/frames";
+import { beginInputScrub } from "../../features/input/inputScrub";
+import { SCRUB_FIELDS } from "../../features/input/scrubFields";
 import { setProjectFps } from "../../features/editor/frameRate";
 import {
   AUDIO_BITRATES,
@@ -160,6 +162,24 @@ export class ControlSetting extends LitElement {
     e.target.value = String(setProjectFps(Number(e.target.value)));
   }
 
+  /**
+   * Start a drag-scrub on one of the number fields.
+   *
+   * One handler for all six: the field's `id` names its entry in
+   * `SCRUB_FIELDS`, so adding a field is a row in that table rather than a
+   * second listener here. A field with no entry simply does not scrub.
+   *
+   * The scrub commits on release, through the same `@change` handlers a typed
+   * edit goes through — see `inputScrub.ts` for why none of them are live.
+   */
+  _handleScrubDown(e: MouseEvent) {
+    const spec = SCRUB_FIELDS[(e.currentTarget as HTMLElement).id];
+    if (spec == null) {
+      return;
+    }
+    beginInputScrub(e, spec);
+  }
+
   _handleClickChangeLang() {
     if (this.lc.value == "ko") {
       this.lc.changeLanguage("en");
@@ -309,7 +329,8 @@ export class ControlSetting extends LitElement {
           <input
             id="projectDurationMinute"
             type="number"
-            class="form-control bg-default text-light"
+            class="form-control bg-default text-light scrub-number"
+            @mousedown=${this._handleScrubDown}
             placeholder="m"
             @change=${this._handleUpdateDurationMinute}
             .value=${String(Math.floor(duration / 60))}
@@ -324,7 +345,8 @@ export class ControlSetting extends LitElement {
           <input
             id="projectDurationSecond"
             type="number"
-            class="form-control bg-default text-light"
+            class="form-control bg-default text-light scrub-number"
+            @mousedown=${this._handleScrubDown}
             placeholder="${this.lc.t("setting.seconds")} e.g) 0"
             @change=${this._handleUpdateDurationSecond}
             .value=${String(duration % 60)}
@@ -341,7 +363,8 @@ export class ControlSetting extends LitElement {
         <input
           id="projectFps"
           type="number"
-          class="form-control bg-default text-light"
+          class="form-control bg-default text-light scrub-number"
+          @mousedown=${this._handleScrubDown}
           list="projectFpsPresets"
           min="1"
           max="240"
@@ -376,14 +399,16 @@ export class ControlSetting extends LitElement {
         <input
           id="previewSizeH"
           type="number"
-          class="form-control bg-default text-light me-1"
+          class="form-control bg-default text-light scrub-number me-1"
+          @mousedown=${this._handleScrubDown}
           .value=${String(this.renderOption.previewSize.h)}
           @change=${this._handleUpdatePreviewSizeH}
         />
         <input
           id="previewSizeW"
           type="number"
-          class="form-control bg-default text-light"
+          class="form-control bg-default text-light scrub-number"
+          @mousedown=${this._handleScrubDown}
           .value=${String(this.renderOption.previewSize.w)}
           @change=${this._handleUpdatePreviewSizeW}
         />
@@ -489,7 +514,8 @@ export class ControlSetting extends LitElement {
               <input
                 id="videoBitrate"
                 type="number"
-                class="form-control bg-default text-light"
+                class="form-control bg-default text-light scrub-number"
+                @mousedown=${this._handleScrubDown}
                 min="1"
                 .value=${String(settings.videoBitrate)}
                 @change=${(e) =>

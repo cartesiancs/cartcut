@@ -3,6 +3,10 @@ import { isTypingTarget } from "./typingTarget";
 
 describe("isTypingTarget", () => {
   it("claims the keystroke for text fields", () => {
+    // Both of the last two ship in this app and both have to be claimed:
+    // the settings panel's scrubbable fields are `type="number"`, and
+    // `number-input`'s edit box is `type="text"` so the caret can be placed at
+    // the front of the number.
     expect(isTypingTarget({ tagName: "INPUT" })).toBe(true);
     expect(isTypingTarget({ tagName: "input" })).toBe(true);
     expect(isTypingTarget({ tagName: "TEXTAREA" })).toBe(true);

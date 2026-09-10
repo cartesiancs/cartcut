@@ -25,7 +25,12 @@ import { customElement, property } from "lit/decorators.js";
 import { useTimelineStore } from "../../states/timelineStore";
 import { LocaleController } from "../../controllers/locale";
 import { GestureCommit } from "./gestureCommit";
-import { clampVolumeDb, volumeDbOf } from "../timeline/audio";
+import {
+  MAX_VOLUME_DB,
+  MIN_VOLUME_DB,
+  clampVolumeDb,
+  volumeDbOf,
+} from "../timeline/audio";
 import { setVolumeDb } from "../timeline/audioOps";
 
 @customElement("audio-volume")
@@ -51,6 +56,12 @@ export class AudioVolume extends LitElement {
       }
     });
 
+    // A fader drag abandoned with Escape. The bounds above are the same ones
+    // `clampVolumeDb` enforces, bound from its own constants so the two cannot
+    // drift: the field stops where the op would have stopped it, which is what
+    // keeps the number from disagreeing with the store mid-drag.
+    this.addEventListener("onCancel", () => this.gesture.cancel());
+
     return this;
   }
 
@@ -65,6 +76,9 @@ export class AudioVolume extends LitElement {
             aria-event="volume"
             @onChange=${this.handleVolume}
             value="0"
+            .min=${MIN_VOLUME_DB}
+            .max=${MAX_VOLUME_DB}
+            sensitivity="0.15"
           ></number-input>
           <span class="text-secondary" style="font-size: 12px;">dB</span>
         </div>

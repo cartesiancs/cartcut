@@ -227,6 +227,25 @@ describe("GestureCommit", () => {
     expect(store().history.timelineHistory.length).toBe(before);
   });
 
+  it("stays cancelled when the button is finally released", () => {
+    // The half the test above does not reach. A scrub cancelled with Escape is
+    // still a scrub with a button held down, so a `mouseup` arrives afterwards
+    // — and if `cancel` had not taken the listener off with it, that mouseup
+    // would flush the gesture and record the cancelled edit as an undo step.
+    // `withCheckpoint` cannot decline it: `documentOf` builds a fresh object on
+    // every call, so its identity check never fires from `flush`.
+    const gesture = new GestureCommit();
+    const before = store().history.timelineHistory.length;
+
+    bump(gesture, 7);
+    gesture.cancel();
+    win.fire("mouseup");
+
+    expect((store().timeline.a as any).opacity).toBe(imageElement().opacity);
+    expect(store().history.timelineHistory.length).toBe(before);
+    expect(win.count("mouseup")).toBe(0);
+  });
+
   it("keeps an edit that lands mid-gesture", () => {
     // A clip drag committing, or an async asset add finishing, during the
     // 350ms idle window. Rewinding to the gesture's opening snapshot used to

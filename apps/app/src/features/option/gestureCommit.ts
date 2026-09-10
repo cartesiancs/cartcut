@@ -65,6 +65,14 @@ export class GestureCommit {
       this.changed = false;
       this.base = store.getDocument();
       // A scrub ends with a mouseup wherever the pointer happens to be.
+      //
+      // Registered here, on the first change, and therefore *after* the one
+      // `scrubSession` registered when the button went down — window listeners
+      // run in registration order, so on release the drag ends first and this
+      // flush lands second. That ordering is what lets `<number-input>` hold
+      // its value against the store for the length of the gesture and still be
+      // resynced by the checkpoint's own notification. Moving either
+      // registration breaks it silently.
       window.addEventListener("mouseup", this.flushBound, { once: true });
     }
 

@@ -30,6 +30,17 @@
  * identity — so a project with no animation, or one already baked at this rate,
  * records no undo step at all.
  *
+ * **One asymmetry, stated rather than discovered: the rate is outside the undo
+ * history.** It lives on `renderOptionStore`, which keeps none, while the lanes
+ * this rebakes live in the timeline's, which does. So an undo restores the old
+ * bakes into a project the store still says runs at the new rate. It stays
+ * coherent because `bakeRateFor` holds a 60Hz floor and the lanes are read by
+ * nearest sample, but it is coherent by luck rather than by design. This is
+ * also why the settings panel's frame-rate field commits once on release
+ * instead of following the pointer: a drag from 30 to 120 is ninety distinct
+ * rates, and ninety checkpoints against a fifty-deep stack would evict every
+ * edit the user made before touching it. See `features/input/inputScrub.ts`.
+ *
  * Lives in `features/editor/` for the reason stated in `actions.ts`:
  * `features/timeline/` is store-free by design, and this reads three stores.
  */

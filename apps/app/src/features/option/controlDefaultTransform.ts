@@ -45,6 +45,15 @@ export class OptionImage extends LitElement {
       }
     });
 
+    // A spinner drag abandoned with Escape. `onCancel` bubbles, so one listener
+    // covers every field in the panel — and cancelling is the only correct
+    // answer: the gesture has been previewing into the store, and on an
+    // animated property its first move already wrote a keyframe at the
+    // playhead. `GestureCommit.cancel` puts the whole pre-gesture document
+    // back and records no history; writing the old number back would instead
+    // read as an edit and leave that keyframe behind.
+    this.addEventListener("onCancel", () => this.gesture.cancel());
+
     return this;
   }
 
@@ -129,11 +138,15 @@ export class OptionImage extends LitElement {
             aria-event="location-x"
             @onChange=${this.handleLocation}
             value="0"
+            step="1"
+            sensitivity="1"
           ></number-input>
           <number-input
             aria-event="location-y"
             @onChange=${this.handleLocation}
             value="0"
+            step="1"
+            sensitivity="1"
           ></number-input>
         </div>
         <div class="d-flex flex-row gap-2 justify-content-end">
@@ -161,11 +174,15 @@ export class OptionImage extends LitElement {
             aria-event="width"
             @onChange=${this.handleSize}
             value="10"
+            step="1"
+            sensitivity="1"
           ></number-input>
           <number-input
             aria-event="height"
             @onChange=${this.handleSize}
             value="10"
+            step="1"
+            sensitivity="1"
           ></number-input>
         </div>
         <div class="d-flex flex-row gap-2 justify-content-end">
@@ -195,6 +212,7 @@ export class OptionImage extends LitElement {
             aria-event="opacity"
             @onChange=${this.handleOpacity}
             value="100"
+            min="0"
             max="100"
           ></number-input>
         </div>
@@ -223,6 +241,7 @@ export class OptionImage extends LitElement {
             aria-event="rotation"
             @onChange=${this.handleRotation}
             value="0"
+            sensitivity="0.5"
           ></number-input>
         </div>
         <div class="d-flex flex-row gap-2 justify-content-end">
