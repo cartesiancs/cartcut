@@ -454,6 +454,7 @@ export class OptionVideo extends LitElement {
     const elementId = this.elementId;
     const startTime = this.timeline[elementId].startTime;
     const atMs = this.timelineCursor - startTime;
+    const bakeHz = bakeRateFor(renderOptionStore.getState().options.fps);
 
     // One step per scrub, not per mousemove: `number-input` dispatches
     // `onChange` on every pointer move, and a checkpoint each would evict the
@@ -461,8 +462,26 @@ export class OptionVideo extends LitElement {
     this.gesture.apply((doc) => {
       let next = doc;
       if ((next.elements[elementId] as any)?.animation?.position?.isActivate) {
-        next = addKeyframe(next, elementId, "position", "x", atMs, x);
-        next = addKeyframe(next, elementId, "position", "y", atMs, y);
+        next = addKeyframe(
+          next,
+          elementId,
+          "position",
+          "x",
+          atMs,
+          x,
+          undefined,
+          bakeHz,
+        );
+        next = addKeyframe(
+          next,
+          elementId,
+          "position",
+          "y",
+          atMs,
+          y,
+          undefined,
+          bakeHz,
+        );
       }
       const element = next.elements[elementId];
       if (element == null) {

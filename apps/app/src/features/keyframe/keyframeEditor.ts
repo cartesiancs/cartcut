@@ -26,6 +26,7 @@ import {
   type DragState,
   type DragTarget,
 } from "./dragKeyframe";
+import { projectBakeHz } from "../editor/frameRate";
 
 @customElement("keyframe-editor")
 export class KeyframeEditor extends LitElement {
@@ -717,6 +718,7 @@ export class KeyframeEditor extends LitElement {
         // Alt is the escape hatch for placing a keyframe a few ms off the
         // playhead deliberately.
         enableSnap: !e.altKey,
+        bakeHz: projectBakeHz(),
       },
     );
 

@@ -35,6 +35,7 @@ import {
 import { KeyframeController } from "../../controllers/keyframe";
 import { useTimelineStore } from "../../states/timelineStore";
 import { addKeyframe } from "../animation/keyframeOps";
+import { projectBakeHz } from "../editor/frameRate";
 import { maskOf } from "../mask/maskShape";
 import {
   isMaskable,
@@ -162,6 +163,11 @@ export class OptionMaskSection extends LitElement {
     keys: Array<{ property: AnimatableProperty; lane: "x" | "y"; value: number }> = [],
   ) {
     const ids = [...this.elementIds];
+    // `projectBakeHz()`, not the op's 60Hz default: a baked lane is a cache read by
+    // nearest sample, so one written coarser than the project's rate hands
+    // consecutive frames the same value and the curve steps. See
+    // `keyframes.ts#bakeRateFor`.
+    const bakeHz = projectBakeHz();
     this.gesture.apply((doc) => {
       let next = doc;
       for (const id of ids) {
@@ -174,7 +180,16 @@ export class OptionMaskSection extends LitElement {
           if (element.animation?.[key.property]?.isActivate !== true) {
             continue;
           }
-          next = addKeyframe(next, id, key.property, key.lane, atMs, key.value);
+          next = addKeyframe(
+            next,
+            id,
+            key.property,
+            key.lane,
+            atMs,
+            key.value,
+            undefined,
+            bakeHz,
+          );
         }
         next = setClipMaskFields(next, id, patch);
       }

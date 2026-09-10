@@ -272,7 +272,8 @@ export type ResizeCommit = {
   /** Where `resizedRect` says the rect should be now. */
   next: Rect;
   /**
-   * The playhead in the element's own milliseconds, for the `size` keyframe.
+   * The playhead in the element's own milliseconds, for the keyframes this
+   * writes — `size`, and `position` for the anchor correction.
    *
    * Optional, and omitting it means "write the static box only". A caller with
    * no playhead — a test, a batch op — has no honest answer here, and a
@@ -335,17 +336,58 @@ export function resizedDocument(
   // on every mousemove collapses to a single keyframe per lane, and a held
   // pointer writes the same value over itself.
   let withKeyframes = doc;
-  if (
-    Number.isFinite(atMs) &&
-    current.animation?.size?.isActivate === true
-  ) {
+  if (Number.isFinite(atMs) && current.animation?.size?.isActivate === true) {
     withKeyframes = addKeyframe(
-      addKeyframe(doc, elementId, "size", "x", atMs!, next.w, undefined, bakeHz),
+      addKeyframe(
+        withKeyframes,
+        elementId,
+        "size",
+        "x",
+        atMs!,
+        next.w,
+        undefined,
+        bakeHz,
+      ),
       elementId,
       "size",
       "y",
       atMs!,
       next.h,
+      undefined,
+      bakeHz,
+    );
+  }
+
+  // The same correction, for a clip whose *position* is animated.
+  //
+  // `location` below is dead data in that case: `transform.localSampleAt` reads
+  // the baked position lane and never looks at the static field while the track
+  // is on. So the anchor correction `anchoredAt` computed — the whole reason a
+  // NW drag keeps the SE corner pinned — was written somewhere nothing reads,
+  // and the grip slid out from under the pointer. Exactly the divergence
+  // `preview/elementPosition.ts` documents being closed for the *move* gesture;
+  // the resize gesture never got the same treatment.
+  //
+  // `next.x`/`next.y` are already the drawn rect in parent space, which is the
+  // space the position track's own values live in, so this stays the absolute
+  // setter `GestureCommit.apply` requires.
+  if (Number.isFinite(atMs) && current.animation?.position?.isActivate === true) {
+    withKeyframes = addKeyframe(
+      addKeyframe(
+        withKeyframes,
+        elementId,
+        "position",
+        "x",
+        atMs!,
+        next.x,
+        undefined,
+        bakeHz,
+      ),
+      elementId,
+      "position",
+      "y",
+      atMs!,
+      next.y,
       undefined,
       bakeHz,
     );

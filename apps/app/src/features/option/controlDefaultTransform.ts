@@ -9,6 +9,7 @@ import {
   sampleTrackXY,
 } from "../animation/keyframes";
 import { addKeyframe } from "../animation/keyframeOps";
+import { projectBakeHz } from "../editor/frameRate";
 import { setIn } from "../../utils/immutable";
 import { GestureCommit } from "./gestureCommit";
 import { withFittedTextHeights } from "../element/textFit";
@@ -433,6 +434,11 @@ export class OptionImage extends LitElement {
       return;
     }
     const atMs = this.timelineCursor - element.startTime;
+    // `projectBakeHz()`, not the op's 60Hz default: a baked lane is a cache read by
+    // nearest sample, so one written coarser than the project's rate hands
+    // consecutive frames the same value and the curve steps. See
+    // `keyframes.ts#bakeRateFor`.
+    const bakeHz = projectBakeHz();
 
     this.gesture.apply((doc) => {
       let next = doc;
@@ -448,6 +454,8 @@ export class OptionImage extends LitElement {
           lane === 1 ? "y" : "x",
           atMs,
           value,
+          undefined,
+          bakeHz,
         );
       }
 

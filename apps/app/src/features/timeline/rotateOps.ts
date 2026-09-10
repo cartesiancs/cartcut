@@ -77,6 +77,7 @@ export function rotateClips(
   elementIds: string[],
   deltaDeg: number,
   cursorMs: number,
+  bakeHz?: number,
 ): TimelineDocument {
   const targets = [...new Set(elementIds)].filter((id) =>
     hasRotation(doc.elements[id]),
@@ -115,6 +116,11 @@ export function rotateClips(
         "x",
         cursorMs - element.startTime,
         turned,
+        undefined,
+        // Threaded in, never read from the store: this module is DOM-free and
+        // node-tested. The op's own default is 60Hz, which under-bakes a
+        // 120fps project and makes the turn step.
+        bakeHz,
       );
     }
 

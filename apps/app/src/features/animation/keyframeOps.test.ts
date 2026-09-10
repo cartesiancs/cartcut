@@ -1083,3 +1083,96 @@ describe("hasAnimation", () => {
     expect(of(doc({ a: maskedOnly }))).toBe(false);
   });
 });
+
+/*
+ * The pair has to come out with *one curve*, not merely one set of instants.
+ *
+ * Authoring forward in time — the normal direction — plants past the sibling's
+ * last keyframe, and that branch used to append with handles collapsed onto the
+ * anchor. The edited lane got its `±handleMs` and the sibling ran linear, so a
+ * dragged diagonal bowed and a position track counter-animating a size zoom
+ * drifted off its focus point on one axis only. Every existing paired test adds
+ * *between* two keyframes, where de Casteljau is exact, which is why none of
+ * them saw it.
+ */
+describe("paired lanes share one curve", () => {
+  /** A segment's shape, normalised out of absolute [ms, value] space. */
+  const shapeOf = (d: TimelineDocument, lane: "x" | "y", index: number) => {
+    const list = track(d, "position", lane);
+    const a = list[index];
+    const b = list[index + 1];
+    const span = b.p[0] - a.p[0];
+    const rise = b.p[1] - a.p[1];
+    const norm = (pt: number[]) => [
+      (pt[0] - a.p[0]) / span + 0,
+      (pt[1] - a.p[1]) / rise + 0,
+    ];
+    return { ce: norm(a.ce), cs: norm(b.cs) };
+  };
+
+  /** One track seeded at `t0`, the way the stopwatch seeds it. */
+  const seeded = (t0: number) =>
+    doc({
+      a: positioned({
+        x: keys([t0, 0]),
+        ax: bakeTrack(keys([t0, 0])),
+        y: keys([t0, 200]),
+        ay: bakeTrack(keys([t0, 200])),
+      }),
+    });
+
+  /** What `previewCanvas` does on a drag: both lanes, in one gesture. */
+  const drag = (d: TimelineDocument, tMs: number, x: number, y: number) =>
+    addKeyframePaired(
+      addKeyframePaired(d, "a", "position", "x", tMs, x),
+      "a",
+      "position",
+      "y",
+      tMs,
+      y,
+    );
+
+  it("gives both lanes the same shape when appending past the end", () => {
+    const out = drag(seeded(0), 1000, 500, 700);
+    expect(shapeOf(out, "y", 0)).toEqual(shapeOf(out, "x", 0));
+  });
+
+  it("gives both lanes the same shape when prepending before the start", () => {
+    const out = drag(seeded(1000), 0, 500, 700);
+    expect(shapeOf(out, "y", 0)).toEqual(shapeOf(out, "x", 0));
+  });
+
+  // Neither lane may come out linear: two bare keyframes describe an
+  // ease-in-out, and a `cs` sitting on its own anchor is what "linear" looks
+  // like in this representation.
+  it("leaves neither lane linear", () => {
+    const out = drag(seeded(0), 1000, 500, 700);
+    for (const lane of ["x", "y"] as const) {
+      expect(shapeOf(out, lane, 0).cs[0]).toBeLessThan(1);
+    }
+  });
+
+  // The sibling holds its own end value out there, not the element's static one.
+  it("appends the sibling's own end value, not the static field", () => {
+    const out = addKeyframePaired(seeded(0), "a", "position", "x", 1000, 500);
+    expect(track(out, "position", "y")[1].p[1]).toBe(200);
+  });
+
+  // The interior case still preserves the curve exactly — that is what
+  // `plantKeyframe` is for, and this fix must not have reached it.
+  it("still leaves an interior sibling curve untouched", () => {
+    const base = doc({ a: positioned() });
+    const before = baked(base, "position", "ay");
+    const after = baked(
+      addKeyframePaired(base, "a", "position", "x", 500, 42),
+      "position",
+      "ay",
+    );
+    for (const t of [0, 250, 500, 750, 1000]) {
+      expect(sampleBaked(after, t, NaN)).toBeCloseTo(
+        sampleBaked(before, t, NaN),
+        6,
+      );
+    }
+  });
+});

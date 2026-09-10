@@ -267,6 +267,36 @@ function indexAtTime(list: Keyframe[], tMs: number): number {
 }
 
 /**
+ * The value the sibling lane holds at `tMs`, when `tMs` lies outside its curve.
+ *
+ * `null` means "inside the authored range", where the curve is real and
+ * `plantKeyframe` must preserve it exactly. Outside it — or on a lane with no
+ * keyframes at all — there is nothing to preserve: the track reads its nearest
+ * end value there (`sampleBaked` clamps to the first and last samples), so the
+ * new keyframe can be added with ordinary handles and the pair comes out with
+ * one shape on both lanes.
+ */
+function heldValueOutside(
+  list: Keyframe[],
+  tMs: number,
+  staticValue: number,
+): number | null {
+  if (list.length === 0) {
+    // The element's own static value is what the renderer would have shown at
+    // that instant anyway.
+    return staticValue;
+  }
+  if (tMs < list[0].p[0]) {
+    return list[0].p[1];
+  }
+  const last = list[list.length - 1];
+  if (tMs > last.p[0]) {
+    return last.p[1];
+  }
+  return null;
+}
+
+/**
  * Add a keyframe to `lane`, and a matching one to its sibling.
  *
  * The sibling's keyframe is *planted* — placed on the curve that lane already
@@ -310,10 +340,24 @@ export function addKeyframePaired(
     return primary;
   }
 
-  if (sibling.list.length === 0) {
-    // No curve to preserve. The element's own static value is what the renderer
-    // would have shown at that instant anyway.
-    const held = staticValueOf(doc.elements[elementId], property, other);
+  // Outside the sibling's authored range there is no curve to preserve — the
+  // track simply holds its nearest end value — so the keyframe is *added*, with
+  // the same `handleMs` the primary lane just got, rather than planted.
+  //
+  // Planting there was the bug: `planted` appends its boundary keyframe with
+  // handles collapsed onto the anchor, which is right for the caller it was
+  // written for (clip splitting, where the curve must not change), and the
+  // `addKeyframe` that follows takes its replace-in-place branch, which
+  // deliberately *keeps* the handles already on a keyframe. So the pair came out
+  // with two different curves: the edited lane eased and the sibling ran linear.
+  // Authoring forward in time takes this branch every time, which is why a
+  // dragged diagonal bowed and a size+position zoom drifted off its focus point.
+  const held = heldValueOutside(
+    sibling.list,
+    tMs,
+    staticValueOf(doc.elements[elementId], property, other),
+  );
+  if (held != null) {
     return addKeyframe(
       primary,
       elementId,

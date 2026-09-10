@@ -10,6 +10,7 @@ import {
   type Lane,
 } from "../features/animation/keyframeOps";
 import type { TimelineDocument } from "../features/timeline/tracks";
+import { projectBakeHz } from "../features/editor/frameRate";
 
 /**
  * The keyframe editing entry point for the option panels and the curve editor.
@@ -29,6 +30,15 @@ import type { TimelineDocument } from "../features/timeline/tracks";
  *
  * Baking is no longer a second call the caller has to remember either —
  * `keyframeOps` writes the authored list and its baked samples together.
+ *
+ * The one thing it must still remember is the *rate*. Every `keyframeOps` op
+ * takes `bakeHz` as a trailing optional defaulting to 60, and a lane baked
+ * below the project's rate steps: the baked array is a cache read by nearest
+ * sample, so at 120fps two consecutive frames get the same value. Reading
+ * `projectBakeHz()` here rather than at each of the five methods' callers is
+ * what keeps the option panels and the curve editor from having to know — and
+ * a controller is a UI object, so it is allowed to read the store where the
+ * pure ops it wraps are not.
  */
 export class KeyframeController implements ReactiveController {
   private host: ReactiveControllerHost;
@@ -40,6 +50,11 @@ export class KeyframeController implements ReactiveController {
   /** Apply one document transform as a single undo step. */
   private commit(fn: (doc: TimelineDocument) => TimelineDocument) {
     useTimelineStore.getState().withCheckpoint(fn);
+  }
+
+  /** The rate this project's curves must be baked at. See the header. */
+  private get bakeHz(): number {
+    return projectBakeHz();
   }
 
   private static laneOf(line: unknown): Lane {
@@ -71,12 +86,24 @@ export class KeyframeController implements ReactiveController {
     const tMs = typeof x === "string" ? parseFloat(x) : x;
     const value = typeof y === "string" ? parseFloat(y) : y;
 
+    const bakeHz = this.bakeHz;
     this.commit((doc) =>
       setTrackActive(
-        addKeyframePaired(doc, elementId, property, lane, tMs, value),
+        addKeyframePaired(
+          doc,
+          elementId,
+          property,
+          lane,
+          tMs,
+          value,
+          undefined,
+          bakeHz,
+        ),
         elementId,
         property,
         true,
+        undefined,
+        bakeHz,
       ),
     );
   }
@@ -99,6 +126,7 @@ export class KeyframeController implements ReactiveController {
         animationType as AnimatableProperty,
         KeyframeController.laneOf(line),
         index,
+        this.bakeHz,
       ),
     );
   }
@@ -127,6 +155,7 @@ export class KeyframeController implements ReactiveController {
   }): number {
     const lane = KeyframeController.laneOf(line);
     const property = animationType as AnimatableProperty;
+    const bakeHz = this.bakeHz;
     let landedAt = index;
 
     this.commit((doc) => {
@@ -138,6 +167,7 @@ export class KeyframeController implements ReactiveController {
         index,
         tMs,
         value,
+        bakeHz,
       );
       landedAt = moved.index;
       return moved.doc;
@@ -169,6 +199,7 @@ export class KeyframeController implements ReactiveController {
         KeyframeController.laneOf(line),
         index,
         { cs, ce },
+        this.bakeHz,
       ),
     );
   }
@@ -192,6 +223,7 @@ export class KeyframeController implements ReactiveController {
         animationType as AnimatableProperty,
         active,
         active && atMs != null ? { atMs } : undefined,
+        this.bakeHz,
       ),
     );
   }

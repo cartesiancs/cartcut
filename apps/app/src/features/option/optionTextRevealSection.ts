@@ -37,6 +37,7 @@ import {
 import { KeyframeController } from "../../controllers/keyframe";
 import { useTimelineStore } from "../../states/timelineStore";
 import { addKeyframe } from "../animation/keyframeOps";
+import { projectBakeHz } from "../editor/frameRate";
 import { playheadAnchor } from "../animation/presets";
 import { revealOf } from "../text/reveal";
 import { applyTypewriter } from "../text/typewriter";
@@ -151,6 +152,11 @@ export class OptionTextRevealSection extends LitElement {
    */
   private commitField(patch: RevealFieldPatch, key?: number) {
     const ids = [...this.elementIds];
+    // `projectBakeHz()`, not the op's 60Hz default: a baked lane is a cache read by
+    // nearest sample, so one written coarser than the project's rate hands
+    // consecutive frames the same value and the curve steps. See
+    // `keyframes.ts#bakeRateFor`.
+    const bakeHz = projectBakeHz();
     this.gesture.apply((doc) => {
       let next = doc;
       for (const id of ids) {
@@ -166,6 +172,8 @@ export class OptionTextRevealSection extends LitElement {
             "x",
             this.cursor - element.startTime,
             key,
+            undefined,
+            bakeHz,
           );
         }
         next = setClipTextRevealFields(next, id, patch);
@@ -188,6 +196,7 @@ export class OptionTextRevealSection extends LitElement {
     const ids = [...this.elementIds];
     const unit = this.reveal?.unit;
     const durationMs = this.typewriterMs;
+    const bakeHz = projectBakeHz();
     useTimelineStore.getState().withCheckpoint((doc) =>
       ids.reduce((acc, id) => {
         const element = acc.elements[id];
@@ -195,6 +204,7 @@ export class OptionTextRevealSection extends LitElement {
           unit,
           durationMs,
           startAtMs: playheadAnchor(element, this.cursor),
+          bakeHz,
         });
       }, doc),
     );

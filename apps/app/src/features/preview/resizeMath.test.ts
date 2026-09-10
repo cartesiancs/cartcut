@@ -410,6 +410,103 @@ describe("resizedDocument", () => {
     });
   });
 
+  /**
+   * The anchor correction, for a clip whose `position` is animated.
+   *
+   * `anchoredAt` is what keeps the grip opposite the one being dragged pinned
+   * in place. It was written into the static `location`, which
+   * `transform.localSampleAt` ignores entirely while the position track is on —
+   * so on exactly the clip a zoom needs (both tracks live) the correction went
+   * nowhere and the pinned corner slid. `preview/elementPosition.ts` documents
+   * the same divergence being closed for the move gesture.
+   */
+  describe("the position track", () => {
+    const bothTracks = () =>
+      docWith({
+        startTime: 0,
+        animation: {
+          ...emptyAnimation("shape"),
+          size: { isActivate: true, x: [], y: [], ax: [], ay: [] },
+          position: { isActivate: true, x: [], y: [], ax: [], ay: [] },
+        },
+      });
+
+    const at = (doc: any, zone: StretchZone, dx: number, dy: number) => {
+      const next = resize(ORIGIN, zone, dx, dy, false);
+      return resizedDocument(doc, "a", {
+        originLocal: ORIGIN,
+        originLocation: { x: ORIGIN.x, y: ORIGIN.y },
+        next: next!,
+        atMs: 500,
+      });
+    };
+
+    /** The box the renderer would draw at the playhead. */
+    const sampled = (doc: any) => ({
+      x: el(doc).animation.position.x[0]?.p[1],
+      y: el(doc).animation.position.y[0]?.p[1],
+      w: el(doc).animation.size.x[0]?.p[1],
+      h: el(doc).animation.size.y[0]?.p[1],
+    });
+
+    /**
+     * The corner a drag holds still: dragging the west edge pins the east one,
+     * dragging the north edge pins the south one.
+     */
+    const pinnedOf = (zone: string, b: { x: number; y: number; w: number; h: number }) => ({
+      x: zone.includes("W") ? b.x + b.w : b.x,
+      y: zone.includes("N") ? b.y + b.h : b.y,
+    });
+
+    // The one that matters: the pinned corner must not move, read off the
+    // *keyframed* box — which is the one that actually gets drawn.
+    it.each([
+      ["stretchNW", 30, -20],
+      ["stretchNE", -30, -20],
+      ["stretchSW", 30, 20],
+      ["stretchSE", -30, 20],
+    ])("keeps the opposite corner pinned dragging %s", (zone, dx, dy) => {
+      const box = sampled(at(bothTracks(), zone as StretchZone, dx, dy));
+      const before = pinnedOf(zone, ORIGIN);
+      const after = pinnedOf(zone, box);
+      expect(after.x).toBeCloseTo(before.x, 6);
+      expect(after.y).toBeCloseTo(before.y, 6);
+    });
+
+    it("writes one keyframe per lane at the playhead", () => {
+      const doc = at(bothTracks(), "stretchNW", 30, -20);
+      expect(el(doc).animation.position.x.map((k: any) => k.p[0])).toEqual([500]);
+      expect(el(doc).animation.position.y.map((k: any) => k.p[0])).toEqual([500]);
+    });
+
+    it("collapses a held pointer to one keyframe per lane", () => {
+      let doc = bothTracks();
+      for (let i = 0; i < 60; i++) {
+        doc = at(doc, "stretchNW", 30, -20);
+      }
+      expect(el(doc).animation.position.x).toHaveLength(1);
+      expect(el(doc).animation.position.y).toHaveLength(1);
+    });
+
+    it("writes nothing while the position track is off", () => {
+      const doc = at(
+        docWith({
+          startTime: 0,
+          animation: {
+            ...emptyAnimation("shape"),
+            size: { isActivate: true, x: [], y: [], ax: [], ay: [] },
+          },
+        }),
+        "stretchNW",
+        30,
+        -20,
+      );
+      expect(doc.elements.a.animation.position.x).toEqual([]);
+      // The static field is still the one that carries the correction there.
+      expect(el(doc).location.x).toBe(ORIGIN.x + 30);
+    });
+  });
+
   it("does not move the element when the pointer holds still", () => {
     for (const zone of ZONES) {
       let doc = docWith();

@@ -1515,9 +1515,33 @@ export class PreviewCanvas extends LitElement {
     // Both lanes in one transform. As two, a single undo left an x keyframe
     // with no y to match it — the element jumping to a position it was never
     // dragged to. `addKeyframePaired` is that guarantee made structural.
+    // `bakeRateFor(fps)`, not the op's 60Hz default: the baked lane is a cache
+    // read by nearest sample, so one written coarser than the project's rate
+    // hands consecutive frames the same value and the move steps. The resize
+    // path below already passes it; a drag omitting it meant `position` and
+    // `size` on one clip were baked at two different rates.
+    const bakeHz = bakeRateFor(this.renderOption.fps);
     return (doc) => {
-      const withX = addKeyframePaired(doc, elementId, "position", "x", atMs, x);
-      return addKeyframePaired(withX, elementId, "position", "y", atMs, y);
+      const withX = addKeyframePaired(
+        doc,
+        elementId,
+        "position",
+        "x",
+        atMs,
+        x,
+        undefined,
+        bakeHz,
+      );
+      return addKeyframePaired(
+        withX,
+        elementId,
+        "position",
+        "y",
+        atMs,
+        y,
+        undefined,
+        bakeHz,
+      );
     };
   }
 

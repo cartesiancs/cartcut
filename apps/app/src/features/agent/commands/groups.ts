@@ -24,6 +24,7 @@ import { createNullElement } from "../../element/nullElement";
 import { placeNewElement } from "../../timeline/placement";
 import { appendTrackOfKind } from "../../timeline/tracks";
 import { renderOptionStore } from "../../../states/renderOptionStore";
+import { projectBakeHz } from "../../editor/frameRate";
 import { commit, declined } from "../commit";
 import { currentDoc, playheadMs, requireElement } from "../context";
 import { registerCommands } from "../registry";
@@ -105,6 +106,7 @@ registerCommands({
       return createGroup(withTrack, ids, groupId, target, {
         name: params.name,
         color: params.color,
+        bakeHz: projectBakeHz(),
       });
     }, "Those clips could not be grouped. They must all share the same current parent, and nesting cannot go more than 8 deep.");
 
@@ -145,7 +147,7 @@ registerCommands({
     }
 
     return commit(
-      (d) => ids.reduce((next, id) => ungroup(next, id, atMs), d),
+      (d) => ids.reduce((next, id) => ungroup(next, id, atMs, projectBakeHz()), d),
       "Those groups are already gone.",
     );
   },
@@ -177,7 +179,7 @@ registerCommands({
     const atMs = Math.max(0, Math.round(params.atMs ?? playheadMs()));
 
     return commit(
-      (d) => setParent(d, ids, params.parentId ?? null, atMs),
+      (d) => setParent(d, ids, params.parentId ?? null, atMs, projectBakeHz()),
       params.parentId == null
         ? "Those clips are not in a group."
         : "Those clips could not be re-parented. They are already there, or the link would make a cycle or nest more than 8 deep.",

@@ -87,13 +87,19 @@ export function snapCandidates(
  *
  * `enableSnap` is false while a modifier is held — the escape hatch for
  * placing a keyframe a few ms off the playhead on purpose.
+ *
+ * `bakeHz` is threaded in rather than read here, which is the rule
+ * `features/timeline/` and `features/animation/` already keep: this module is
+ * DOM-free and node-tested, and reading `renderOptionStore` would end that.
+ * Omitting it left every curve the editor drew baked at 60Hz, so on a 120fps
+ * project a hand-drawn ease played back at half the rate it was authored at.
  */
 export function updateDrag(
   state: DragState,
   v: Viewport,
   px: number,
   py: number,
-  opts: { playheadMs: number; enableSnap: boolean },
+  opts: { playheadMs: number; enableSnap: boolean; bakeHz?: number },
 ): { doc: TimelineDocument; index: number } {
   const { tMs, value } = toTrack(v, px, py);
   const { elementId, property, lane } = state.target;
@@ -115,6 +121,7 @@ export function updateDrag(
       state.originIndex,
       clampToClip(v, snapped),
       value,
+      opts.bakeHz,
     );
   }
 
@@ -130,6 +137,7 @@ export function updateDrag(
       lane,
       state.originIndex,
       state.part === "cs" ? { cs: [tMs, value] } : { ce: [tMs, value] },
+      opts.bakeHz,
     ),
     index: state.originIndex,
   };

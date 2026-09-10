@@ -31,6 +31,7 @@ import { deleteClips, pasteClips, splitAtPlayhead } from "../timeline/clipOps";
 import { createGroup, isGroupAnimated, ungroup } from "../timeline/groupOps";
 import { canMergeClips, mergeClips } from "../timeline/mergeOps";
 import { canRotateClips, rotateClips } from "../timeline/rotateOps";
+import { projectBakeHz } from "./frameRate";
 import { canDetachAudio } from "../timeline/audio";
 import { detachAudioFrom } from "../timeline/audioOps";
 import { normalizeFps, snapMsToFrame } from "../timeline/frames";
@@ -98,7 +99,9 @@ export function mergeSelection(): void {
 /** Turn the selection by `deltaDeg` — 90 for the toolbar's quarter turn. */
 export function rotateSelection(deltaDeg: number): void {
   const at = useTimelineStore.getState().cursor;
-  commit((input) => rotateClips(input, selectedIds(), deltaDeg, at));
+  commit((input) =>
+    rotateClips(input, selectedIds(), deltaDeg, at, projectBakeHz()),
+  );
 }
 
 export function deleteSelection(): void {
@@ -197,7 +200,12 @@ export function groupClips(ids: string[]): void {
     const target =
       withTrack.tracks.find((track) => track.kind === "group")?.id ?? trackId;
 
-    const grouped = createGroup(withTrack, ids, groupId, target);
+    // Grouping pushes each child's position track through a change of basis
+    // and rewrites its baked lanes, so it needs the project's rate for the
+    // same reason authoring a keyframe does.
+    const grouped = createGroup(withTrack, ids, groupId, target, {
+      bakeHz: projectBakeHz(),
+    });
 
     // `createGroup` declines by returning what it was given — which here is the
     // document *with* the new group row, not the one this started from. Handing
@@ -241,8 +249,9 @@ export function ungroupClips(ids: string[]): void {
 
   commit((input) => {
     let out = input;
+    const bakeHz = projectBakeHz();
     for (const id of ids) {
-      out = ungroup(out, id, atMs);
+      out = ungroup(out, id, atMs, bakeHz);
     }
     return out;
   });

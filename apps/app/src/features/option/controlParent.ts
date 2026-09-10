@@ -24,6 +24,7 @@ import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { useTimelineStore } from "../../states/timelineStore";
 import { setParent } from "../timeline/groupOps";
+import { projectBakeHz } from "../editor/frameRate";
 import {
   canPickParent,
   parentChoicesFor,
@@ -152,7 +153,15 @@ export class ParentSelectControl extends LitElement {
     useTimelineStore
       .getState()
       .withCheckpoint((doc) =>
-        setParent(doc, [elementId], value === NONE ? null : value, cursor),
+        setParent(
+          doc,
+          [elementId],
+          value === NONE ? null : value,
+          cursor,
+          // The re-parent rewrites the child's baked position lane; at the
+          // op's 60Hz default that lane would step in a 120fps project.
+          projectBakeHz(),
+        ),
       );
 
     this.requestUpdate();
