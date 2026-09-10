@@ -146,7 +146,7 @@ export class ControlKeyframeNav extends LitElement {
     `;
 
     return html`
-      <div class="d-flex flex-row align-items-center">
+      <div class="d-flex flex-row align-items-center keyframe-nav">
         ${step("prev", nav.prevMs, "chevron_left", `Previous ${name} keyframe`)}
         <button
           class="btn btn-xxs text-light"

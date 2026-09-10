@@ -727,3 +727,15 @@ body.playback-preview preview-bottom-bar {
 .keyframe-hollow {
   font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 48;
 }
+
+// The three buttons read as one control, so they sit together.
+//
+// `.btn-xxs` carries 0.4rem of horizontal padding, which puts 0.8rem between
+// any two adjacent buttons — fine for buttons that mean separate things, too
+// loose for a navigator whose arrows belong to the diamond between them.
+// Scoped here rather than changed on `.btn-xxs`, which the mask shape row and
+// the tab bar also use at their own spacing.
+.keyframe-nav .btn {
+  padding-left: 0.1rem !important;
+  padding-right: 0.1rem !important;
+}
