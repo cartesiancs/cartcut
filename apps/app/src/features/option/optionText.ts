@@ -7,6 +7,7 @@ import { setIn } from "../../utils/immutable";
 import { rasterizeTextElements } from "../element/rasterizeText";
 import { affectsTextBlock, withFittedTextHeights } from "../element/textFit";
 import { DEFAULT_LINE_HEIGHT, coerceLineHeight } from "../text/metrics";
+import { applyMenuPlacement } from "../menu/menuPlacement";
 import "./animationPresetBrowser";
 import "./controlBlendMode";
 import "./optionLutSection";
@@ -23,6 +24,21 @@ import type { OptionTab } from "./optionTabBar";
  */
 const DEFAULT_FONT_NAME = "notosanskr";
 const DEFAULT_FONT_LABEL = "Pretendard";
+
+/** How tall the scrolling name list may get before it scrolls, in px. */
+const FONT_LIST_MAX_PX = 360;
+
+/**
+ * How short it may be squeezed when the window cannot hold that.
+ *
+ * A list clamped to the space available can end up a few pixels tall next to a
+ * button near the window edge, which is a menu that opened and shows nothing.
+ * Below this it is better to overhang slightly than to vanish.
+ */
+const FONT_LIST_MIN_PX = 120;
+
+/** The narrowest the menu gets, whatever the option column has been dragged to. */
+const FONT_MENU_MIN_WIDTH_PX = 220;
 
 @customElement("option-text")
 export class OptionText extends LitElement {
@@ -64,6 +80,15 @@ export class OptionText extends LitElement {
    */
   @property()
   fontQuery = "";
+
+  /**
+   * Whether the font menu is open.
+   *
+   * This control does not use Bootstrap's dropdown JS, which is why the state
+   * has to live here. See `placeFontMenu` for what it buys.
+   */
+  @property()
+  fontMenuOpen = false;
 
   /**
    * The text last written into history, and the only thing that decides whether
@@ -287,13 +312,12 @@ export class OptionText extends LitElement {
 
         <div class="dropdown">
           <button
+            aria-event="font-toggle"
             class="btn btn-dark btn-sm dropdown-toggle w-100 d-flex align-items-center text-start"
             type="button"
-            data-bs-toggle="dropdown"
-            data-bs-display="static"
-            aria-expanded="false"
+            aria-expanded=${this.fontMenuOpen}
             title=${this.selectedFontLabel}
-            @click=${this.handleOpenFontDropdown}
+            @click=${this.handleToggleFontMenu}
           >
             <!--
               A flex row, so a long font name ellipsises against the caret
@@ -303,12 +327,15 @@ export class OptionText extends LitElement {
               >${this.selectedFontLabel}</span
             >
           </button>
-          <div class="dropdown-menu w-100 p-0">
+          <div
+            aria-event="font-menu"
+            class="dropdown-menu p-0 ${this.fontMenuOpen ? "show" : ""}"
+            style="z-index: 6000;"
+          >
             <!--
-              Outside the scrolling list, so it stays put while the list moves
-              under it. Bootstrap's clearMenus exempts an input from the
-              click-anywhere-inside close, which is what lets a field live in a
-              dropdown at all; picking a font is an anchor and still closes it.
+              Outside the scrolling list, so it stays put while the names move
+              under it. placeFontMenu gives the list its height; the frame gets
+              none, or the search box would scroll away with them.
             -->
             <div class="p-2">
               <input
@@ -321,8 +348,9 @@ export class OptionText extends LitElement {
               />
             </div>
             <ul
+              aria-event="font-list"
               class="list-unstyled mb-0"
-              style="max-height: 360px; overflow-y: auto; overflow-x: hidden;"
+              style="overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;"
             >
               ${fontListTemplate.length === 0
                 ? html`<li>
@@ -666,6 +694,9 @@ export class OptionText extends LitElement {
   hide() {
     this.classList.add("d-none");
     this.isShow = false;
+    // The menu is `position: fixed`, so it is not hidden by the panel being
+    // hidden — it would go on floating over the editor with nothing under it.
+    this.closeFontMenu();
   }
 
   show() {
@@ -959,24 +990,239 @@ export class OptionText extends LitElement {
   }
 
   /**
-   * Clear the filter and put the caret in it as the menu opens.
+   * Open or close the font menu.
    *
-   * The clear matters more than the focus: a query left over from the last
-   * time the menu was open would show a filtered list with no visible reason,
-   * and in the worst case an empty one.
-   *
-   * Bootstrap's own toggle is delegated from `document`, so it runs after this
-   * bubbles; the focus is deferred by a frame to land once the menu is shown.
+   * The filter is cleared on the way open rather than on the way closed: a
+   * query left over from last time would show a filtered list with no visible
+   * reason, and in the worst case an empty one.
    */
-  handleOpenFontDropdown() {
+  handleToggleFontMenu() {
+    this.fontMenuOpen = !this.fontMenuOpen;
+
+    if (!this.fontMenuOpen) {
+      return;
+    }
+
     this.fontQuery = "";
 
+    // A frame, so the caret lands after `updated` has shown and placed the
+    // menu — focusing a `display: none` field does nothing at all.
     requestAnimationFrame(() => {
-      const search: HTMLInputElement | null = this.querySelector(
+      this.querySelector<HTMLInputElement>(
         "input[aria-event='font-search']",
-      );
-      search?.focus();
+      )?.focus();
     });
+  }
+
+  closeFontMenu() {
+    if (!this.fontMenuOpen) {
+      return;
+    }
+
+    this.fontMenuOpen = false;
+    this.fontQuery = "";
+  }
+
+  /**
+   * Anything but a click on this control's own toggle or menu closes it.
+   *
+   * Registered for the life of the component rather than only while the menu
+   * is open, which is what lets the toggle's own click be excluded here
+   * instead of raced against: a listener added while that click is still
+   * bubbling would receive it and shut the menu on the way up.
+   */
+  private readonly onDocumentPointerDown = (event: Event) => {
+    if (!this.fontMenuOpen) {
+      return;
+    }
+
+    const target = event.target as Element | null;
+    if (
+      target?.closest("[aria-event='font-toggle']") != null ||
+      target?.closest("[aria-event='font-menu']") != null
+    ) {
+      return;
+    }
+
+    this.closeFontMenu();
+  };
+
+  /**
+   * Escape closes the menu, and stops there.
+   *
+   * `elementTimelineCanvas` binds Escape on `window` to cancel the current
+   * gesture, and `document` runs first — so without the `stopPropagation` one
+   * Escape would both close this menu and cancel whatever the user was doing
+   * in the timeline behind it.
+   */
+  private readonly onDocumentKeydown = (event: KeyboardEvent) => {
+    if (!this.fontMenuOpen || event.key !== "Escape") {
+      return;
+    }
+
+    event.stopPropagation();
+    this.closeFontMenu();
+    this.querySelector<HTMLElement>("button[aria-event='font-toggle']")?.focus();
+  };
+
+  /**
+   * A fixed menu does not travel with the panel that scrolled under it, so it
+   * is re-placed against the button it belongs to.
+   *
+   * Capture phase, because the option column scrolls rather than the document
+   * and a scroll event does not bubble past the element that scrolled. That
+   * reaches *every* scroller in the app, including the menu's own list — which
+   * is why the first thing this does is let the list through. Closing on that
+   * one made the menu shut the moment anyone scrolled the names, which is the
+   * single thing a long list is for.
+   */
+  private readonly onAncestorScroll = (event: Event) => {
+    if (!this.fontMenuOpen) {
+      return;
+    }
+
+    const menu = this.querySelector("[aria-event='font-menu']");
+    const target = event.target as Node | null;
+    if (menu != null && target != null && menu.contains(target)) {
+      return;
+    }
+
+    // Scrolled far enough that the button is out of its own column: there is
+    // nothing left on screen for the menu to be attached to, and a menu
+    // hanging off an anchor nobody can see is worse than one that closed.
+    if (this.isFontAnchorClipped(target)) {
+      this.closeFontMenu();
+      return;
+    }
+
+    this.placeFontMenu();
+  };
+
+  /** Has the toggle been scrolled out of the box that `scroller` clips it to? */
+  private isFontAnchorClipped(scroller: Node | null): boolean {
+    const button = this.querySelector<HTMLElement>(
+      "button[aria-event='font-toggle']",
+    );
+
+    // `document` scrolls too, and clips nothing — the viewport does, and a
+    // button off the top of the window is the caller's problem, not this one's.
+    if (button == null || !(scroller instanceof Element)) {
+      return false;
+    }
+
+    const box = scroller.getBoundingClientRect();
+    const rect = button.getBoundingClientRect();
+    return rect.bottom <= box.top || rect.top >= box.bottom;
+  }
+
+  /** A resize moves the button and changes the room around it. */
+  private readonly onWindowResize = () => {
+    if (this.fontMenuOpen) {
+      this.placeFontMenu();
+    }
+  };
+
+  connectedCallback() {
+    super.connectedCallback();
+    document.addEventListener("pointerdown", this.onDocumentPointerDown, true);
+    document.addEventListener("keydown", this.onDocumentKeydown);
+    document.addEventListener("scroll", this.onAncestorScroll, true);
+    window.addEventListener("resize", this.onWindowResize);
+  }
+
+  disconnectedCallback() {
+    document.removeEventListener(
+      "pointerdown",
+      this.onDocumentPointerDown,
+      true,
+    );
+    document.removeEventListener("keydown", this.onDocumentKeydown);
+    document.removeEventListener("scroll", this.onAncestorScroll, true);
+    window.removeEventListener("resize", this.onWindowResize);
+    super.disconnectedCallback();
+  }
+
+  updated(changed: PropertyValues) {
+    super.updated(changed);
+
+    // Opening moves the menu and typing resizes it; scrolling and resizing are
+    // handled by their own listeners, which know the menu did not have to
+    // re-render to need moving. This guard is not tidiness — the store
+    // subscription in `createRenderRoot` re-renders this panel on every cursor
+    // tick, and `placeFontMenu` forces a synchronous layout four times over.
+    if (
+      this.fontMenuOpen &&
+      (changed.has("fontMenuOpen") || changed.has("fontQuery"))
+    ) {
+      this.placeFontMenu();
+    }
+  }
+
+  /**
+   * Put the open menu on the viewport, clear of the panel it lives in.
+   *
+   * The option column is `overflow-y-scroll overflow-x-hidden`, so a menu
+   * positioned inside it is clipped at the column's bottom edge — which for a
+   * list this tall is most of it. `position: fixed` is what escapes that, and
+   * it is only safe because no ancestor of this panel carries a `transform`,
+   * `filter` or `backdrop-filter`; any of those would make the column the
+   * containing block again and put the clipping straight back.
+   *
+   * `applyMenuPlacement` is the same module the right-click menus use, and it
+   * is what keeps the list on screen: `html, body { overflow: hidden }` means
+   * anything pushed past the bottom of the window is not merely off-screen but
+   * unreachable, since there is no scrollbar and, in Electron, no browser
+   * chrome either.
+   */
+  private placeFontMenu() {
+    const button = this.querySelector<HTMLElement>(
+      "button[aria-event='font-toggle']",
+    );
+    const menu = this.querySelector<HTMLElement>("[aria-event='font-menu']");
+    const list = this.querySelector<HTMLElement>("[aria-event='font-list']");
+
+    if (button == null || menu == null || list == null) {
+      return;
+    }
+
+    const rect = button.getBoundingClientRect();
+    menu.style.width = `${Math.max(rect.width, FONT_MENU_MIN_WIDTH_PX)}px`;
+
+    // The frame is not the scroller — the list inside it is, so that the search
+    // box stays put while the names move under it. That has to be true *before*
+    // anything is measured: with a `max-height` on the frame and none on the
+    // list, `chrome` below comes out as the difference between a clamped height
+    // and an unclamped one, which is negative, and undoes the clamp it exists
+    // to apply.
+    this.unclampFontFrame(menu);
+    list.style.maxHeight = `${FONT_LIST_MAX_PX}px`;
+
+    // Everything the menu is that is not the list: the search box and the
+    // padding around it. Measured at the natural size, where it is a constant.
+    const chrome = menu.offsetHeight - list.offsetHeight;
+
+    // The anchor is the button's bottom edge, or its top edge when the menu
+    // flips: `placeMenu` hangs a flipped menu's bottom on the anchor it was
+    // given, so flipping about the bottom edge would cover the button the menu
+    // opened from.
+    let placement = applyMenuPlacement(menu, { x: rect.left, y: rect.bottom });
+    if (placement.flipped) {
+      placement = applyMenuPlacement(menu, { x: rect.left, y: rect.top });
+    }
+
+    // `applyMenuPlacement` writes the height it worked out onto whatever it
+    // placed, so it is taken off the frame here and handed to the list.
+    this.unclampFontFrame(menu);
+    list.style.maxHeight = `${Math.max(
+      FONT_LIST_MIN_PX,
+      Math.min(FONT_LIST_MAX_PX, placement.maxHeight - chrome),
+    )}px`;
+  }
+
+  /** Undo the height and the scroll `applyMenuPlacement` puts on the frame. */
+  private unclampFontFrame(menu: HTMLElement) {
+    menu.style.maxHeight = "";
+    menu.style.overflowY = "visible";
   }
 
   /**
@@ -1002,7 +1248,7 @@ export class OptionText extends LitElement {
 
     const selectedText = name;
     this.selectedFont = name;
-    this.fontQuery = "";
+    this.closeFontMenu();
 
     const type = value.split("/")[value.split("/").length - 1].split(".")[1];
 

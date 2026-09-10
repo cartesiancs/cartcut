@@ -23,11 +23,16 @@
     </head>
         <app-root></app-root>
 
-        <!-- The `bundle` build, so Popper comes with it — the editor has three
-             `data-bs-toggle="dropdown"` menus. It stays a separate <script>
-             rather than an import in the bundle so that `window.bootstrap`
-             cannot be taken down by an error while the bundle evaluates; the
-             E2E harness waits on the two independently. -->
+        <!-- The `bundle` build, so Popper comes with it — the editor has two
+             `data-bs-toggle="dropdown"` menus, both in the preview's top bar.
+             The font picker used to be a third; it places itself against the
+             viewport now (features/menu/menuPlacement.ts) because Popper
+             cannot lift a menu out of the option column's own scrollbox.
+
+             It stays a separate <script> rather than an import in the bundle
+             so that `window.bootstrap` cannot be taken down by an error while
+             the bundle evaluates; the E2E harness waits on the two
+             independently. -->
         <script src="vendor/bootstrap.bundle.min.js"></script>
         <script src="vendor/devent-designsystem.js"></script>
 
