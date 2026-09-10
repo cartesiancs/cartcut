@@ -3,7 +3,6 @@ import { LitElement, PropertyValues, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { LocaleController } from "../../controllers/locale";
-import { KeyframeController } from "../../controllers/keyframe";
 import {
   sampleTrack,
   sampleTrackXY,
@@ -14,13 +13,13 @@ import { setIn } from "../../utils/immutable";
 import { GestureCommit } from "./gestureCommit";
 import { withFittedTextHeights } from "../element/textFit";
 import type { AnimatableProperty } from "../../@types/timeline";
+import "./controlKeyframeNav";
 import "../filter/backgroundRemove";
 import "./controlParent";
 
 @customElement("default-transform")
 export class OptionImage extends LitElement {
   private lc = new LocaleController(this);
-  private keyframeControl = new KeyframeController(this);
   /** Coalesces a spinner scrub into a single undo step. */
   private gesture = new GestureCommit();
 
@@ -151,20 +150,11 @@ export class OptionImage extends LitElement {
           ></number-input>
         </div>
         <div class="d-flex flex-row gap-2 justify-content-end">
-          <button
-            class="btn btn-xxs text-light mr-2"
-            @click=${() => this.setAnimationEnable("position")}
-          >
-            <span
-              class="material-symbols-outlined icon-xsm ${this.getAnimationEnable(
-                "position",
-              )
-                ? "text-light"
-                : "text-secondary"}"
-            >
-              stat_0
-            </span>
-          </button>
+          <control-keyframe-nav
+            .elementId=${this.targetId}
+            .property=${"position"}
+            .label=${"position"}
+          ></control-keyframe-nav>
         </div>
       </div>
 
@@ -187,20 +177,11 @@ export class OptionImage extends LitElement {
           ></number-input>
         </div>
         <div class="d-flex flex-row gap-2 justify-content-end">
-          <button
-            class="btn btn-xxs text-light mr-2"
-            @click=${() => this.setAnimationEnable("size")}
-          >
-            <span
-              class="material-symbols-outlined icon-xsm ${this.getAnimationEnable(
-                "size",
-              )
-                ? "text-light"
-                : "text-secondary"}"
-            >
-              stat_0
-            </span>
-          </button>
+          <control-keyframe-nav
+            .elementId=${this.targetId}
+            .property=${"size"}
+            .label=${"size"}
+          ></control-keyframe-nav>
         </div>
       </div>
 
@@ -218,20 +199,11 @@ export class OptionImage extends LitElement {
           ></number-input>
         </div>
         <div class="d-flex flex-row gap-2 justify-content-end">
-          <button
-            class="btn btn-xxs text-light mr-2"
-            @click=${() => this.setAnimationEnable("opacity")}
-          >
-            <span
-              class="material-symbols-outlined icon-xsm ${this.getAnimationEnable(
-                "opacity",
-              )
-                ? "text-light"
-                : "text-secondary"}"
-            >
-              stat_0
-            </span>
-          </button>
+          <control-keyframe-nav
+            .elementId=${this.targetId}
+            .property=${"opacity"}
+            .label=${"opacity"}
+          ></control-keyframe-nav>
         </div>
       </div>
 
@@ -246,20 +218,11 @@ export class OptionImage extends LitElement {
           ></number-input>
         </div>
         <div class="d-flex flex-row gap-2 justify-content-end">
-          <button
-            class="btn btn-xxs text-light mr-2"
-            @click=${() => this.setAnimationEnable("rotation")}
-          >
-            <span
-              class="material-symbols-outlined icon-xsm ${this.getAnimationEnable(
-                "rotation",
-              )
-                ? "text-light"
-                : "text-secondary"}"
-            >
-              stat_0
-            </span>
-          </button>
+          <control-keyframe-nav
+            .elementId=${this.targetId}
+            .property=${"rotation"}
+            .label=${"rotation"}
+          ></control-keyframe-nav>
         </div>
       </div>
     `;
@@ -380,34 +343,6 @@ export class OptionImage extends LitElement {
       element.width,
       element.height,
     );
-  }
-
-  getAnimationEnable(animationType): boolean {
-    return this.track(animationType)?.isActivate === true;
-  }
-
-  /**
-   * Toggle a property's animation.
-   *
-   * Turning it on seeds one keyframe at the playhead from the element's current
-   * static value, so the element does not jump the moment animation is enabled.
-   * `appendFirstAnimation`, which used to do that by mutating the store
-   * snapshot, now lives in `keyframeOps.setTrackActive` where it is pure and
-   * covered.
-   */
-  setAnimationEnable(animationType) {
-    const elementId = this.targetId;
-    const element = this.timeline?.[elementId];
-    if (element == null) {
-      return;
-    }
-    this.keyframeControl.setActive({
-      elementId,
-      animationType,
-      active: !this.getAnimationEnable(animationType),
-      atMs: this.timelineCursor - element.startTime,
-    });
-    this.requestUpdate();
   }
 
   /**

@@ -29,6 +29,11 @@ import {
   maskOf,
 } from "../mask/maskShape";
 import { DEFAULT_REVEAL_PROGRESS, revealOf } from "../text/reveal";
+import { setClipMaskFields } from "../timeline/maskOps";
+import { setClipTextRevealFields } from "../timeline/textRevealOps";
+import { isTrackLive } from "../timeline/keyframeMarkers";
+import { keyframeNavAt } from "./keyframeNav";
+import { setIn } from "../../utils/immutable";
 import type { TimelineDocument } from "../timeline/tracks";
 import {
   BAKE_HZ,
@@ -42,6 +47,7 @@ import {
   normalizeAnimation,
   plantKeyframe,
   removeKeyframe as removeFromList,
+  sampleBaked,
   setHandles as setHandlesInList,
   siblingLane,
   type Keyframe,
@@ -568,6 +574,242 @@ function staticValueOf(
     // says otherwise — the same rule `size` states above.
     case "revealProgress":
       return revealOf(element)?.progress ?? DEFAULT_REVEAL_PROGRESS;
+  }
+}
+
+/**
+ * Add, remove or arm — whichever the playhead's frame calls for.
+ *
+ * The one op behind the sidebar's keyframe diamond, and the reason the diamond
+ * can be a single control. Three states, three answers:
+ *
+ * | at the playhead        | what happens                                    |
+ * |------------------------|-------------------------------------------------|
+ * | not armed              | arm, seeding one keyframe here from the static  |
+ * |                        | value                                           |
+ * | armed, no key here     | add one carrying the value the clip is *already*|
+ * |                        | showing, so the picture does not move           |
+ * | armed, a key here      | remove it — and if that was the last, disarm and|
+ * |                        | adopt its value as the static one               |
+ *
+ * `cursorMs` is an absolute timeline time, not the element-local ms every other
+ * op in this file takes. Deriving it here rather than at the call site is
+ * deliberate: the frame comparison needs the element anyway, and the panels have
+ * each been writing `cursor - startTime` by hand with no clamp — which is how
+ * arming a property with the playhead off the clip seeded a keyframe at a
+ * negative time. `inSpan` is now the guard, and it declines.
+ */
+export function toggleKeyframe(
+  doc: TimelineDocument,
+  elementId: string,
+  property: AnimatableProperty,
+  cursorMs: number,
+  fps: number,
+  bakeHz: number = BAKE_HZ,
+): TimelineDocument {
+  const found = resolve(doc, elementId, property, "x");
+  if (found == null) {
+    return doc;
+  }
+
+  const nav = keyframeNavAt(found.element, property, cursorMs, fps);
+  if (!nav.inSpan) {
+    // A keyframe outside the clip never plays. Refusing beats reporting success
+    // for an edit with no visible effect.
+    return doc;
+  }
+
+  const atMs = cursorMs - (found.element as any).startTime;
+  const lanes = lanesOf(property);
+
+  if (nav.mark !== "on") {
+    // "off" and "empty" are the same job — *make sure there is a keyframe here*
+    // — and they are one path rather than two because a track can be both:
+    // switched off while still holding the curve the user drew, which is what
+    // `setTrackActive` preserves on the way out. Arming that one seeds nothing
+    // (it only fills empty lanes), so an `else if` would have left the click
+    // with no keyframe to show for itself: the diamond stays hollow and the
+    // clip jumps to wherever the old curve is.
+    let next = doc;
+    if (nav.mark === "off") {
+      next = setTrackActive(doc, elementId, property, true, { atMs }, bakeHz);
+    }
+
+    for (const lane of lanes) {
+      const laneFound = resolve(next, elementId, property, lane);
+      if (laneFound == null) {
+        continue;
+      }
+      // **Planted, not added.** `addToList` seats fresh ±100ms handles, which
+      // re-shapes the curve on both sides of the new point — so dropping a
+      // diamond mid-animation would silently change the motion either side of
+      // it. `plantKeyframe` subdivides the existing segment exactly (de
+      // Casteljau), so the curve is bit-for-bit the one that was there and the
+      // user simply gains a point to grab. Outside the authored range it
+      // appends the held end value, which is equally what was playing there.
+      //
+      // The empty-lane fallback is for a project authored before paired lanes
+      // existed, where `x` can carry a curve and `y` nothing: there is no curve
+      // to preserve, so the static value is what the renderer was showing.
+      const planted =
+        laneFound.list.length === 0
+          ? addToList(
+              laneFound.list,
+              atMs,
+              staticValueOf(laneFound.element, property, lane),
+            )
+          : plantKeyframe(laneFound.list, atMs);
+      if (planted === laneFound.list) {
+        continue;
+      }
+      next = withLane(next, elementId, property, lane, planted, bakeHz);
+    }
+    return next;
+  }
+
+  // `on`. The stored time is exact — `keyframeNavAt` reports the keyframe's own
+  // `p[0]`, not the snapped playhead — so `indexAtTime`'s `===` is the right
+  // lookup even for a keyframe the curve editor's Alt put off the frame grid.
+  const target = nav.atMs;
+  if (target == null) {
+    return doc;
+  }
+
+  // Which lane actually carries it. Normally both do; a project authored before
+  // `addKeyframePaired` existed can have it on one.
+  let primary: Lane | null = null;
+  let index = -1;
+  const removed: Array<{ lane: Lane; value: number }> = [];
+  for (const lane of lanes) {
+    const laneFound = resolve(doc, elementId, property, lane);
+    if (laneFound == null) {
+      continue;
+    }
+    const at = indexAtTime(laneFound.list, target);
+    if (at < 0) {
+      continue;
+    }
+    removed.push({ lane, value: laneFound.list[at].p[1] });
+    if (primary == null) {
+      primary = lane;
+      index = at;
+    }
+  }
+  if (primary == null) {
+    return doc;
+  }
+
+  const removedDoc = removeKeyframePaired(
+    doc,
+    elementId,
+    property,
+    primary,
+    index,
+    bakeHz,
+  );
+  if (removedDoc === doc) {
+    return doc;
+  }
+
+  if (isTrackLive(removedDoc.elements[elementId], property)) {
+    return removedDoc;
+  }
+
+  // That was the last one. Switch the track off and put the value it was
+  // holding into the field the renderer now falls back to.
+  let next = setTrackActive(
+    removedDoc,
+    elementId,
+    property,
+    false,
+    undefined,
+    bakeHz,
+  );
+  for (const { lane, value } of removed) {
+    next = withStaticValue(next, elementId, property, lane, value);
+  }
+  return next;
+}
+
+/**
+ * Write one lane's value back into the static field it keyframes.
+ *
+ * The exact inverse of `staticValueOf`, and it exists for one moment: the
+ * removal of a property's **last** keyframe. `sampleBaked` on an empty lane
+ * falls back to the static field, so without this the picture jumps to whatever
+ * that field happened to hold — and for a `position` authored by dragging on the
+ * preview it holds the *pre-drag* location, because that path writes keyframes
+ * and not `location`.
+ *
+ * It is the symmetric half of `setTrackActive`'s seed, which exists so that
+ * "the first thing the user does after enabling animation is not 'watch the
+ * element jump'". Disabling it deserves the same.
+ *
+ * Mask and reveal go through their own ops rather than `setIn`, so the write
+ * passes the validation `coerceMask` does — the read/write split those modules
+ * are built around. `scale` is the one property with no static field at all
+ * (an unscaled element is one whose scale track is off), so it declines; no
+ * panel offers a scale diamond, so that branch is unreachable today and says so
+ * rather than inventing a field.
+ */
+function withStaticValue(
+  doc: TimelineDocument,
+  elementId: string,
+  property: AnimatableProperty,
+  lane: Lane,
+  value: number,
+): TimelineDocument {
+  const element = doc.elements[elementId];
+  if (element == null || !Number.isFinite(value)) {
+    return doc;
+  }
+
+  // `setIn` allocates unconditionally — it has no decline-by-identity — so the
+  // guard is here. The mask and reveal ops below already compare before writing.
+  if (staticValueOf(element, property, lane) === value) {
+    return doc;
+  }
+
+  const put = (path: string[]) => ({
+    ...doc,
+    elements: { ...doc.elements, [elementId]: setIn(element, path, value) },
+  });
+
+  switch (property) {
+    case "position":
+      // `setIn` walks the path, so it clones `location` and touches one axis —
+      // the sibling is preserved without being read.
+      return put(["location", lane === "x" ? "x" : "y"]);
+    case "opacity":
+      return put(["opacity"]);
+    case "rotation":
+      return put(["rotation"]);
+    case "size":
+      return put([lane === "x" ? "width" : "height"]);
+    case "scale":
+      return doc;
+
+    case "maskPosition": {
+      const at = maskOf(element)?.location ?? DEFAULT_MASK_LOCATION;
+      return setClipMaskFields(doc, elementId, {
+        location: { ...at, [lane === "x" ? "x" : "y"]: value },
+      });
+    }
+    case "maskSize": {
+      const size = maskOf(element)?.size ?? DEFAULT_MASK_SIZE;
+      return setClipMaskFields(doc, elementId, {
+        size: { ...size, [lane === "x" ? "width" : "height"]: value },
+      });
+    }
+    case "maskRotation":
+      return setClipMaskFields(doc, elementId, { rotation: value });
+    case "maskFeather":
+      return setClipMaskFields(doc, elementId, { feather: value });
+    case "maskRoundness":
+      return setClipMaskFields(doc, elementId, { roundness: value });
+
+    case "revealProgress":
+      return setClipTextRevealFields(doc, elementId, { progress: value });
   }
 }
 

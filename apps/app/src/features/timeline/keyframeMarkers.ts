@@ -60,8 +60,18 @@ export type KeyframeLane = {
   centerY: number;
 };
 
-/** Whether a property is animated and has something to show. */
-function isLive(element: TimelineElement, property: AnimatableProperty): boolean {
+/**
+ * Whether a property is animated and has something to show.
+ *
+ * Exported because it is the three-state diamond's "armed" test too, and the
+ * two must not drift: an active track with an empty curve renders from the
+ * static value, so a sidebar control that called it armed would light up for an
+ * animation nobody can see. `keyframeTrack.ts` records that hazard.
+ */
+export function isTrackLive(
+  element: TimelineElement,
+  property: AnimatableProperty,
+): boolean {
   const track = (element as any).animation?.[property];
   if (track == null || typeof track !== "object" || track.isActivate !== true) {
     return false;
@@ -86,7 +96,7 @@ export function keyframeTimes(element: TimelineElement): number[] {
   const times: number[] = [];
 
   for (const property of animatableProperties(element)) {
-    if (!isLive(element, property)) {
+    if (!isTrackLive(element, property)) {
       continue;
     }
     const track = (element as any).animation[property];

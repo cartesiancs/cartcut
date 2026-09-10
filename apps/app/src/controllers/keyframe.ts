@@ -7,10 +7,11 @@ import {
   removeKeyframePaired,
   setHandles,
   setTrackActive,
+  toggleKeyframe,
   type Lane,
 } from "../features/animation/keyframeOps";
 import type { TimelineDocument } from "../features/timeline/tracks";
-import { projectBakeHz } from "../features/editor/frameRate";
+import { projectBakeHz, projectFps } from "../features/editor/frameRate";
 
 /**
  * The keyframe editing entry point for the option panels and the curve editor.
@@ -199,6 +200,39 @@ export class KeyframeController implements ReactiveController {
         KeyframeController.laneOf(line),
         index,
         { cs, ce },
+        this.bakeHz,
+      ),
+    );
+  }
+
+  /**
+   * The keyframe diamond: add one here, remove the one here, or arm the track.
+   *
+   * Which of the three it is depends on the document, so the choice lives in
+   * the pure op and not here — a controller that decided would have to read the
+   * store before committing and act on a snapshot one edit stale.
+   *
+   * `cursorMs` is absolute; the op converts. That is deliberate: every panel
+   * has been writing `cursor - startTime` by hand with no clamp, which is how
+   * arming a property with the playhead off the clip seeded a keyframe at a
+   * negative time. One conversion, one guard, one place.
+   */
+  togglePoint({
+    elementId,
+    animationType,
+    cursorMs,
+  }: {
+    elementId: string;
+    animationType: AnimatableProperty | string;
+    cursorMs: number;
+  }) {
+    this.commit((doc) =>
+      toggleKeyframe(
+        doc,
+        elementId,
+        animationType as AnimatableProperty,
+        cursorMs,
+        projectFps(),
         this.bakeHz,
       ),
     );

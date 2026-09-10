@@ -716,3 +716,14 @@ body.playback-preview preview-bottom-bar {
 .btn-nowarp {
   white-space: nowrap;
 }
+
+// The keyframe diamond's empty state.
+//
+// `.material-symbols-outlined` above pins `FILL 1` for the whole app, so every
+// icon is solid. Material Symbols is a variable font, so asking for `FILL 0`
+// here gives the outline of the same glyph — which is how every NLE says "no
+// keyframe on this frame". Every axis has to be restated: `font-variation-settings`
+// replaces the whole list rather than merging one axis into it.
+.keyframe-hollow {
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 48;
+}

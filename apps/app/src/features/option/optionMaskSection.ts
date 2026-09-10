@@ -32,7 +32,6 @@ import {
   type MaskType,
   type TimelineElement,
 } from "../../@types/timeline";
-import { KeyframeController } from "../../controllers/keyframe";
 import { useTimelineStore } from "../../states/timelineStore";
 import { addKeyframe } from "../animation/keyframeOps";
 import { projectBakeHz } from "../editor/frameRate";
@@ -44,6 +43,7 @@ import {
   type MaskFieldPatch,
 } from "../timeline/maskOps";
 import { GestureCommit } from "./gestureCommit";
+import "./controlKeyframeNav";
 import "../../components/input/input";
 
 /** The icon for each shape. Material Symbols names. */
@@ -67,7 +67,6 @@ export class OptionMaskSection extends LitElement {
   @property({ type: Array })
   elementIds: string[] = [];
 
-  private keyframeControl = new KeyframeController(this);
   private gesture = new GestureCommit();
   private teardown: Array<() => void> = [];
 
@@ -205,24 +204,6 @@ export class OptionMaskSection extends LitElement {
     return typeof parsed === "number" && Number.isFinite(parsed) ? parsed : 0;
   }
 
-  private trackActive(property: AnimatableProperty): boolean {
-    return (this.element as any)?.animation?.[property]?.isActivate === true;
-  }
-
-  private toggleTrack(property: AnimatableProperty) {
-    const element = this.element;
-    if (element == null) {
-      return;
-    }
-    this.keyframeControl.setActive({
-      elementId: this.primaryId,
-      animationType: property,
-      active: !this.trackActive(property),
-      atMs: this.cursor - element.startTime,
-    });
-    this.requestUpdate();
-  }
-
   /**
    * Arm the pen on the clip this panel is showing.
    *
@@ -255,20 +236,11 @@ export class OptionMaskSection extends LitElement {
 
   private keyButton(property: AnimatableProperty) {
     return html`
-      <button
-        class="btn btn-xxs text-light mr-2"
-        aria-event="mask-key-${property}"
-        title=${property}
-        @click=${() => this.toggleTrack(property)}
-      >
-        <span
-          class="material-symbols-outlined icon-xsm ${this.trackActive(property)
-            ? "text-light"
-            : "text-secondary"}"
-        >
-          stat_0
-        </span>
-      </button>
+      <control-keyframe-nav
+        .elementId=${this.primaryId}
+        .property=${property}
+        .label=${property}
+      ></control-keyframe-nav>
     `;
   }
 

@@ -34,7 +34,6 @@ import {
   type TextReveal,
   type TimelineElement,
 } from "../../@types/timeline";
-import { KeyframeController } from "../../controllers/keyframe";
 import { useTimelineStore } from "../../states/timelineStore";
 import { addKeyframe } from "../animation/keyframeOps";
 import { projectBakeHz } from "../editor/frameRate";
@@ -48,6 +47,7 @@ import {
   type RevealFieldPatch,
 } from "../timeline/textRevealOps";
 import { GestureCommit } from "./gestureCommit";
+import "./controlKeyframeNav";
 import "../../components/input/input";
 
 /** One word each. The panel has no prose in it, deliberately. */
@@ -81,7 +81,6 @@ export class OptionTextRevealSection extends LitElement {
   @property({ type: Number })
   typewriterMs = DEFAULT_TYPEWRITER_MS;
 
-  private keyframeControl = new KeyframeController(this);
   private gesture = new GestureCommit();
   private teardown: Array<() => void> = [];
 
@@ -218,44 +217,15 @@ export class OptionTextRevealSection extends LitElement {
     return typeof parsed === "number" && Number.isFinite(parsed) ? parsed : 0;
   }
 
-  private get trackActive(): boolean {
-    return (
-      (this.element as any)?.animation?.revealProgress?.isActivate === true
-    );
-  }
-
-  private toggleTrack() {
-    const element = this.element;
-    if (element == null) {
-      return;
-    }
-    this.keyframeControl.setActive({
-      elementId: this.primaryId,
-      animationType: "revealProgress",
-      active: !this.trackActive,
-      atMs: this.cursor - (element as any).startTime,
-    });
-    this.requestUpdate();
-  }
-
   // --------------------------------------------------------------- drawing
 
   private keyButton() {
     return html`
-      <button
-        class="btn btn-xxs text-light mr-2"
-        aria-event="reveal-key-progress"
-        title="revealProgress"
-        @click=${() => this.toggleTrack()}
-      >
-        <span
-          class="material-symbols-outlined icon-xsm ${
-            this.trackActive ? "text-light" : "text-secondary"
-          }"
-        >
-          stat_0
-        </span>
-      </button>
+      <control-keyframe-nav
+        .elementId=${this.primaryId}
+        .property=${"revealProgress"}
+        .label=${"reveal"}
+      ></control-keyframe-nav>
     `;
   }
 
