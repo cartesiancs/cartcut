@@ -121,6 +121,18 @@ const OUTSIDE_ALPHA = 0.28;
 const FRAME_GUIDE_COLOR = "rgba(255, 255, 255, 0.35)";
 
 /**
+ * The snap guide, and the darker casing drawn a little wider under it.
+ *
+ * The `renderControlOutline` arrangement, for the reason stated there: the
+ * chrome keeps one colour whatever the picture behind it is doing, and the rim
+ * is what makes it readable on a light clip instead of vanishing into one.
+ */
+const ALIGN_GUIDE_COLOR = "#ffffff";
+const ALIGN_GUIDE_CASING = "rgba(0, 0, 0, 0.62)";
+const ALIGN_GUIDE_WIDTH = 3;
+const ALIGN_GUIDE_RIM = 1.5;
+
+/**
  * Pen chrome, in **screen** pixels — every use divides by the world scale.
  *
  * The grab radius is the distance within which clicking the first node closes
@@ -930,50 +942,57 @@ export class PreviewCanvas extends LitElement {
   // `movedLocation` call that placed the element, so the guides and the position
   // cannot disagree.
 
+  /**
+   * The snap guides, on the frame edges and the two centre lines.
+   *
+   * Drawn the way `renderControlOutline` draws its handles and for the same
+   * reason: a white guide across a white clip is not faint, it is gone, and the
+   * one gesture that needs it is aligning something *to* a light background.
+   * Each line is a bright stroke on a darker casing a little wider, so one of
+   * the two contrasts whatever is behind it — the pair costs one extra stroke
+   * of a path that is already built.
+   */
   drawAlign(ctx: CanvasRenderingContext2D, direction: string[]) {
     const frame = this.frameSize;
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "#ffffff";
+
+    const path = new Path2D();
+    let any = false;
+    const line = (x1: number, y1: number, x2: number, y2: number) => {
+      path.moveTo(x1, y1);
+      path.lineTo(x2, y2);
+      any = true;
+    };
+
     if (direction.includes("top")) {
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(frame.w, 0);
-      ctx.stroke();
+      line(0, 0, frame.w, 0);
     }
-
     if (direction.includes("left")) {
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(0, frame.h);
-      ctx.stroke();
+      line(0, 0, 0, frame.h);
     }
-
     if (direction.includes("right")) {
-      ctx.beginPath();
-      ctx.moveTo(frame.w, 0);
-      ctx.lineTo(frame.w, frame.h);
-      ctx.stroke();
+      line(frame.w, 0, frame.w, frame.h);
     }
-
     if (direction.includes("bottom")) {
-      ctx.beginPath();
-      ctx.moveTo(0, frame.h);
-      ctx.lineTo(frame.w, frame.h);
-      ctx.stroke();
+      line(0, frame.h, frame.w, frame.h);
     }
-
     if (direction.includes("horizontal")) {
-      ctx.beginPath();
-      ctx.moveTo(0, frame.h / 2);
-      ctx.lineTo(frame.w, frame.h / 2);
-      ctx.stroke();
+      line(0, frame.h / 2, frame.w, frame.h / 2);
     }
     if (direction.includes("vertical")) {
-      ctx.beginPath();
-      ctx.moveTo(frame.w / 2, 0);
-      ctx.lineTo(frame.w / 2, frame.h);
-      ctx.stroke();
+      line(frame.w / 2, 0, frame.w / 2, frame.h);
     }
+    if (!any) {
+      return;
+    }
+
+    ctx.save();
+    ctx.strokeStyle = ALIGN_GUIDE_CASING;
+    ctx.lineWidth = ALIGN_GUIDE_WIDTH + ALIGN_GUIDE_RIM * 2;
+    ctx.stroke(path);
+    ctx.strokeStyle = ALIGN_GUIDE_COLOR;
+    ctx.lineWidth = ALIGN_GUIDE_WIDTH;
+    ctx.stroke(path);
+    ctx.restore();
   }
 
   isAlign({ x, y, w, h }) {
