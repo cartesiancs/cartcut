@@ -28,6 +28,7 @@ import {
   DEFAULT_MASK_SIZE,
   maskOf,
 } from "../mask/maskShape";
+import { DEFAULT_REVEAL_PROGRESS, revealOf } from "../text/reveal";
 import type { TimelineDocument } from "../timeline/tracks";
 import {
   BAKE_HZ,
@@ -35,7 +36,7 @@ import {
   type Baked,
   addKeyframe as addToList,
   bakeTrack,
-  isMaskTrack,
+  isConditionalTrack,
   lanesOf,
   moveKeyframe as moveInList,
   normalizeAnimation,
@@ -517,6 +518,12 @@ function staticValueOf(
       return maskOf(element)?.feather ?? DEFAULT_MASK_FEATHER;
     case "maskRoundness":
       return maskOf(element)?.roundness ?? DEFAULT_MASK_ROUNDNESS;
+    // Seeded from what the clip is showing right now, which for a reveal
+    // nobody has keyed is the whole text. Clicking the stopwatch therefore
+    // plants "fully revealed" and changes nothing until a second keyframe
+    // says otherwise — the same rule `size` states above.
+    case "revealProgress":
+      return revealOf(element)?.progress ?? DEFAULT_REVEAL_PROGRESS;
   }
 }
 
@@ -590,15 +597,17 @@ export function setTrackActive(
 }
 
 /**
- * The properties a clip animates that are its own, mask tracks excluded.
+ * The properties a clip animates that are its own — the conditional families
+ * excluded.
  *
- * `animatableProperties` is a function of the element's *state* — a masked clip
- * offers five more — so this is where the two questions are separated rather
- * than at each call site.
+ * `animatableProperties` is a function of the element's *state*: a masked clip
+ * offers five more, and a text clip with a reveal one more again. Both of those
+ * belong to the thing that created them rather than to the clip's movement, so
+ * this is where the two questions are separated rather than at each call site.
  */
 function ownAnimatableProperties(element: TimelineElement): AnimatableProperty[] {
   return animatableProperties(element).filter(
-    (property) => !isMaskTrack(property),
+    (property) => !isConditionalTrack(property),
   );
 }
 
@@ -644,11 +653,13 @@ export function hasAnimation(
  * authored (`x`/`y`) and baked (`ax`/`ay`) together — the invariant this whole
  * module exists to hold.
  *
- * **Mask tracks are left alone.** `maskPosition` and its four siblings are
- * properties of the mask, not of the clip's movement; they exist only while
- * there is a mask, `maskOps` seeds and removes them with it, and the UI that
- * offers them is a different tab. Clearing exactly what the preset grid can
- * write is the rule that keeps the tile honest.
+ * **The conditional tracks are left alone.** `maskPosition` and its four
+ * siblings are properties of the mask, and `revealProgress` is a property of a
+ * text clip's reveal, not of the clip's movement; each exists only while the
+ * thing that owns it does, each is seeded and removed with it, and neither is
+ * something the preset grid can write. Clearing exactly what that grid *can*
+ * write is the rule that keeps the tile honest — a "None" that also stopped a
+ * typewriter would be claiming to have removed something it never applied.
  *
  * Declines by identity when there was nothing to clear, so a second click on
  * "None" costs no undo step.

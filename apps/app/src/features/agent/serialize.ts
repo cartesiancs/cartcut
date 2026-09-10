@@ -34,6 +34,8 @@ import { DEFAULT_LUT_INTENSITY, lutOf } from "../renderer/lut";
 import { isBlendable } from "../timeline/blendOps";
 import { isGradable } from "../timeline/lutOps";
 import { maskOf } from "../mask/maskShape";
+import { revealOf } from "../text/reveal";
+import { isRevealable } from "../timeline/textRevealOps";
 import { isMaskable } from "../timeline/maskOps";
 import type { TimelineDocument, TimelineTrack } from "../timeline/tracks";
 import { resolveTextStyle } from "../text/style";
@@ -177,6 +179,15 @@ export function clipRow(
   const mask = maskOf(element);
   if (mask != null) {
     row.mask = mask.shape;
+  }
+
+  // Whether the clip's lettering is revealed a piece at a time, in a word. Like
+  // the mask's shape it explains a clip that is in the document but not all
+  // there in the picture — which for a reveal is the *usual* state at any given
+  // frame, and would otherwise read as a broken font or a bad trim.
+  const reveal = revealOf(element);
+  if (reveal != null) {
+    row.reveal = reveal.unit;
   }
 
   switch (element.filetype) {
@@ -371,6 +382,25 @@ export function clipDetail(
           : {}),
       };
     }
+  }
+
+  // Reported whatever its value on text, and absent on every other type — the
+  // same distinction `blend`, `lut` and `mask` make above.
+  //
+  // The static `progress` is what is sent, not the value at the playhead: a
+  // reveal that is keyframed is *supposed* to differ from it at every frame,
+  // and reporting a sampled number would read as a setting an agent could
+  // write. `get_keyframes` is where the curve lives.
+  if (isRevealable(element)) {
+    const detailReveal = revealOf(element);
+    detail.reveal =
+      detailReveal == null
+        ? null
+        : {
+            unit: detailReveal.unit,
+            progress: detailReveal.progress,
+            fade: detailReveal.fade ?? 0,
+          };
   }
 
   if (element.filetype === "shape") {

@@ -569,6 +569,58 @@ export type TextFill =
   | { type: "gradient"; from: string; to: string; angle: number };
 
 /**
+ * What one step of a reveal counts.
+ *
+ * A runtime list for the same reason `MASK_SHAPES` is one: the option panel
+ * builds its picker from it, and a value that is not in it is refused rather
+ * than stored.
+ */
+export const REVEAL_UNITS = ["character", "word", "line"] as const;
+
+export type RevealUnit = (typeof REVEAL_UNITS)[number];
+
+/**
+ * Showing a text clip's lettering a piece at a time — the typewriter, and every
+ * other cadence built out of the same scalar.
+ *
+ * **This field holds no time at all.** It says what a progress value *means*;
+ * the progress itself is `animation.revealProgress`, an ordinary keyframe track
+ * over the static `progress` below. That split is the whole design:
+ *
+ * - Timing lives in the animation block, so `rebaseAnimation`, `sliceAnimation`
+ *   and `rebakeElement` carry it through split, trim, duplicate, paste and a
+ *   project frame-rate change without knowing this feature exists. A
+ *   `startMs`/`durationMs` pair stored here would need every one of those
+ *   reimplemented in `clipOps`.
+ * - Meaning lives here, so changing the wording of the text does not invalidate
+ *   the timing — which is exactly what keyframing the string itself, the way
+ *   Premiere's Source Text does, cannot offer.
+ *
+ * Not a mixin over the other visual types on purpose: a reveal counts units of
+ * *text*, and a picture has none. Wiping an image on is what a mask is for.
+ */
+export type TextReveal = {
+  unit: RevealUnit;
+  /**
+   * 0-100, how much of the text is shown. **100 is the inert state** — turning
+   * a reveal on without keyframing it changes nothing on screen.
+   *
+   * This is the static field `animation.revealProgress` keyframes, and it obeys
+   * the usual contract: a keyframed reveal shows exactly what typing the same
+   * number here shows.
+   */
+  progress: number;
+  /**
+   * 0-1. How much of one unit's turn it spends fading in; 0 is a hard cut.
+   *
+   * Bounded at one unit deliberately, so at most one unit is ever partially
+   * drawn and the renderer costs one extra pass rather than one per unit in
+   * flight.
+   */
+  fade?: number;
+};
+
+/**
  * Text.
  *
  * Everything from `options.shadow` down is **optional on purpose**. Projects
@@ -633,6 +685,13 @@ export type TextElementType = TimelinePlaced &
      * fades the whole element — background box, shadow and all.
      */
     textOpacity?: number;
+    /**
+     * Absent means the whole text is shown, and clearing a reveal deletes the
+     * key — so a project nobody has revealed saves byte-identically to one
+     * written before the feature, and `SCHEMA_VERSION` did not move. The rule
+     * `blend`, `lut` and `mask` all follow.
+     */
+    reveal?: TextReveal;
     widthInner: number;
   };
 
@@ -1024,6 +1083,23 @@ export type MaskAnimatableProperty =
   (typeof MASK_ANIMATABLE_PROPERTIES)[number];
 
 /**
+ * The tracks a text clip carries only while it has a `reveal`.
+ *
+ * One track, holding the 0-100 progress. It sits in `element.animation` beside
+ * the clip's own five for the reason the mask's five do: everything that
+ * rewrites keyframes walks `Object.keys(animation)`, so split, trim, duplicate,
+ * paste and a frame-rate change carry a typewriter's timing for free.
+ *
+ * Kept out of `emptyAnimation` and gated in `animatableProperties` below, so a
+ * clip with no reveal has no such track to save — and
+ * `keyframes.ts#normalizeAnimation` collects the orphans if one is left behind.
+ */
+export const TEXT_ANIMATABLE_PROPERTIES = ["revealProgress"] as const;
+
+export type TextAnimatableProperty =
+  (typeof TEXT_ANIMATABLE_PROPERTIES)[number];
+
+/**
  * The tracks a clip carries on its own account, as a value rather than a type.
  *
  * A runtime list because `electron/` cannot import this module — `rootDir` is
@@ -1044,7 +1120,28 @@ export const OWN_ANIMATABLE_PROPERTIES = [
 
 export type AnimatableProperty =
   | (typeof OWN_ANIMATABLE_PROPERTIES)[number]
-  | MaskAnimatableProperty;
+  | MaskAnimatableProperty
+  | TextAnimatableProperty;
+
+/**
+ * Every property that can carry a track — the conditional families included.
+ *
+ * Assembled here rather than at the one place that needs it, which is
+ * `mcp/tools/define.ts`'s hand copy and the test that pins it. Spelling the
+ * families out in that test made the guard go stale *at the same moment* as the
+ * copy it exists to guard: `size` was added to the union, to
+ * `animatableProperties` and to every consumer, and the test went on passing
+ * against a list that named four of the five. A guard that can only be wrong
+ * when this line is wrong cannot repeat that.
+ *
+ * Membership here says a property is animatable *somewhere*, not on every clip
+ * — `animatableProperties(element)` is the only answer to that question.
+ */
+export const ALL_ANIMATABLE_PROPERTIES: readonly AnimatableProperty[] = [
+  ...OWN_ANIMATABLE_PROPERTIES,
+  ...MASK_ANIMATABLE_PROPERTIES,
+  ...TEXT_ANIMATABLE_PROPERTIES,
+];
 
 /**
  * Which properties an element can actually animate.
@@ -1090,9 +1187,19 @@ export function animatableProperties(
   // it would put a filetype exception here that the context menu, the diamond
   // lane and the MCP schema would each have to re-derive.
   const own: AnimatableProperty[] = [...OWN_ANIMATABLE_PROPERTIES];
-  return (element as { mask?: unknown }).mask != null
-    ? [...own, ...MASK_ANIMATABLE_PROPERTIES]
-    : own;
+  if ((element as { mask?: unknown }).mask != null) {
+    own.push(...MASK_ANIMATABLE_PROPERTIES);
+  }
+  // Text's `revealProgress` is gated the same way and for the same reason: a
+  // clip with no reveal has nothing to progress through, and offering the
+  // stopwatch would seed a track that `withReveal` would then have to strip.
+  if (
+    element.filetype === "text" &&
+    (element as { reveal?: unknown }).reveal != null
+  ) {
+    own.push(...TEXT_ANIMATABLE_PROPERTIES);
+  }
+  return own;
 }
 
 export interface Timeline {

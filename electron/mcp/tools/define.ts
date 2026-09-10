@@ -195,7 +195,8 @@ export const BLEND_MODES = [
  * *advertise* a property in one tool's output and *reject* it in another's
  * input — a surface an agent can only discover by being refused.
  *
- * The five `mask*` entries only exist on a clip that has a mask;
+ * The five `mask*` entries only exist on a clip that has a mask, and
+ * `revealProgress` only on a text clip that has a reveal;
  * `animatableProperties` is the gate, and the commands decline through it.
  */
 export const ANIMATABLE = [
@@ -209,6 +210,7 @@ export const ANIMATABLE = [
   "maskRotation",
   "maskFeather",
   "maskRoundness",
+  "revealProgress",
 ] as const;
 
 /** The mask shapes a clip can be cut to. A copy of `MASK_SHAPES`. */

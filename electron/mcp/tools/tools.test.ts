@@ -189,18 +189,19 @@ describe("every tool is usable as declared", () => {
     // refused: `get_clip` reports whichever tracks a clip has, so an enum
     // narrower than the union would name a property in one tool's output and
     // reject it in another's input.
-    // Both halves imported, neither retyped. Spelling the clip's own four out
-    // here made this guard stale in the same way and at the same moment as the
-    // copy it exists to guard: `size` was added to the union, to
-    // `animatableProperties` and to every consumer, and this test went on
-    // passing against a list that named four of the five.
-    const { OWN_ANIMATABLE_PROPERTIES, MASK_ANIMATABLE_PROPERTIES } =
-      await import("../../../apps/app/src/@types/timeline");
-    const union = [
-      ...OWN_ANIMATABLE_PROPERTIES,
-      ...MASK_ANIMATABLE_PROPERTIES,
-    ];
-    expect([...ANIMATABLE].sort()).toEqual([...union].sort());
+    // One list imported, nothing retyped — not even the *families*. Spelling
+    // the clip's own four out here made this guard stale in the same way and at
+    // the same moment as the copy it exists to guard: `size` was added to the
+    // union, to `animatableProperties` and to every consumer, and this test went
+    // on passing against a list that named four of the five. Naming the two
+    // families instead only moved the same defect up one level, and it happened
+    // again the moment there was a third: text's `revealProgress`.
+    const { ALL_ANIMATABLE_PROPERTIES } = await import(
+      "../../../apps/app/src/@types/timeline"
+    );
+    expect([...ANIMATABLE].sort()).toEqual(
+      [...ALL_ANIMATABLE_PROPERTIES].sort(),
+    );
   });
 
   it("advertises exactly the filetypes the renderer defines", async () => {

@@ -155,6 +155,7 @@ const ANIMATION_MENU: Record<string, { label: string; icon: string }> = {
   maskRotation: { label: "Rotation", icon: "rotate_90_degrees_cw" },
   maskFeather: { label: "Feather", icon: "blur_on" },
   maskRoundness: { label: "Roundness", icon: "rounded_corner" },
+  revealProgress: { label: "Reveal", icon: "keyboard" },
 };
 
 /** The mask's five, as a set, for splitting the menu in two. */

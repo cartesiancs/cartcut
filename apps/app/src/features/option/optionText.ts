@@ -12,6 +12,7 @@ import "./controlBlendMode";
 import "./optionLutSection";
 import "./optionMaskSection";
 import "./optionTabBar";
+import "./optionTextRevealSection";
 import type { OptionTab } from "./optionTabBar";
 
 @customElement("option-text")
@@ -111,6 +112,11 @@ export class OptionText extends LitElement {
       </div>
 
       <div class=${this.tab === "animation" ? "" : "d-none"}>
+        <!-- A reveal is one keyframe track on one scalar, so it belongs with
+             the other animation, above the presets that cannot write it. -->
+        <option-text-reveal-section
+          .elementIds=${this.elementId}
+        ></option-text-reveal-section>
         <animation-preset-browser
           .elementIds=${this.elementId}
         ></animation-preset-browser>

@@ -1049,9 +1049,64 @@ export function emptyMaskAnimation(): Record<string, unknown> {
   };
 }
 
+/**
+ * The one empty track a text clip gains when it is given a reveal.
+ *
+ * Out of `emptyAnimation` for the reason `emptyMaskAnimation` is: a clip with
+ * no reveal must carry exactly the block it carried before this feature
+ * existed. Seeded and removed by `timeline/textRevealOps.ts`.
+ */
+export function emptyRevealAnimation(): Record<string, unknown> {
+  return { revealProgress: { isActivate: false, x: [], ax: [] } };
+}
+
 /** Whether a track name belongs to the mask rather than to the clip itself. */
 export function isMaskTrack(property: string): boolean {
   return property.startsWith("mask");
+}
+
+/** Whether a track name belongs to a text clip's reveal. */
+export function isRevealTrack(property: string): boolean {
+  return property === "revealProgress";
+}
+
+/**
+ * The tracks that exist only while the element carries the thing they describe,
+ * and how to ask whether it does.
+ *
+ * A table rather than two hard-coded conditions because there are two of these
+ * now and the next one should not be a third `if` in four places. It is
+ * deliberately **not** re-derived from `animatableProperties`: "drop anything
+ * that list does not offer" would also delete tracks written by a hand-edited
+ * project or a newer build, silently, which is a much worse failure than
+ * carrying one along.
+ */
+const CONDITIONAL_TRACKS: Array<{
+  match: (property: string) => boolean;
+  present: (element: any) => boolean;
+}> = [
+  { match: isMaskTrack, present: (element) => element?.mask != null },
+  { match: isRevealTrack, present: (element) => element?.reveal != null },
+];
+
+/**
+ * Whether this element is entitled to this track at all.
+ *
+ * `true` for every unconditional track, so callers can use it as a filter
+ * without knowing which families are conditional.
+ */
+export function carriesTrack(element: any, property: string): boolean {
+  for (const rule of CONDITIONAL_TRACKS) {
+    if (rule.match(property)) {
+      return rule.present(element);
+    }
+  }
+  return true;
+}
+
+/** Whether a track name belongs to one of the conditional families. */
+export function isConditionalTrack(property: string): boolean {
+  return CONDITIONAL_TRACKS.some((rule) => rule.match(property));
 }
 
 function normalizeTrackValue(raw: any, lanes: Lane[]): any {
@@ -1149,14 +1204,14 @@ function sameTrack(before: any, after: any, lanes: Lane[]): boolean {
  * `normalizeDocument`, which runs on every edit and every checkpoint and has no
  * business walking keyframe arrays at pointer rate.
  *
- * It is also where **orphan mask tracks are collected**. A clip's mask curves
- * exist only while it has a mask (`animatableProperties`), so a `maskFeather`
- * track on an unmasked clip is invisible to the curve editor, to the diamond
- * lane, to `keyframeOps` and to `rebakeElement` — while still being cloned by
- * every duplicate, sliced by every split and written to every save, going
- * staler at each frame-rate change it is not re-baked for. Dropping it here
- * costs one `startsWith` per track on the one pass that already exists for
- * exactly this kind of repair.
+ * It is also where **orphan conditional tracks are collected**. A clip's mask
+ * curves exist only while it has a mask, and a text clip's `revealProgress`
+ * only while it has a reveal (`animatableProperties`), so a `maskFeather` track
+ * on an unmasked clip is invisible to the curve editor, to the diamond lane, to
+ * `keyframeOps` and to `rebakeElement` — while still being cloned by every
+ * duplicate, sliced by every split and written to every save, going staler at
+ * each frame-rate change it is not re-baked for. `carriesTrack` decides, on the
+ * one pass that already exists for exactly this kind of repair.
  *
  * And it is where **a missing unconditional track is seeded**, which is the
  * same rule read the other way round. A track the element *should* carry but
@@ -1174,12 +1229,10 @@ export function normalizeAnimation<T extends TimelineElement>(element: T): T {
     return element;
   }
 
-  const masked = (element as any).mask != null;
-
   const next: any = {};
   let changed = false;
   for (const property of Object.keys(animation)) {
-    if (!masked && isMaskTrack(property)) {
+    if (!carriesTrack(element, property)) {
       changed = true;
       continue;
     }

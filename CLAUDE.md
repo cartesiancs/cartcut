@@ -337,6 +337,90 @@ records that a preset was what wrote them. That is also why no tile but "None"
 shows an applied state — a highlight on Fade In would be a guess presented as a
 fact.
 
+## Revealing text
+
+Showing a text clip's lettering a piece at a time — the typewriter, and every
+other cadence built from the same scalar. CapCut has a one-click preset for it;
+Premiere makes you keyframe the Source Text once per glyph.
+
+```
+apps/app/src/features/text/reveal.ts        the plan: units -> character offsets
+apps/app/src/features/text/typewriter.ts    applyTypewriter, built on the ops
+apps/app/src/features/timeline/textRevealOps.ts  setClipTextReveal / …Fields
+apps/app/src/features/renderer/text.ts      paintLettering, paintRevealHead
+apps/app/src/features/option/optionTextRevealSection.ts  the Animation-tab panel
+```
+
+**A reveal is one continuous scalar, and `unit` says what it counts.** That
+split is the whole design, and it puts the two halves in different places:
+
+- **Meaning** is `element.reveal` — `{ unit, progress, fade? }`, an optional
+  field on text alone. It holds **no time at all**, so nothing in `clipOps` has
+  to rebase it.
+- **Timing** is `element.animation.revealProgress`, an ordinary keyframe track
+  over the static `progress`. `rebaseAnimation`, `sliceAnimation` and
+  `rebakeElement` all walk `Object.keys(animation)`, so split, trim, duplicate,
+  paste and a frame-rate change carry a typewriter's timing for free — the same
+  argument the mask's five make for living there. Storing `startMs`/`durationMs`
+  on the field would have meant reimplementing every one of those, and the one
+  anyone forgot would fail silently on one edit.
+
+Absent means the whole text is shown, clearing deletes the key, and
+**`SCHEMA_VERSION` did not move**. `revealProgress` is kept out of
+`emptyAnimation` and gated in `animatableProperties` on `element.reveal != null`
+— the mask's arrangement exactly, and `normalizeAnimation` collects the orphans
+through `keyframes.ts#carriesTrack`, which is now a table rather than the two
+hard-coded conditions it was becoming.
+
+Keyframing the *string*, as Premiere does, is the alternative and is wrong here:
+`HistoryEntry` keeps fifty snapshots of the element map, so the undo stack would
+grow by the whole body times its glyph count; easing and handles would mean
+nothing; and correcting one typo would invalidate every keyframe. A progress
+scalar is independent of the wording, so the timing survives an edit to the text.
+
+Five things that are easy to get wrong:
+
+- **The reveal is applied *after* layout, never before.** `layoutFor`'s
+  `wrapCache` is keyed on the whole string, so wrapping a growing prefix would
+  miss that cache every frame *and* re-flow the text as each word arrived. It
+  also means the box never changes size, which is why nothing about a reveal
+  belongs in `textFit.ts#RE_FITTING_PATHS`.
+- **The lettering is drawn left-anchored while revealing.** `backgroundX + pad`
+  is already the full line's left edge under all three alignments, so the prefix
+  is drawn there with `textAlign: "left"`. Drawing it at a centre or right
+  anchor re-centres it every frame and the text creeps sideways as it types —
+  the defect Premiere's Source Text keyframing has, and invisible in any
+  left-aligned test.
+- **The background band is drawn at the full line's width.** A band is a layout
+  element, not something that types; one that grew would redraw at a new size
+  every frame and, centred, grow both ways at once. It appears whole with the
+  line's first unit, and a line that has not started gets no band.
+- **A cut never lands inside a grapheme.** `Intl.Segmenter` decides, pinned to
+  one locale so the same sentence does not segment differently on CI than on a
+  Korean machine. It is also the only thing that makes `word` mean anything in
+  Japanese or Chinese, where there is no space to split on.
+- **`fade` is bounded to one unit.** At most one unit is ever part-drawn, so the
+  cost is one extra clipped pass per line rather than one per unit in flight.
+  That pass draws the *whole* prefix and clips it, because `measureText` on a
+  substring loses the kerning against the glyph before it.
+
+`applyTypewriter` writes exactly what a user could place by hand —
+`setClipTextReveal`, `setTrackActive`, two `addKeyframe`s, one linear easing —
+so the stopwatch, the curve editor and undo all work on its result without
+knowing a button made it. It is deliberately **not** in
+`features/animation/presets.ts`: a `PresetShape` is transform and opacity stops
+and `applyPreset` writes keyframes only, while a reveal preset must also write
+`element.reveal`. The linear default is load-bearing — `addKeyframe` gives every
+anchor a 100ms handle, so two bare keyframes describe an ease-in-out, and typing
+that starts slow, races and then dawdles reads as a stutter.
+
+There is no dedicated MCP tool yet, but `revealProgress` **is** in
+`define.ts#ANIMATABLE`, so the existing animation tools reach the curve on a
+clip that has a reveal. That list is now pinned against
+`@types/timeline.ts#ALL_ANIMATABLE_PROPERTIES` rather than against the families
+spelled out in the test — which is the third time that guard would otherwise
+have gone stale at the same moment as the copy it guards.
+
 ## The application menu
 
 The macOS menu bar is a second surface onto the editor's commands, and it obeys
