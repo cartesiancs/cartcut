@@ -30,6 +30,12 @@ export type SnapResult = {
   edge: "start" | "end" | null;
 };
 
+/** What `snapEdge` answers: where one edge lands, and what pulled it there. */
+export type EdgeSnapResult = {
+  ms: number;
+  hit: SnapPoint | null;
+};
+
 /**
  * Everything a drag can snap to.
  *
@@ -60,6 +66,69 @@ export function collectSnapPoints(
 }
 
 /**
+ * The nearest point to one edge, or `null` if none is within tolerance.
+ *
+ * The scoring core both public functions share. `score` comes back so a caller
+ * weighing two edges against each other can compare them on the same footing —
+ * which is the whole reason this is a separate function rather than inlined
+ * twice.
+ *
+ * Ties go to the earliest point in the array, because the comparison is strict.
+ */
+function nearestPoint(
+  edgeMs: number,
+  points: SnapPoint[],
+  range: number,
+  tolerancePx: number,
+  preferTrackId?: string,
+): { point: SnapPoint; score: number } | null {
+  let best: { point: SnapPoint; score: number } | null = null;
+
+  for (const point of points) {
+    const distancePx = Math.abs(msToPxSigned(point.ms - edgeMs, range));
+
+    if (distancePx > tolerancePx) {
+      continue;
+    }
+
+    // A same-track point wins any tie; the nudge keeps it from beating a
+    // point that is genuinely closer.
+    const score =
+      preferTrackId != null && point.trackId === preferTrackId
+        ? distancePx - 0.001
+        : distancePx;
+
+    if (best == null || score < best.score) {
+      best = { point, score };
+    }
+  }
+
+  return best;
+}
+
+/**
+ * Snap one edge, leaving everything else alone.
+ *
+ * What a **trim** needs, and the reason `snapSpan` could not simply be reused
+ * for it: that one moves a span of fixed length, so its answer is a `startMs`
+ * and its trailing-edge branch computes `point.ms - lengthMs`. A trim pins one
+ * edge and moves the other, and the length is a consequence rather than an
+ * input.
+ */
+export function snapEdge(
+  edgeMs: number,
+  points: SnapPoint[],
+  range: number,
+  tolerancePx: number,
+  preferTrackId?: string,
+): EdgeSnapResult {
+  const best = nearestPoint(edgeMs, points, range, tolerancePx, preferTrackId);
+  return best == null
+    ? { ms: edgeMs, hit: null }
+    : { ms: best.point.ms, hit: best.point };
+}
+
+/**
  * Snap a span of `lengthMs` starting at `startMs`.
  *
  * Both edges are candidates. Ties prefer the leading edge, and a point on
@@ -74,37 +143,36 @@ export function snapSpan(
   tolerancePx: number,
   preferTrackId?: string,
 ): SnapResult {
-  let best: SnapResult = { startMs, hit: null, edge: null };
-  let bestScore = Infinity;
+  const leading = nearestPoint(
+    startMs,
+    points,
+    range,
+    tolerancePx,
+    preferTrackId,
+  );
+  const trailing = nearestPoint(
+    startMs + lengthMs,
+    points,
+    range,
+    tolerancePx,
+    preferTrackId,
+  );
 
-  for (const point of points) {
-    for (const edge of ["start", "end"] as const) {
-      const edgeMs = edge === "start" ? startMs : startMs + lengthMs;
-      const distancePx = Math.abs(
-        msToPxSigned(point.ms - edgeMs, range),
-      );
-
-      if (distancePx > tolerancePx) {
-        continue;
-      }
-
-      // A same-track point wins any tie; the nudge keeps it from beating a
-      // point that is genuinely closer.
-      const score =
-        preferTrackId != null && point.trackId === preferTrackId
-          ? distancePx - 0.001
-          : distancePx;
-
-      if (score < bestScore) {
-        bestScore = score;
-        best = {
-          startMs: edge === "start" ? point.ms : point.ms - lengthMs,
-          hit: point,
-          edge,
-        };
-      }
-    }
+  // `<=` is the documented "ties prefer the leading edge" rule, now applied to
+  // every tie rather than only to a tie on the same point. The loop this
+  // replaces scored point-major and compared strictly, so an equal score on a
+  // point earlier in the array beat the leading edge — array order deciding
+  // what the docstring says the edge decides.
+  if (leading != null && (trailing == null || leading.score <= trailing.score)) {
+    return { startMs: leading.point.ms, hit: leading.point, edge: "start" };
+  }
+  if (trailing != null) {
+    return {
+      startMs: trailing.point.ms - lengthMs,
+      hit: trailing.point,
+      edge: "end",
+    };
   }
 
-  return best;
+  return { startMs, hit: null, edge: null };
 }

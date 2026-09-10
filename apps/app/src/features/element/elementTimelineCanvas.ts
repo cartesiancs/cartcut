@@ -30,6 +30,7 @@ import {
 } from "../timeline/frames";
 import { clampRange } from "../timeline/zoom";
 import {
+  confirmTrimGuide,
   resolveMove,
   resolveTransitionResize,
   resolveTrim,
@@ -917,22 +918,34 @@ export class elementTimelineCanvas extends LitElement {
       // Trimming acts on the grabbed clip alone; dragging one edge of a
       // multi-selection has no obvious meaning for the rest. `clipOps` clamps
       // the edge at the neighbouring clip rather than letting it overlap.
+      const edge = drag.phase === "trimStart" ? "start" : "end";
       const plan = resolveTrim({
         base,
         elementId: drag.hit.elementId,
-        edge: drag.phase === "trimStart" ? "start" : "end",
+        edge,
         dxPx: drag.dxPx,
         range: this.timelineRange,
         fps,
+        playheadMs: this.timelineCursor,
       });
       if (plan.kind === "none") {
         this.drawCanvas();
         return;
       }
       next =
-        drag.phase === "trimStart"
+        edge === "start"
           ? trimClipStart(base, drag.hit.elementId, plan.trimMs)
           : trimClipEnd(base, drag.hit.elementId, plan.trimMs);
+
+      // Asked after the op, not before: `clipOps` clamps against the source
+      // file's remaining footage, so an edge can be aimed at a neighbour it
+      // cannot reach. A guide on a line the edge stopped short of reads as a bug.
+      this.snapGuideMs = confirmTrimGuide(
+        next,
+        drag.hit.elementId,
+        edge,
+        plan.snapGuideMs,
+      );
     } else {
       // The grabbed clip is resolved, and the whole selection then moves by
       // however much it actually travelled, so a multi-clip drag keeps its

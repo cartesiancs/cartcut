@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { collectSnapPoints, snapSpan, type SnapPoint } from "./snapping";
+import {
+  collectSnapPoints,
+  snapEdge,
+  snapSpan,
+  type SnapPoint,
+} from "./snapping";
 import {
   SCHEMA_VERSION,
   createTrack,
@@ -52,6 +57,79 @@ describe("collectSnapPoints", () => {
       { excludeIds: ["a"] },
     );
     expect(points.every((p) => p.kind === "origin")).toBe(true);
+  });
+});
+
+describe("snapEdge", () => {
+  const points: SnapPoint[] = [
+    { ms: 1000, kind: "clipEnd", trackId: "v1" },
+    { ms: 5000, kind: "clipStart", trackId: "v2" },
+  ];
+
+  it("leaves an edge alone when nothing is near", () => {
+    expect(snapEdge(3000, points, RANGE, 10)).toEqual({ ms: 3000, hit: null });
+  });
+
+  it("pulls the edge onto a nearby point", () => {
+    // 1px is ~22ms at this range, so 100ms is well inside a 10px window.
+    expect(snapEdge(1100, points, RANGE, 10)).toEqual({
+      ms: 1000,
+      hit: points[0],
+    });
+  });
+
+  it("moves only the edge it is given", () => {
+    // The distinction from `snapSpan`, which would return a start for a span of
+    // a fixed length. Here the answer is the edge itself, whichever end it is.
+    expect(snapEdge(4900, points, RANGE, 10).ms).toBe(5000);
+  });
+
+  it("chooses the nearest candidate, not the last one tested", () => {
+    const near: SnapPoint[] = [
+      { ms: 3000, kind: "clipEnd", trackId: "v1" },
+      { ms: 3100, kind: "clipStart", trackId: "v1" },
+    ];
+    expect(snapEdge(3010, near, RANGE, 10).hit).toBe(near[0]);
+    expect(snapEdge(3090, near, RANGE, 10).hit).toBe(near[1]);
+  });
+
+  it("measures tolerance in pixels, so the window narrows as you zoom in", () => {
+    // 300ms is 13.5px at this range and 60px at range 4.
+    expect(snapEdge(1300, points, RANGE, 20).hit).toBe(points[0]);
+    expect(snapEdge(1300, points, 4, 20).hit).toBe(null);
+  });
+
+  it("prefers a point on the track being trimmed", () => {
+    const tied: SnapPoint[] = [
+      { ms: 2900, kind: "clipEnd", trackId: "v1" },
+      { ms: 3100, kind: "clipStart", trackId: "v2" },
+    ];
+    expect(snapEdge(3000, tied, RANGE, 20, "v2").hit).toBe(tied[1]);
+    expect(snapEdge(3000, tied, RANGE, 20, "v1").hit).toBe(tied[0]);
+  });
+
+  it("still takes a genuinely closer point from another track", () => {
+    const uneven: SnapPoint[] = [
+      { ms: 2950, kind: "clipEnd", trackId: "v2" },
+      { ms: 3200, kind: "clipStart", trackId: "v1" },
+    ];
+    expect(snapEdge(3000, uneven, RANGE, 20, "v1").hit).toBe(uneven[0]);
+  });
+
+  it("has no effect with a zero tolerance", () => {
+    expect(snapEdge(1000.5, points, RANGE, 0)).toEqual({
+      ms: 1000.5,
+      hit: null,
+    });
+  });
+
+  it("never moves the edge further than the tolerance allows", () => {
+    for (const edgeMs of [0, 900, 1500, 4800, 9000]) {
+      const result = snapEdge(edgeMs, points, RANGE, 10);
+      expect(Math.abs(result.ms - edgeMs)).toBeLessThanOrEqual(
+        pxToMsSigned(10, RANGE) + 1e-9,
+      );
+    }
   });
 });
 

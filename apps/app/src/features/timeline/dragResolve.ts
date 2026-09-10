@@ -35,7 +35,13 @@
  * sound up with a cut is the thing an audio drag most often means.
  */
 
-import { pxToMsSigned, spanEnd, spanLength, spanStart } from "./geometry";
+import {
+  ADJACENCY_EPSILON_MS,
+  pxToMsSigned,
+  spanEnd,
+  spanLength,
+  spanStart,
+} from "./geometry";
 import {
   frameToMs,
   isFrameLocked,
@@ -43,7 +49,7 @@ import {
   msToFrameCeil,
   snapMsToFrame,
 } from "./frames";
-import { collectSnapPoints, snapSpan } from "./snapping";
+import { collectSnapPoints, snapEdge, snapSpan } from "./snapping";
 import { trackDeltaFor } from "./dragMachine";
 import type { TimelineDocument } from "./tracks";
 
@@ -91,7 +97,20 @@ export type MovePlan =
       snapGuideMs: number | null;
     };
 
-export type TrimPlan = { kind: "none" } | { kind: "trim"; trimMs: number };
+export type TrimPlan =
+  | { kind: "none" }
+  | {
+      kind: "trim";
+      /** Timeline ms to move the grabbed edge by. */
+      trimMs: number;
+      /**
+       * Time to draw a guide line at, if the edge snapped.
+       *
+       * Aspirational: `clipOps` clamps after this, so pass it through
+       * `confirmTrimGuide` with the resulting document before drawing it.
+       */
+      snapGuideMs: number | null;
+    };
 
 export type ResolveMoveInput = {
   base: TimelineDocument;
@@ -251,16 +270,32 @@ export type ResolveTrimInput = {
   dxPx: number;
   range: number;
   fps: number;
+  /** Omitted means the playhead is not a snap candidate. */
+  playheadMs?: number;
+  tolerancePx?: number;
   quantize?: boolean;
 };
 
 /**
  * Where a trim handle lets go.
  *
- * The edge is quantized, not the delta. Quantizing a *delta* preserves whatever
- * sub-frame phase the edge already had — drag a misaligned clip's handle and it
- * stays misaligned forever. Quantizing the resulting *edge* puts it on the grid
- * and keeps it there.
+ * The same two layers as `resolveMove`, in the same order and for the same
+ * reasons: the grabbed edge snaps to a neighbour's edge, the playhead or zero
+ * within a pixel tolerance, and falls back to the frame grid when nothing is in
+ * range. Lengthening a clip until it meets the next one is the commonest thing
+ * anyone does with these handles, and doing it by eye a frame at a time is what
+ * this replaces — a neighbour that predates frame alignment could not be met at
+ * all.
+ *
+ * The grid still applies to audio here. That exemption is a *drag* rule
+ * (`frames.ts#isFrameLocked`, and the note in CLAUDE.md); trims quantize
+ * everything. Snapping is the separate layer, so an audio handle gains the
+ * magnet without gaining the exemption.
+ *
+ * When nothing snaps, the edge is quantized, not the delta. Quantizing a *delta*
+ * preserves whatever sub-frame phase the edge already had — drag a misaligned
+ * clip's handle and it stays misaligned forever. Quantizing the resulting *edge*
+ * puts it on the grid and keeps it there.
  *
  * `trimClipStart` / `trimClipEnd` clamp against the source file, timeline zero
  * and the neighbouring clip, so a trim that runs into one of those comes to rest
@@ -269,7 +304,16 @@ export type ResolveTrimInput = {
  * document that has been edited under these rules.
  */
 export function resolveTrim(input: ResolveTrimInput): TrimPlan {
-  const { base, elementId, edge, dxPx, range, fps, quantize = true } = input;
+  const {
+    base,
+    elementId,
+    edge,
+    dxPx,
+    range,
+    fps,
+    playheadMs,
+    quantize = true,
+  } = input;
 
   const element = base.elements[elementId];
   if (element == null) {
@@ -278,9 +322,29 @@ export function resolveTrim(input: ResolveTrimInput): TrimPlan {
 
   const deltaMs = pxToMsSigned(dxPx, range);
   const edgeMs = edge === "start" ? spanStart(element) : spanEnd(element);
-  const targetMs = quantize
-    ? snapMsToFrame(edgeMs + deltaMs, fps)
-    : edgeMs + deltaMs;
+  const desiredMs = edgeMs + deltaMs;
+
+  // The clip being trimmed is excluded, which also stops the moving edge
+  // snapping to the pinned one: a clip cannot collapse onto itself, and its own
+  // far edge is the one candidate that would always be reachable.
+  const snapped = snapEdge(
+    desiredMs,
+    collectSnapPoints(base, { excludeIds: [elementId], playheadMs }),
+    range,
+    input.tolerancePx ?? SNAP_TOLERANCE_PX,
+    element.trackId,
+  );
+
+  // Snapping wins, and the edge it found is taken verbatim — re-quantizing it
+  // would reopen the sub-frame gap this module's header warns about. Unlike
+  // `resolveMove` there is no third rule that can overrule the snap afterwards,
+  // so a hit is always honoured and `snapGuideMs` needs no suppression here.
+  const targetMs =
+    snapped.hit != null
+      ? snapped.ms
+      : quantize
+        ? snapMsToFrame(desiredMs, fps)
+        : desiredMs;
 
   const rawTrim = targetMs - edgeMs;
   const trimMs = quantize ? rawTrim : Math.round(rawTrim);
@@ -289,7 +353,42 @@ export function resolveTrim(input: ResolveTrimInput): TrimPlan {
     return { kind: "none" };
   }
 
-  return { kind: "trim", trimMs };
+  return { kind: "trim", trimMs, snapGuideMs: snapped.hit?.ms ?? null };
+}
+
+/**
+ * The trim guide, kept only if the edge actually arrived.
+ *
+ * `resolveTrim` chooses a target; `trimClipStart`/`trimClipEnd` then clamp it
+ * against the neighbouring clip, timeline zero, `MIN_TIMELINE_MS` and — the case
+ * that matters here — the source file's own head and tail room. A clip with two
+ * seconds of footage left cannot reach a neighbour five seconds away, and
+ * drawing the line anyway is how a correct edit reads as a broken one. Same rule
+ * `resolveMove` keeps with `snappedToEdge`, enforced one step later because for
+ * a trim the clamp lives downstream of the resolver.
+ *
+ * The neighbour clamp needs no special case: its limit *is* the snap candidate,
+ * so an edge stopped by it has landed exactly where the guide says.
+ *
+ * `ADJACENCY_EPSILON_MS` rather than `===` because a clamped edge reaches the
+ * document as a sum of doubles, and a sped-up clip's span is `duration / speed`,
+ * which reconstructs its target only to within a rounding error.
+ */
+export function confirmTrimGuide(
+  doc: TimelineDocument,
+  elementId: string,
+  edge: "start" | "end",
+  guideMs: number | null,
+): number | null {
+  if (guideMs == null) {
+    return null;
+  }
+  const element = doc.elements[elementId];
+  if (element == null) {
+    return null;
+  }
+  const landedMs = edge === "start" ? spanStart(element) : spanEnd(element);
+  return Math.abs(landedMs - guideMs) <= ADJACENCY_EPSILON_MS ? guideMs : null;
 }
 
 export type ResolveTransitionResizeInput = {

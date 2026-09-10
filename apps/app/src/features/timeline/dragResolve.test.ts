@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { SNAP_TOLERANCE_PX, resolveMove, resolveTrim } from "./dragResolve";
+import {
+  SNAP_TOLERANCE_PX,
+  confirmTrimGuide,
+  resolveMove,
+  resolveTrim,
+} from "./dragResolve";
 import {
   SCHEMA_VERSION,
   createTrack,
@@ -12,7 +17,13 @@ import {
   videoElement,
   mulberry32,
 } from "../renderer/testing";
-import { msToPxSigned, pxToMsSigned, spanEnd, spanStart } from "./geometry";
+import {
+  ADJACENCY_EPSILON_MS,
+  msToPxSigned,
+  pxToMsSigned,
+  spanEnd,
+  spanStart,
+} from "./geometry";
 import { frameToMs, framePx, isFrameAligned, msToFrame } from "./frames";
 import { moveClips, splitClip, trimClipEnd, trimClipStart } from "./clipOps";
 import { TRACK_PITCH } from "./layout";
@@ -58,6 +69,25 @@ function move(base: TimelineDocument, over: Record<string, any> = {}) {
     fps: FPS,
     playheadMs: -1_000_000, // parked far away unless a test wants it
     trackPitch: TRACK_PITCH,
+    ...over,
+  });
+}
+
+/** `resolveTrim` on element "a" with the playhead parked far away. */
+function trimAt(
+  base: TimelineDocument,
+  edge: "start" | "end",
+  dxPx: number,
+  over: Record<string, any> = {},
+) {
+  return resolveTrim({
+    base,
+    elementId: "a",
+    edge,
+    dxPx,
+    range: ZOOMED,
+    fps: FPS,
+    playheadMs: -1_000_000,
     ...over,
   });
 }
@@ -330,6 +360,7 @@ describe("resolveTrim", () => {
       dxPx: 0,
       range: ZOOMED,
       fps: FPS,
+      playheadMs: -1_000_000, // parked far away unless a test wants it
       ...over,
     });
   }
@@ -340,6 +371,7 @@ describe("resolveTrim", () => {
     expect(plan).toEqual({
       kind: "trim",
       trimMs: Math.round(pxToMsSigned(13, WIDE)),
+      snapGuideMs: null,
     });
   });
 
@@ -413,6 +445,198 @@ describe("resolveTrim", () => {
     if (plan.kind !== "trim") return;
     const next = trimClipStart(base, "a", plan.trimMs);
     expect(spanStart(next.elements.a)).toBe(0);
+  });
+});
+
+describe("resolveTrim — snapping composes with quantization", () => {
+  /** Aim at `targetMs` and overshoot by `overPx`, so the ask is zoom-relative. */
+  function aimAt(
+    base: TimelineDocument,
+    edge: "start" | "end",
+    targetMs: number,
+    range: number,
+    overPx = 2,
+  ) {
+    const element = base.elements.a;
+    const edgeMs = edge === "start" ? spanStart(element) : spanEnd(element);
+    const toward = targetMs >= edgeMs ? overPx : -overPx;
+    return msToPxSigned(targetMs - edgeMs, range) + toward;
+  }
+
+  it("takes an off-grid neighbour's start verbatim", () => {
+    // The point of the whole feature: a clip that predates frame alignment
+    // cannot be met by quantization at all, because its edge is not on the grid.
+    const base = doc({
+      a: alignedClip(60, 120), // 1000ms .. 3000ms
+      b: imageElement({ trackId: "v1", startTime: 3050.7, duration: 2000 }),
+    });
+    const plan = trimAt(base, "end", aimAt(base, "end", 3050.7, ZOOMED));
+    expect(plan.kind).toBe("trim");
+    if (plan.kind !== "trim") return;
+
+    expect(plan.snapGuideMs).toBe(3050.7);
+    const next = trimClipEnd(base, "a", plan.trimMs);
+    expect(spanEnd(next.elements.a)).toBeCloseTo(3050.7, 9);
+    // And it is deliberately *not* pulled back onto the grid afterwards.
+    expect(isFrameAligned(spanEnd(next.elements.a), FPS)).toBe(false);
+  });
+
+  it("pulls the left edge onto the previous clip's end, leaving no seam", () => {
+    const base = doc({
+      a: alignedClip(120, 120), // 2000ms .. 4000ms
+      b: imageElement({ trackId: "v1", startTime: 0, duration: 1961.4 }),
+    });
+    const plan = trimAt(base, "start", aimAt(base, "start", 1961.4, ZOOMED));
+    expect(plan.kind).toBe("trim");
+    if (plan.kind !== "trim") return;
+
+    expect(plan.snapGuideMs).toBe(1961.4);
+    const next = trimClipStart(base, "a", plan.trimMs);
+    expect(spanStart(next.elements.a)).toBeCloseTo(1961.4, 9);
+  });
+
+  it("snaps to the playhead", () => {
+    const base = doc({ a: alignedClip(60, 300) }); // 1000ms .. 6000ms
+    const plan = trimAt(base, "end", aimAt(base, "end", 5953.3, ZOOMED), {
+      playheadMs: 5953.3,
+    });
+    expect(plan).toMatchObject({ kind: "trim", snapGuideMs: 5953.3 });
+  });
+
+  it("snaps to timeline zero", () => {
+    const base = doc({ a: alignedClip(3, 300) }); // starts at 50ms
+    const plan = trimAt(base, "start", aimAt(base, "start", 0, ZOOMED));
+    expect(plan).toMatchObject({ kind: "trim", snapGuideMs: 0 });
+  });
+
+  it("snaps to a clip on another track", () => {
+    const base = doc({
+      a: alignedClip(60, 120), // 1000ms .. 3000ms
+      b: imageElement({ trackId: "v2", startTime: 3044.4, duration: 500 }),
+    });
+    const plan = trimAt(base, "end", aimAt(base, "end", 3044.4, ZOOMED));
+    expect(plan).toMatchObject({ kind: "trim", snapGuideMs: 3044.4 });
+  });
+
+  it("keeps the snap tolerance in pixels, not milliseconds", () => {
+    // Same distance in ms; snapping fires zoomed out and is irrelevant zoomed
+    // in, where quantization has already chosen the same edge.
+    const base = doc({
+      a: imageElement({ trackId: "v1", startTime: 1000, duration: 2000 }),
+      b: imageElement({ trackId: "v1", startTime: 3222.2, duration: 500 }),
+    });
+
+    const wide = trimAt(
+      base,
+      "end",
+      aimAt(base, "end", 3222.2, WIDE, SNAP_TOLERANCE_PX - 1),
+      { range: WIDE },
+    );
+    expect(wide).toMatchObject({ kind: "trim", snapGuideMs: 3222.2 });
+
+    const zoomed = trimAt(
+      base,
+      "end",
+      aimAt(base, "end", 3222.2, ZOOMED, SNAP_TOLERANCE_PX + 40),
+    );
+    expect(zoomed.kind).toBe("trim");
+    if (zoomed.kind !== "trim") return;
+    expect(zoomed.snapGuideMs).toBe(null);
+    expect(isFrameAligned(3000 + zoomed.trimMs, FPS)).toBe(true);
+  });
+
+  it("does not snap the moving edge to the clip's own pinned edge", () => {
+    // Otherwise a short clip's right edge would be dragged onto its own left
+    // one and the clip would collapse. `excludeIds` is what prevents it.
+    const base = doc({
+      a: imageElement({ trackId: "v1", startTime: 1000, duration: 30 }),
+    });
+    const plan = trimAt(base, "end", aimAt(base, "end", 1000, ZOOMED));
+    expect(plan.kind).toBe("trim");
+    if (plan.kind !== "trim") return;
+    expect(plan.snapGuideMs).toBe(null);
+  });
+
+  it("snaps the timeline edge of a sped-up clip", () => {
+    // `trimMs` is a timeline delta; `clipEdit` converts it by `speed`. What has
+    // to meet the neighbour is what the user sees, not the source window.
+    for (const speed of [0.5, 2]) {
+      const target = 1000 + 4000 / speed + 37.7;
+      const base = doc({
+        a: videoElement({
+          trackId: "v1",
+          startTime: frameToMs(60, FPS),
+          duration: 4000,
+          trim: { startTime: 0, endTime: 4000 },
+          sourceDuration: 8000,
+          speed,
+        }),
+        b: imageElement({ trackId: "v1", startTime: target, duration: 500 }),
+      });
+      const plan = trimAt(base, "end", aimAt(base, "end", target, ZOOMED));
+      expect(plan.kind).toBe("trim");
+      if (plan.kind !== "trim") return;
+
+      expect(plan.snapGuideMs).toBeCloseTo(target, 9);
+      const next = trimClipEnd(base, "a", plan.trimMs);
+      expect(Math.abs(spanEnd(next.elements.a) - target)).toBeLessThanOrEqual(
+        ADJACENCY_EPSILON_MS,
+      );
+    }
+  });
+
+  it("still declines a gesture that trims nothing", () => {
+    const base = doc({
+      a: alignedClip(60, 120),
+      b: imageElement({ trackId: "v1", startTime: 3000, duration: 500 }),
+    });
+    // The right edge is already exactly on the neighbour, so the snap it finds
+    // is where it already is. That must be no edit at all.
+    expect(trimAt(base, "end", 0).kind).toBe("none");
+  });
+});
+
+describe("confirmTrimGuide", () => {
+  it("keeps the guide when the edge arrived", () => {
+    const base = doc({
+      a: alignedClip(60, 120), // ends at 3000ms
+      b: imageElement({ trackId: "v1", startTime: 3050.7, duration: 2000 }),
+    });
+    const plan = trimAt(base, "end", msToPxSigned(50.7, ZOOMED) + 2);
+    if (plan.kind !== "trim") throw new Error("expected a trim");
+    const next = trimClipEnd(base, "a", plan.trimMs);
+    expect(confirmTrimGuide(next, "a", "end", plan.snapGuideMs)).toBe(3050.7);
+  });
+
+  it("drops the guide when the source ran out first", () => {
+    // A clip with nothing left at the tail cannot reach the neighbour it was
+    // aimed at. The clamp in `clipEdit` decides, and the line goes with it.
+    const base = doc({
+      a: videoElement({
+        trackId: "v1",
+        startTime: 4000,
+        duration: 2000,
+        trim: { startTime: 0, endTime: 2000 },
+        sourceDuration: 2000, // nothing left past the window
+      }),
+      b: imageElement({ trackId: "v1", startTime: 6040.4, duration: 500 }),
+    });
+    const plan = trimAt(base, "end", msToPxSigned(40.4, ZOOMED) + 2);
+    if (plan.kind !== "trim") throw new Error("expected a trim");
+    expect(plan.snapGuideMs).toBe(6040.4);
+
+    const next = trimClipEnd(base, "a", plan.trimMs);
+    expect(spanEnd(next.elements.a)).toBeLessThan(6040.4);
+    expect(confirmTrimGuide(next, "a", "end", plan.snapGuideMs)).toBe(null);
+  });
+
+  it("has nothing to confirm when there was no snap", () => {
+    const base = doc({ a: alignedClip(60, 120) });
+    expect(confirmTrimGuide(base, "a", "end", null)).toBe(null);
+  });
+
+  it("drops the guide when the clip is gone", () => {
+    expect(confirmTrimGuide(doc({}), "a", "end", 3000)).toBe(null);
   });
 });
 
