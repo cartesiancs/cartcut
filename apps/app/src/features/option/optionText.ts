@@ -15,6 +15,15 @@ import "./optionTabBar";
 import "./optionTextRevealSection";
 import type { OptionTab } from "./optionTabBar";
 
+/**
+ * The bundled default font: the name it is stored under, and the name it is
+ * shown under. They differ — the file has been Pretendard since long before
+ * anyone renamed the identifier — and both the list item and the button label
+ * need the pair, so it is stated once here rather than spelled out twice.
+ */
+const DEFAULT_FONT_NAME = "notosanskr";
+const DEFAULT_FONT_LABEL = "Pretendard";
+
 @customElement("option-text")
 export class OptionText extends LitElement {
   elementId: string[];
@@ -43,6 +52,18 @@ export class OptionText extends LitElement {
   tab: OptionTab = "media";
   updateOnce: any;
   selectedFont: string;
+
+  /**
+   * What has been typed into the font dropdown's search box.
+   *
+   * A `@property` rather than a plain field: the store subscription in
+   * `createRenderRoot` re-renders this panel on every document change, and the
+   * filtered list has to survive that. The field is bound to the input with
+   * `.value`, so lit leaves the DOM node — and the caret — alone whenever the
+   * two already agree, which is every render but the one the keystroke caused.
+   */
+  @property()
+  fontQuery = "";
 
   /**
    * The text last written into history, and the only thing that decides whether
@@ -78,13 +99,36 @@ export class OptionText extends LitElement {
   render() {
     const fontListTemplate: any = [];
 
+    // The bundled default is one entry in the same list rather than a fixed row
+    // above it, so the search filters it like any other font and the empty
+    // state can say, truthfully, that nothing matched.
+    if (this.matchesFontQuery(DEFAULT_FONT_LABEL)) {
+      fontListTemplate.push(html`
+        <li>
+          <a
+            class="dropdown-item dropdown-item-sm text-truncate ${this.selectedFont ==
+            DEFAULT_FONT_NAME
+              ? "bg-primary"
+              : ""}"
+            @click=${() =>
+              this.handleChangeTextFont("default", DEFAULT_FONT_NAME)}
+            >${DEFAULT_FONT_LABEL}</a
+          >
+        </li>
+      `);
+    }
+
     for (let index = 0; index < this.fontList.length; index++) {
       const font = this.fontList[index];
+
+      if (!this.matchesFontQuery(font.name)) {
+        continue;
+      }
 
       fontListTemplate.push(html`
         <li>
           <a
-            class="dropdown-item dropdown-item-sm ${this.selectedFont ==
+            class="dropdown-item dropdown-item-sm text-truncate ${this.selectedFont ==
             font.name
               ? "bg-primary"
               : ""}"
@@ -232,37 +276,63 @@ export class OptionText extends LitElement {
         />
       </div>
 
+      <!--
+        The button says which font the clip is in, not what the control does.
+        A picker that reads "Select Font" whatever is selected makes the panel
+        the one place in the app that cannot answer the question it is for —
+        every other row here (Font Size, Color, Line Spacing) shows its value.
+      -->
       <div class="mb-2">
         <label class="form-label text-light">Font</label>
 
-        <div class="dropdown ">
+        <div class="dropdown">
           <button
-            class="btn btn-dark btn-sm dropdown-toggle"
+            class="btn btn-dark btn-sm dropdown-toggle w-100 d-flex align-items-center text-start"
             type="button"
             data-bs-toggle="dropdown"
             data-bs-display="static"
             aria-expanded="false"
+            title=${this.selectedFontLabel}
+            @click=${this.handleOpenFontDropdown}
           >
-            Select Font
+            <!--
+              A flex row, so a long font name ellipsises against the caret
+              instead of pushing it out of an overflow-hidden button.
+            -->
+            <span class="flex-grow-1 text-truncate"
+              >${this.selectedFontLabel}</span
+            >
           </button>
-          <ul
-            class="dropdown-menu"
-            style="    height: 160px;
-    overflow: scroll; "
-          >
-            <li>
-              <a
-                class="dropdown-item dropdown-item-sm ${this.selectedFont ==
-                "notosanskr"
-                  ? "bg-primary"
-                  : ""}"
-                @click=${() =>
-                  this.handleChangeTextFont("default", "notosanskr")}
-                >Pretendard</a
-              >
-            </li>
-            ${fontListTemplate}
-          </ul>
+          <div class="dropdown-menu w-100 p-0">
+            <!--
+              Outside the scrolling list, so it stays put while the list moves
+              under it. Bootstrap's clearMenus exempts an input from the
+              click-anywhere-inside close, which is what lets a field live in a
+              dropdown at all; picking a font is an anchor and still closes it.
+            -->
+            <div class="p-2">
+              <input
+                type="text"
+                aria-event="font-search"
+                class="form-control form-control-sm bg-default text-light"
+                placeholder="Search fonts"
+                .value=${this.fontQuery}
+                @input=${this.handleSearchFont}
+              />
+            </div>
+            <ul
+              class="list-unstyled mb-0"
+              style="max-height: 360px; overflow-y: auto; overflow-x: hidden;"
+            >
+              ${fontListTemplate.length === 0
+                ? html`<li>
+                    <span class="dropdown-item-text text-secondary"
+                      >No fonts found</span
+                    >
+                  </li>`
+                : fontListTemplate}
+            </ul>
+          </div>
         </div>
       </div>
 
@@ -872,11 +942,67 @@ export class OptionText extends LitElement {
     }
   }
 
+  /**
+   * Does this font's name survive the search box?
+   *
+   * Case-insensitive substring, deliberately not a fuzzy match: the list is
+   * one flat column of names the user is reading off the screen, and a fuzzy
+   * matcher's job — ranking distant candidates — has nothing to rank here.
+   */
+  private matchesFontQuery(name: string): boolean {
+    const query = this.fontQuery.trim().toLowerCase();
+    return query === "" || name.toLowerCase().includes(query);
+  }
+
+  handleSearchFont(event: Event) {
+    this.fontQuery = (event.target as HTMLInputElement).value;
+  }
+
+  /**
+   * Clear the filter and put the caret in it as the menu opens.
+   *
+   * The clear matters more than the focus: a query left over from the last
+   * time the menu was open would show a filtered list with no visible reason,
+   * and in the worst case an empty one.
+   *
+   * Bootstrap's own toggle is delegated from `document`, so it runs after this
+   * bubbles; the focus is deferred by a frame to land once the menu is shown.
+   */
+  handleOpenFontDropdown() {
+    this.fontQuery = "";
+
+    requestAnimationFrame(() => {
+      const search: HTMLInputElement | null = this.querySelector(
+        "input[aria-event='font-search']",
+      );
+      search?.focus();
+    });
+  }
+
+  /**
+   * The name to show on the closed button.
+   *
+   * The bundled default is stored under its internal name and shown under its
+   * real one, which is the same pair the list item has always used. A clip
+   * whose `fontname` is missing is the only case with nothing to report, and
+   * it is the only case that reads as a prompt.
+   */
+  private get selectedFontLabel(): string {
+    if (!this.selectedFont) {
+      return "Select Font";
+    }
+
+    return this.selectedFont === DEFAULT_FONT_NAME
+      ? DEFAULT_FONT_LABEL
+      : this.selectedFont;
+  }
+
   handleChangeTextFont(value, name) {
     const elementControl = document.querySelector("element-control");
 
     const selectedText = name;
     this.selectedFont = name;
+    this.fontQuery = "";
 
     const type = value.split("/")[value.split("/").length - 1].split(".")[1];
 
