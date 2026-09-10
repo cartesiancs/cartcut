@@ -2,6 +2,7 @@ import { app, BrowserWindow, Menu } from "electron";
 import * as path from "path";
 import { mainWindow, window } from "./window.js";
 import { menuCommand, type MenuCommandId } from "./menuCommands.js";
+import isDev from "electron-is-dev";
 
 const isMac = process.platform === "darwin";
 
@@ -142,10 +143,19 @@ const template: any = [
       item("view.previewZoomOut"),
       separator,
       { role: "togglefullscreen" },
-      separator,
-      { role: "reload" },
-      { role: "forceReload" },
-      { role: "toggleDevTools" },
+      // No `reload`/`forceReload`, in any build. A menu item *is* its
+      // keystroke — `role: "reload"` registers CmdOrCtrl+R with the system —
+      // and ⌘R on a video editor is a data-loss key: the renderer holds the
+      // whole `TimelineDocument` and the undo history, and a reload drops both
+      // with no prompt. That is as true in development as in a release, where
+      // the document being thrown away is the one under test, so the item is
+      // simply gone. Reloading during development is a restart
+      // (`npm run start`), which is what picks up a new main-process build
+      // anyway.
+      //
+      // The devtools stay, under `isDev` — they read the page rather than
+      // replacing it. `lib/window.ts` opens them on the same condition.
+      ...(isDev ? [separator, { role: "toggleDevTools" }] : []),
     ],
   },
   // { role: 'windowMenu' }
