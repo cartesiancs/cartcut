@@ -202,13 +202,13 @@ export class KeyframeEditor extends LitElement {
     this.showKeyframeEditorButtonGroup();
     this.classList.add("h-100", "w-100", "position-absolute", "overflow-hidden");
 
-    return html` <div style="display: flex;">
+    return html` <div style="display: flex; height: 100%;">
       <div
-        class="d-flex row gap-2 p-2 ps-3"
+        class="keyframe-editor-options d-flex flex-column gap-2 p-2 ps-3"
         style="width: ${this.resize.timelineVertical.leftOption}px"
       >
         <span class="text-secondary">Line</span>
-        <div class="btn-group p-2" role="group" id="timelineOptionLineEditor">
+        <div class="btn-group" role="group" id="timelineOptionLineEditor">
           <button
             line="0"
             @click=${() => this.changeLineEditor("0")}
@@ -235,11 +235,10 @@ export class KeyframeEditor extends LitElement {
         <span class="text-secondary">Range</span>
         <input
           type="range"
-          class="form-range p-2 ps-3"
           min="0.1"
           max="10"
           step="0.1"
-          value="1"
+          value="${this.verticalRange}"
           id="verticalRange"
           @change=${this.handleChangeVerticalRange}
           @input=${this.handleChangeVerticalRange}
@@ -260,7 +259,23 @@ export class KeyframeEditor extends LitElement {
 
   handleChangeVerticalRange(e) {
     this.verticalRange = parseFloat(e.target.value);
+    this.syncRangeFill(e.target);
     this.requestUpdate();
+  }
+
+  /**
+   * Paints the travelled part of the slider's track.
+   *
+   * Webkit has no pseudo-element for it, so the track is a gradient driven by
+   * this custom property — the arrangement `elementTimelineRange.ts` already
+   * uses, and the reason this slider can look like that one.
+   */
+  private syncRangeFill(input: HTMLInputElement) {
+    const min = parseFloat(input.min);
+    const max = parseFloat(input.max);
+    const value = parseFloat(input.value);
+    const percent = ((value - min) / (max - min)) * 100;
+    input.style.setProperty("--range-fill", `${percent}%`);
   }
 
   drawRuler() {
@@ -503,6 +518,8 @@ export class KeyframeEditor extends LitElement {
   }
 
   updated() {
+    const input = this.querySelector<HTMLInputElement>("#verticalRange");
+    if (input) this.syncRangeFill(input);
     this.drawCanvas();
   }
 

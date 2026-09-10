@@ -226,6 +226,76 @@ element-timeline-range {
   }
 }
 
+// The keyframe editor's vertical-zoom slider: the zoom slider above, stood on
+// end, because it scales the axis it sits beside and a horizontal control for
+// a vertical scale reads backwards.
+//
+// `writing-mode: vertical-lr` with `direction: rtl` is what turns it, not
+// `appearance: slider-vertical` — that is non-standard, deprecated since
+// Chromium 121 and removed since 135, so it would go horizontal again on an
+// Electron bump with nothing failing to say so. `direction: rtl` is the half
+// that puts the larger value at the top, which is the only way up can mean
+// more.
+//
+// The track's thin dimension is therefore `width`, and the head is centred on
+// it with `margin-left` rather than `margin-top`: `width`/`height`/`margin-*`
+// stay physical whatever the writing mode, so both swap axes with the control.
+keyframe-editor {
+  .keyframe-editor-options {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  input[type="range"]#verticalRange {
+    appearance: none;
+    writing-mode: vertical-lr;
+    direction: rtl;
+    width: 0.75rem;
+    // Fills what the buttons above it leave, so the scale is as long as the
+    // panel allows and a short timeline clips nothing.
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 0 0 0 0.25rem;
+    padding: 0;
+    background: transparent;
+    outline: none;
+
+    &::-webkit-slider-runnable-track {
+      width: 3px;
+      border-radius: 999px;
+      border: none;
+      box-shadow: none;
+      background: linear-gradient(
+        to top,
+        #6c757d 0 var(--range-fill, 50%),
+        #2c3035 var(--range-fill, 50%) 100%
+      );
+    }
+
+    &::-webkit-slider-thumb {
+      appearance: none;
+      height: 0.65rem;
+      width: 0.65rem;
+      // Centres the head on the 3px track.
+      margin-left: calc((3px - 0.65rem) / 2);
+      border: none;
+      border-radius: 50%;
+      background: #cdd2d8;
+      box-shadow: none;
+      transition: background 0.12s ease;
+
+      &:hover {
+        background: #ffffff;
+      }
+
+      &:active {
+        background: #ffffff;
+        box-shadow: 0 0 0 3px rgba(205, 210, 216, 0.18);
+      }
+    }
+  }
+}
+
 .top-bar {
   height: 34px;
   background-color: #0f1012;
