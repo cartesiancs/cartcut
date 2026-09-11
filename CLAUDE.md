@@ -1221,6 +1221,31 @@ a release and the spec would pass with or without the scope — which a first
 draft of it did. With the scope removed the disturbed export **deadlocks**,
 which is how the spec is known to measure something.
 
+## Releasing and the download mirror
+
+`npm run build:osx` uploads a draft GitHub release. Publishing it runs
+`.github/workflows/mirror-r2.yml`, which copies the assets to Cloudflare R2
+under `cartcut/<tag>/` and rewrites `cartcut/latest.json` and `latest.txt` —
+what the "Download for macOS" button on cartesiancs.com/cartcut reads.
+
+```
+scripts/r2LatestManifest.mjs     release JSON -> latest.json, pure + CLI, no deps
+.github/workflows/mirror-r2.yml  download, upload, point latest, prune to 3
+```
+
+- **GitHub is the source of truth; R2 is a mirror.** electron-updater still
+  reads GitHub (`build.publish` is unchanged), and every installed copy has
+  that baked into its `app-update.yml`, so moving the updater means publishing
+  to both for as long as old installs exist.
+- **`latest.*` is written last**, after every file under the tag has landed,
+  so it never names a file that is not there. Everything under a tag is cached
+  `immutable`; only the two `latest.*` files change.
+- **The manifest refuses a release with no `.dmg`**, which is what renaming
+  an artifact would produce. `slotOf` maps names by suffix (`-arm64.dmg`, bare
+  `.dmg` = Intel); change `artifactName` and change it with it.
+- **Not `wrangler r2 object put`** — it stops at 300 MiB and a DMG is ~1.1 GB.
+  The workflow uses the S3 API through `aws s3 cp`, which goes multipart.
+
 ## Testing
 
 Vitest, suites co-located with sources. The `features/timeline/` and

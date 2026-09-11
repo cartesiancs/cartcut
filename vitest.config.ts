@@ -14,6 +14,8 @@ export default defineConfig({
     include: [
       "apps/app/src/**/*.{test,spec}.ts",
       "electron/**/*.{test,spec}.ts",
+      // Release tooling, plain .mjs so CI runs it with no `npm ci`.
+      "scripts/**/*.{test,spec}.mjs",
     ],
     exclude: ["**/node_modules/**", "**/dist/**", "**/main/**"],
   },

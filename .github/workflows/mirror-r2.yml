@@ -1,0 +1,101 @@
+# Mirrors a published GitHub release onto Cloudflare R2, then points
+# download.cartesiancs.com/cartcut/latest.json at it.
+#
+# The GitHub release stays the source of truth — electron-updater still reads
+# it — and R2 is a copy for the website's download button. electron-builder
+# uploads a *draft*; this runs when the draft is published.
+#
+# `release` runs the workflow file from the tagged commit, so a tag cut before
+# this file existed never triggers it. Mirror one of those by hand:
+#   gh workflow run mirror-r2.yml -f tag=v0.5.3
+#
+# Secrets: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET.
+name: Mirror release to R2
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to mirror, e.g. v0.5.3
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-r2
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      # aws-cli 2.23+ adds CRC checksums R2 has not always accepted.
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      PUBLIC_BASE: https://download.cartesiancs.com/cartcut
+      KEEP_VERSIONS: 3
+    steps:
+      # The manifest script comes from the default branch, not the tag, so a
+      # backfilled old tag is described by the same code as a new one.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: scripts
+
+      # Built before anything is uploaded, so a release it cannot describe
+      # fails here and leaves the bucket untouched.
+      - name: Build latest.json
+        run: |
+          gh release view "$TAG" --json tagName,publishedAt,assets \
+            | node scripts/r2LatestManifest.mjs --base-url "$PUBLIC_BASE" --out manifest
+
+      - name: Download release assets
+        run: gh release download "$TAG" -p '*.dmg' -p '*.zip' -p '*.exe' -p 'latest*.yml' -D out
+
+      - name: Upload the release under its tag
+        run: |
+          dest="s3://$R2_BUCKET/cartcut/$TAG/"
+          immutable="public, max-age=31536000, immutable"
+          aws s3 cp out/ "$dest" --recursive --endpoint-url "$R2_ENDPOINT" \
+            --cache-control "$immutable" \
+            --exclude '*' --include '*.dmg' --content-type application/x-apple-diskimage
+          aws s3 cp out/ "$dest" --recursive --endpoint-url "$R2_ENDPOINT" \
+            --cache-control "$immutable" --exclude '*.dmg'
+
+      # Last, so latest.json never names a file that is not there yet. A
+      # backfill of an older tag leaves latest pointing at the newer one.
+      - name: Point latest at this release
+        run: |
+          version="${TAG#v}"
+          current="$(aws s3 cp "s3://$R2_BUCKET/cartcut/latest.txt" - --endpoint-url "$R2_ENDPOINT" 2>/dev/null | tr -d '[:space:]' || true)"
+          newest="$(printf '%s\n%s\n' "$current" "$version" | sed '/^$/d' | sort -V | tail -n 1)"
+          if [ -n "$current" ] && [ "$newest" != "$version" ]; then
+            echo "::notice::latest is $current, newer than $version; leaving it"
+            exit 0
+          fi
+          aws s3 cp manifest/latest.json "s3://$R2_BUCKET/cartcut/latest.json" --endpoint-url "$R2_ENDPOINT" \
+            --cache-control "public, max-age=60" --content-type application/json
+          aws s3 cp manifest/latest.txt "s3://$R2_BUCKET/cartcut/latest.txt" --endpoint-url "$R2_ENDPOINT" \
+            --cache-control "public, max-age=60" --content-type "text/plain; charset=utf-8"
+
+      - name: Keep only the newest releases
+        run: |
+          aws s3 ls "s3://$R2_BUCKET/cartcut/" --endpoint-url "$R2_ENDPOINT" \
+            | awk '$1 == "PRE" { sub("/$", "", $2); print $2 }' \
+            | grep -E '^v[0-9]' | sort -V | head -n "-$KEEP_VERSIONS" \
+            | while read -r old; do
+                echo "Removing $old"
+                aws s3 rm "s3://$R2_BUCKET/cartcut/$old/" --recursive --endpoint-url "$R2_ENDPOINT"
+              done
