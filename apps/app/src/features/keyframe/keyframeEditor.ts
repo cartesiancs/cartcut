@@ -14,6 +14,7 @@ import { count as perfCount } from "../debug/frameStats";
 import {
   clampToClip,
   hitTest,
+  rulerTicks,
   toScreen,
   toTrack,
   type Hit,
@@ -285,21 +286,15 @@ export class KeyframeEditor extends LitElement {
 
   drawRuler() {
     const ctx = this.canvas.getContext("2d") as any;
-
-    const height = 1000;
     const width = 50;
-    const step = 50;
-    const iStep = step * 40;
-    const center = this.verticalScroll;
 
     ctx.fillStyle = "#55585e";
     ctx.textAlign = "center";
     ctx.font = "9px Arial";
 
-    for (let i = -iStep; i <= iStep; i += step) {
-      const pos = center + i;
-      ctx.fillText(i, width / 2, pos / this.verticalRange);
-      ctx.fillRect(10, pos / this.verticalRange, 30, 0.5);
+    for (const tick of rulerTicks(this.viewport(), this.surface.height)) {
+      ctx.fillText(tick.label, width / 2, tick.y);
+      ctx.fillRect(10, tick.y, 30, 0.5);
     }
   }
 

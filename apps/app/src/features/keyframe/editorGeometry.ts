@@ -89,6 +89,65 @@ export function toTrack(
   };
 }
 
+/** The least gap between two value-ruler ticks, in px. */
+export const RULER_MIN_SPACING = 32;
+
+export type RulerTick = { value: number; y: number; label: string };
+
+/**
+ * The smallest 1, 2 or 5 × 10ⁿ that is at least `min`.
+ *
+ * What keeps the ruler's labels round at every zoom. A fixed step was dense
+ * enough to blur into a solid bar at the far end of the Range slider — 50
+ * units at 10 units per px is a tick every 5px.
+ */
+function niceStep(min: number): number {
+  if (!Number.isFinite(min) || min <= 0) {
+    return 1;
+  }
+  const magnitude = 10 ** Math.floor(Math.log10(min));
+  for (const m of [1, 2, 5]) {
+    // A relative epsilon, so a `min` that is exactly a nice number — which
+    // `log10` can land a hair past — is answered with itself.
+    if (m * magnitude >= min * (1 - 1e-9)) {
+      return m * magnitude;
+    }
+  }
+  return 10 * magnitude;
+}
+
+/**
+ * The value ruler's ticks, for the part of the axis that is on screen.
+ *
+ * The step follows the vertical zoom so ticks stay at least `minSpacing` px
+ * apart, and only visible values are produced — the fixed loop this replaces
+ * ran out of ticks once the curve was panned far enough. Positions go through
+ * `toScreen`, so a tick labelled 100 sits exactly where a keyframe at 100 does.
+ */
+export function rulerTicks(
+  v: Viewport,
+  heightPx: number,
+  minSpacing: number = RULER_MIN_SPACING,
+): RulerTick[] {
+  const step = niceStep(minSpacing * v.verticalRange);
+  const decimals = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
+  const top = toTrack(v, 0, 0).value;
+  const bottom = toTrack(v, 0, Math.max(0, heightPx)).value;
+
+  const ticks: RulerTick[] = [];
+  for (let k = Math.ceil(top / step); k <= Math.floor(bottom / step); k++) {
+    // Rounded to the step's own precision, so a step of 0.2 labels 0.6 and
+    // not 0.6000000000000001; `+ 0` folds the -0 that rounding can leave.
+    const value = Number((k * step).toFixed(decimals)) + 0;
+    ticks.push({
+      value,
+      y: toScreen(v, 0, value).y,
+      label: value.toFixed(decimals),
+    });
+  }
+  return ticks;
+}
+
 /** A time held inside the clip it belongs to. */
 export function clampToClip(v: Viewport, tMs: number): number {
   if (!Number.isFinite(tMs)) {

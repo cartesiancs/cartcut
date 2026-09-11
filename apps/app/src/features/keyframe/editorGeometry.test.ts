@@ -4,6 +4,8 @@ import {
   clampToClip,
   hitTest,
   msPerPx,
+  RULER_MIN_SPACING,
+  rulerTicks,
   snapTime,
   toScreen,
   toTrack,
@@ -223,5 +225,57 @@ describe("hitTest", () => {
     expect(
       hitTest(candidate as Keyframe[], v, 0, 0, { activeIndex: 99 }),
     ).not.toBeUndefined();
+  });
+});
+
+describe("rulerTicks", () => {
+  const RANGES = [0.001, 0.1, 0.37, 1, 2.5, 7.3, 10, 1000];
+
+  it("keeps ticks at least the minimum apart at every zoom", () => {
+    for (const verticalRange of RANGES) {
+      const ticks = rulerTicks(view({ verticalRange }), 600);
+      for (let i = 1; i < ticks.length; i++) {
+        expect(ticks[i].y - ticks[i - 1].y).toBeGreaterThanOrEqual(
+          RULER_MIN_SPACING - 1e-6,
+        );
+      }
+    }
+  });
+
+  it("is never more than 2.5× sparser than it has to be", () => {
+    // The 1-2-5 ladder's widest rung; a coarser rule would leave the axis bare.
+    for (const verticalRange of RANGES) {
+      const [a, b] = rulerTicks(view({ verticalRange }), 600);
+      expect(b.y - a.y).toBeLessThanOrEqual(RULER_MIN_SPACING * 2.5 + 1e-6);
+    }
+  });
+
+  it("was the bug: the far end of the Range slider", () => {
+    const ticks = rulerTicks(view({ verticalRange: 10 }), 600);
+    expect(ticks.length).toBeLessThanOrEqual(600 / RULER_MIN_SPACING + 1);
+  });
+
+  it("sits exactly where a keyframe of the same value draws", () => {
+    const v = view({ verticalRange: 3, verticalScroll: 123 });
+    for (const tick of rulerTicks(v, 600)) {
+      expect(tick.y).toBe(toScreen(v, 0, tick.value).y);
+    }
+  });
+
+  it("covers the visible axis however far it is panned", () => {
+    const v = view({ verticalRange: 1, verticalScroll: -50_000 });
+    const ticks = rulerTicks(v, 600);
+    expect(ticks.length).toBeGreaterThan(0);
+    expect(ticks[0].y).toBeGreaterThanOrEqual(0);
+    expect(ticks[0].y).toBeLessThan(RULER_MIN_SPACING * 2.5);
+    expect(ticks[ticks.length - 1].y).toBeLessThanOrEqual(600);
+  });
+
+  it("labels fractional steps cleanly", () => {
+    const ticks = rulerTicks(view({ verticalRange: 0.001 }), 600);
+    for (const tick of ticks) {
+      expect(tick.label).toMatch(/^-?\d+\.\d{2}$/);
+      expect(tick.label).not.toBe("-0.00");
+    }
   });
 });
