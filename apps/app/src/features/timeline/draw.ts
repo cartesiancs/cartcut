@@ -468,7 +468,6 @@ function drawFilmstrip(
     clipY: rect.y,
     clipW: rect.w,
     clipH: rect.h,
-    spanStartMs: spanStart(element),
     sourceInMs: isDynamicElement(element) ? element.trim.startTime : 0,
     speed: speedOf(element),
     sourceAspect: aspect,
@@ -492,8 +491,9 @@ function drawFilmstrip(
     }
 
     // Draw the whole tile at its natural width and let the clip's own clip path
-    // cut the overhang; scaling the last tile down instead would squash it.
-    ctx.drawImage(bitmap, tile.dx, tile.dy, plan.tileW, tile.dh);
+    // cut the overhang at either end; scaling a cut tile down instead would
+    // squash it, and seating it at the clip's edge would slide it on a trim.
+    ctx.drawImage(bitmap, tile.tileX, tile.dy, plan.tileW, tile.dh);
   }
 }
 

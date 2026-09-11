@@ -20,7 +20,6 @@ function input(over: Partial<FilmstripInput> = {}): FilmstripInput {
     clipY: 0,
     clipW: 180,
     clipH: 40,
-    spanStartMs: 0,
     sourceInMs: 0,
     speed: 1,
     sourceAspect: 16 / 9,
@@ -152,17 +151,77 @@ describe("planFilmstrip", () => {
   it("starts at the trim point, not at the head of the file", () => {
     const plan = planFilmstrip(input({ sourceInMs: 5000 }));
 
-    // Quantising floors, so the first tile can sit up to one quantum before the
-    // exact trim point. That is at most one tile's worth of source time — a
-    // frame the eye cannot distinguish from the right one at this size, and the
-    // price of keys that stay put while zooming.
-    expect(plan.tiles[0].sourceMs).toBeGreaterThan(5000 - plan.quantum);
+    // The first tile is the grid cell the trim point falls in, cut by the
+    // clip's edge, so its frame is from that cell's left edge — up to one tile
+    // before the trim point, plus the quantum's floor. A frame the eye cannot
+    // tell from the right one at this size, and the price of a strip that
+    // stays put while the head is trimmed.
+    const tileSourceMs = 71 / (RANGE / 4) * 5;
+    expect(plan.tiles[0].sourceMs).toBeGreaterThan(
+      5000 - tileSourceMs - plan.quantum,
+    );
     expect(plan.tiles[0].sourceMs).toBeLessThanOrEqual(5000);
 
     const base = planFilmstrip(input());
     expect(plan.tiles[0].sourceMs - base.tiles[0].sourceMs).toBeGreaterThan(
-      4000,
+      3000,
     );
+  });
+
+  it("cuts the first tile at a trimmed head rather than seating it there", () => {
+    // 5000ms is 225px of source before the clip's edge: 3 whole tiles and 12px
+    // of a fourth, so the first visible tile starts 12px left of the clip.
+    const plan = planFilmstrip(input({ sourceInMs: 5000 }));
+    const first = plan.tiles[0];
+    expect(first.tileX).toBeCloseTo(-12, 6);
+    expect(first.dx).toBe(0);
+    expect(first.dw).toBeCloseTo(59, 6);
+    expect(first.swFrac).toBeCloseTo(59 / 71, 6);
+  });
+
+  it("keeps every frame in place while the head is trimmed", () => {
+    // The bug: the grid was anchored at the clip's left edge, so a head trim
+    // slid the whole strip along with the edge and it looked pushed, not cut.
+    // A head trim moves the edge and the trim point by the same amount, so
+    // each frame must stay at the same x, and only the edge moves over it.
+    const pxPerMs = RANGE / 4 / 5;
+    const at = (trimMs: number) =>
+      planFilmstrip(
+        input({
+          clipX: 50 + trimMs * pxPerMs,
+          clipW: 400 - trimMs * pxPerMs,
+          sourceInMs: 2000 + trimMs,
+        }),
+      );
+    const before = at(0);
+    for (const trimMs of [17, 250, 700, 1333]) {
+      const after = at(trimMs);
+      for (const tile of after.tiles) {
+        const same = before.tiles.find((t) => t.key === tile.key);
+        expect(same).toBeDefined();
+        expect(tile.tileX).toBeCloseTo(same!.tileX, 6);
+      }
+    }
+  });
+
+  it("keeps every frame in place while the tail is trimmed", () => {
+    const before = planFilmstrip(input({ clipW: 400 }));
+    const after = planFilmstrip(input({ clipW: 250 }));
+    for (const tile of after.tiles) {
+      const same = before.tiles.find((t) => t.key === tile.key);
+      expect(same).toBeDefined();
+      expect(tile.tileX).toBe(same!.tileX);
+    }
+  });
+
+  it("scrolls the strip with the clip, not against it", () => {
+    // Moving a clip on the timeline carries its frames along with it.
+    const a = planFilmstrip(input({ clipX: 100, sourceInMs: 3000 }));
+    const b = planFilmstrip(input({ clipX: 160, sourceInMs: 3000 }));
+    expect(b.tiles.map((t) => t.key)).toEqual(a.tiles.map((t) => t.key));
+    b.tiles.forEach((t, i) => {
+      expect(t.tileX - a.tiles[i].tileX).toBeCloseTo(60, 6);
+    });
   });
 
   it("covers twice the source in the same width when sped up", () => {

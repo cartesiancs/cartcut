@@ -15,7 +15,7 @@
  * coverage lives.
  */
 
-import { pxToMsSigned } from "../geometry";
+import { msToPxSigned, pxToMsSigned } from "../geometry";
 import { DEFAULT_FPS, frameToMs, msToFrame, normalizeFps } from "../frames";
 
 /**
@@ -44,15 +44,21 @@ export type FilmstripTile = {
   localpath: string;
   /** Quantised position in the source file, in source ms. */
   sourceMs: number;
-  /** Destination rect on the canvas. */
+  /**
+   * Where the tile's left edge sits at its natural width, which may be left of
+   * the clip: the first tile of a head-trimmed clip is cut, not shifted.
+   */
+  tileX: number;
+  /** The visible part of the tile, clipped to the clip. */
   dx: number;
   dy: number;
   dw: number;
   dh: number;
   /**
-   * Horizontal fraction of the tile to draw, 0..1.
+   * Horizontal fraction of the tile that is visible, 0..1.
    *
-   * The last tile of a strip is nearly always cut off by the clip's edge.
+   * The last tile of a strip is nearly always cut off by the clip's edge, and
+   * the first one is whenever the head has been trimmed.
    */
   swFrac: number;
 };
@@ -114,8 +120,6 @@ export type FilmstripInput = {
   clipY: number;
   clipW: number;
   clipH: number;
-  /** Where the clip starts on the timeline, and how long it runs there. */
-  spanStartMs: number;
   /** Source ms shown at the clip's left edge. */
   sourceInMs: number;
   speed: number;
@@ -136,7 +140,6 @@ export function planFilmstrip(input: FilmstripInput): FilmstripPlan {
     clipY,
     clipW,
     clipH,
-    spanStartMs,
     sourceInMs,
     speed,
     sourceAspect,
@@ -154,24 +157,37 @@ export function planFilmstrip(input: FilmstripInput): FilmstripPlan {
   );
   const quantum = frameToMs(quantumFrames, fps);
 
-  const tiles: FilmstripTile[] = [];
-  const count = Math.ceil(clipW / tileW);
+  // The grid is anchored where source time 0 would sit on the timeline, not at
+  // the clip's left edge. A head trim moves the edge and the trim point
+  // together, so this anchor stays put and the edge slides over a strip that
+  // does not move — the same way a tail trim already looked. Anchored at the
+  // edge instead, every tile rode along with it and the whole strip appeared
+  // to be pushed rather than cut.
+  const originX = clipX - msToPxSigned(sourceInMs / speed, range);
+  const clipRight = clipX + clipW;
 
-  for (let i = 0; i < count; i++) {
-    const dx = clipX + i * tileW;
-    const dw = Math.min(tileW, clipX + clipW - dx);
+  // Only the indices that touch both the clip and the viewport. Cull before
+  // quantising: an off-screen tile should not even be asked for, or a long
+  // clip would queue hundreds of decodes nobody can see. The epsilon keeps a
+  // grid line that lands exactly on an edge from yielding a zero-width tile
+  // through floating-point noise.
+  const EPS = 1e-6;
+  const left = Math.max(clipX, viewportX0);
+  const right = Math.min(clipRight, viewportX1);
+  const first = Math.max(0, Math.floor((left - originX) / tileW + EPS));
+  const last = Math.ceil((right - originX) / tileW - EPS);
+
+  const tiles: FilmstripTile[] = [];
+
+  for (let i = first; i < last; i++) {
+    const tileX = originX + i * tileW;
+    const dx = Math.max(tileX, clipX);
+    const dw = Math.min(tileX + tileW, clipRight) - dx;
     if (dw <= 0) {
       continue;
     }
 
-    // Cull before quantising: an off-screen tile should not even be asked for,
-    // or a long clip would queue hundreds of decodes nobody can see.
-    if (dx + dw < viewportX0 || dx > viewportX1) {
-      continue;
-    }
-
-    const timelineMs = spanStartMs + pxToMsSigned(i * tileW, range);
-    const exactSourceMs = sourceInMs + (timelineMs - spanStartMs) * speed;
+    const exactSourceMs = pxToMsSigned(i * tileW, range) * speed;
     // Quantised through the frame index rather than by dividing milliseconds:
     // one frame at 60fps is 16.666…ms, so `floor(ms / quantum) * quantum` drifts
     // off the grid and gives two neighbouring tiles different keys for the same
@@ -186,6 +202,7 @@ export function planFilmstrip(input: FilmstripInput): FilmstripPlan {
       key: tileKey(localpath, sourceMs, clipH),
       localpath,
       sourceMs,
+      tileX,
       dx,
       dy: clipY,
       dw,
