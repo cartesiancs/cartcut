@@ -15,6 +15,7 @@ import { blendOf, DEFAULT_BLEND, isBlendIsolating } from "./blend";
 import { renderControlOutline } from "./controlOutline";
 import { applyLutGrade, lutGradeFor } from "./lut/apply";
 import { applyMask, clipToMask, destinationMatrix, maskRenderFor } from "./mask";
+import { applyMirror } from "./mirror";
 import { layerFor } from "./surface";
 import type { ElementRenderFunction } from "./type";
 
@@ -354,6 +355,11 @@ function drawDirect<T extends VisualTimelineElement>(
     );
   }
   ctx.globalAlpha *= opacityScaledBy100 / 100;
+
+  // Inside the box and after the transform, so the picture turns over and the
+  // box does not — see `mirror.ts`. The outline below is symmetric, so it does
+  // not care that it is drawn under the flip.
+  applyMirror(ctx, sized, width, height);
 
   renderFunction(ctx, elementId, sized, timelineCursor);
 

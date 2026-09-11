@@ -43,6 +43,15 @@ import {
 } from "../timeline/transitionOps";
 import { addEffect } from "../timeline/effectOps";
 import { isGradable, setClipLut } from "../timeline/lutOps";
+import { mirrorToggleTarget, type MirrorAxis } from "../timeline/mirrorOps";
+import { isReversed, isReversible } from "../timeline/reverseOps";
+import { mirrorClips } from "../editor/actions";
+import {
+  canReverseHere,
+  isReversePending,
+  reverseClips,
+  unreverseClips,
+} from "../reverse/reverseSession";
 import { DEFAULT_EFFECT_MS } from "./effectElement";
 import {
   DEFAULT_TRANSITION_MS,
@@ -848,6 +857,86 @@ export class elementTimelineCanvas extends LitElement {
     }
 
     return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').rasterizeSelectedText()" item-name="Rasterize text" item-icon="image"> </menu-dropdown-item>`;
+  }
+
+  // ----------------------------------------------------------------- media
+
+  /**
+   * Start reversing the right-clicked video clips.
+   *
+   * Returns at once: the file is made in main, the tray in the bottom-left
+   * shows it, and each clip lands as its own undo step when its file does.
+   * The work is `reverseSession`, which the option panel's button also calls.
+   */
+  public reverseSelected() {
+    reverseClips([...this.targetIdDuringRightClick]);
+  }
+
+  /** Put the right-clicked clips back on their forward sources. Instant. */
+  public unreverseSelected() {
+    unreverseClips([...this.targetIdDuringRightClick]);
+    this.drawCanvas();
+  }
+
+  /** Mirror the right-clicked clips on one axis, or clear it. */
+  public mirrorSelected(axis: MirrorAxis) {
+    mirrorClips([...this.targetIdDuringRightClick], axis);
+    this.drawCanvas();
+  }
+
+  /**
+   * Reverse and mirror entries, offered only when they would do something —
+   * the rule the rest of this menu keeps, since `menu-dropdown-item` has no
+   * disabled state. A clip already being reversed offers no second Reverse.
+   *
+   * The mirror labels say what the click will do: a toggle over a selection
+   * that is all mirrored clears it, and "Mirror horizontally" on a clip that
+   * already is would be a label promising the opposite of the effect.
+   */
+  private mediaMenuTemplate(): string {
+    const ids = this.targetIdDuringRightClick;
+    if (ids.length === 0) {
+      return "";
+    }
+
+    const doc = this.currentDoc();
+    const call = (invocation: string, label: string, icon: string) =>
+      `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').${invocation}" item-name="${label}" item-icon="${icon}"> </menu-dropdown-item>`;
+
+    const rows: string[] = [];
+
+    if (
+      canReverseHere() &&
+      ids.some((id) => isReversible(doc.elements[id]) && !isReversePending(id))
+    ) {
+      rows.push(call("reverseSelected()", "Reverse", "fast_rewind"));
+    }
+    if (ids.some((id) => isReversed(doc.elements[id]))) {
+      rows.push(call("unreverseSelected()", "Un-reverse", "restore"));
+    }
+
+    const h = mirrorToggleTarget(doc, ids, "h");
+    if (h != null) {
+      rows.push(
+        call(
+          "mirrorSelected('h')",
+          h ? "Mirror horizontally" : "Remove horizontal mirror",
+          "flip",
+        ),
+      );
+    }
+    const v = mirrorToggleTarget(doc, ids, "v");
+    if (v != null) {
+      rows.push(
+        call(
+          "mirrorSelected('v')",
+          v ? "Flip vertically" : "Remove vertical flip",
+          "swap_vert",
+        ),
+      );
+    }
+
+    return rows.join("\n          ");
   }
 
   // ----------------------------------------------------------------- drag
@@ -1821,6 +1910,7 @@ export class elementTimelineCanvas extends LitElement {
     document.querySelector("#menuRightClick").innerHTML = `
         <menu-dropdown-body top="${y}" left="${x}">
           ${this.animationMenuTemplate()}
+          ${this.mediaMenuTemplate()}
           ${this.audioMenuTemplate()}
           ${this.rasterizeMenuTemplate()}
           ${this.groupMenuTemplate()}

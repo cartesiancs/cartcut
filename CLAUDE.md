@@ -919,6 +919,68 @@ apply the published transfer function and a neutral Rec.709 render only**: no
 camera primaries matrix and no manufacturer look, so they are a correct base
 grade and not a substitute for a vendor conversion LUT.
 
+## Reverse and mirror
+
+Two per-clip operations that sit next to each other in the UI — the timeline's
+context menu and the option panel's `<clip-orientation>` row both call the
+same functions — and are opposite in every other way. Mirror is a render
+property: instant, no file. Reverse makes a new media file and points the clip
+at it.
+
+```
+apps/app/src/features/timeline/mirrorOps.ts    flipH / flipV — video and image only
+apps/app/src/features/renderer/mirror.ts       applyMirror, called from drawDirect
+apps/app/src/features/timeline/reverseOps.ts   applyReverse / unreverse
+apps/app/src/features/reverse/reverseSession.ts  start a job, apply on landing
+apps/app/src/states/backgroundTaskStore.ts     the bottom-left tray's list
+electron/lib/reverseRecipe.ts                  args + chunk sizing, pure
+electron/lib/reversePipeline.ts                the run, no Electron — tested for real
+electron/lib/reverse.ts / ipc/ipcReverse.ts    cache in userData/reversed, serial queue
+```
+
+**Mirror flips the picture inside its box, not the element.** `applyMirror`
+runs in `drawDirect` after the transform and just before the per-type
+renderer, so the box — and with it the hit test, the grips, the outline,
+resize, the pen tool, tracking and group children — does not move.
+`transform.ts` deliberately refuses a negative scale, and `rotationOf` would
+read a mirrored matrix as a half turn. The consequence to know: **a mask stays
+where it was drawn** and the picture turns over beneath it. `true` or absent;
+off deletes the key.
+
+**Reverse swaps `localpath` for a reversed copy of the trim window.** That is
+why the preview, the export's audio (`-i localpath`), the filmstrip, the
+waveform and `loadedAssetStore` needed no changes. The clip becomes
+`trim = [0, duration]` over the new file, so its span does not move. The
+original is kept in `element.reversed`, and source time `r` in the reversed
+file is `to − r` in the original, which is what makes `unreverse` instant and
+exact after a split or an inner trim. Keyframes, speed, blend, grade, mask and
+mirror are untouched.
+
+Four things that are easy to get wrong:
+
+- **FFmpeg's `reverse` buffers its whole input.** At 3600×2338@120 that is
+  1.5GB a second, so the window is cut into chunks sized to a 512MB budget
+  (`chunkSecondsFor`), each reversed alone and joined last-first. The cut is
+  one decode through the `segment` muxer with forced keyframes, not one seek
+  per chunk — N independent seeks can duplicate or drop a boundary frame.
+- **`applyReverse` declines if the clip changed while the file was made.** It
+  takes minutes on heavy footage and editing continues; a clip trimmed in the
+  meantime covers a different window. The session toasts rather than applying.
+- **`reversePipeline.test.ts` is the real check**, against the bundled ffmpeg:
+  output frame `i` must be closest to source frame `N−1−i` across four chunk
+  boundaries. Its fixture is flat greys at `16 + 3N`, and it was wrong twice
+  first — `testsrc2` at 64×48 changes by less than encode noise, and levels
+  outside 16..235 clip to 0/255 and collide. Both failed while the pipeline
+  was right. Change the fixture carefully.
+- **The reversed file lives in `userData/reversed`, like proxies.** A project
+  moved to another machine shows a reversed clip as missing media, and
+  `reversed.localpath` is not an `AssetField`, so `relinkAssets` does not
+  rewrite it. A sound detached *before* reversing stays forward — it is a
+  separate clip. There is no MCP write tool for either yet; the serializer
+  reports `mirror` and `reversed`.
+
+`SCHEMA_VERSION` did not move.
+
 ## The screen recorder
 
 A separate application inside the app: two windows and a tray icon, opened from

@@ -121,6 +121,49 @@ type Gradable = {
 };
 
 /**
+ * A clip whose picture can be mirrored inside its own box.
+ *
+ * Video and image only. A mirror flips the *media*, not the element: it is
+ * applied by `features/renderer/mirror.ts` just before the per-type renderer
+ * draws, underneath the transform, so the box, the hit test, the grips and a
+ * mask all stay exactly where they were — the picture turns over beneath them.
+ *
+ * Stored as `true` or not at all. Clearing deletes the key, the rule `blend`
+ * and `lut` follow, so a project nobody has mirrored saves byte-identically to
+ * one written before the feature and `SCHEMA_VERSION` did not move. Read
+ * through `features/timeline/mirrorOps.ts#mirrorOf`.
+ */
+type Mirrorable = {
+  flipH?: true;
+  flipV?: true;
+};
+
+/**
+ * Where a reversed clip came from, so reversing it back is instant.
+ *
+ * A reversed clip's `localpath` points at a *new file*, the clip's trimmed
+ * window played backwards — which is what makes the preview, the export's
+ * audio, the filmstrip and the waveform all follow with no changes of their
+ * own. This remembers the forward source and the window the new file covers.
+ *
+ * The mapping back is `to - r`: a source time `r` in the reversed file is
+ * `to - r` in the original. It survives a split or an inner trim of the
+ * reversed clip, because each half keeps the same `to`. See
+ * `features/timeline/reverseOps.ts`.
+ */
+export type ReversedFrom = {
+  /** The forward source, exactly as `localpath` held it. */
+  localpath: string;
+  /** The window of the original the reversed file covers, in source ms. */
+  from: number;
+  to: number;
+  /** The original's `sourceDuration`. */
+  sourceDuration: number;
+  /** The original's `isExistAudio`. */
+  isExistAudio: boolean;
+};
+
+/**
  * The mask shapes a clip can be cut to.
  *
  * Three of them are built in and one is drawn: `pen` means "the path in
@@ -447,6 +490,7 @@ export type ImageElementType = TimelinePlaced &
   Animatable &
   Blendable &
   Gradable &
+  Mirrorable &
   Maskable &
   Replaceable & {
     filetype: "image";
@@ -482,9 +526,15 @@ export type VideoElementType = TimelinePlaced &
   Leveled &
   Blendable &
   Gradable &
+  Mirrorable &
   Maskable &
   Replaceable & {
     filetype: "video";
+    /**
+     * Present while the clip plays a reversed copy of its source. Absent on
+     * every forward clip, and deleted on the way back.
+     */
+    reversed?: ReversedFrom;
     /**
      * Window into the *source file*, in source milliseconds — never a timeline
      * offset. The clip sits at `[startTime, startTime + duration/speed)`, and

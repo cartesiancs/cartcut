@@ -264,6 +264,22 @@ const request = {
       return () => ipcRenderer.removeListener("proxy:done", wrapped);
     },
   },
+  /**
+   * Clip reversal. `start(jobId, { source, fromMs, toMs })` resolves when the
+   * reversed file exists — or with `{ ok: false, cancelled }` — and
+   * `onProgress` hears `{ jobId, fraction, stage }` in the meantime. The job id
+   * is minted by the caller so it can cancel before `start` resolves.
+   */
+  reverse: {
+    start: (jobId, request) =>
+      ipcRenderer.invoke("reverse:start", jobId, request),
+    cancel: (jobId) => ipcRenderer.invoke("reverse:cancel", jobId),
+    onProgress: (handler) => {
+      const wrapped = (_event, payload) => handler(payload);
+      ipcRenderer.on("reverse:progress", wrapped);
+      return () => ipcRenderer.removeListener("reverse:progress", wrapped);
+    },
+  },
   selfhosted: {
     run: () => ipcRenderer.invoke("selfhosted:run"),
   },

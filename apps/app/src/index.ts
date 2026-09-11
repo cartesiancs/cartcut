@@ -57,6 +57,8 @@ import "./features/input/inputText";
 // The title bar's export trigger. The settings it exports with live in
 // `ui/control/ControlSetting.ts`; this is the button and the progress popover.
 import "./features/export/exportButton";
+// The bottom-left tray of long-running work, e.g. reversing a clip.
+import "./features/task/backgroundTasks";
 
 import { Toast } from "./features/toast/toast";
 import { ToastBox } from "./features/toast/toastBox";

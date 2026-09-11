@@ -32,6 +32,8 @@ import { describeFilter } from "../renderer/filter/params";
 import { blendOf, DEFAULT_BLEND } from "../renderer/blend";
 import { DEFAULT_LUT_INTENSITY, lutOf } from "../renderer/lut";
 import { isBlendable } from "../timeline/blendOps";
+import { isMirrorable, mirrorOf } from "../timeline/mirrorOps";
+import { isReversed } from "../timeline/reverseOps";
 import { isGradable } from "../timeline/lutOps";
 import { maskOf } from "../mask/maskShape";
 import { revealOf } from "../text/reveal";
@@ -190,6 +192,19 @@ export function clipRow(
     row.reveal = reveal.unit;
   }
 
+  // Both only when set, like `blend`. A mirrored or reversed clip explains a
+  // picture that does not match its source file at a glance, and is otherwise
+  // indistinguishable in a list. `reversed` is a flag only: the forward source
+  // it remembers is a path the agent has no use for and would pay for in
+  // output tokens on every row.
+  const mirror = mirrorOf(element);
+  if (mirror.h || mirror.v) {
+    row.mirror = `${mirror.h ? "h" : ""}${mirror.v ? "v" : ""}`;
+  }
+  if (isReversed(element)) {
+    row.reversed = true;
+  }
+
   switch (element.filetype) {
     case "text": {
       row.text = truncate(element.text, TEXT_PREVIEW_CHARS);
@@ -343,6 +358,14 @@ export function clipDetail(
     detail.blend = blendOf(element);
   }
 
+  // Whatever their value on the types that can carry them, absent on the rest
+  // — the distinction `blend` makes just above.
+  if (isMirrorable(element)) {
+    const mirror = mirrorOf(element);
+    detail.flipH = mirror.h;
+    detail.flipV = mirror.v;
+  }
+
   // Reported whatever its value on the types that can carry one, and absent on
   // the types that cannot — the same distinction `blend` makes just above, and
   // for the same reason: an agent reading a detail view must be able to tell
@@ -442,6 +465,7 @@ export function clipDetail(
       detail.audioDetached = true;
     }
     detail.origin = element.origin;
+    detail.reversed = isReversed(element);
   }
 
   const animation = (element as any).animation;

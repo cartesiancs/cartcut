@@ -117,6 +117,9 @@ export class App extends LitElement {
         <style id="fontStyles" ref="fontStyles"></style>
 
         <toast-box></toast-box>
+        <!-- Long-running work — reversing a clip — in the bottom-left, clear
+             of the toasts at bottom-centre. -->
+        <background-tasks></background-tasks>
 
         <warning-demo></warning-demo>
         <onboarding-overlay></onboarding-overlay>

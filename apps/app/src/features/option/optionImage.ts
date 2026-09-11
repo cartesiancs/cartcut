@@ -5,6 +5,7 @@ import { LocaleController } from "../../controllers/locale";
 import "../filter/backgroundRemove";
 import "./controlDefaultTransform";
 import "./controlBlendMode";
+import "./controlClipOrientation";
 import "./optionLutSection";
 import "./optionMaskSection";
 import "./animationPresetBrowser";
@@ -84,6 +85,11 @@ export class OptionImage extends LitElement {
         .timelineState=${this.timelineState}
         .isShow=${this.isShow}
       ></default-transform>
+
+      <clip-orientation
+        .elementId=${this.elementId}
+        .isShow=${this.isShow}
+      ></clip-orientation>
 
       <blend-mode
         .elementId=${this.elementId}

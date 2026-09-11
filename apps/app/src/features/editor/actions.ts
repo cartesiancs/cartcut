@@ -31,6 +31,7 @@ import { deleteClips, pasteClips, splitAtPlayhead } from "../timeline/clipOps";
 import { createGroup, isGroupAnimated, ungroup } from "../timeline/groupOps";
 import { canMergeClips, mergeClips } from "../timeline/mergeOps";
 import { canRotateClips, rotateClips } from "../timeline/rotateOps";
+import { toggleMirror, type MirrorAxis } from "../timeline/mirrorOps";
 import { projectBakeHz } from "./frameRate";
 import { canDetachAudio } from "../timeline/audio";
 import { detachAudioFrom } from "../timeline/audioOps";
@@ -94,6 +95,17 @@ export function mergeSelection(): void {
   selectionStore
     .getState()
     .setIds(ids.filter((id) => after.elements[id] != null));
+}
+
+/**
+ * Mirror `ids` on one axis, or clear it if every one of them already is.
+ *
+ * Takes ids rather than reading the selection, because its two callers mean
+ * different things: the context menu acts on the right-click snapshot and the
+ * option panel on the one clip it is showing.
+ */
+export function mirrorClips(ids: string[], axis: MirrorAxis): void {
+  commit((input) => toggleMirror(input, ids, axis));
 }
 
 /** Turn the selection by `deltaDeg` — 90 for the toolbar's quarter turn. */

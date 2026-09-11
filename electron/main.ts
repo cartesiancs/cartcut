@@ -34,6 +34,7 @@ import "./render/renderFrame.js";
 import { ipcRenderV2 } from "./render/renderFrame.js";
 import { ipcMedia } from "./ipc/ipcMedia.js";
 import { ipcProxy } from "./ipc/ipcProxy.js";
+import { ipcReverse } from "./ipc/ipcReverse.js";
 import { runServer } from "./webServer.js";
 import { ipcSelfhosted } from "./ipc/ipcSelfhosted.js";
 import { httpFFmpegRenderV2 } from "./server/controllers/render.js";
@@ -158,6 +159,11 @@ ipcMain.handle("proxy:stats", ipcProxy.stats);
 ipcMain.handle("proxy:inspect", ipcProxy.inspect);
 ipcMain.handle("proxy:generate", ipcProxy.generate);
 ipcMain.handle("proxy:clear", ipcProxy.clear);
+
+// Clip reversal. `start` resolves when the file is made — minutes for heavy
+// footage — and reports on `reverse:progress` in the meantime.
+ipcMain.handle("reverse:start", ipcReverse.start);
+ipcMain.handle("reverse:cancel", ipcReverse.cancel);
 
 ipcMain.handle("app:getResourcesPath", ipcApp.getResourcesPath);
 ipcMain.handle("app:getTempPath", ipcApp.getTempPath);

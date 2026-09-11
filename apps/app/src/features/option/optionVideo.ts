@@ -21,6 +21,7 @@ import type { FilterInput } from "../renderer/filter/params";
 import "./controlAudioVolume";
 import "./controlBlendMode";
 import "./controlClipSpeed";
+import "./controlClipOrientation";
 import "./optionLutSection";
 import "./optionMaskSection";
 import "./animationPresetBrowser";
@@ -211,6 +212,13 @@ export class OptionVideo extends LitElement {
         .elementId=${this.elementId}
         .isShow=${this.isShow}
       ></clip-speed>
+
+      <!-- Beside speed: reverse is the other thing here that changes how the
+           footage plays rather than how it looks. -->
+      <clip-orientation
+        .elementId=${this.elementId}
+        .isShow=${this.isShow}
+      ></clip-orientation>
 
       <blend-mode
         .elementId=${this.elementId}
