@@ -29,6 +29,22 @@ import {
 } from "./dragKeyframe";
 import { projectBakeHz, projectFps } from "../editor/frameRate";
 import { pinchRange } from "../timeline/zoom";
+import { planRulerTicks } from "../timeline/rulerTicks";
+
+/**
+ * The curve editor's own palette.
+ *
+ * Darker than the timeline's `#0f1012`, so the curves and the grid carry the
+ * contrast. Outside the clip is an overlay rather than an opaque fill, so the
+ * grid runs on beneath it — dimmed, which is what says "no keyframes here".
+ */
+const CURVE_COLORS = {
+  background: "#08090b",
+  outsideClip: "rgba(0, 0, 0, 0.6)",
+  gridMinor: "rgba(255, 255, 255, 0.035)",
+  gridMajor: "rgba(255, 255, 255, 0.07)",
+  gridZero: "rgba(255, 255, 255, 0.16)",
+};
 
 /** The Range slider's bounds; a Shift+pinch stays inside them. */
 const MIN_VERTICAL_RANGE = 0.1;
@@ -298,6 +314,38 @@ export class KeyframeEditor extends LitElement {
     }
   }
 
+  /**
+   * The background grid: time lines on the timeline ruler's ticks, value lines
+   * on this ruler's.
+   *
+   * Both come from the planners the rulers already use, so a grid line always
+   * sits under a tick — the vertical ones under the timeline's ruler above the
+   * panel, which shares this canvas's zoom and scroll. The zero line is picked
+   * out because it is where an offset property rests.
+   */
+  private drawGrid(ctx: CanvasRenderingContext2D) {
+    const { width, height } = this.surface;
+
+    const time = planRulerTicks({
+      range: this.timelineRange,
+      hScroll: this.timelineScroll,
+      width,
+      fps: projectFps(),
+    });
+    for (const tick of time.ticks) {
+      ctx.fillStyle = tick.major
+        ? CURVE_COLORS.gridMajor
+        : CURVE_COLORS.gridMinor;
+      ctx.fillRect(Math.round(tick.x), 0, 1, height);
+    }
+
+    for (const tick of rulerTicks(this.viewport(), height)) {
+      ctx.fillStyle =
+        tick.value === 0 ? CURVE_COLORS.gridZero : CURVE_COLORS.gridMajor;
+      ctx.fillRect(0, Math.round(tick.y), width, 1);
+    }
+  }
+
   private drawDots(ctx) {
     const track = this.timeline[this.elementId].animation[this.animationType];
 
@@ -416,7 +464,7 @@ export class KeyframeEditor extends LitElement {
       millisecondsToPx(targetTimeline.startTime, this.timelineRange) -
       this.timelineScroll;
 
-    ctx.fillStyle = "#000000";
+    ctx.fillStyle = CURVE_COLORS.outsideClip;
     ctx.beginPath();
     ctx.rect(0, 0, startPx, this.surface.height);
     ctx.fill();
@@ -432,7 +480,7 @@ export class KeyframeEditor extends LitElement {
         this.timelineRange,
       ) - this.timelineScroll;
 
-    ctx.fillStyle = "#000000";
+    ctx.fillStyle = CURVE_COLORS.outsideClip;
     ctx.beginPath();
     ctx.rect(
       startPx,
@@ -504,11 +552,13 @@ export class KeyframeEditor extends LitElement {
     );
 
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "#0f1012";
+    ctx.fillStyle = CURVE_COLORS.background;
     ctx.beginPath();
     ctx.rect(0, 0, width, height);
     ctx.fill();
 
+    // Under the paddings, so the grid outside the clip is dimmed with it.
+    this.drawGrid(ctx);
     this.drawLeftPadding(ctx);
     this.drawRightPadding(ctx);
     this.drawRuler();
