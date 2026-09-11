@@ -54,6 +54,28 @@ const SETTING_TABS: OptionTabSpec[] = [
 ];
 
 /**
+ * The canvas-size shortcuts, drawn as their own shape.
+ *
+ * Two of them share 16:9, so the ratio alone does not tell them apart; `tag`
+ * is the second line that does, and the full size is in the tooltip.
+ */
+const RESOLUTION_PRESETS: {
+  w: number;
+  h: number;
+  ratio: string;
+  tag: string;
+  title: string;
+}[] = [
+  { w: 1920, h: 1080, ratio: "16:9", tag: "FHD", title: "1920×1080 (desktop)" },
+  { w: 3840, h: 2160, ratio: "16:9", tag: "4K", title: "3840×2160 (4K)" },
+  { w: 1080, h: 1080, ratio: "1:1", tag: "Square", title: "1080×1080 (square)" },
+  { w: 1080, h: 1920, ratio: "9:16", tag: "Mobile", title: "1080×1920 (mobile)" },
+];
+
+/** Longest side of a preset's glyph, in px. */
+const RATIO_GLYPH_PX = 20;
+
+/**
  * `#nav-home`: everything that decides what the project *outputs*, plus the
  * app and project chrome that has nowhere better to live.
  *
@@ -414,34 +436,105 @@ export class ControlSetting extends LitElement {
         />
       </div>
 
-      <div class="d-flex flex-column align-items-start mb-3">
-        <button
-          class="btn btn-sm btn-default text-light mt-1"
-          @click=${() => this._handleClickResolution(1920, 1080)}
-        >
-          1920x1080 (desktop)
-        </button>
+      ${this.renderResolutionPresets()}
+    `;
+  }
 
-        <button
-          class="btn btn-sm btn-default text-light mt-1"
-          @click=${() => this._handleClickResolution(3840, 2160)}
-        >
-          3840x2160 (4k)
-        </button>
+  /**
+   * Four tiles in one row, each drawing its own aspect ratio.
+   *
+   * Not `.btn`: the design system pins its padding with `!important`, which is
+   * wider than a quarter of the sidebar and is why these used to stack.
+   */
+  private renderResolutionPresets() {
+    const { w, h } = this.renderOption.previewSize;
 
-        <button
-          class="btn btn-sm btn-default text-light mt-1"
-          @click=${() => this._handleClickResolution(1080, 1080)}
-        >
-          1080x1080 (square)
-        </button>
+    return html`
+      <style>
+        .resolution-presets {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 0.25rem;
+        }
 
-        <button
-          class="btn btn-sm btn-default text-light mt-1"
-          @click=${() => this._handleClickResolution(1080, 1920)}
-        >
-          1080x1920 (mobile)
-        </button>
+        .resolution-preset {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 0.25rem;
+          min-width: 0;
+          padding: 0.4rem 0.1rem 0.3rem;
+          border: 1px solid transparent;
+          border-radius: 8px;
+          background-color: #1c1f23;
+          color: #adb5bd;
+          font-size: 11px;
+          line-height: 1.1;
+          cursor: pointer;
+        }
+
+        .resolution-preset:hover {
+          background-color: #2a2e33;
+          color: #f8f9fa;
+        }
+
+        .resolution-preset.active {
+          border-color: rgba(255, 255, 255, 0.45);
+          color: #f8f9fa;
+        }
+
+        .resolution-preset-glyph-box {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: ${RATIO_GLYPH_PX}px;
+          height: ${RATIO_GLYPH_PX}px;
+        }
+
+        .resolution-preset-glyph {
+          border: 1.5px solid currentColor;
+          border-radius: 2px;
+        }
+
+        .resolution-preset.active .resolution-preset-glyph {
+          background-color: rgba(255, 255, 255, 0.18);
+        }
+
+        .resolution-preset-tag {
+          font-size: 10px;
+          opacity: 0.7;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 100%;
+        }
+      </style>
+
+      <div class="resolution-presets mb-3">
+        ${RESOLUTION_PRESETS.map((preset) => {
+          const scale = RATIO_GLYPH_PX / Math.max(preset.w, preset.h);
+          const active = preset.w === w && preset.h === h;
+
+          return html`
+            <button
+              type="button"
+              class="resolution-preset ${active ? "active" : ""}"
+              title=${preset.title}
+              @click=${() => this._handleClickResolution(preset.w, preset.h)}
+            >
+              <span class="resolution-preset-glyph-box">
+                <span
+                  class="resolution-preset-glyph"
+                  style="width: ${Math.round(preset.w * scale)}px; height: ${Math.round(
+                    preset.h * scale,
+                  )}px;"
+                ></span>
+              </span>
+              <span>${preset.ratio}</span>
+              <span class="resolution-preset-tag">${preset.tag}</span>
+            </button>
+          `;
+        })}
       </div>
     `;
   }
