@@ -45,6 +45,7 @@ import {
 } from "../fx/presetRegistry";
 import { renderParamControls } from "../fx/fxParamControls";
 import { GestureCommit } from "./gestureCommit";
+import { beginInputScrub } from "../input/inputScrub";
 
 const ALIGNMENTS: Array<{ value: TransitionAlignment; label: string }> = [
   { value: "start", label: "Start at cut" },
@@ -293,11 +294,20 @@ export class OptionTransition extends LitElement {
           />
           <input
             type="number"
-            class="form-control bg-default text-light form-control-sm"
+            class="form-control bg-default text-light form-control-sm scrub-number"
             style="width: 6rem;"
             min="40"
             step="10"
             .value=${String(Math.round(transition.duration))}
+            @mousedown=${(e: MouseEvent) =>
+              // Five ms a pixel: a second of transition is 200px of travel.
+              beginInputScrub(e, {
+                sensitivity: 5,
+                step: 10,
+                min: 40,
+                max: Math.round(finiteMax),
+                decimals: 0,
+              })}
             @change=${this.handleChangeDuration}
           />
         </div>

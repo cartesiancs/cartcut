@@ -2,12 +2,14 @@
  * Drag-to-scrub for an ordinary `<input type="number">`.
  *
  * The adapter between `scrubSession.ts` and a plain Bootstrap field — the
- * settings panel's, as opposed to `<number-input>`, which owns its own value.
- * Here the element is the value: the drag writes `input.value` and the panel's
- * existing handler reads it back.
+ * settings panel's and every clip inspector's, as opposed to `<number-input>`,
+ * which owns its own value. Here the element is the value: the drag writes
+ * `input.value` and the panel's existing `@change` handler reads it back, so
+ * making a field draggable is a `scrub-number` class and a `@mousedown`.
  *
- * **Every field commits on release, none of them live.** That is not caution,
- * it is three separate hazards:
+ * **Every field commits on release, none of them live.** In an inspector that
+ * is simply one drag, one undo step, through the handler a typed edit already
+ * uses. In the settings panel it is not caution but three separate hazards:
  *
  *   - `projectFps` runs `setProjectFps`, which re-clamps the zoom, re-snaps the
  *     playhead and rebakes every animation lane through `withCheckpoint`. A
@@ -25,6 +27,17 @@
 
 import type { ScrubOptions } from "./numberScrub";
 import { isScrubStart, startScrub, windowScrubHost } from "./scrubSession";
+
+/**
+ * `beginInputScrub` bound to one spec, for a `@mousedown`.
+ *
+ * Build it once, at module scope, when the spec is fixed: lit re-binds a
+ * listener whose identity changes, so a closure minted inside `render()` is a
+ * remove and an add on every render of the panel.
+ */
+export function scrubOn(spec: ScrubOptions): (event: MouseEvent) => void {
+  return (event) => beginInputScrub(event, spec);
+}
 
 export function beginInputScrub(event: MouseEvent, spec: ScrubOptions): void {
   const input = event.currentTarget as HTMLInputElement | null;

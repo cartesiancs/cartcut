@@ -27,6 +27,21 @@ import "./optionMaskSection";
 import "./optionTabBar";
 import "./optionTextRevealSection";
 import type { OptionTab } from "./optionTabBar";
+import { beginInputScrub, scrubOn } from "../input/inputScrub";
+import { sweepSpec } from "../input/numberScrub";
+
+// Font size and letter spacing are whole pixels — both handlers read the field
+// back as an integer. Line spacing is a multiple of the size, so it moves in
+// twentieths across the same 0.5..4 band the field declares.
+const SCRUB_FONT_SIZE = scrubOn({ sensitivity: 0.5, step: 1, min: 1, decimals: 0 });
+const SCRUB_LINE_HEIGHT = scrubOn({
+  sensitivity: 0.01,
+  step: 0.05,
+  min: 0.5,
+  max: 4,
+  decimals: 2,
+});
+const SCRUB_LETTER_SPACING = scrubOn({ sensitivity: 0.25, step: 1, decimals: 0 });
 
 /**
  * The bundled default font: the name it is stored under, and the name it is
@@ -297,9 +312,10 @@ export class OptionText extends LitElement {
         <label class="form-label text-light">Font Size</label>
         <input
           @change=${this.handleChangeTextSize}
+          @mousedown=${SCRUB_FONT_SIZE}
           aria-event="font-size"
           type="number"
-          class="form-control bg-default text-light"
+          class="form-control bg-default text-light scrub-number"
           value="52"
         />
       </div>
@@ -318,12 +334,13 @@ export class OptionText extends LitElement {
         <label class="form-label text-light">Line Spacing</label>
         <input
           @change=${this.handleChangeLineHeight}
+          @mousedown=${SCRUB_LINE_HEIGHT}
           aria-event="line-height"
           type="number"
           min="0.5"
           max="4"
           step="0.1"
-          class="form-control bg-default text-light"
+          class="form-control bg-default text-light scrub-number"
           .value=${String(this.textStyle.lineHeight)}
         />
       </div>
@@ -332,9 +349,10 @@ export class OptionText extends LitElement {
         <label class="form-label text-light">Letter Spacing</label>
         <input
           @change=${this.handleChangeLetterSpacing}
+          @mousedown=${SCRUB_LETTER_SPACING}
           aria-event="letter-spacing"
           type="number"
-          class="form-control bg-default text-light"
+          class="form-control bg-default text-light scrub-number"
           value="0"
         />
       </div>
@@ -570,11 +588,13 @@ export class OptionText extends LitElement {
       <label class="form-label text-light small">${label}</label>
       <input
         type="number"
-        class="form-control form-control-sm bg-default text-light"
+        class="form-control form-control-sm bg-default text-light scrub-number"
         min=${min}
         max=${max}
         step=${step}
         .value=${String(value)}
+        @mousedown=${(e: MouseEvent) =>
+          beginInputScrub(e, sweepSpec(min, max, step))}
         @change=${(e: Event) =>
           this.set(path, Number((e.target as HTMLInputElement).value))}
       />

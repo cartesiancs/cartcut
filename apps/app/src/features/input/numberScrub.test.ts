@@ -4,8 +4,11 @@ import {
   SCRUB_FINE,
   SCRUB_MAX_STEP_PX,
   SCRUB_THRESHOLD_PX,
+  SWEEP_PX,
   beginScrub,
+  decimalsFor,
   modifiersOf,
+  sweepSpec,
   nudgeValue,
   scrubFactor,
   scrubMove,
@@ -15,6 +18,66 @@ import {
 } from "./numberScrub";
 
 const NONE = {};
+
+describe("decimalsFor", () => {
+  it("counts the places a grid needs", () => {
+    expect(decimalsFor(1)).toBe(0);
+    expect(decimalsFor(10)).toBe(0);
+    expect(decimalsFor(0.1)).toBe(1);
+    expect(decimalsFor(0.05)).toBe(2);
+    expect(decimalsFor(3.6)).toBe(1);
+    expect(decimalsFor(0.015)).toBe(3);
+  });
+
+  it("caps a derived step's float noise at four", () => {
+    expect(decimalsFor(1 / 300)).toBe(4);
+    expect(decimalsFor(1e-7)).toBe(4);
+  });
+
+  it("falls back to the scrub default for a step that is not a grid", () => {
+    expect(decimalsFor(0)).toBe(2);
+    expect(decimalsFor(-1)).toBe(2);
+    expect(decimalsFor(Number.NaN)).toBe(2);
+  });
+});
+
+describe("sweepSpec", () => {
+  it("spreads the whole range across the same travel whatever its units", () => {
+    for (const [min, max] of [
+      [0, 1],
+      [0, 100],
+      [0, 360],
+      [-500, 500],
+    ]) {
+      const spec = sweepSpec(min, max, 1);
+      expect(spec.sensitivity * SWEEP_PX).toBeCloseTo(max - min);
+      expect(spec.min).toBe(min);
+      expect(spec.max).toBe(max);
+    }
+  });
+
+  it("snaps to the step and rounds to its places", () => {
+    const spec = sweepSpec(0, 1, 0.01);
+    expect(spec.step).toBe(0.01);
+    expect(spec.decimals).toBe(2);
+    expect(sweepSpec(0, 100, 1).decimals).toBe(0);
+  });
+
+  it("reaches the ceiling and stops there", () => {
+    const spec = sweepSpec(0, 100, 1);
+    let state = beginScrub(50, spec);
+    state = scrubMove(state, SCRUB_THRESHOLD_PX, NONE, spec);
+    for (let i = 0; i < 10; i++) {
+      state = scrubMove(state, SCRUB_MAX_STEP_PX, NONE, spec);
+    }
+    expect(scrubValueOf(state, spec)).toBe(100);
+  });
+
+  it("still moves on a range with no width", () => {
+    expect(sweepSpec(5, 5, 1).sensitivity).toBeGreaterThan(0);
+    expect(sweepSpec(5, 5, 0).sensitivity).toBeGreaterThan(0);
+  });
+});
 
 /** The defaults `number-input` ships with: 0.3 units a pixel, snapped to tenths. */
 const opts = (over: Partial<ScrubOptions> = {}): ScrubOptions => ({

@@ -29,6 +29,10 @@ import {
 import { defaultParamsFor, presetById, presetsOfKind } from "../fx/presetRegistry";
 import { renderParamControls } from "../fx/fxParamControls";
 import { GestureCommit } from "./gestureCommit";
+import { scrubOn } from "../input/inputScrub";
+import { sweepSpec } from "../input/numberScrub";
+
+const SCRUB_INTENSITY = scrubOn(sweepSpec(0, 100, 1));
 
 /**
  * Blend modes offered for an overlay preset.
@@ -201,12 +205,13 @@ export class OptionEffect extends LitElement {
           />
           <input
             type="number"
-            class="form-control bg-default text-light form-control-sm"
+            class="form-control bg-default text-light form-control-sm scrub-number"
             style="width: 5rem;"
             min="0"
             max="100"
             step="1"
             .value=${String(Math.round(effect.intensity))}
+            @mousedown=${SCRUB_INTENSITY}
             @change=${this.handleCommitIntensity}
           />
         </div>

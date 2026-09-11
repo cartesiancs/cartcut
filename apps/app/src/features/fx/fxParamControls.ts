@@ -22,6 +22,8 @@
 
 import { html, type TemplateResult } from "lit";
 import type { FxParamSpec, FxParamValues } from "./presetTypes";
+import { scrubOn } from "../input/inputScrub";
+import { sweepSpec } from "../input/numberScrub";
 
 export type ParamChange = (key: string, value: number | string | boolean | number[]) => void;
 
@@ -88,12 +90,13 @@ function numberControl(
         />
         <input
           type="number"
-          class="form-control bg-default text-light form-control-sm"
+          class="form-control bg-default text-light form-control-sm scrub-number"
           style="width: 5.5rem;"
           min=${param.min}
           max=${param.max}
           step=${step}
           .value=${String(value)}
+          @mousedown=${scrubOn(sweepSpec(param.min, param.max, step))}
           @change=${(e: Event) =>
             opts.onCommit(param.key, Number((e.target as HTMLInputElement).value))}
         />
@@ -189,6 +192,7 @@ function pointControl(
 ): TemplateResult {
   const value = valueOf(param, values) as number[];
   const step = param.step ?? (param.max - param.min) / 100;
+  const scrub = scrubOn(sweepSpec(param.min, param.max, step));
 
   const write = (index: 0 | 1, raw: string) => {
     const next = [...value];
@@ -204,11 +208,12 @@ function pointControl(
           (index) => html`
             <input
               type="number"
-              class="form-control bg-default text-light form-control-sm"
+              class="form-control bg-default text-light form-control-sm scrub-number"
               min=${param.min}
               max=${param.max}
               step=${step}
               .value=${String(value[index])}
+              @mousedown=${scrub}
               @change=${(e: Event) =>
                 write(index, (e.target as HTMLInputElement).value)}
             />

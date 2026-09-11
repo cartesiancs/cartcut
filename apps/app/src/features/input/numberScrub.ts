@@ -53,6 +53,54 @@ export type ScrubOptions = {
   threshold?: number;
 };
 
+/** Travel, in pixels, that `sweepSpec` spreads a field's whole range across. */
+export const SWEEP_PX = 300;
+
+/**
+ * Decimal places a value on this grid needs — `0.05` → 2, `10` → 0.
+ *
+ * Capped at four: a derived step like `(max - min) / 100` can come out as
+ * `0.0033333333333333335`, and nobody is dragging to the sixteenth place. A
+ * step that is not a usable grid gets the scrub's own default of 2.
+ */
+export function decimalsFor(step: number): number {
+  if (!Number.isFinite(step) || step <= 0) {
+    return 2;
+  }
+  if (Number.isInteger(step)) {
+    return 0;
+  }
+  const text = String(step);
+  const exponent = /e-(\d+)$/.exec(text);
+  const places = exponent != null
+    ? Number(exponent[1])
+    : (text.split(".")[1] ?? "").length;
+  return Math.min(4, places);
+}
+
+/**
+ * A scrub for a field whose bounds are its only description.
+ *
+ * For controls generated from data — a preset's parameter, a style row — where
+ * nobody has hand-tuned a `sensitivity`. The rule is that the whole range is
+ * `SWEEP_PX` of travel whatever its units, so a 0..1 mix and a 0..360 angle feel
+ * the same under the hand. Reusing `step` as the sensitivity, the obvious
+ * alternative, makes the first unmovable and the second twitchy — the
+ * trade-off `scrubFields.ts` states for the settings panel.
+ */
+export function sweepSpec(min: number, max: number, step: number): ScrubOptions {
+  const grid = Number.isFinite(step) && step > 0 ? step : 0;
+  const span = max - min;
+  return {
+    sensitivity:
+      Number.isFinite(span) && span > 0 ? span / SWEEP_PX : grid > 0 ? grid : 1,
+    step: grid,
+    min,
+    max,
+    decimals: decimalsFor(grid),
+  };
+}
+
 export type ScrubModifiers = {
   shift?: boolean;
   meta?: boolean;

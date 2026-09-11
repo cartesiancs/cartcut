@@ -26,6 +26,23 @@ import "./optionMaskSection";
 import "./animationPresetBrowser";
 import "./optionTabBar";
 import type { OptionTab } from "./optionTabBar";
+import { scrubOn } from "../input/inputScrub";
+
+// The shaders read the blur strength with `parseInt`, hence whole steps; the
+// chroma-key threshold is a fraction and above 1 keys out the whole frame.
+const SCRUB_FILTER_STRENGTH = scrubOn({
+  sensitivity: 0.25,
+  step: 1,
+  min: 0,
+  decimals: 0,
+});
+const SCRUB_CHROMAKEY_THRESHOLD = scrubOn({
+  sensitivity: 0.005,
+  step: 0.01,
+  min: 0,
+  max: 1,
+  decimals: 2,
+});
 
 @customElement("option-video")
 export class OptionVideo extends LitElement {
@@ -104,11 +121,12 @@ export class OptionVideo extends LitElement {
                  whatever had last been typed into it. -->
             <input
               @change=${this.handleChangeStrength}
+              @mousedown=${SCRUB_FILTER_STRENGTH}
               type="number"
               aria-event="filter_strength"
               min="0"
               step="1"
-              class="form-control bg-default text-light ${isChromakey
+              class="form-control bg-default text-light scrub-number ${isChromakey
                 ? "d-none"
                 : ""}"
               .value=${String(filter.strength ?? "")}
@@ -131,9 +149,10 @@ export class OptionVideo extends LitElement {
                 >
                 <input
                   @change=${this.handleChangeChromakey}
+                  @mousedown=${SCRUB_CHROMAKEY_THRESHOLD}
                   type="number"
                   aria-event="chromakey_force"
-                  class="form-control bg-default text-light"
+                  class="form-control bg-default text-light scrub-number"
                   .value=${String(filter.threshold ?? "")}
                   step="0.01"
                   min="0"
