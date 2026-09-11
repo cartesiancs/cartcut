@@ -7,6 +7,7 @@ import "./controlDefaultTransform";
 import "./controlBlendMode";
 import "./controlClipOrientation";
 import "./optionLutSection";
+import "./optionAdjustSection";
 import "./optionMaskSection";
 import "./animationPresetBrowser";
 import "./optionTabBar";
@@ -65,6 +66,12 @@ export class OptionImage extends LitElement {
       ></option-tab-bar>
 
       <!-- Every pane stays mounted; only one is shown. See optionTabBar.ts -->
+      <div class=${this.tab === "adjust" ? "" : "d-none"}>
+        <option-adjust-section
+          .elementIds=${[this.elementId]}
+        ></option-adjust-section>
+      </div>
+
       <div class=${this.tab === "mask" ? "" : "d-none"}>
         <option-mask-section
           .elementIds=${[this.elementId]}

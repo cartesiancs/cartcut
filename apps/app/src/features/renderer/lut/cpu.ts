@@ -93,7 +93,15 @@ export function createCpuLutApplier(): LutApplier {
         }
       }
 
+      // Under identity, explicitly: `@napi-rs/canvas` applies the current
+      // transform to `putImageData`, which the spec says must be ignored and
+      // Chromium does ignore. The layer arrives carrying the destination's
+      // zoom, so without this a node suite drawing at any scale but 1 reads a
+      // magnified grade back. See `adjust/cpu.ts`, where it was found.
+      surface.ctx.save();
+      surface.ctx.setTransform(1, 0, 0, 1, 0, 0);
       surface.ctx.putImageData(image, 0, 0);
+      surface.ctx.restore();
       return true;
     },
 

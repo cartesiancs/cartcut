@@ -145,6 +145,26 @@ export function prepareLutGrade(ref: LutRef | null): LutGrade | null {
   return { key: ref.presetId, lut, amount: ref.intensity / 100 };
 }
 
+/**
+ * A grade from a table the caller already has, rather than from a preset id.
+ *
+ * The colour adjustments' way in: their table is baked from the clip's own
+ * settings (`adjust/bake.ts`), so there is nothing for the resolver to look
+ * up. `key` must name the table's contents exactly — the GPU applier caches a
+ * texture per key. `null` when there is no applier, the same answer
+ * `prepareLutGrade` gives, so the caller keeps the fast path.
+ */
+export function directLutGrade(
+  key: string,
+  lut: LutData,
+  amount: number,
+): LutGrade | null {
+  if (!(amount > 0) || currentApplier() == null) {
+    return null;
+  }
+  return { key, lut, amount: Math.min(1, amount) };
+}
+
 /** `prepareLutGrade` straight from an element. The paint loop's entry point. */
 export function lutGradeFor(
   element: Parameters<typeof lutOf>[0],

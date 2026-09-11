@@ -13,6 +13,7 @@ import {
 } from "../timeline/transform";
 import { blendOf, DEFAULT_BLEND, isBlendIsolating } from "./blend";
 import { renderControlOutline } from "./controlOutline";
+import { adjustToneFor, applyFinish, finishRenderFor } from "./adjust/apply";
 import { applyLutGrade, lutGradeFor } from "./lut/apply";
 import { applyMask, clipToMask, destinationMatrix, maskRenderFor } from "./mask";
 import { applyMirror } from "./mirror";
@@ -130,6 +131,31 @@ export function renderElement<T extends VisualTimelineElement>(
   const grade = lutGradeFor(element);
 
   /**
+   * The clip's colour adjustments, as two halves resolved here beside the
+   * grade and for the same reason: an unadjusted clip — or one whose sliders
+   * are all at zero — must keep the untouched path rather than allocate a
+   * layer to do nothing to it.
+   *
+   * `tone` is a LUT baked from the colour and lightness sliders and goes
+   * through the same applier as `grade`, *before* it: correct the shot, then
+   * apply the look. `finish` is sharpen, clarity, fade, vignette and grain,
+   * after it. Neither is suspended by `isolated`; see `adjust/apply.ts`.
+   */
+  const tone = adjustToneFor(element);
+  const base = destinationMatrix(ctx);
+  const finish =
+    context == null
+      ? finishRenderFor(undefined, elementId, element, timelineCursor, base)
+      : finishRenderFor(
+          context.elements,
+          elementId,
+          element,
+          timelineCursor,
+          base,
+          context.memo,
+        );
+
+  /**
    * The clip's mask, in device pixels, or `null` when it cuts nothing.
    *
    * Resolved here, beside the grade and for the same reason — a clip whose mask
@@ -151,26 +177,26 @@ export function renderElement<T extends VisualTimelineElement>(
    */
   const mask =
     context == null
-      ? maskRenderFor(
-          undefined,
-          elementId,
-          element,
-          timelineCursor,
-          destinationMatrix(ctx),
-        )
+      ? maskRenderFor(undefined, elementId, element, timelineCursor, base)
       : maskRenderFor(
           context.elements,
           elementId,
           element,
           timelineCursor,
-          destinationMatrix(ctx),
+          base,
           context.memo,
         );
 
   // The path every clip took before blend modes existed, and the one almost
   // every clip still takes. Byte-for-byte what it was: no layer is allocated,
   // no extra blit is issued, and `golden.test.ts`'s digests are the proof.
-  if (!isBlendIsolating(blend) && grade == null && mask == null) {
+  if (
+    !isBlendIsolating(blend) &&
+    grade == null &&
+    tone == null &&
+    finish == null &&
+    mask == null
+  ) {
     drawDirect(
       ctx,
       elementId,
@@ -216,8 +242,23 @@ export function renderElement<T extends VisualTimelineElement>(
     // Group opacity has already been baked in above, and that is harmless:
     // `getImageData` and `texImage2D` both hand over *straight* colour, so a
     // clip at 50% is graded as the colour it is rather than as a darker one.
+    // The clip's own corrections come first — its colour and lightness
+    // sliders, baked into a table and run through the same applier as the
+    // LUT — so the LUT is a look applied to a corrected shot, not a
+    // correction fighting a look. Lumetri's Basic-then-Creative order.
+    if (tone != null) {
+      applyLutGrade(layer, tone);
+    }
     if (grade != null) {
       applyLutGrade(layer, grade);
+    }
+
+    // Sharpen, clarity, fade, vignette and grain, after the look: fade has
+    // to see the graded blacks to lift them, and grain sits on top of
+    // everything. Before the mask for the reason the grade is — the GPU
+    // applier blits its result back with `copy`.
+    if (finish != null) {
+      applyFinish(layer, finish);
     }
 
     // After the grade, and the order is unobservable rather than arbitrary: a

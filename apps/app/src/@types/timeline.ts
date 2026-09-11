@@ -121,6 +121,57 @@ type Gradable = {
 };
 
 /**
+ * The manual colour controls, in the order the Adjust tab lists them.
+ *
+ * CapCut's Adjust panel, which is also Lightroom's and Lumetri's basic set:
+ * three for colour, seven for lightness, five for finishing. Exported as a
+ * runtime list so `electron/mcp/tools/define.ts`'s hand-copy can be pinned
+ * against it, the arrangement `FILETYPES` and `BLEND_MODES` already have.
+ *
+ * What each one does, and over what range, is `features/adjust/spec.ts`.
+ */
+export const COLOR_ADJUSTMENT_KEYS = [
+  "temperature",
+  "tint",
+  "saturation",
+  "exposure",
+  "contrast",
+  "highlights",
+  "shadows",
+  "whites",
+  "blacks",
+  "brilliance",
+  "sharpen",
+  "clarity",
+  "particles",
+  "fade",
+  "vignette",
+] as const;
+
+export type ColorAdjustmentKey = (typeof COLOR_ADJUSTMENT_KEYS)[number];
+
+/**
+ * A clip's manual colour adjustments, in slider units.
+ *
+ * **Sparse**, and that is the whole persistence contract: a slider at zero has
+ * no key, and a clip with every slider at zero has no `adjust` field at all.
+ * A project nobody has adjusted therefore saves byte-identically to one written
+ * before the feature, and `SCHEMA_VERSION` did not move — the rule `blend` and
+ * `lut` follow.
+ */
+export type ColorAdjustments = Partial<Record<ColorAdjustmentKey, number>>;
+
+/**
+ * A clip that can carry manual colour adjustments.
+ *
+ * The same five types as `Gradable`, for the same reason. Absent means
+ * unadjusted, answered by `features/renderer/adjust.ts#adjustOf`.
+ */
+type Adjustable = {
+  adjust?: ColorAdjustments;
+};
+
+/**
  * A clip whose picture can be mirrored inside its own box.
  *
  * Video and image only. A mirror flips the *media*, not the element: it is
@@ -490,6 +541,7 @@ export type ImageElementType = TimelinePlaced &
   Animatable &
   Blendable &
   Gradable &
+  Adjustable &
   Mirrorable &
   Maskable &
   Replaceable & {
@@ -500,6 +552,7 @@ export type GifElementType = TimelinePlaced &
   Visual &
   Blendable &
   Gradable &
+  Adjustable &
   Maskable &
   Replaceable & {
     filetype: "gif";
@@ -510,6 +563,7 @@ export type ShapeElementType = TimelinePlaced &
   Animatable &
   Blendable &
   Gradable &
+  Adjustable &
   Maskable & {
     filetype: "shape";
     oWidth: number; // 원래 shape 사이즈
@@ -526,6 +580,7 @@ export type VideoElementType = TimelinePlaced &
   Leveled &
   Blendable &
   Gradable &
+  Adjustable &
   Mirrorable &
   Maskable &
   Replaceable & {
@@ -684,6 +739,7 @@ export type TextElementType = TimelinePlaced &
   Animatable &
   Blendable &
   Gradable &
+  Adjustable &
   Maskable &
   Replaceable & {
     filetype: "text";

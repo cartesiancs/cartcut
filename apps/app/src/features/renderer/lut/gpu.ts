@@ -47,6 +47,17 @@ import type { LutData } from "../../lut/lutData";
 import { FxProgram, quadGeometry } from "../fx/programs";
 import type { Surface } from "../surface";
 import { lutBlocking, type LutApplier } from "./apply";
+import { BoundedCache } from "./boundedCache";
+
+/**
+ * How many LUT textures stay resident.
+ *
+ * Presets alone never approach it. Colour adjustments do: they are baked into
+ * a LUT keyed by their settings (`adjust/bake.ts`), so a slider drag mints a
+ * key per step, and without a bound each would pin a half-float atlas in
+ * video memory for the life of the app.
+ */
+const MAX_RESIDENT_LUTS = 32;
 
 /** `HALF_FLOAT_OES`, which the extension object carries rather than `gl`. */
 type HalfFloatExtension = { HALF_FLOAT_OES: number };
@@ -87,7 +98,15 @@ export function createGpuLutApplier(): LutApplier | null {
 
   let program: FxProgram | null = null;
   let sourceTexture: WebGLTexture | null = null;
-  const uploaded = new Map<string, Uploaded | null>();
+  // `null` marks a key whose upload failed, so it is not retried every frame.
+  const uploaded = new BoundedCache<string, Uploaded | null>(
+    MAX_RESIDENT_LUTS,
+    (_key, entry) => {
+      if (entry != null) {
+        context.deleteTexture(entry.texture);
+      }
+    },
+  );
   let reported = false;
 
   const reportOnce = (message: string): void => {

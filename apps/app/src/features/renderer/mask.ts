@@ -100,6 +100,39 @@ export function destinationMatrix(ctx: CanvasRenderingContext2D): Mat {
 }
 
 /**
+ * Element-local pixels to the destination's device pixels.
+ *
+ * `base` is `destinationMatrix(ctx)`, then the parent chain, then the element's
+ * own transform — exactly the three `renderElement` and `drawDirect` apply
+ * between them. Shared by the mask and the colour adjustments' finish pass,
+ * because both have to know where the clip's box lands on the layer, and two
+ * derivations of that would be the `worldMatrixOf` trap waiting to happen
+ * twice.
+ */
+export function elementDeviceMatrix(
+  elements: Record<string, TimelineElement> | undefined,
+  elementId: string,
+  element: TimelineElement,
+  timelineCursor: number,
+  base: Mat,
+  memo?: TransformMemo,
+): Mat {
+  const parent =
+    elements == null
+      ? null
+      : parentMatrixOf(elements, elementId, timelineCursor, memo);
+  return multiply(
+    parent == null ? base : multiply(base, parent),
+    localMatrixOf(element, timelineCursor),
+  );
+}
+
+/** Device pixels per element pixel, `sqrt(|det|)`. */
+export function deviceScaleOf(m: Mat): number {
+  return scaleOfMat(m);
+}
+
+/**
  * Resolve an element's mask into device space, or `null` if it cuts nothing.
  *
  * `null` for: no mask, a `pen` mask with too few nodes to enclose anything, a
@@ -138,13 +171,13 @@ export function maskRenderFor(
     return null;
   }
 
-  const parent =
-    elements == null
-      ? null
-      : parentMatrixOf(elements, elementId, timelineCursor, memo);
-  const chain = multiply(
-    parent == null ? base : multiply(base, parent),
-    localMatrixOf(element, timelineCursor),
+  const chain = elementDeviceMatrix(
+    elements,
+    elementId,
+    element,
+    timelineCursor,
+    base,
+    memo,
   );
 
   const scale = scaleOfMat(chain);

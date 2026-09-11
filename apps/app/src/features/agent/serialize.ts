@@ -31,6 +31,8 @@ import {
 import { describeFilter } from "../renderer/filter/params";
 import { blendOf, DEFAULT_BLEND } from "../renderer/blend";
 import { DEFAULT_LUT_INTENSITY, lutOf } from "../renderer/lut";
+import { adjustOf } from "../renderer/adjust";
+import { isAdjustable } from "../timeline/adjustOps";
 import { isBlendable } from "../timeline/blendOps";
 import { isMirrorable, mirrorOf } from "../timeline/mirrorOps";
 import { isReversed } from "../timeline/reverseOps";
@@ -170,6 +172,14 @@ export function clipRow(
     if (lut.intensity !== DEFAULT_LUT_INTENSITY) {
       row.lutIntensity = lut.intensity;
     }
+  }
+
+  // Only the sliders that are moved, and only when any are. At most fifteen
+  // scalars, so the cap is not at stake — but a list where every clip
+  // announced fifteen zeros would bury the one clip that was actually graded.
+  const adjust = adjustOf(element);
+  if (adjust != null) {
+    row.adjust = adjust;
   }
 
   // The shape name alone, and only when there is a mask. A masked clip is
@@ -374,6 +384,13 @@ export function clipDetail(
     const lut = lutOf(element);
     detail.lut = lut == null ? null : lut.presetId;
     detail.lutIntensity = lut == null ? null : lut.intensity;
+  }
+
+  // `{}` rather than absent on a clip that could carry adjustments and has
+  // none, so "unadjusted" reads differently from "this kind of clip has no
+  // colour controls" — the distinction `lut` makes just above.
+  if (isAdjustable(element)) {
+    detail.adjust = adjustOf(element) ?? {};
   }
 
   // Reported whatever its value on the types that can carry one, and absent on

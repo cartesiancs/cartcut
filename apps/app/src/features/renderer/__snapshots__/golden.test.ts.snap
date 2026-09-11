@@ -10,6 +10,16 @@ exports[`golden frames > composites a stable frame at each sampled timecode 1`] 
 }
 `;
 
+exports[`golden frames — adjusted > composites a stable frame at each sampled timecode 1`] = `
+{
+  "0": "f83721ec",
+  "1000": "f83721ec",
+  "2000": "f83721ec",
+  "3000": "852acaf5",
+  "3999": "852acaf5",
+}
+`;
+
 exports[`golden frames — blended > composites a stable frame at each sampled timecode 1`] = `
 {
   "0": "47ed7dee",

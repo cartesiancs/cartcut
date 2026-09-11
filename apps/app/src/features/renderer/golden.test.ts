@@ -221,3 +221,45 @@ describe("golden frames — blended", () => {
     }
   });
 });
+
+/**
+ * The same scene with colour adjustments on two clips — tone on one, finish
+ * and tone together on the other — kept apart from the plain scene for the
+ * reason the blended one is: the plain digests are the proof that an
+ * unadjusted project renders exactly as it did before the feature.
+ *
+ * Grain is left out: it is deterministic, but a digest over it would pin the
+ * hash's every bit, and `adjustComposite.test.ts` covers it statistically.
+ */
+function adjustedTimeline(): Timeline {
+  const base = timeline();
+  return {
+    ...base,
+    flyer: { ...base.flyer, adjust: { exposure: 30, temperature: -40, contrast: 25 } },
+    badge: { ...base.badge, adjust: { saturation: -60, fade: 35, vignette: 50, sharpen: 60 } },
+  } as Timeline;
+}
+
+describe("golden frames — adjusted", () => {
+  it("composites a stable frame at each sampled timecode", () => {
+    const frames = Object.fromEntries(
+      [0, 1000, 2000, 3000, 3999].map((t) => [
+        t,
+        frameDigest(t, adjustedTimeline()),
+      ]),
+    );
+    expect(frames).toMatchSnapshot();
+  });
+
+  it("is deterministic — the same timecode digests identically", () => {
+    expect(frameDigest(2000, adjustedTimeline())).toBe(
+      frameDigest(2000, adjustedTimeline()),
+    );
+  });
+
+  it("differs from the same scene composited without adjustments", () => {
+    for (const t of [0, 1000, 2000, 3000]) {
+      expect(frameDigest(t, adjustedTimeline())).not.toBe(frameDigest(t));
+    }
+  });
+});

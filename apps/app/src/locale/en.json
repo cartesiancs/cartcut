@@ -68,5 +68,29 @@
     "prev": "Prev",
     "next": "Next",
     "finish": "Finish"
+  },
+  "adjust": {
+    "tab": "Adjust",
+    "group_color": "Color",
+    "group_lightness": "Lightness",
+    "group_effects": "Effects",
+    "temperature": "Temperature",
+    "tint": "Tint",
+    "saturation": "Saturation",
+    "exposure": "Exposure",
+    "contrast": "Contrast",
+    "highlights": "Highlights",
+    "shadows": "Shadows",
+    "whites": "Whites",
+    "blacks": "Blacks",
+    "brilliance": "Brilliance",
+    "sharpen": "Sharpen",
+    "clarity": "Clarity",
+    "particles": "Particles",
+    "fade": "Fade",
+    "vignette": "Vignette",
+    "reset": "Reset",
+    "reset_all": "Reset all",
+    "reset_hint": "Double-click a name to reset it."
   }
 }

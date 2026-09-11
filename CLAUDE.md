@@ -478,7 +478,7 @@ step, as the user's own mouse.
 
 ```
 electron/mcp/server.ts      transport, sessions, auth
-electron/mcp/tools.ts       barrel: assembles the 55 tools Claude Code sees
+electron/mcp/tools.ts       barrel: assembles the 56 tools Claude Code sees
 electron/mcp/tools/define.ts  the erased Registrar, shared zod fragments
 electron/mcp/tools/*.ts     one module per family (read, cut, media, tracks, …)
 electron/mcp/bridge.ts      main -> renderer request/response
@@ -918,6 +918,118 @@ chroma as an RMS distance rather than as `max - min`. **The `log-convert` six
 apply the published transfer function and a neutral Rec.709 render only**: no
 camera primaries matrix and no manufacturer look, so they are a correct base
 grade and not a substitute for a vendor conversion LUT.
+
+## Color adjustments
+
+A clip's manual colour controls — CapCut's Adjust panel, which is also
+Lightroom's and Lumetri's basic set. Fifteen sliders in three groups, on the
+same five types a LUT covers:
+
+- **Color**: temperature, tint, saturation
+- **Lightness**: exposure, contrast, highlights, shadows, whites, blacks, brilliance
+- **Effects**: sharpen, clarity, particles (grain), fade, vignette
+
+```
+apps/app/src/features/adjust/spec.ts         the table: group, range, every physical scale
+apps/app/src/features/adjust/tone.ts         colour + lightness as one pure pixel function
+apps/app/src/features/adjust/bake.ts         that function baked into a 33³ LUT, cached by key
+apps/app/src/features/adjust/finishMath.ts   effects: the CPU oracle the GLSL is generated from
+apps/app/src/features/renderer/adjust.ts     adjustOf / coerceAdjustPatch — the read/write split
+apps/app/src/features/renderer/adjust/       apply.ts (injection), glsl.ts, gpu.ts, cpu.ts
+apps/app/src/features/timeline/adjustOps.ts  setClipAdjust / resetClipAdjust, and their declines
+apps/app/src/features/option/optionAdjustSection.ts   the Adjust tab
+```
+
+`element.adjust` is a **sparse** map of slider values: a slider at zero has no
+key, a clip with every slider at zero has no field, so an unadjusted project
+saves byte-identically to one written before the feature and
+**`SCHEMA_VERSION` did not move**. Bipolar sliders run −100..100, the four
+effects with no meaningful negative run 0..100; vignette is bipolar (+ darkens
+the edges, − lightens). Static values only — there are no adjustment keyframes
+yet, and nothing in the design stands in their way.
+
+**The two groups are applied in two different places, and that split is the
+design.** Every colour and lightness control is a pure function of the pixel's
+own colour, so `bake.ts` evaluates the whole chain at the nodes of a cube and
+hands it to the *existing* clip-LUT applier. No new shader: the tone half
+inherits a GLSL path already pinned to ffmpeg's `lut3d`, the half-float atlas,
+the CPU fallback and export blocking. What is left to prove is that the table
+matches the function, and `bake.test.ts` holds it to one 8-bit step for every
+slider at both ends of its travel. The effects need a pixel's neighbours or its
+position, so they run in a separate **finish** pass with its own GPU and CPU
+appliers, injected the way `lut/apply.ts` injects its own.
+
+The order inside `renderElement`'s isolation layer:
+
+```
+drawDirect → tone (baked LUT) → clip LUT → finish → mask → blend
+```
+
+Tone before the LUT is Lumetri's Basic-then-Creative: correct the shot, then
+apply the look. Finish after it because fade has to see the graded blacks to
+lift them. Finish before the mask for the reason the grade is — the GPU applier
+blits back with `copy`. Neither half is suspended by `isolated`. An unadjusted
+clip, or one whose sliders are all zero, keeps the fast path; `golden.test.ts`'s
+plain digests are the proof, and there is a separate adjusted block beside the
+blended one.
+
+Six things that are easy to get wrong, most of them paid for once:
+
+- **The table is baked unclamped.** The final clamp is a crease wherever
+  exposure or saturation pushes a channel through 0 or 1, and a crease inside a
+  cube cell does not shrink usefully with the table (+2 EV was 2.7 steps out at
+  33³ and still 1.6 at 65³). `LutData` stores out-of-range nodes on purpose, and
+  both appliers clamp *after* the lookup, which is exactly where `toneStep`
+  clamps. The tone curve is continued linearly past its ends for the same reason.
+- **White balance and exposure go through a pure 2.2 power, not piecewise
+  sRGB.** Under a power law a gain on light is a gain on the signal —
+  `x·g^(1/2.2)` — so all three fold into one per-channel multiply, which a LUT
+  reproduces exactly. Through the sRGB toe, +2 EV with warm white balance was
+  5.2 steps out near black at 33³. The two curves differ only below ~4% signal,
+  and `tone.test.ts` checks 18% grey against sRGB to within 1%.
+- **Highlights, shadows, whites, blacks and brilliance are one monotone curve**,
+  not five in a row, with a minimum rise between control points. Five composed
+  curves can fight; one curve that must rise cannot invert.
+- **Highlights and shadows are global**, a curve and not Lightroom's
+  edge-aware local tone mapping. Deliberate: a global curve bakes exactly, so the
+  preview and the export are structurally the same picture.
+- **Every finish distance is the clip's, not the layer's.** The layer is in
+  device pixels — the preview carries zoom × DPR — so sharpen's tap spacing and
+  the grain cell are clip pixels × the device scale, clarity's radius is a share
+  of the clip's shorter side, and the vignette maps device → clip space through
+  `mask.ts#elementDeviceMatrix`, the chain the mask already used. That is why the
+  vignette follows a rotated clip and why `adjustComposite.test.ts` can require
+  the same picture at 1× and 2×.
+- **The blurs average premultiplied colour.** The layer holds one clip against
+  transparency; averaging straight colour across its edge reads the empty
+  surroundings as black picture and sharpens a rim onto the border. The GPU
+  uploads the layer a second time with `UNPACK_PREMULTIPLY_ALPHA_WEBGL` for the
+  taps; the centre pixel still comes from the straight upload.
+
+Two more that are about the tests rather than the feature:
+
+- **`@napi-rs/canvas` applies the current transform to `putImageData`**, which
+  the spec says must be ignored and Chromium does ignore. Both CPU appliers
+  (`adjust/cpu.ts` and `lut/cpu.ts`) now write back under an explicit identity.
+  Before that, any node suite drawing at a scale other than 1 read a magnified
+  layer back — invisible in every LUT suite, all of which draw at identity.
+- **Grain uses Hoskins' sine-free hash**, because GPUs disagree about `sin` at
+  large arguments. It is still not bit-exact between float32 on the GPU and
+  float64 on the CPU, so grain is checked statistically everywhere, and the
+  adjusted golden block leaves it out.
+
+The GLSL is **generated** from `finishMath.ts`'s constants (`glsl.ts`), so a
+tap weight or a scale cannot drift between the two; `glsl.test.ts` checks the
+text carries them and runs the stages in `finishPixel`'s order.
+`tests/e2e/specs/adjust.spec.ts` is what ties the shader that ships to the CPU
+oracle on real pixels.
+
+Reached three ways, all through `adjustOps.ts`: the **Adjust tab** in the
+video, image, shape and text inspectors (gif still has no inspector at all);
+the `set_color_adjustments` MCP tool, whose strict schema is built from
+`define.ts#COLOR_ADJUSTMENTS` and pinned against `COLOR_ADJUSTMENT_KEYS`; and
+nothing else. A reset and a patch in one tool call are one undo step, and a
+slider drag is one undo step through `GestureCommit`.
 
 ## Reverse and mirror
 

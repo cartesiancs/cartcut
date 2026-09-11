@@ -217,6 +217,32 @@ export const ANIMATABLE = [
 export const MASK_SHAPES = ["rectangle", "star", "heart", "pen"] as const;
 
 /**
+ * The colour adjustment sliders, by stored name.
+ *
+ * A copy of `@types/timeline.ts#COLOR_ADJUSTMENT_KEYS` for the `rootDir`
+ * reason above; `tools.test.ts` asserts the two match. `set_color_adjustments`
+ * builds a *strict* schema from this list, so a key missing here is a slider
+ * an agent cannot move, and one extra is a key the editor would refuse.
+ */
+export const COLOR_ADJUSTMENTS = [
+  "temperature",
+  "tint",
+  "saturation",
+  "exposure",
+  "contrast",
+  "highlights",
+  "shadows",
+  "whites",
+  "blacks",
+  "brilliance",
+  "sharpen",
+  "clarity",
+  "particles",
+  "fade",
+  "vignette",
+] as const;
+
+/**
  * The animation presets.
  *
  * A copy of `features/animation/presets.ts`'s table, and a copy on purpose:

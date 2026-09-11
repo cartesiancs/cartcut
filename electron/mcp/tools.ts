@@ -43,6 +43,7 @@ import { registerTrackTools } from "./tools/tracks";
 import { registerAnimationTools } from "./tools/animation";
 import { registerFxTools } from "./tools/fx";
 import { registerLutTools } from "./tools/lut";
+import { registerAdjustTools } from "./tools/adjust";
 import { registerMaskTools } from "./tools/mask";
 import { registerPlanTools } from "./tools/plan";
 import { registerGroupTools } from "./tools/groups";
@@ -59,6 +60,7 @@ export function registerToolsWith(define: Registrar) {
   registerAnimationTools(define);
   registerFxTools(define);
   registerLutTools(define);
+  registerAdjustTools(define);
   registerMaskTools(define);
   registerGroupTools(define);
   registerMetaTools(define);

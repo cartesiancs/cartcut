@@ -15,6 +15,7 @@ import { registerToolsWith } from "../tools";
 import {
   ANIMATABLE,
   BLEND_MODES,
+  COLOR_ADJUSTMENTS,
   EASINGS,
   FILETYPES,
   MASK_SHAPES,
@@ -76,6 +77,7 @@ const EXPECTED = [
   // colour filters
   "list_luts",
   "set_lut",
+  "set_color_adjustments",
   // masking
   "set_mask",
   // groups
@@ -221,6 +223,16 @@ describe("every tool is usable as declared", () => {
       "../../../apps/app/src/@types/timeline"
     );
     expect([...MASK_SHAPES].sort()).toEqual([...renderer].sort());
+  });
+
+  it("advertises exactly the colour adjustments a clip can carry", async () => {
+    // `set_color_adjustments` builds a strict schema from this list, so drift
+    // either way is visible to an agent: a missing key is a slider it cannot
+    // move, an extra one is a key the editor refuses.
+    const { COLOR_ADJUSTMENT_KEYS } = await import(
+      "../../../apps/app/src/@types/timeline"
+    );
+    expect([...COLOR_ADJUSTMENTS]).toEqual([...COLOR_ADJUSTMENT_KEYS]);
   });
 
   it("keeps descriptions short enough to live in every request's context", () => {

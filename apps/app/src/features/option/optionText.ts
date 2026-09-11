@@ -23,6 +23,7 @@ import {
 import "./animationPresetBrowser";
 import "./controlBlendMode";
 import "./optionLutSection";
+import "./optionAdjustSection";
 import "./optionMaskSection";
 import "./optionTabBar";
 import "./optionTextRevealSection";
@@ -227,6 +228,12 @@ export class OptionText extends LitElement {
       ></option-tab-bar>
 
       <!-- Every pane stays mounted; only one is shown. See optionTabBar.ts -->
+      <div class=${this.tab === "adjust" ? "" : "d-none"}>
+        <option-adjust-section
+          .elementIds=${[this.elementId]}
+        ></option-adjust-section>
+      </div>
+
       <div class=${this.tab === "mask" ? "" : "d-none"}>
         <option-mask-section
           .elementIds=${this.elementId}

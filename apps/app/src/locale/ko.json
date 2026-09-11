@@ -68,5 +68,29 @@
     "prev": "이전",
     "next": "다음",
     "finish": "시작하기"
+  },
+  "adjust": {
+    "tab": "조정",
+    "group_color": "색상",
+    "group_lightness": "밝기",
+    "group_effects": "효과",
+    "temperature": "색온도",
+    "tint": "색조",
+    "saturation": "채도",
+    "exposure": "노출",
+    "contrast": "대비",
+    "highlights": "하이라이트",
+    "shadows": "그림자",
+    "whites": "흰색",
+    "blacks": "검정",
+    "brilliance": "광채",
+    "sharpen": "선명도",
+    "clarity": "명료도",
+    "particles": "입자",
+    "fade": "페이드",
+    "vignette": "비네팅",
+    "reset": "초기화",
+    "reset_all": "전체 초기화",
+    "reset_hint": "이름을 더블클릭하면 값이 초기화됩니다."
   }
 }

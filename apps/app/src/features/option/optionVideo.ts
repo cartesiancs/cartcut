@@ -23,6 +23,7 @@ import "./controlBlendMode";
 import "./controlClipSpeed";
 import "./controlClipOrientation";
 import "./optionLutSection";
+import "./optionAdjustSection";
 import "./optionMaskSection";
 import "./animationPresetBrowser";
 import "./optionTabBar";
@@ -176,6 +177,12 @@ export class OptionVideo extends LitElement {
         controls inside subscribe to the document when they mount, and toggling
         would otherwise drop and re-add those subscriptions on every click.
       -->
+      <div class=${this.tab === "adjust" ? "" : "d-none"}>
+        <option-adjust-section
+          .elementIds=${[this.elementId]}
+        ></option-adjust-section>
+      </div>
+
       <div class=${this.tab === "mask" ? "" : "d-none"}>
         <option-mask-section
           .elementIds=${[this.elementId]}
