@@ -8,6 +8,18 @@ import { rasterizeTextElements } from "../element/rasterizeText";
 import { affectsTextBlock, withFittedTextHeights } from "../element/textFit";
 import { DEFAULT_LINE_HEIGHT, coerceLineHeight } from "../text/metrics";
 import { applyMenuPlacement } from "../menu/menuPlacement";
+import type { FontEntry } from "../font/fontFaces";
+import type { FontFamily } from "../font/fontWeight";
+import {
+  DEFAULT_FONT_WEIGHT,
+  FONT_WEIGHTS,
+  coerceFontWeight,
+  elementFontWeight,
+  faceFor,
+  groupFontFamilies,
+  labelForWeight,
+  parseFaceName,
+} from "../font/fontWeight";
 import "./animationPresetBrowser";
 import "./controlBlendMode";
 import "./optionLutSection";
@@ -21,9 +33,15 @@ import type { OptionTab } from "./optionTabBar";
  * shown under. They differ — the file has been Pretendard since long before
  * anyone renamed the identifier — and both the list item and the button label
  * need the pair, so it is stated once here rather than spelled out twice.
+ *
+ * "(Built-in)" is not decoration. Now that the picker lists *families*, a
+ * machine with Pretendard installed has a real `Pretendard` family of its own,
+ * and the two would otherwise be two rows with one name — one of which ships
+ * with the app and is the last resort in every `ctx.font` stack the renderer
+ * builds, and one of which is on this machine only.
  */
 const DEFAULT_FONT_NAME = "notosanskr";
-const DEFAULT_FONT_LABEL = "Pretendard";
+const DEFAULT_FONT_LABEL = "Pretendard (Built-in)";
 
 /** How tall the scrolling name list may get before it scrolls, in px. */
 const FONT_LIST_MAX_PX = 360;
@@ -40,10 +58,23 @@ const FONT_LIST_MIN_PX = 120;
 /** The narrowest the menu gets, whatever the option column has been dragged to. */
 const FONT_MENU_MIN_WIDTH_PX = 220;
 
+/** The bundled default, as an entry in the same list every other font is in. */
+const DEFAULT_FONT_ENTRY: FontEntry = {
+  path: "default",
+  name: DEFAULT_FONT_NAME,
+  type: "otf",
+};
+
 @customElement("option-text")
 export class OptionText extends LitElement {
   elementId: string[];
-  fontList: any[];
+
+  /**
+   * Every font file the machine has, flat — one entry per *face*, which is
+   * what `electron/lib/font.ts` returns and what `fontname` has always held.
+   * `fontFamilies()` folds it into the families the picker actually shows.
+   */
+  fontList: FontEntry[];
 
   @property()
   timelineState: ITimelineStore = useTimelineStore.getInitialState();
@@ -66,8 +97,26 @@ export class OptionText extends LitElement {
    */
   @property()
   tab: OptionTab = "media";
-  updateOnce: any;
   selectedFont: string;
+
+  /**
+   * The weight of the selected clip, as the panel last read it.
+   *
+   * Held alongside `selectedFont` and for the same reason: `resetValue` fills
+   * both from the document when the selection changes, and the two together
+   * are what the family and weight controls show back.
+   */
+  selectedWeight = DEFAULT_FONT_WEIGHT;
+
+  /**
+   * `groupFontFamilies` over `fontList`, kept until the list grows.
+   *
+   * The grouping walks four hundred filenames, and the store subscription in
+   * `createRenderRoot` re-renders this panel on every cursor tick — so doing it
+   * in `render` would run it sixty times a second during playback. The list is
+   * append-only and built once at startup, so its length is a sufficient key.
+   */
+  private familiesCache: { size: number; families: FontFamily[] } | null = null;
 
   /**
    * What has been typed into the font dropdown's search box.
@@ -101,11 +150,10 @@ export class OptionText extends LitElement {
     super();
 
     this.elementId = [];
-    this.fontList = [];
+    this.fontList = [DEFAULT_FONT_ENTRY];
     this.align = "left";
     this.isBold = false;
     this.isItalic = false;
-    this.updateOnce = false;
     this.selectedFont = "notosanskr";
     this.insertPresetFontLists();
     this.insertFontLists();
@@ -122,44 +170,34 @@ export class OptionText extends LitElement {
   }
 
   render() {
+    // Families, not files. A machine with Aktiv Grotesk installed has eleven
+    // font *files* for it, and listing those as eleven separate fonts is what
+    // made a weight control impossible — see `font/fontWeight.ts`.
+    const families = this.fontFamilies();
+    const current = this.currentFamily();
     const fontListTemplate: any = [];
 
-    // The bundled default is one entry in the same list rather than a fixed row
-    // above it, so the search filters it like any other font and the empty
-    // state can say, truthfully, that nothing matched.
-    if (this.matchesFontQuery(DEFAULT_FONT_LABEL)) {
-      fontListTemplate.push(html`
-        <li>
-          <a
-            class="dropdown-item dropdown-item-sm text-truncate ${this.selectedFont ==
-            DEFAULT_FONT_NAME
-              ? "bg-primary"
-              : ""}"
-            @click=${() =>
-              this.handleChangeTextFont("default", DEFAULT_FONT_NAME)}
-            >${DEFAULT_FONT_LABEL}</a
-          >
-        </li>
-      `);
-    }
-
-    for (let index = 0; index < this.fontList.length; index++) {
-      const font = this.fontList[index];
-
-      if (!this.matchesFontQuery(font.name)) {
+    for (const family of families) {
+      if (!this.matchesFontQuery(this.familyLabel(family))) {
         continue;
       }
 
+      // Previewed in the family's own regular face rather than in whichever
+      // weight is selected: the list is a comparison, and one row drawn Black
+      // among forty drawn Regular reads as a different typeface instead of as
+      // the same one at a different weight.
+      const preview = faceFor(family, DEFAULT_FONT_WEIGHT, false);
+
       fontListTemplate.push(html`
         <li>
           <a
-            class="dropdown-item dropdown-item-sm text-truncate ${this.selectedFont ==
-            font.name
+            class="dropdown-item dropdown-item-sm text-truncate ${current?.family ===
+            family.family
               ? "bg-primary"
               : ""}"
-            style="font-family: '${font.name}'"
-            @click=${() => this.handleChangeTextFont(font.value, font.name)}
-            >${font.name}</a
+            style=${preview == null ? "" : `font-family: '${preview.entry.name}'`}
+            @click=${() => this.handleChangeFontFamily(family)}
+            >${this.familyLabel(family)}</a
           >
         </li>
       `);
@@ -362,6 +400,38 @@ export class OptionText extends LitElement {
             </ul>
           </div>
         </div>
+      </div>
+
+      <!--
+        Only the weights this family actually ships. A native select rather
+        than another overlay menu: the list is at most nine rows and never
+        needs a search, and a select is the one control that already says
+        "these are all the choices" without being opened.
+      -->
+      <div class="mb-2">
+        <label class="form-label text-light">Weight</label>
+        <select
+          aria-event="font-weight"
+          class="form-select form-control bg-default text-light"
+          ?disabled=${this.availableWeights().length < 2}
+          @change=${this.handleChangeFontWeight}
+        >
+          <!--
+            The selection is a property on the option, not a value binding on
+            the select and not the selected attribute. Lit commits an element's
+            own bindings before its children, so a value binding would be
+            assigned while the select is still empty and silently do nothing;
+            and once anyone has used the control, its dirty flag makes the
+            attribute stop moving the visible selection.
+          -->
+          ${this.availableWeights().map(
+            (weight) => html`
+              <option value=${weight} .selected=${weight === this.selectedWeight}>
+                ${labelForWeight(weight)}
+              </option>
+            `,
+          )}
+        </select>
       </div>
 
       <label class="form-label text-light">Font Options</label>
@@ -737,56 +807,39 @@ export class OptionText extends LitElement {
     window.electronAPI.req.font.getPresetFontLists().then((result: any) => {
       for (const font of result?.fonts ?? []) {
         ensureFontFace(font);
-        this.fontList.unshift({
-          index: this.fontList.length + 1,
-          value: font.path,
-          name: font.name,
-        });
+        this.fontList.push(font);
       }
       this.requestUpdate();
     });
   }
 
+  /**
+   * Every system font, registered as it is listed.
+   *
+   * The registration used to be a loop nested inside this one, guarded by
+   * `updateOnce` — which it set on its *first* pass, so it injected an
+   * `@font-face` for the presets and for the first system font and for nothing
+   * else. Fonts whose CSS family happens to match an installed family name
+   * ("Arial", "Georgia") resolved anyway, straight out of the system, which is
+   * what hid it; `AktivGrotesk-Bold` is not a family name any OS knows and
+   * drew in the fallback with nothing to say so.
+   *
+   * It matters more now than it did: the picker previews each row in its own
+   * face, and a weight is chosen by naming a *file*, so every face has to be
+   * reachable by the name the element stores.
+   */
   insertFontLists() {
     window.electronAPI.req.font.getLists().then((result) => {
       if (result.status == 0) {
         return 0;
       }
 
-      for (let index = 0; index < result.fonts.length; index++) {
-        const font = result.fonts[index];
-        this.fontList.push({
-          index: index + 1,
-          value: font.path,
-          name: font.name,
-        });
-
-        if (!this.updateOnce) {
-          for (let index = 0; index < this.fontList.length; index++) {
-            const font = this.fontList[index];
-
-            const type = font.value
-              .split("/")
-              [font.value.split("/").length - 1].split(".")[1];
-
-            console.log();
-
-            document.querySelector("#fontStyles").insertAdjacentHTML(
-              "beforeend",
-              `
-            @font-face {
-                font-family: "${font.name}";
-                src: local("${font.name}"),
-                  url("${font.value}") format("${type}");
-            }
-            `,
-            );
-          }
-          this.updateOnce = true;
-        }
-
-        this.requestUpdate();
+      for (const font of result.fonts) {
+        ensureFontFace(font);
+        this.fontList.push(font);
       }
+
+      this.requestUpdate();
     });
   }
 
@@ -812,6 +865,10 @@ export class OptionText extends LitElement {
     this.isBold = timeline[this.elementId[0]].options.isBold;
     this.isItalic = timeline[this.elementId[0]].options.isItalic;
     this.selectedFont = timeline[this.elementId[0]].fontname;
+    this.selectedWeight = elementFontWeight(
+      this.selectedFont,
+      timeline[this.elementId[0]].fontweight,
+    );
   }
 
   /**
@@ -1238,25 +1295,120 @@ export class OptionText extends LitElement {
       return "Select Font";
     }
 
-    return this.selectedFont === DEFAULT_FONT_NAME
-      ? DEFAULT_FONT_LABEL
-      : this.selectedFont;
+    // The *family*, because that is what the list offers and what the weight
+    // row qualifies. Showing `AktivGrotesk-Bold` here beside a weight row
+    // reading "Bold" says the same thing twice, and says it in two different
+    // vocabularies.
+    const family = parseFaceName(this.selectedFont).family;
+
+    return family === DEFAULT_FONT_NAME ? DEFAULT_FONT_LABEL : family;
   }
 
-  handleChangeTextFont(value, name) {
-    const elementControl = document.querySelector("element-control");
+  // ------------------------------------------------------- family and weight
 
-    const selectedText = name;
-    this.selectedFont = name;
+  /** `fontList` grouped into families, recomputed only when the list grows. */
+  private fontFamilies(): FontFamily[] {
+    if (this.familiesCache?.size !== this.fontList.length) {
+      this.familiesCache = {
+        size: this.fontList.length,
+        families: groupFontFamilies(this.fontList),
+      };
+    }
+    return this.familiesCache.families;
+  }
+
+  /** The family the selected clip's `fontname` belongs to, if it is installed. */
+  private currentFamily(): FontFamily | null {
+    const family = parseFaceName(this.selectedFont ?? "").family.toLowerCase();
+    return (
+      this.fontFamilies().find(
+        (candidate) => candidate.family.toLowerCase() === family,
+      ) ?? null
+    );
+  }
+
+  /**
+   * The rungs the weight row offers.
+   *
+   * A family the machine does not have — a project carried here from another
+   * machine — still has to show *something*, and what it shows is the weight
+   * the clip is already at. Offering the full ladder there would be offering
+   * eight choices that all resolve to the one file that is missing.
+   */
+  private availableWeights(): number[] {
+    return this.currentFamily()?.weights ?? [this.selectedWeight];
+  }
+
+  /** The bundled default is stored under its internal name, shown under its own. */
+  private familyLabel(family: FontFamily): string {
+    return family.family === DEFAULT_FONT_NAME ? DEFAULT_FONT_LABEL : family.family;
+  }
+
+  /**
+   * Switching family keeps the weight if the new family has one like it.
+   *
+   * Going from a Bold Aktiv Grotesk to Georgia, which ships only Regular and
+   * Bold, should land on Georgia Bold — `faceFor`'s nearest-rung rule is what
+   * decides, and it is the same rule CSS uses, so the result is the one a
+   * stylesheet asking for the same weight would have picked.
+   */
+  handleChangeFontFamily(family: FontFamily) {
     this.closeFontMenu();
+    this.applyFace(family, this.selectedWeight);
+  }
 
-    const type = value.split("/")[value.split("/").length - 1].split(".")[1];
+  handleChangeFontWeight(event: Event) {
+    const weight = coerceFontWeight((event.target as HTMLSelectElement).value);
+    const family = this.currentFamily();
 
-    elementControl.changeTextFont({
-      elementId: this.elementId[0],
-      fontPath: value,
-      fontType: type,
-      fontName: selectedText,
-    });
+    if (family == null) {
+      return;
+    }
+
+    this.applyFace(family, weight);
+  }
+
+  /**
+   * Point the selection at one face of one family.
+   *
+   * `fontweight` is written alongside the three font fields even though the
+   * renderer ignores it for a static face, because it is the only record of
+   * *which rung was asked for*: the file name says 700 for a family that ships
+   * one, and says nothing at all for a variable font, where the number is the
+   * whole answer.
+   */
+  private applyFace(family: FontFamily, weight: number) {
+    // Always the upright face, never the family's real italic — and that is
+    // what `faceFor`'s slant argument is for here, rather than a feature this
+    // panel uses. `options.isItalic` is a synthetic slant the renderer applies
+    // on top of whatever face it is given, so choosing `AktivGrotesk-BoldItalic`
+    // would slant an already-slanted file, and switching italic back off would
+    // leave the clip italic with the button unlit. Italic stays orthogonal to
+    // the weight row, exactly as it was before there was one.
+    const face = faceFor(family, weight, false);
+
+    if (face == null) {
+      return;
+    }
+
+    // Injected before the commit so the very next repaint can draw with it —
+    // the argument `agent/commands/appearance.ts` makes at its own call site.
+    ensureFontFace(face.entry);
+
+    this.selectedFont = face.entry.name;
+    this.selectedWeight = family.variable ? weight : face.weight;
+
+    const elementControl = document.querySelector("element-control");
+    for (const elementId of this.elementId) {
+      elementControl.changeTextFont({
+        elementId,
+        fontPath: face.entry.path,
+        fontType: face.entry.type,
+        fontName: face.entry.name,
+        fontWeight: String(this.selectedWeight),
+      });
+    }
+
+    this.requestUpdate();
   }
 }

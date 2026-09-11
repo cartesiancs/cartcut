@@ -691,15 +691,21 @@ export class ElementControl extends LitElement {
     ]);
   }
 
-  changeTextFont({ elementId, fontPath, fontType, fontName }) {
+  changeTextFont({ elementId, fontPath, fontType, fontName, fontWeight }) {
     // `fontType` used to be accepted and dropped, leaving `fonttype` describing
     // whatever font was set before this one. `fontFaces.ts` reads it for the
     // `@font-face` `format()`, and the agent's `set_text_font` writes all three
     // together for exactly this reason.
+    //
+    // `fontWeight` is optional so that the agent's `set_text_font`, which names
+    // a file and nothing else, keeps working: a face already carries its own
+    // weight, and writing a number nobody asked for would make the panel report
+    // a rung the caller never picked.
     this.commitTextFields(elementId, [
       { path: ["fontpath"], value: fontPath },
       { path: ["fontname"], value: fontName },
       ...(fontType ? [{ path: ["fonttype"], value: fontType }] : []),
+      ...(fontWeight ? [{ path: ["fontweight"], value: fontWeight }] : []),
     ]);
   }
 

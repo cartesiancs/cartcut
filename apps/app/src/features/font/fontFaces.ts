@@ -62,6 +62,7 @@ export function parseFontPath(fontPath: string): FontEntry {
 /** Families already injected, so a repeated call is free. */
 const registered = new Set<string>([DEFAULT_FONT.name]);
 
+
 /** The stylesheet `optionText` also writes into, created on first use. */
 function styleElement(): HTMLStyleElement | null {
   if (typeof document === "undefined") {
@@ -91,6 +92,11 @@ export function ensureFontFace(entry: FontEntry): void {
     return;
   }
 
+  // No `font-weight` descriptor, including for a variable font. Measured in
+  // Chromium: a variable face gives all nine rungs from `ctx.font` with or
+  // without one, because the engine reads the file's own `fvar` axis and does
+  // not need to be told. Declaring a range that changes nothing would be a
+  // second, silent source of truth about what a face covers.
   style.insertAdjacentHTML(
     "beforeend",
     `@font-face { font-family: "${entry.name}"; src: url("file://${entry.path}"); }`,
