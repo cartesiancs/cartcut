@@ -87,7 +87,7 @@ bin/
 Compatible binaries can be downloaded from
 https://github.com/cartesiancs/ffmpeg4nugget
 
-The macOS builds must be **native** — an x86_64 binary runs on Apple Silicon
+The macOS builds must be **native**. An x86_64 binary runs on Apple Silicon
 through Rosetta 2 at roughly half the export speed, and nothing in the app will
 say so. Check with `lipo -archs bin/darwin-arm64/ffmpeg`, which must print
 `arm64`. The build also has to carry `libx264`, `libx265`, `libvpx-vp9`,
@@ -108,8 +108,8 @@ npm run start
 
 `npm run build:osx` signs, notarizes and uploads the macOS build to a **draft** GitHub release. Publishing that draft runs [`mirror-r2.yml`](.github/workflows/mirror-r2.yml), which copies the release to Cloudflare R2 and updates the manifest the website's download button reads:
 
-- `https://download.cartesiancs.com/cartcut/latest.json` — version plus the Apple Silicon and Intel `.dmg` URLs
-- `https://download.cartesiancs.com/cartcut/latest.txt` — the version alone, as plain text
+- `https://download.cartesiancs.com/cartcut/latest.json`: version plus the Apple Silicon and Intel `.dmg` URLs
+- `https://download.cartesiancs.com/cartcut/latest.txt`: the version alone, as plain text
 
 The GitHub release is the source of truth, and in-app auto-update still reads it. To mirror a tag that was published before the workflow existed: `gh workflow run mirror-r2.yml -f tag=v0.5.3`.
 

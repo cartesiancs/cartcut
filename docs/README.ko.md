@@ -109,8 +109,8 @@ npm run start
 
 `npm run build:osx`는 macOS 빌드에 서명과 공증을 거친 뒤 GitHub **드래프트** 릴리스로 업로드합니다. 이 드래프트를 게시하면 [`mirror-r2.yml`](../.github/workflows/mirror-r2.yml)이 실행되어 릴리스를 Cloudflare R2로 복사하고, 웹사이트의 다운로드 버튼이 읽는 매니페스트를 갱신합니다.
 
-- `https://download.cartesiancs.com/cartcut/latest.json` — 버전과 Apple Silicon 및 Intel용 `.dmg` URL
-- `https://download.cartesiancs.com/cartcut/latest.txt` — 버전만 담긴 일반 텍스트
+- `https://download.cartesiancs.com/cartcut/latest.json`: 버전과 Apple Silicon 및 Intel용 `.dmg` URL
+- `https://download.cartesiancs.com/cartcut/latest.txt`: 버전만 담긴 일반 텍스트
 
 원본은 GitHub 릴리스이며, 앱 내 자동 업데이트도 여전히 GitHub을 읽습니다. 워크플로가 생기기 전에 게시된 태그를 미러링하려면 `gh workflow run mirror-r2.yml -f tag=v0.5.3`을 실행하세요.
 
