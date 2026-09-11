@@ -31,6 +31,7 @@ import {
 import { pinchRange } from "../timeline/zoom";
 import {
   confirmTrimGuide,
+  nextDragPreview,
   resolveMove,
   resolveTransitionResize,
   resolveTrim,
@@ -888,19 +889,15 @@ export class elementTimelineCanvas extends LitElement {
         range: this.timelineRange,
         fps,
       });
-      if (plan.kind === "none") {
-        this.drawCanvas();
-        return;
-      }
-
       // `setTransitionDuration` clamps to what the source handles can supply
       // and records the ask, so dragging past the available footage stops the
-      // badge growing without losing what was asked for.
-      this.pendingDoc = setTransitionDuration(
-        base,
-        drag.hit.transitionId,
-        plan.durationMs,
-      );
+      // badge growing without losing what was asked for. It clamps rather
+      // than refuses, so identity from it is the base.
+      const next =
+        plan.kind === "none"
+          ? null
+          : setTransitionDuration(base, drag.hit.transitionId, plan.durationMs);
+      this.pendingDoc = nextDragPreview(this.pendingDoc, base, next, "base");
       this.drawCanvas();
       return;
     }
@@ -912,7 +909,9 @@ export class elementTimelineCanvas extends LitElement {
     this.snapGuideMs = null;
     this.dropTrackId = null;
 
-    let next: TimelineDocument;
+    // `null` is a resolver's "no change". `nextDragPreview` keeps that apart
+    // from a declined op, and the difference is the whole of it — see there.
+    let next: TimelineDocument | null = null;
 
     if (drag.phase === "trimStart" || drag.phase === "trimEnd") {
       // Trimming acts on the grabbed clip alone; dragging one edge of a
@@ -928,24 +927,27 @@ export class elementTimelineCanvas extends LitElement {
         fps,
         playheadMs: this.timelineCursor,
       });
-      if (plan.kind === "none") {
-        this.drawCanvas();
-        return;
-      }
-      next =
-        edge === "start"
-          ? trimClipStart(base, drag.hit.elementId, plan.trimMs)
-          : trimClipEnd(base, drag.hit.elementId, plan.trimMs);
+      if (plan.kind !== "none") {
+        next =
+          edge === "start"
+            ? trimClipStart(base, drag.hit.elementId, plan.trimMs)
+            : trimClipEnd(base, drag.hit.elementId, plan.trimMs);
 
-      // Asked after the op, not before: `clipOps` clamps against the source
-      // file's remaining footage, so an edge can be aimed at a neighbour it
-      // cannot reach. A guide on a line the edge stopped short of reads as a bug.
-      this.snapGuideMs = confirmTrimGuide(
-        next,
-        drag.hit.elementId,
-        edge,
-        plan.snapGuideMs,
-      );
+        // Asked after the op, not before: `clipOps` clamps against the source
+        // file's remaining footage, so an edge can be aimed at a neighbour it
+        // cannot reach. A guide on a line the edge stopped short of reads as a
+        // bug.
+        this.snapGuideMs = confirmTrimGuide(
+          next,
+          drag.hit.elementId,
+          edge,
+          plan.snapGuideMs,
+        );
+      }
+      // A trim clamps rather than refuses, so identity is the base.
+      this.pendingDoc = nextDragPreview(this.pendingDoc, base, next, "base");
+      this.drawCanvas();
+      return;
     } else {
       // The grabbed clip is resolved, and the whole selection then moves by
       // however much it actually travelled, so a multi-clip drag keeps its
@@ -968,25 +970,21 @@ export class elementTimelineCanvas extends LitElement {
       // press-and-hold with a steady hand committed an undo step that appears
       // to do nothing — and, if a neighbour's edge happened to lie within the
       // snap tolerance, silently relocated the clip the user never dragged.
-      if (plan.kind === "none") {
-        this.drawCanvas();
-        return;
-      }
+      if (plan.kind !== "none") {
+        this.snapGuideMs = plan.snapGuideMs;
+        next = moveClips(base, this.dragIds, plan.appliedMs, plan.trackDelta);
 
-      this.snapGuideMs = plan.snapGuideMs;
-      next = moveClips(base, this.dragIds, plan.appliedMs, plan.trackDelta);
-
-      if (plan.trackDelta !== 0 && next !== base) {
-        this.dropTrackId = next.elements[drag.hit.elementId]?.trackId ?? null;
+        if (plan.trackDelta !== 0 && next !== base) {
+          this.dropTrackId =
+            next.elements[drag.hit.elementId]?.trackId ?? null;
+        }
       }
     }
 
-    // A declined op returns its input. Holding the previous frame rather than
-    // snapping back to the start makes a blocked drag come to rest against
-    // whatever is in the way, instead of jumping home.
-    if (next !== base) {
-      this.pendingDoc = next;
-    }
+    // `moveClips` refuses rather than clamps, so a declined move holds the
+    // previous frame: a blocked drag comes to rest against whatever is in the
+    // way instead of jumping home. "No change" still goes home.
+    this.pendingDoc = nextDragPreview(this.pendingDoc, base, next, "hold");
     this.drawCanvas();
   }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   SNAP_TOLERANCE_PX,
   confirmTrimGuide,
+  nextDragPreview,
   resolveMove,
   resolveTrim,
 } from "./dragResolve";
@@ -229,6 +230,153 @@ describe("resolveMove — frame quantization", () => {
       5555.5 - frameToMs(60, FPS),
       9,
     );
+  });
+});
+
+describe("a drag, event by event", () => {
+  // `applyDrag` resolves every pointer event afresh from the gesture's base and
+  // carries the preview across events with `nextDragPreview`. These drive whole
+  // pointer paths through exactly that loop. One plan at a time cannot see the
+  // bug they guard: each event was answered correctly, and the clip still froze
+  // a few frames short of 0s, because of what was *kept* between events.
+
+  /** What a move gesture leaves pending on release; `null` means nothing. */
+  function moveGesture(
+    base: TimelineDocument,
+    path: number[],
+    dragIds = ["a"],
+  ): TimelineDocument | null {
+    let preview: TimelineDocument | null = null;
+    for (const dxPx of path) {
+      const plan = move(base, { dxPx, dragIds, range: WIDE });
+      const next =
+        plan.kind === "none"
+          ? null
+          : moveClips(base, dragIds, plan.appliedMs, plan.trackDelta);
+      preview = nextDragPreview(preview, base, next, "hold");
+    }
+    return preview;
+  }
+
+  /** The same for dragging the clip's left edge. */
+  function trimStartGesture(
+    base: TimelineDocument,
+    path: number[],
+  ): TimelineDocument | null {
+    let preview: TimelineDocument | null = null;
+    for (const dxPx of path) {
+      const plan = trimAt(base, "start", dxPx, { range: WIDE });
+      const next =
+        plan.kind === "none" ? null : trimClipStart(base, "a", plan.trimMs);
+      preview = nextDragPreview(preview, base, next, "base");
+    }
+    return preview;
+  }
+
+  /** Where the canvas shows clip "a" once the gesture is over. */
+  const shownStart = (base: TimelineDocument, preview: TimelineDocument | null) =>
+    spanStart((preview ?? base).elements.a);
+
+  /**
+   * Out to the right, then back to the left — the recorded trackpad gesture.
+   * The return steps are coarse on purpose: a real pointer skips over the
+   * origin rather than landing on it exactly.
+   */
+  function awayAndBack(outPx: number, backPx: number): number[] {
+    const path: number[] = [];
+    for (let dx = 25; dx <= outPx; dx += 25) path.push(dx);
+    for (let dx = outPx - 70; dx > backPx; dx -= 70) path.push(dx);
+    path.push(backPx);
+    return path;
+  }
+
+  it("brings a clip that starts at 0 back to 0 when it is dragged away and back", () => {
+    // The reported bug, as recorded: the pointer went on to -450px while the
+    // clip stayed at 783ms, and releasing committed 783ms.
+    const base = doc({ a: alignedClip(0, 540) });
+    const preview = moveGesture(base, awayAndBack(300, -450));
+    expect(shownStart(base, preview)).toBe(0);
+    // Back home is no edit at all: nothing pending, so no undo step.
+    expect(preview).toBeNull();
+  });
+
+  it("returns to the origin with the pointer, wherever the clip started", () => {
+    const base = doc({ a: alignedClip(120, 60) });
+    expect(moveGesture(base, awayAndBack(300, 0))).toBeNull();
+  });
+
+  it("reaches 0 from anywhere once the pointer overshoots", () => {
+    // 14 frames: where the first report stopped.
+    const base = doc({ a: alignedClip(14, 540) });
+    const path = [];
+    for (let dx = -40; dx >= -2_000; dx -= 40) path.push(dx);
+    expect(shownStart(base, moveGesture(base, path))).toBe(0);
+  });
+
+  it("lands where the last pointer position says, however the pointer got there", () => {
+    // With nothing in the way nothing is ever declined, so the route must not
+    // matter: the whole path has to agree with its last event resolved alone.
+    // The old hold-on-`none` failed exactly this whenever the path ended at the
+    // clip's origin.
+    const random = mulberry32(11);
+    for (let trial = 0; trial < 300; trial++) {
+      const startFrame = random() < 0.4 ? 0 : Math.floor(random() * 240);
+      const base = doc({ a: alignedClip(startFrame, 60) });
+      const path = Array.from(
+        { length: 2 + Math.floor(random() * 40) },
+        () => Math.round((random() - 0.5) * 800),
+      );
+      const whole = moveGesture(base, path);
+      const lastAlone = moveGesture(base, [path[path.length - 1]]);
+      expect(shownStart(base, whole)).toBe(shownStart(base, lastAlone));
+    }
+  });
+
+  it("brings a trimmed edge back when it is dragged away and back past its clamp", () => {
+    // The same freeze, one op over: `trimClipStart` clamps at 0 and hands its
+    // input back, which is "no change", not a refusal to hold on to.
+    const base = doc({ a: alignedClip(0, 540) });
+    const preview = trimStartGesture(base, awayAndBack(300, -450));
+    expect(shownStart(base, preview)).toBe(0);
+    expect(preview).toBeNull();
+  });
+
+  it("still holds a blocked move against what stopped it", () => {
+    // The other half of the contract: a *refused* move keeps its last frame,
+    // rather than jumping home.
+    const base = doc({ n: alignedClip(0, 60), a: alignedClip(180, 60) });
+    const path = [];
+    for (let dx = -15; dx >= -600; dx -= 15) path.push(dx);
+    const preview = moveGesture(base, path);
+    expect(preview).not.toBeNull();
+    expect(shownStart(base, preview)).toBeGreaterThanOrEqual(
+      spanEnd(base.elements.n),
+    );
+    expect(shownStart(base, preview)).toBeLessThan(spanStart(base.elements.a));
+  });
+});
+
+describe("nextDragPreview", () => {
+  const base = doc({ a: alignedClip(60, 60) });
+  const earlier = moveClips(base, ["a"], 1000, 0);
+  const later = moveClips(base, ["a"], 2000, 0);
+
+  it("shows the base when the resolver answered no change", () => {
+    expect(nextDragPreview(earlier, base, null, "hold")).toBeNull();
+    expect(nextDragPreview(earlier, base, null, "base")).toBeNull();
+  });
+
+  it("holds the previous frame on a refusal, when asked to", () => {
+    expect(nextDragPreview(earlier, base, base, "hold")).toBe(earlier);
+  });
+
+  it("shows the base on identity from an op that only clamps", () => {
+    expect(nextDragPreview(earlier, base, base, "base")).toBeNull();
+  });
+
+  it("takes a changed document as the new candidate", () => {
+    expect(nextDragPreview(earlier, base, later, "hold")).toBe(later);
+    expect(nextDragPreview(earlier, base, later, "base")).toBe(later);
   });
 });
 

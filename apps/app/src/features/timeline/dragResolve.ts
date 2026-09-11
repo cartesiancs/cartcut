@@ -472,3 +472,46 @@ export function resolveTransitionResize(
 
   return { kind: "duration", durationMs: Math.max(0, durationMs) };
 }
+
+/**
+ * What a drag shows after one more pointer event.
+ *
+ * Every event is resolved afresh from the gesture's base, and there are three
+ * different answers an event can produce — which must not be confused:
+ *
+ *   - **No change** (`next` is `null`): the resolver answered `none`, because
+ *     the pointer's travel resolves to where the clip started. That is an
+ *     answer, so the preview goes back to the base.
+ *   - **Declined** (`next === base`): what that means depends on the op, so
+ *     the caller says. `moveClips` *refuses* — an overlap, a row of another
+ *     kind — and there the previous frame is held (`"hold"`), so a blocked
+ *     drag rests against whatever is in the way instead of jumping home.
+ *     `trimClipStart`/`trimClipEnd` and `setTransitionDuration` never refuse:
+ *     they *clamp*, so identity from them means the clamp cancelled the whole
+ *     edit — the base, not a reason to stay put (`"base"`).
+ *   - **Changed**: the op's result becomes the candidate.
+ *
+ * Holding the previous frame where the answer was really "the base" is what
+ * froze a clip a few frames short of 0s: drag a clip that starts at 0 away and
+ * back, and from the moment the pointer passed its origin every event answered
+ * `none`, so the clip stayed wherever the last *moving* event had left it, and
+ * releasing committed that. A trimmed edge pulled back past its clamp froze
+ * the same way.
+ *
+ * `null` back means "show the base", which is also what keeps a gesture that
+ * ends where it started free: nothing is pending, so no undo step is recorded.
+ */
+export function nextDragPreview(
+  previous: TimelineDocument | null,
+  base: TimelineDocument,
+  next: TimelineDocument | null,
+  onIdentity: "hold" | "base",
+): TimelineDocument | null {
+  if (next == null) {
+    return null;
+  }
+  if (next === base) {
+    return onIdentity === "hold" ? previous : null;
+  }
+  return next;
+}
