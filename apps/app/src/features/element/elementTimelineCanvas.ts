@@ -28,7 +28,7 @@ import {
   shouldShowFrameGrid,
   stepCursorByFrames,
 } from "../timeline/frames";
-import { clampRange } from "../timeline/zoom";
+import { pinchRange } from "../timeline/zoom";
 import {
   confirmTrimGuide,
   resolveMove,
@@ -1159,10 +1159,11 @@ export class elementTimelineCanvas extends LitElement {
     // pinch-to-zoom scroll the timeline on a Mac instead of magnifying it.
     if (e.ctrlKey) {
       e.preventDefault();
-      // Proportional to the current range, so the wheel magnifies by a
-      // constant ratio per notch — the same curve the slider now uses.
-      const dx = parseFloat(e.deltaY) * (this.timelineRange / 75);
-      const next = clampRange(this.timelineRange - dx, this.projectFps());
+      const next = pinchRange(
+        this.timelineRange,
+        parseFloat(e.deltaY),
+        this.projectFps(),
+      );
       if (next !== this.timelineRange) {
         this.timelineState.setRange(next);
       }

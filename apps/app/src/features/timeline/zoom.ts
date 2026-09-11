@@ -93,6 +93,21 @@ export function sliderFromRange(
 }
 
 /**
+ * The range after one pinch (or Ctrl+wheel) event.
+ *
+ * Proportional to the current range, so each event magnifies by a constant
+ * ratio — the same curve the slider uses. Shared by the timeline and the curve
+ * editor, which show one zoom and so must answer a pinch identically.
+ */
+export function pinchRange(
+  range: number,
+  deltaY: number,
+  fps: number = DEFAULT_FPS,
+): number {
+  return clampRange(range - deltaY * (range / 75), fps);
+}
+
+/**
  * Hold a range inside the mapping's bounds.
  *
  * A non-finite range means something upstream produced garbage; falling back to

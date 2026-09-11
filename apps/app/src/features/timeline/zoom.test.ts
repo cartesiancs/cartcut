@@ -4,6 +4,7 @@ import {
   MIN_RANGE,
   clampRange,
   maxRangeForFps,
+  pinchRange,
   rangeFromSlider,
   sliderFromRange,
 } from "./zoom";
@@ -223,5 +224,27 @@ describe("clampRange, when the project rate changes", () => {
       expect(clampRange(Infinity, fps)).toBe(maxRangeForFps(fps));
       expect(clampRange(-Infinity, fps)).toBe(MIN_RANGE);
     }
+  });
+});
+
+describe("pinchRange", () => {
+  it("zooms in on a spread and out on a pinch", () => {
+    expect(pinchRange(10, -5)).toBeGreaterThan(10);
+    expect(pinchRange(10, 5)).toBeLessThan(10);
+  });
+
+  it("magnifies by a constant ratio, whatever the current range", () => {
+    expect(pinchRange(2, -3) / 2).toBeCloseTo(pinchRange(20, -3) / 20, 12);
+  });
+
+  it("leaves the range alone on a zero delta", () => {
+    expect(pinchRange(7, 0)).toBe(7);
+  });
+
+  it("stays inside the bounds for the project's rate", () => {
+    expect(pinchRange(maxRangeForFps(120), -500, 120)).toBe(
+      maxRangeForFps(120),
+    );
+    expect(pinchRange(MIN_RANGE, 500)).toBe(MIN_RANGE);
   });
 });

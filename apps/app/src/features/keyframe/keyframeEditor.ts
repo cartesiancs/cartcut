@@ -26,7 +26,12 @@ import {
   type DragState,
   type DragTarget,
 } from "./dragKeyframe";
-import { projectBakeHz } from "../editor/frameRate";
+import { projectBakeHz, projectFps } from "../editor/frameRate";
+import { pinchRange } from "../timeline/zoom";
+
+/** The Range slider's bounds; a Shift+pinch stays inside them. */
+const MIN_VERTICAL_RANGE = 0.1;
+const MAX_VERTICAL_RANGE = 10;
 
 @customElement("keyframe-editor")
 export class KeyframeEditor extends LitElement {
@@ -235,10 +240,10 @@ export class KeyframeEditor extends LitElement {
         <span class="text-secondary">Range</span>
         <input
           type="range"
-          min="0.1"
-          max="10"
+          min="${MIN_VERTICAL_RANGE}"
+          max="${MAX_VERTICAL_RANGE}"
           step="0.1"
-          value="${this.verticalRange}"
+          .value=${String(this.verticalRange)}
           id="verticalRange"
           @change=${this.handleChangeVerticalRange}
           @input=${this.handleChangeVerticalRange}
@@ -668,6 +673,24 @@ export class KeyframeEditor extends LitElement {
   }
 
   _handleMouseWheel(e) {
+    // A trackpad pinch arrives as a wheel event with `ctrlKey` on macOS, and
+    // Windows spells wheel-zoom Ctrl+wheel — the timeline's own test, for the
+    // same reason. The selection survives a zoom: the point is still on screen.
+    if (e.ctrlKey) {
+      e.preventDefault();
+      if (e.shiftKey) {
+        this.zoomValueAxis(e.deltaY, e.offsetY);
+        return;
+      }
+      // The time axis is the timeline's zoom, not a copy of it, so the curve
+      // stays aligned with the clip bar above it.
+      const next = pinchRange(this.timelineRange, e.deltaY, projectFps());
+      if (next !== this.timelineRange) {
+        useTimelineStore.getState().setRange(next);
+      }
+      return;
+    }
+
     const newScroll = this.timelineScroll + e.deltaX;
     this.verticalScroll -= e.deltaY * this.verticalRange;
 
@@ -682,6 +705,28 @@ export class KeyframeEditor extends LitElement {
       this.timelineState.setScroll(newScroll);
     }
 
+    this.requestUpdate();
+  }
+
+  /**
+   * Shift+pinch: zoom the value axis about the pointer.
+   *
+   * `verticalRange` is track units per px, so zooming in makes it smaller. The
+   * scroll is corrected so the value under the pointer stays under it — solving
+   * `toTrack`'s `py * range - scroll` for the same value before and after.
+   */
+  private zoomValueAxis(deltaY: number, py: number) {
+    const range = this.verticalRange;
+    const next = Math.min(
+      MAX_VERTICAL_RANGE,
+      Math.max(MIN_VERTICAL_RANGE, range + deltaY * (range / 75)),
+    );
+    if (next === range) {
+      return;
+    }
+    this.verticalScroll += py * (next - range);
+    this.verticalRange = next;
+    this.drawCanvas();
     this.requestUpdate();
   }
 
