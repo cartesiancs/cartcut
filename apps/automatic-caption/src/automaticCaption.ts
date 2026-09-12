@@ -35,6 +35,7 @@ import { createTextElement } from "../../app/src/features/element/textElement";
 import { fontsSettled } from "../../app/src/features/element/rasterizeText";
 import { renderElement } from "../../app/src/features/renderer/element";
 import { renderText } from "../../app/src/features/renderer/text";
+import { TransientModal } from "../../app/src/features/ui/transientModal";
 import "./progress";
 
 /** How many split/merge steps the panel's own Cmd+Z can walk back. */
@@ -44,7 +45,8 @@ const UNDO_LIMIT = 50;
 export class AutomaticCaption extends LitElement {
   isLoadVideo: boolean;
   videoPath: string;
-  analyzingVideoModal: any;
+  /** The progress dialog. Gated, because a cached transcript returns instantly. */
+  analyzingVideoModal: TransientModal | undefined;
   selectVideoModal: any;
   videoRows: any;
   hasUpdatedOnce: boolean;
@@ -178,6 +180,7 @@ export class AutomaticCaption extends LitElement {
     // full-resolution frame every 16ms against a canvas nobody could see.
     this._stopLoop();
     this.mediaElement()?.pause();
+    this.analyzingVideoModal?.dispose();
   }
 
   private _stopLoop() {
@@ -453,14 +456,14 @@ export class AutomaticCaption extends LitElement {
     );
     this._undo = [];
 
-    this.analyzingVideoModal.hide();
+    this.analyzingVideoModal?.close();
     this.requestUpdate();
     this.panelVideoModal.show();
   }
 
   /** Give the keyboard back and close the progress modal. */
   _endAnalysis() {
-    this.analyzingVideoModal?.hide();
+    this.analyzingVideoModal?.close();
     this.isLoadVideo = false;
     this.jobId = null;
     this.applyCursorEvent("pointer");
@@ -504,7 +507,7 @@ export class AutomaticCaption extends LitElement {
     // One path for video and audio alike: main runs ffmpeg over whatever it is
     // handed. The panel used to skip extraction for audio and give the file
     // straight to the recogniser, which was two flows and two ways to fail.
-    this.analyzingVideoModal.show();
+    this.analyzingVideoModal?.open();
     this.requestUpdate();
 
     await this.transcribeSelectedClip();
@@ -514,6 +517,7 @@ export class AutomaticCaption extends LitElement {
     this.applyCursorEvent("pointer");
     this._stopLoop();
     this.mediaElement()?.pause();
+    this.analyzingVideoModal?.close();
 
     // `captionsFrom` drops a line the user emptied and guarantees a positive
     // duration; `captionOptions` is the same factory the preview drew with, so
@@ -561,11 +565,10 @@ export class AutomaticCaption extends LitElement {
         },
       );
 
-      this.analyzingVideoModal = new bootstrap.Modal(
-        document.getElementById("AnalyzingVideo"),
-        {
-          keyboard: false,
-        },
+      const analyzing = document.getElementById("AnalyzingVideo");
+      this.analyzingVideoModal = new TransientModal(
+        new bootstrap.Modal(analyzing, { keyboard: false }),
+        analyzing!,
       );
 
       const panel = document.getElementById("VideoPanel");
@@ -1231,7 +1234,7 @@ export class AutomaticCaption extends LitElement {
                   data-bs-dismiss="modal"
                   @click=${() => {
                     this.isLoadVideo = false;
-                    this.analyzingVideoModal.hide();
+                    this.analyzingVideoModal?.close();
                     this.requestUpdate();
                   }}
                 >

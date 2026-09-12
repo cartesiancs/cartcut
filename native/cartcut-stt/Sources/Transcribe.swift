@@ -62,8 +62,19 @@ enum Transcribe {
   /// made the panel flash "Downloading language model" on every single run, so
   /// the question "is it already here" has to be asked separately from "give me
   /// something that would install it".
-  static func installAssetsIfNeeded(for transcriber: SpeechTranscriber) async throws {
-    if await AssetInventory.status(forModules: [transcriber]) == .installed {
+  static func installAssetsIfNeeded(
+    for transcriber: SpeechTranscriber,
+    locale: Locale
+  ) async throws {
+    // Asked of `installedLocales` rather than `AssetInventory.status`. The two
+    // disagree: measured here, `status` answered something other than
+    // `.installed` for `en-GB` while `installedLocales` listed it, so the panel
+    // announced "Downloading the language model" for a model already on disk —
+    // and `installedLocales` is also what the language picker reports, so this
+    // is the answer that has to match what the user was told.
+    let installed = await SpeechTranscriber.installedLocales
+    let wanted = locale.identifier(.bcp47)
+    if installed.contains(where: { $0.identifier(.bcp47) == wanted }) {
       return
     }
     guard let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) else {
@@ -112,7 +123,7 @@ enum Transcribe {
       reportingOptions: [],
       attributeOptions: [.audioTimeRange, .transcriptionConfidence])
 
-    try await installAssetsIfNeeded(for: transcriber)
+    try await installAssetsIfNeeded(for: transcriber, locale: locale)
 
     // Best effort. Reserving pins the model against the OS purging it, so the
     // next run in this language stays warm — but the cap is small and hitting
