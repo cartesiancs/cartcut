@@ -784,6 +784,20 @@ export type TextElementType = TimelinePlaced &
       padding?: number;
       /** Corner radius of the box. */
       radius?: number;
+      /**
+       * **Backdrop** blur: how much to blur what is *behind* the band, in
+       * element pixels. Frosted glass, and CSS's `backdrop-filter` exactly.
+       * Absent or 0 means the band is drawn straight over a sharp picture, which
+       * is the byte-identical path it always took.
+       *
+       * The band's own edge stays crisp, and `color` with `opacity` is the tint
+       * on the glass — a frosted caption is a blurred backdrop plus a
+       * translucent wash, which is what makes it readable rather than merely
+       * blurry. `renderer/backdrop.ts` holds the mechanism and the one thing it
+       * cannot do: a transition has no backdrop to read, so the tint draws and
+       * the frost does not.
+       */
+      blur?: number;
     };
     fill?: TextFill;
     /**

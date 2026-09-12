@@ -38,6 +38,8 @@ export type ResolvedBackground = {
   opacity: number;
   padding: number;
   radius: number;
+  /** Backdrop blur behind the band, in element pixels. 0 is no frost. */
+  blur: number;
 };
 
 export type ResolvedTextStyle = {
@@ -166,6 +168,11 @@ export function resolveTextStyle(element: TextElementType): ResolvedTextStyle {
         500,
       ),
       radius: num(background?.radius, 0, 0, 500),
+      // Clamped like the shadow's blur, and load-bearing for the same reason:
+      // it reaches the device as `filter: blur(Npx)`, which a negative value
+      // makes invalid — and an invalid `filter` is ignored silently, so the
+      // frost would simply stop happening.
+      blur: num(background?.blur, 0, 0, 500),
     },
     fill: resolveFill(element.fill),
     textOpacity: num(element.textOpacity, 100, 0, 100),
@@ -227,6 +234,10 @@ export function styleBleed(style: ResolvedTextStyle): number {
     );
   }
   if (style.background.enable) {
+    // `background.blur` adds nothing here. It is a *backdrop* blur, clipped to
+    // the band it frosts, so however large it is the band's own footprint is
+    // still `padding` — and rasterisation, which is what this margin is for,
+    // has no backdrop to frost in the first place.
     bleed = Math.max(bleed, style.background.padding);
   }
 

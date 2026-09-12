@@ -17,6 +17,7 @@ import { adjustToneFor, applyFinish, finishRenderFor } from "./adjust/apply";
 import { applyLutGrade, lutGradeFor } from "./lut/apply";
 import { applyMask, clipToMask, destinationMatrix, maskRenderFor } from "./mask";
 import { applyMirror } from "./mirror";
+import { backdropOf, type Backdrop } from "./backdrop";
 import { layerFor } from "./surface";
 import type { ElementRenderFunction } from "./type";
 
@@ -187,6 +188,24 @@ export function renderElement<T extends VisualTimelineElement>(
           context.memo,
         );
 
+  /**
+   * The frame this clip is being drawn over, for a renderer that has to read it
+   * — today only a text clip's frosted background band.
+   *
+   * Captured **here**, from `ctx`, because a few lines down `ctx` may be a
+   * transparent layer and the frame is then unreachable. The layer shares the
+   * destination's pixel grid, so the same backdrop serves both paths with no
+   * mapping; `renderer/backdrop.ts` states that invariant and checks it.
+   *
+   * `null` inside a transition, and that is the same reasoning `blend` follows
+   * three lines above rather than a second rule: `fx/compositor.ts#renderClip`
+   * draws each half into a cleared, transparent buffer, so there is no backdrop
+   * there to blur — a frosted band would sample nothing and come out as a hole
+   * in the dissolve. The band's own colour still draws, so the clip does not
+   * change shape for the length of the transition; it simply stops being glass.
+   */
+  const backdrop = context?.isolated === true ? null : backdropOf(ctx);
+
   // The path every clip took before blend modes existed, and the one almost
   // every clip still takes. Byte-for-byte what it was: no layer is allocated,
   // no extra blit is issued, and `golden.test.ts`'s digests are the proof.
@@ -205,6 +224,7 @@ export function renderElement<T extends VisualTimelineElement>(
       controlOutlineEnabled,
       renderFunction,
       context,
+      backdrop,
     );
     return;
   }
@@ -231,6 +251,7 @@ export function renderElement<T extends VisualTimelineElement>(
       false,
       renderFunction,
       context,
+      backdrop,
     );
 
     // The clip is finished, alone, at destination resolution and against
@@ -308,6 +329,7 @@ export function renderElement<T extends VisualTimelineElement>(
       false,
       renderFunction,
       context,
+      backdrop,
     );
     ctx.restore();
   }
@@ -341,6 +363,7 @@ function drawDirect<T extends VisualTimelineElement>(
   controlOutlineEnabled: boolean,
   renderFunction: ElementRenderFunction<T>,
   context?: ElementRenderContext,
+  backdrop?: Backdrop | null,
 ): void {
   ctx.save();
 
@@ -402,7 +425,7 @@ function drawDirect<T extends VisualTimelineElement>(
   // not care that it is drawn under the flip.
   applyMirror(ctx, sized, width, height);
 
-  renderFunction(ctx, elementId, sized, timelineCursor);
+  renderFunction(ctx, elementId, sized, timelineCursor, backdrop);
 
   if (controlOutlineEnabled) {
     renderControlOutline(ctx, 0, 0, width, height);

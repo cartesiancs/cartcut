@@ -61,6 +61,13 @@ describe("resolveTextStyle on a pre-effects element", () => {
     expect(DEFAULT_BACKGROUND_PADDING).toBe(12);
   });
 
+  it("leaves the background band hard-edged", () => {
+    // Absent `blur` has to resolve to 0, which is the byte-identical
+    // `fillRect`/`roundRect` path — a project written before the field existed
+    // must not acquire a soft edge on load.
+    expect(resolveTextStyle(legacyText()).background.blur).toBe(0);
+  });
+
   it("treats a missing outline opacity as fully opaque", () => {
     expect(resolveTextStyle(legacyText()).outline.opacity).toBe(100);
   });
@@ -106,6 +113,30 @@ describe("resolveTextStyle sanitising", () => {
     );
 
     expect(style.glow.size).toBe(0);
+  });
+
+  it("clamps a negative background blur, which canvas would throw on", () => {
+    const element = legacyText();
+    element.background = {
+      enable: true,
+      color: "#000000",
+      blur: -20,
+    } as TextElementType["background"];
+
+    // It reaches the device as `shadowBlur` through `paintShadowOnly`, so the
+    // same clamp the shadow's own blur needs applies here.
+    expect(resolveTextStyle(element).background.blur).toBe(0);
+  });
+
+  it("replaces a NaN background blur rather than passing it to canvas", () => {
+    const element = legacyText();
+    element.background = {
+      enable: true,
+      color: "#000000",
+      blur: Number.NaN,
+    } as TextElementType["background"];
+
+    expect(resolveTextStyle(element).background.blur).toBe(0);
   });
 
   it("clamps opacity into 0-100", () => {
@@ -208,6 +239,32 @@ describe("styleBleed", () => {
       color: "#000000",
       opacity: 60,
     };
+
+    expect(styleBleed(resolveTextStyle(element))).toBe(2);
+  });
+
+  it("counts a background's padding but not its blur", () => {
+    const element = legacyText();
+    element.background = {
+      enable: true,
+      color: "#000000",
+      padding: 10,
+      blur: 200,
+    } as TextElementType["background"];
+
+    // The blur is a *backdrop* blur, clipped to the band, so it spills nothing
+    // outside the box — however large it is, the footprint is the padding.
+    expect(styleBleed(resolveTextStyle(element))).toBe(12);
+  });
+
+  it("ignores a background's padding while the background is off", () => {
+    const element = legacyText();
+    element.background = {
+      enable: false,
+      color: "#000000",
+      padding: 40,
+      blur: 40,
+    } as TextElementType["background"];
 
     expect(styleBleed(resolveTextStyle(element))).toBe(2);
   });

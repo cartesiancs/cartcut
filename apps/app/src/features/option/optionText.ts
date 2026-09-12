@@ -735,6 +735,7 @@ export class OptionText extends LitElement {
             ${this.numberRow("Opacity", ["background", "opacity"], style.background.opacity, { max: 100 })}
             ${this.numberRow("Padding", ["background", "padding"], style.background.padding)}
             ${this.numberRow("Radius", ["background", "radius"], style.background.radius)}
+            ${this.numberRow("Blur", ["background", "blur"], style.background.blur)}
             ${this.colorRow("Color", ["background", "color"], style.background.color)}
           </div>`
         : ""}

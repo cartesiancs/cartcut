@@ -22,6 +22,13 @@
  * all when `loadedAssetStore` has no entry for a path, and loading is
  * asynchronous — so without seeding, the clip blinks out of existence between
  * the commit and the image finishing its own decode.
+ *
+ * One thing is deliberately lost: a **frosted background band** bakes as its
+ * tint alone. `background.blur` is a backdrop blur, and a PNG of the clip by
+ * itself has no backdrop — this canvas is empty, so no backdrop is passed and
+ * `renderer/backdrop.ts` declines. Baking the frost would also be wrong: it
+ * would freeze whatever happened to be behind the clip at one moment into a
+ * picture that then moves independently of it.
  */
 
 import type { TextElementType } from "../../@types/timeline";

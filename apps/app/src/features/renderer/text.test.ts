@@ -782,3 +782,249 @@ describe("renderText line spacing", () => {
     expect(broken).toEqual(inkBounds(draw({ options })));
   });
 });
+
+
+
+/**
+ * The frosted background band: `background.blur` as a *backdrop* blur.
+ *
+ * The band's own edge stays crisp and its colour is unchanged; what moves is the
+ * picture behind it. So every test here paints a **sharp vertical edge** first —
+ * red on the left, blue on the right — and then asks what happened to that edge
+ * inside the band and outside it. A step that became a ramp is a frost; a step
+ * that stayed a step is not.
+ *
+ * `renderText` reads the backdrop from its fifth argument rather than from
+ * `ctx.canvas`, which is what lets the frost survive the isolated compositing
+ * path — `backdropComposite.test.ts` is where that is checked, through
+ * `renderElement`. Here the backdrop is passed explicitly, including the case
+ * where it *is* the destination, because the fast path draws straight onto the
+ * frame and the engine has to tolerate a canvas being its own source.
+ */
+describe("renderText background blur", () => {
+  /**
+   * Where the element is placed, in its own pixels, and where the backdrop's
+   * step is painted at 1x. They are equal, which puts the step at the element's
+   * own x = 0 — well inside a band that spans -60..71 — at every scale.
+   */
+  const OFFSET = 100;
+  const EDGE = 100;
+  const SIZE = 400;
+
+  /** A sharp vertical edge to frost, and its context. */
+  function backdropScene(scale = 1) {
+    const { canvas, ctx } = scene(SIZE * scale, SIZE * scale);
+    ctx.fillStyle = "#ff0000";
+    ctx.fillRect(0, 0, EDGE * scale, SIZE * scale);
+    ctx.fillStyle = "#0000ff";
+    ctx.fillRect(EDGE * scale, 0, (SIZE - EDGE) * scale, SIZE * scale);
+    return { canvas, ctx };
+  }
+
+  const frosted = (over: Record<string, unknown> = {}) => {
+    const el = base();
+    // A wide band with no lettering in it: " " keeps the line non-blank (a blank
+    // line draws no band at all) while leaving the frost unobscured by glyphs.
+    el.text = " ";
+    el.width = 240;
+    el.background = {
+      enable: true,
+      color: "#000000",
+      // A transparent tint, so what the pixels show is the frost alone. The
+      // colour is the one thing about the band this feature did not change.
+      opacity: 0,
+      padding: 60,
+      radius: 0,
+      ...over,
+    };
+    return el;
+  };
+
+  /**
+   * Draw `element` over the sharp edge and hand back the canvas.
+   *
+   * `scale` goes on the context the way the preview's zoom × DPR does, and the
+   * translate puts the band well inside the frame so its own edges are not
+   * confused with the canvas's.
+   */
+  function frost(element: ReturnType<typeof frosted>, scale = 1) {
+    const { canvas, ctx } = backdropScene(scale);
+    ctx.save();
+    ctx.scale(scale, scale);
+    ctx.translate(OFFSET, OFFSET);
+    renderText(ctx, "t", element, 0, { canvas });
+    ctx.restore();
+    return canvas;
+  }
+
+  /** How many pixels of `row` are neither the red nor the blue of the edge. */
+  function rampWidth(canvas: ReturnType<typeof scene>["canvas"], y: number) {
+    const width = canvas.width;
+    const d = canvas.getContext("2d").getImageData(0, y, width, 1).data;
+    let mixed = 0;
+    for (let x = 0; x < width; x += 1) {
+      const [r, g, b] = [d[x * 4], d[x * 4 + 1], d[x * 4 + 2]];
+      // Anything between the two solids: the blur mixes them channel by channel.
+      if (r > 20 && r < 235 && b > 20 && b < 235) {
+        mixed += 1;
+      }
+      // The engines disagree by a hair on an antialiased sample, not on hue.
+      expect(g).toBeLessThan(40);
+    }
+    return mixed;
+  }
+
+  it("blurs the picture behind the band", () => {
+    const sharp = frost(frosted());
+    const glass = frost(frosted({ blur: 12 }));
+
+    // Through the middle of the band: a step becomes a ramp tens of pixels wide.
+    const middle = OFFSET + base().fontsize;
+    expect(rampWidth(sharp, middle)).toBe(0);
+    expect(rampWidth(glass, middle)).toBeGreaterThan(20);
+  });
+
+  it("leaves everything outside the band alone", () => {
+    const glass = frost(frosted({ blur: 12 }));
+
+    // Above the band, the edge is still an edge...
+    expect(rampWidth(glass, 8)).toBe(0);
+    // ...and the two solids are untouched on the row that is frosted.
+    const middle = OFFSET + base().fontsize;
+    const left = pixel(glass, 4, middle);
+    const right = pixel(glass, SIZE - 4, middle);
+    expect([left.r, left.g, left.b]).toEqual([255, 0, 0]);
+    expect([right.r, right.g, right.b]).toEqual([0, 0, 255]);
+  });
+
+  it("draws the same pixels for blur 0 as for no blur at all", () => {
+    // The compatibility case. A project written before the field existed has no
+    // `blur` and has to take the untouched path — which is what lets this
+    // feature leave `SCHEMA_VERSION` alone.
+    const absent = frost(frosted());
+    const zero = frost(frosted({ blur: 0 }));
+
+    const a = absent.getContext("2d").getImageData(0, 0, SIZE, SIZE).data;
+    const b = zero.getContext("2d").getImageData(0, 0, SIZE, SIZE).data;
+    expect(Buffer.from(a)).toEqual(Buffer.from(b));
+  });
+
+  it("keeps the band's own edge crisp", () => {
+    // What is soft is the backdrop, not the band. An opaque band over a plain
+    // backdrop must go from paper to tint within an antialiased pixel, whatever
+    // the blur — a blurred *band* would ramp across tens of them.
+    const { canvas, ctx } = scene(SIZE, SIZE, "#ffffff");
+    ctx.translate(OFFSET, OFFSET);
+    renderText(ctx, "t", frosted({ blur: 20, opacity: 100 }), 0, { canvas });
+
+    const d = canvas
+      .getContext("2d")
+      .getImageData(0, OFFSET + base().fontsize, SIZE, 1).data;
+    let partial = 0;
+    for (let x = 0; x < SIZE; x += 1) {
+      const v = d[x * 4];
+      if (v > 20 && v < 235) {
+        partial += 1;
+      }
+    }
+    // One antialiased pixel per edge, at most: the band's box has a fractional
+    // right edge because the line's measured width does.
+    expect(partial).toBeLessThanOrEqual(2);
+  });
+
+  it("frosts only inside the rounded corners", () => {
+    // Over stripes rather than a single step, because the frosted *area* is what
+    // is being measured and stripes make every pixel of it mixed. The clip is
+    // traced under the element's own transform, so the corner is a real rounded
+    // corner and not the band's bounding box.
+    const striped = (element: ReturnType<typeof frosted>) => {
+      const { canvas, ctx } = scene(SIZE, SIZE);
+      for (let x = 0; x < SIZE; x += 20) {
+        ctx.fillStyle = "#ff0000";
+        ctx.fillRect(x, 0, 10, SIZE);
+        ctx.fillStyle = "#0000ff";
+        ctx.fillRect(x + 10, 0, 10, SIZE);
+      }
+      ctx.translate(OFFSET, OFFSET);
+      renderText(ctx, "t", element, 0, { canvas });
+
+      const d = canvas.getContext("2d").getImageData(0, 0, SIZE, SIZE).data;
+      let mixed = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] > 20 && d[i] < 235 && d[i + 2] > 20 && d[i + 2] < 235) {
+          mixed += 1;
+        }
+      }
+      return mixed;
+    };
+
+    const square = striped(frosted({ blur: 12, radius: 0 }));
+    const round = striped(frosted({ blur: 12, radius: 40 }));
+
+    // Sharp stripes are never mixed, so what is counted is the frosted area.
+    expect(square).toBeGreaterThan(0);
+    // Rounding takes frosted area off the four corners and nowhere else: four
+    // corners of a 40px radius are 4 * (1 - pi/4) * 1600 ~ 1370 pixels.
+    expect(square - round).toBeGreaterThan(900);
+    expect(square - round).toBeLessThan(1900);
+  });
+
+  it("scales the blur with the transform", () => {
+    // The preview draws through zoom × DPR and the export draws 1:1, so a blur
+    // that did not go through the matrix would be a different picture in the
+    // two. At 2x the ramp is twice as wide in device pixels — the same picture,
+    // twice the size.
+    const one = rampWidth(frost(frosted({ blur: 12 })), OFFSET + 40);
+    const two = rampWidth(frost(frosted({ blur: 12 }), 2), (OFFSET + 40) * 2);
+
+    expect(one).toBeGreaterThan(20);
+    expect(Math.abs(two - one * 2)).toBeLessThanOrEqual(4);
+  });
+
+  it("draws no frost, and no band, behind a blank line", () => {
+    const blank = frosted({ blur: 12 });
+    blank.text = "\n";
+
+    const glass = frost(blank);
+    expect(rampWidth(glass, OFFSET + 40)).toBe(0);
+  });
+
+  it("frosts every line of a wrapped block in one pass", () => {
+    // Two lines whose bands overlap at the default padding, which is the case
+    // the union pass exists for: the seam between them must be frosted once,
+    // not frosted and then frosted again through the first band's tint.
+    const el = frosted({ blur: 10, padding: 12, opacity: 60 });
+    el.text = "AAAA\nAAAA";
+    el.textcolor = "#000000";
+
+    const glass = frost(el);
+    const firstLine = OFFSET + base().fontsize - 8;
+    const secondLine = OFFSET + base().fontsize + 48 - 8;
+    expect(rampWidth(glass, firstLine)).toBeGreaterThan(10);
+    expect(rampWidth(glass, secondLine)).toBeGreaterThan(10);
+  });
+
+  it("declines silently when there is no backdrop to read", () => {
+    // `rasterizeText` draws onto an empty canvas and passes none, and a
+    // transition's isolated buffer has none either. A frosted band then draws
+    // its tint and no frost — the contract a LUT that is not installed has.
+    const { canvas, ctx } = backdropScene();
+    ctx.translate(OFFSET, OFFSET);
+    expect(() =>
+      renderText(ctx, "t", frosted({ blur: 12 }), 0),
+    ).not.toThrow();
+
+    expect(rampWidth(canvas, OFFSET + 40)).toBe(0);
+  });
+
+  it("declines when the backdrop is not on the destination's pixel grid", () => {
+    // The frost is blitted at identity, so a backdrop of another size would
+    // land out of register. Better to draw no frost than the wrong picture.
+    const { canvas, ctx } = backdropScene();
+    const other = scene(SIZE / 2, SIZE / 2, "#00ff00");
+    ctx.translate(OFFSET, OFFSET);
+    renderText(ctx, "t", frosted({ blur: 12 }), 0, { canvas: other.canvas });
+
+    expect(rampWidth(canvas, OFFSET + 40)).toBe(0);
+  });
+});
