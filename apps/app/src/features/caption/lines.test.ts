@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeAt,
   captionsFrom,
   lineIndexAt,
+  linesFromTranscript,
   linesFromWordGroups,
   mergeCaretOffset,
   mergeLineWithPrevious,
@@ -10,6 +12,7 @@ import {
   splitLineAt as split,
   wordIndexAt,
   type CaptionWord,
+  type TranscribedWord,
 } from "./lines";
 
 /** "hello there world" — three words, one second each. */
@@ -237,5 +240,142 @@ describe("captionsFrom", () => {
   it("clamps a negative start rather than placing off the timeline", () => {
     const early = linesFromWordGroups([[{ word: "hi", start: -0.5, end: 1 }]]);
     expect(captionsFrom(early)[0].startTime).toBe(0);
+  });
+});
+
+describe("linesFromTranscript", () => {
+  /** What main sends: milliseconds, and `confidence`. */
+  const wire: TranscribedWord[] = [
+    { word: "hello", startMs: 0, endMs: 1000, confidence: 0.9 },
+    { word: "there", startMs: 1000, endMs: 2000, confidence: 0.8 },
+  ];
+
+  it("converts milliseconds to seconds", () => {
+    const [line] = linesFromTranscript([wire]);
+
+    expect(line.words.map((w) => [w.start, w.end])).toEqual([
+      [0, 1],
+      [1, 2],
+    ]);
+    expect(line.start).toBe(0);
+    expect(line.end).toBe(2);
+  });
+
+  it("renames confidence to score", () => {
+    const [line] = linesFromTranscript([wire]);
+    expect(line.words.map((w) => w.score)).toEqual([0.9, 0.8]);
+  });
+
+  it("keeps a confidence of exactly zero", () => {
+    // The guard is `!= null`, not truthiness. A back end that is certain a word
+    // is wrong still reported something, and dropping it would read as "no
+    // confidence available" instead.
+    const [line] = linesFromTranscript([
+      [{ word: "mumble", startMs: 0, endMs: 500, confidence: 0 }],
+    ]);
+
+    expect(line.words[0].score).toBe(0);
+    expect("score" in line.words[0]).toBe(true);
+  });
+
+  it("leaves the key absent when no confidence was reported", () => {
+    // Absent, not `undefined`. The OpenAI path reports none per word, and an
+    // explicit `undefined` would survive into the project file as a key.
+    const [line] = linesFromTranscript([
+      [{ word: "spoken", startMs: 0, endMs: 500 }],
+    ]);
+
+    expect("score" in line.words[0]).toBe(false);
+  });
+
+  it("drops the speaker label", () => {
+    // A speaker change breaks the line in main; the panel has nowhere to show
+    // the label, so it does not travel.
+    const [line] = linesFromTranscript([
+      [{ word: "mine", startMs: 0, endMs: 500, speaker: "A" }],
+    ]);
+
+    expect("speaker" in line.words[0]).toBe(false);
+  });
+
+  it("answers an empty list for a missing or empty transcript", () => {
+    // `result.lines` is optional on the wire, and a clip with no speech in it is
+    // an ordinary outcome rather than a failure.
+    expect(linesFromTranscript(undefined)).toEqual([]);
+    expect(linesFromTranscript(null)).toEqual([]);
+    expect(linesFromTranscript([])).toEqual([]);
+  });
+
+  it("drops an empty group rather than making a line with no span", () => {
+    // `groupWords` never emits one; this is the same defence
+    // `linesFromWordGroups` keeps, reached through the conversion.
+    expect(linesFromTranscript([[], wire, []])).toHaveLength(1);
+  });
+
+  it("joins the words into the line's starting text", () => {
+    expect(linesFromTranscript([wire])[0].text).toBe("hello there");
+  });
+
+  it("survives the round trip back to milliseconds", () => {
+    // Integer milliseconds in, the same integers out through `captionsFrom`.
+    // The seconds in between are exact for these, but the assertion is what
+    // stops anyone reintroducing a rounding step at the boundary.
+    const [caption] = captionsFrom(
+      linesFromTranscript([
+        [{ word: "one", startMs: 1234, endMs: 5678 }],
+      ]),
+    );
+
+    expect(caption.startTime).toBe(1234);
+    expect(caption.duration).toBe(5678 - 1234);
+  });
+});
+
+describe("activeAt", () => {
+  /** Two lines, with a silent gap inside the first one. */
+  const two = () =>
+    linesFromWordGroups([
+      [
+        { word: "hello", start: 0, end: 1 },
+        { word: "there", start: 2, end: 3 },
+      ],
+      [{ word: "again", start: 4, end: 5 }],
+    ]);
+
+  it("answers the line and the word being spoken", () => {
+    expect(activeAt(two(), 2.5)).toEqual({ lineIndex: 0, wordIndex: 1 });
+    expect(activeAt(two(), 4.5)).toEqual({ lineIndex: 1, wordIndex: 0 });
+  });
+
+  it("answers a line with no word during a gap between its words", () => {
+    // The caption is on screen for its whole span, and nobody is speaking
+    // between two of its words. A highlighted chip there would be a lie.
+    expect(activeAt(two(), 1.5)).toEqual({ lineIndex: 0, wordIndex: null });
+  });
+
+  it("answers neither before the first line and after the last", () => {
+    expect(activeAt(two(), -1)).toEqual({ lineIndex: null, wordIndex: null });
+    expect(activeAt(two(), 99)).toEqual({ lineIndex: null, wordIndex: null });
+  });
+
+  it("answers neither for no lines at all", () => {
+    expect(activeAt([], 0)).toEqual({ lineIndex: null, wordIndex: null });
+  });
+
+  it("agrees with lineIndexAt and wordIndexAt at every boundary", () => {
+    // It is defined as their composition, and the panel reads it in two places
+    // that used to compute it separately. Pinned across the boundaries because
+    // both are half-open, and an off-by-one there flickers the highlight.
+    const lines = two();
+    for (const t of [0, 0.999, 1, 1.999, 2, 2.999, 3, 3.999, 4, 4.999, 5]) {
+      const lineIndex = lineIndexAt(lines, t);
+      expect(activeAt(lines, t)).toEqual({
+        lineIndex,
+        wordIndex: wordIndexAt(
+          lineIndex == null ? undefined : lines[lineIndex],
+          t,
+        ),
+      });
+    }
   });
 });

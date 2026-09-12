@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { captionLayout } from "./layout";
+import {
+  captionLayout,
+  captionStyle,
+} from "./layout";
 import { defaultTextHeight } from "../text/metrics";
 
 const HD = { w: 1920, h: 1080 };
@@ -71,5 +74,60 @@ describe("captionLayout", () => {
     const layout = captionLayout({ w: 0, h: Number.NaN });
 
     expect(layout).toEqual(captionLayout(HD));
+  });
+});
+
+describe("captionStyle", () => {
+  const FRAME = { w: 1920, h: 1080 };
+
+  it("is the layout plus the fixed look", () => {
+    // Everything `captionLayout` answers, unchanged, and nothing else invented.
+    expect(captionStyle(FRAME, "lowerThird")).toEqual({
+      ...captionLayout(FRAME, "lowerThird"),
+      textcolor: "#ffffff",
+      optionsAlign: "center",
+      backgroundEnable: true,
+    });
+  });
+
+  it("carries the placement through", () => {
+    expect(captionStyle(FRAME, "center").locationY).toBe(
+      captionLayout(FRAME, "center").locationY,
+    );
+    expect(captionStyle(FRAME, "center").locationY).not.toBe(
+      captionStyle(FRAME, "lowerThird").locationY,
+    );
+  });
+
+  it("defaults to the lower third, as the panel does", () => {
+    expect(captionStyle(FRAME)).toEqual(captionStyle(FRAME, "lowerThird"));
+  });
+
+  it("passes overrides down to the layout", () => {
+    expect(captionStyle(FRAME, "lowerThird", { fontsize: 100, locationY: 7 }))
+      .toMatchObject({ fontsize: 100, locationY: 7 });
+  });
+
+  it("does not depend on any line, so every caption gets the same box", () => {
+    // The whole reason it takes no index: the panel used to pass the index of
+    // the *filtered* caption list into a function that indexed the unfiltered
+    // lines. Two calls with the same frame must be indistinguishable.
+    expect(captionStyle(FRAME, "center")).toEqual(captionStyle(FRAME, "center"));
+  });
+
+  it("supplies no text, startTime or duration", () => {
+    // Those three belong to the caption, not to the style, and `captionRows`
+    // spreads them over this. A `text` here is what the old version produced —
+    // from the wrong line — and it has to stay absent.
+    const style = captionStyle(FRAME);
+    expect("text" in style).toBe(false);
+    expect("startTime" in style).toBe(false);
+    expect("duration" in style).toBe(false);
+  });
+
+  it("keeps the frame fallback for a degenerate frame", () => {
+    expect(captionStyle({ w: 0, h: NaN })).toEqual(
+      captionStyle({ w: 1920, h: 1080 }),
+    );
   });
 });

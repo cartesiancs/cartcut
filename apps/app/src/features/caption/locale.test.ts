@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { chooseDefaultLocale, sortLocales, type TranscriptionLocale } from "./locale";
+import {
+  applyLocales,
+  chooseDefaultLocale,
+  localeLabel,
+  sortLocales,
+  type TranscriptionLocale,
+} from "./locale";
 
 /** The real shape and ordering macOS 26 returned on the machine this was built on. */
 const AVAILABLE: TranscriptionLocale[] = [
@@ -72,5 +78,119 @@ describe("sortLocales", () => {
     const before = AVAILABLE.map((l) => l.id);
     sortLocales(AVAILABLE);
     expect(AVAILABLE.map((l) => l.id)).toEqual(before);
+  });
+});
+
+describe("localeLabel", () => {
+  it("names an installed locale and nothing more", () => {
+    expect(localeLabel(AVAILABLE[0])).toBe("English (South Africa)");
+  });
+
+  it("warns that an uninstalled one downloads, once", () => {
+    // The download happens once per language and the model stays on the Mac, so
+    // the note is "once" rather than a size or a warning.
+    expect(localeLabel({ id: "fr-FR", name: "français (France)", installed: false }))
+      .toBe("français (France) (downloads once)");
+  });
+});
+
+describe("applyLocales", () => {
+  const ok = { available: true, locales: AVAILABLE, reason: "" };
+
+  it("sorts the list before choosing from it", () => {
+    // The load-bearing ordering. `chooseDefaultLocale`'s region fallback and its
+    // last resort both read array order, so choosing from the OS's own ordering
+    // — which puts en-ZA first — reintroduces the defect this module exists for.
+    const { locales, selectedLocale } = applyLocales(ok, ["en-AU"]);
+
+    expect(locales).toEqual(sortLocales(AVAILABLE));
+    expect(selectedLocale).toBe(chooseDefaultLocale(sortLocales(AVAILABLE), ["en-AU"]));
+  });
+
+  it("picks a different region than the unsorted list would, for an uninstalled language", () => {
+    // Proof the sort is load-bearing rather than cosmetic. `chooseDefaultLocale`
+    // prefers an *installed* region, so order only decides when none of them is
+    // — and then it takes `sameLanguage[0]`. Two uninstalled French regions,
+    // enumerated by the OS with France first and named so that Canada sorts
+    // first: the unsorted list answers fr-FR and the sorted one fr-CA.
+    const raw: TranscriptionLocale[] = [
+      { id: "fr-FR", name: "zz français (France)", installed: false },
+      { id: "fr-CA", name: "aa français (Canada)", installed: false },
+    ];
+
+    expect(chooseDefaultLocale(raw, ["fr-CH"])).toBe("fr-FR");
+    expect(applyLocales({ available: true, locales: raw }, ["fr-CH"]).selectedLocale)
+      .toBe("fr-CA");
+  });
+
+  it("picks a different language than the unsorted list would, when nothing matches", () => {
+    // The other order-dependent branch: no preference shares a language with
+    // anything available and nothing is installed, so the answer is
+    // `available[0]` — which is whatever the OS happened to enumerate first.
+    const raw: TranscriptionLocale[] = [
+      { id: "de-DE", name: "zz Deutsch", installed: false },
+      { id: "ja-JP", name: "aa 日本語", installed: false },
+    ];
+
+    expect(chooseDefaultLocale(raw, ["pt-BR"])).toBe("de-DE");
+    expect(applyLocales({ available: true, locales: raw }, ["pt-BR"]).selectedLocale)
+      .toBe("ja-JP");
+  });
+
+  it("keeps apple when the recogniser is available", () => {
+    expect(applyLocales(ok, ["en-US"]).method).toBe("apple");
+    expect(applyLocales(ok, ["en-US"]).available).toBe(true);
+  });
+
+  it("forces openai when it is not", () => {
+    // Leaving this at apple would transcribe through OpenAI while the On-device
+    // button still rendered as the selected one — its styling keys on `method`,
+    // not on availability.
+    const result = applyLocales(
+      { available: false, locales: [], reason: "requires macOS 26" },
+      ["en-US"],
+    );
+
+    expect(result.method).toBe("openai");
+    expect(result.reason).toBe("requires macOS 26");
+    expect(result.selectedLocale).toBe("");
+  });
+
+  it("treats anything but a literal true as unavailable", () => {
+    // It crosses IPC. A truthy-but-not-true value must not unlock on-device.
+    for (const available of ["yes", 1, {}, null, undefined]) {
+      expect(applyLocales({ available, locales: AVAILABLE }, ["en-US"]).method)
+        .toBe("openai");
+    }
+  });
+
+  it("survives a payload with nothing in it", () => {
+    // The web build has no main process behind the bridge, and a rejected
+    // `invoke` resolves to undefined.
+    for (const payload of [undefined, null, {}, "nonsense", 42]) {
+      expect(applyLocales(payload, ["en-US"])).toEqual({
+        available: false,
+        reason: "",
+        locales: [],
+        selectedLocale: "",
+        method: "openai",
+      });
+    }
+  });
+
+  it("ignores a locales field that is not a list", () => {
+    expect(applyLocales({ available: true, locales: "en-US" }, ["en-US"]).locales)
+      .toEqual([]);
+  });
+
+  it("ignores a reason that is not a string", () => {
+    expect(applyLocales({ available: false, reason: { why: "no" } }, []).reason)
+      .toBe("");
+  });
+
+  it("does not mutate the list it was handed", () => {
+    const raw = [...AVAILABLE];
+    applyLocales({ available: true, locales: raw }, ["en-US"]);
+    expect(raw).toEqual(AVAILABLE);
   });
 });

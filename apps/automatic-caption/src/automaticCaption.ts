@@ -2,24 +2,29 @@ import { LitElement, html } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import { v4 as uuidv4 } from "uuid";
 import {
-  chooseDefaultLocale,
-  sortLocales,
+  applyLocales,
+  localeLabel,
 } from "../../app/src/features/caption/locale";
+import { type CaptionPlacement } from "../../app/src/features/caption/layout";
 import {
-  captionLayout,
-  type CaptionPlacement,
-} from "../../app/src/features/caption/layout";
-import {
-  captionsFrom,
-  lineIndexAt,
-  linesFromWordGroups,
-  mergeCaretOffset,
-  mergeLineWithPrevious,
-  setLineText,
-  splitLineAt,
-  wordIndexAt,
+  activeAt,
   type CaptionLine,
 } from "../../app/src/features/caption/lines";
+import {
+  applyCaptionEdit,
+  captionKeyIntent,
+  capturesKey,
+  editText,
+  type CaptionEditor,
+  type CaptionKeyIntent,
+} from "../../app/src/features/caption/editor";
+import { captionRows } from "../../app/src/features/caption/rows";
+import {
+  ChromeGate,
+  PreviewLoop,
+  chromeStateOf,
+  windowScheduler,
+} from "../../app/src/features/caption/previewLoop";
 import {
   captionSources,
   sourceDisplayName,
@@ -31,15 +36,16 @@ import {
   playbackFraction,
   playheadLabel,
 } from "../../app/src/features/media/playback";
-import { createTextElement } from "../../app/src/features/element/textElement";
 import { fontsSettled } from "../../app/src/features/element/rasterizeText";
-import { renderElement } from "../../app/src/features/renderer/element";
-import { renderText } from "../../app/src/features/renderer/text";
+import { paintCaptionPreview } from "../../app/src/features/caption/preview";
+import {
+  TranscribeSession,
+  progressCopy,
+  progressPercent,
+  type JobProgress,
+} from "../../app/src/features/caption/transcribeSession";
 import { TransientModal } from "../../app/src/features/ui/transientModal";
 import "./progress";
-
-/** How many split/merge steps the panel's own Cmd+Z can walk back. */
-const UNDO_LIMIT = 50;
 
 @customElement("automatic-caption")
 export class AutomaticCaption extends LitElement {
@@ -52,9 +58,8 @@ export class AutomaticCaption extends LitElement {
   hasUpdatedOnce: boolean;
   panelVideoModal: any;
   isPlay: boolean;
-  private _done: boolean;
-  private _animationFrameId: any;
-  private _paintRequest: number;
+  /** The two animation-frame handles. See `caption/previewLoop.ts`. */
+  private readonly _loop = new PreviewLoop(windowScheduler());
   /** Seconds into the source media. Read from the media element, never accumulated. */
   progress: number;
   /** The element key of the chosen clip. Identifies the row and the source. */
@@ -83,8 +88,7 @@ export class AutomaticCaption extends LitElement {
   private _verticalPlacement: CaptionPlacement;
 
   /** What the template last showed, so a 60Hz loop does not re-render it. */
-  private _shownActive = "";
-  private _shownLabel = "";
+  private readonly _chrome = new ChromeGate();
 
   /** Languages this Mac can transcribe, and whether it can at all. */
   locales: { id: string; name: string; installed: boolean }[];
@@ -92,10 +96,8 @@ export class AutomaticCaption extends LitElement {
   speechAvailable: boolean;
   speechReason: string;
 
-  /** The running job. Minted here so a model download can be cancelled. */
-  jobId: string | null;
-  progressFraction: number;
-  progressStage: string;
+  /** The running job. Null in the web build, which has no bridge behind it. */
+  private _session: TranscribeSession | null;
   private _unsubscribeProgress: (() => void) | null;
 
   constructor() {
@@ -117,18 +119,12 @@ export class AutomaticCaption extends LitElement {
     this.progress = 0;
     this.mediaDuration = 0;
 
-    this._done = false;
-    this._animationFrameId = null;
-    this._paintRequest = 0;
-
     this.locales = [];
     this.selectedLocale = "";
     this.speechAvailable = false;
     this.speechReason = "";
 
-    this.jobId = null;
-    this.progressFraction = 0;
-    this.progressStage = "";
+    this._session = null;
     this._unsubscribeProgress = null;
 
     this.sttMethod = "apple";
@@ -147,26 +143,23 @@ export class AutomaticCaption extends LitElement {
     // await and one place a failure can come from.
     const api = this._transcribeApi();
     if (api != null) {
-      this._unsubscribeProgress = api.onProgress((payload: any) => {
-        // Progress for a job we are no longer waiting on is not ours to draw.
-        if (payload?.jobId !== this.jobId) {
-          return;
-        }
-        this.progressFraction = payload.fraction ?? 0;
-        this.progressStage = payload.stage ?? "";
-        this.requestUpdate();
-      });
+      this._session = new TranscribeSession(api, uuidv4);
+      // `subscribe` filters to our own job, so progress for one we are no longer
+      // waiting on never reaches the bar.
+      this._unsubscribeProgress = this._session.subscribe(() =>
+        this.requestUpdate(),
+      );
 
       api.locales().then((result: any) => {
-        this.speechAvailable = result?.available === true;
-        this.speechReason = result?.reason ?? "";
-        this.locales = sortLocales(result?.locales ?? []);
-        this.selectedLocale = this._defaultLocale();
-        // Falling back silently would transcribe with OpenAI while the button
-        // still said On-device.
-        if (!this.speechAvailable) {
-          this.sttMethod = "openai";
-        }
+        // `applyLocales` sorts before choosing and forces `openai` when there is
+        // no recogniser — falling back silently would transcribe with OpenAI
+        // while the button still said On-device.
+        const state = applyLocales(result, this._localePreferences());
+        this.speechAvailable = state.available;
+        this.speechReason = state.reason;
+        this.locales = state.locales;
+        this.selectedLocale = state.selectedLocale;
+        this.sttMethod = state.method;
         this.requestUpdate();
       });
     }
@@ -184,20 +177,17 @@ export class AutomaticCaption extends LitElement {
   }
 
   private _stopLoop() {
-    this._done = true;
-    if (this._animationFrameId) {
-      window.cancelAnimationFrame(this._animationFrameId);
-      this._animationFrameId = null;
-    }
-    if (this._paintRequest) {
-      window.cancelAnimationFrame(this._paintRequest);
-      this._paintRequest = 0;
-    }
+    this._loop.stop();
   }
 
   private _transcribeApi(): any {
     // Null in the web build, which has no main process behind the bridge.
     return (window as any).electronAPI?.req?.transcribe ?? null;
+  }
+
+  /** What the progress dialog shows. Inert without a bridge. */
+  private get _progress(): JobProgress {
+    return this._session?.progress ?? { fraction: 0, stage: "" };
   }
 
   /**
@@ -210,12 +200,8 @@ export class AutomaticCaption extends LitElement {
    * wrong is invisible — the first version offered South African English to an
    * `en-US` user and looked entirely reasonable doing it.
    */
-  private _defaultLocale(): string {
-    const preferences = [
-      ...(navigator.languages ?? []),
-      navigator.language ?? "",
-    ];
-    return chooseDefaultLocale(this.locales, preferences);
+  private _localePreferences(): string[] {
+    return [...(navigator.languages ?? []), navigator.language ?? ""];
   }
 
   @query("#previewCanvasCaption") canvas!: HTMLCanvasElement;
@@ -253,34 +239,6 @@ export class AutomaticCaption extends LitElement {
   }
 
   /**
-   * One caption's options, and the single source of what a caption *is*.
-   *
-   * `redrawPreview` turns these into an element to draw; `handleClickComplate`
-   * emits them, and `Control` → `elementControl.addText` hands them to the same
-   * `createTextElement`. The preview and the placed element therefore cannot
-   * differ in anything that reaches the picture — which is the whole point, and
-   * what the hand-rolled `drawCaption` could never promise. It was out by a
-   * font size vertically, used a line advance of 52 against the renderer's 62.4,
-   * and padded the background band on one side only.
-   */
-  private captionOptions(index: number) {
-    const line = this.lines[index];
-    const layout = captionLayout(this.previewSize, this._verticalPlacement);
-
-    return {
-      ...layout,
-      text: line?.text ?? "",
-      textcolor: "#ffffff",
-      optionsAlign: "center" as const,
-      backgroundEnable: true,
-    };
-  }
-
-  private captionElement(index: number) {
-    return createTextElement(this.captionOptions(index));
-  }
-
-  /**
    * The one place pixels are written.
    *
    * Never called from `render()` or `updated()`: those fire for every unrelated
@@ -297,53 +255,28 @@ export class AutomaticCaption extends LitElement {
       return;
     }
 
-    // Fill rather than clear, with the project's own background — what
-    // `renderer/timeline.ts#paint` does before drawing anything. There was no
-    // clear of any kind here before, so an audio-only clip stacked every caption
-    // it had ever drawn on top of the last.
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
-    ctx.fillStyle = this.backgroundColor;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    this.drawSourceFrame(ctx);
-
-    const index = lineIndexAt(this.lines, this.progress);
-    if (index != null) {
-      // The real path: `renderTimelineAtTime` → `paint` → `renderElement` →
-      // `renderText`. `context` is omitted deliberately — it is only read for
-      // parent lookups, and a caption that is not on the timeline yet has no
-      // parent. The cursor is inert for a plain caption (every animation track
-      // is inactive and there is no reveal), but it is passed honestly anyway.
-      renderElement(
-        ctx,
-        "caption-preview",
-        this.captionElement(index),
-        this.progress * 1000,
-        false,
-        renderText,
-      );
-    }
+    paintCaptionPreview(ctx, {
+      // The backing store and the project frame are equal here, because the
+      // <canvas> attributes are bound to `previewSize` and CSS does the
+      // downscale. They are passed separately because they mean different
+      // things — see `caption/preview.ts`.
+      canvasSize: { w: canvas.width, h: canvas.height },
+      frame: this.previewSize,
+      backgroundColor: this.backgroundColor,
+      lines: this.lines,
+      progressSec: this.progress,
+      placement: this._verticalPlacement,
+      sourceImage: this.sourceFrame(),
+    });
   }
 
-  /**
-   * The clip's own picture, in the clip's own box.
-   *
-   * Drawn at the frame's size rather than the canvas's: a 4K clip in a 1080p
-   * project overflows here exactly as it will on the timeline, instead of being
-   * silently squashed to fit, which is information the user needs while
-   * positioning captions over it.
-   */
-  private drawSourceFrame(ctx: CanvasRenderingContext2D): void {
+  private sourceFrame(): CanvasImageSource | null {
     if (this.mediaType !== "video") {
-      return;
+      return null;
     }
     const video = this.mediaElement() as HTMLVideoElement | null;
-    if (video == null || video.readyState < 2) {
-      return;
-    }
-    ctx.drawImage(video, 0, 0, this.previewSize.w, this.previewSize.h);
+    // `readyState < 2` is HAVE_NOTHING or HAVE_METADATA: no frame to draw yet.
+    return video != null && video.readyState >= 2 ? video : null;
   }
 
   /**
@@ -358,13 +291,7 @@ export class AutomaticCaption extends LitElement {
 
   /** Coalesce repaints through one frame, as `previewCanvas.scheduleDraw` does. */
   private schedulePaint(): void {
-    if (this._paintRequest) {
-      return;
-    }
-    this._paintRequest = window.requestAnimationFrame(() => {
-      this._paintRequest = 0;
-      this.redrawPreview();
-    });
+    this._loop.schedulePaint(() => this.redrawPreview());
   }
 
   /**
@@ -405,57 +332,39 @@ export class AutomaticCaption extends LitElement {
    * one disk cache and a clip the agent has already read opens instantly here.
    */
   async transcribeSelectedClip() {
-    const api = this._transcribeApi();
-    if (api == null) {
+    const session = this._session;
+    if (session == null) {
       this._failAnalysis("Transcription needs the desktop app.");
       return;
     }
 
-    // Minted before the call so Cancel works during a first-run model download,
-    // which is the long wait and resolves `start` only when it finishes.
-    this.jobId = uuidv4();
-    this.progressFraction = 0;
-    this.progressStage = "extracting";
-    this.requestUpdate();
-
-    let result: any;
-    try {
-      result = await api.start(this.jobId, {
+    const outcome = await session.run(
+      {
         source: this.videoPath,
         method: this.sttMethod,
-        locale: this.sttMethod === "apple" ? this.selectedLocale : undefined,
-      });
-    } catch (error) {
-      this._failAnalysis(String(error));
-      return;
-    } finally {
-      this.jobId = null;
-    }
-
-    if (result?.ok !== true) {
-      if (result?.cancelled === true) {
-        this._endAnalysis();
-        return;
-      }
-      this._failAnalysis(result?.error ?? "Transcription failed.");
-      return;
-    }
-
-    // Main groups the words into caption lines with `analysis/segments.ts`,
-    // which is where the rule for where a caption breaks lives and is tested.
-    // Only the units change here: ms to seconds, and `confidence` to `score`.
-    this.lines = linesFromWordGroups(
-      (result.lines ?? []).map((line: any[]) =>
-        line.map((word: any) => ({
-          word: word.word,
-          start: word.startMs / 1000,
-          end: word.endMs / 1000,
-          ...(word.confidence != null ? { score: word.confidence } : {}),
-        })),
-      ),
+        // The session withholds this for OpenAI, which detects the language.
+        locale: this.selectedLocale,
+      },
+      () => this.requestUpdate(),
     );
+
+    if (outcome.kind === "cancelled") {
+      this._endAnalysis();
+      return;
+    }
+    if (outcome.kind === "failed") {
+      this._failAnalysis(outcome.message);
+      return;
+    }
+
+    this.lines = outcome.lines;
     this._undo = [];
 
+    // Close the progress dialog, *then* show the editor — two Bootstrap modals
+    // transitioning in one tick over shared `body.modal-open` state, which is
+    // the family of bug `TransientModal` exists for. Do not reorder, and do not
+    // await `updateComplete` in between: the first paint is deferred to the
+    // panel's own `shown.bs.modal`.
     this.analyzingVideoModal?.close();
     this.requestUpdate();
     this.panelVideoModal.show();
@@ -465,7 +374,7 @@ export class AutomaticCaption extends LitElement {
   _endAnalysis() {
     this.analyzingVideoModal?.close();
     this.isLoadVideo = false;
-    this.jobId = null;
+    this._session?.clear();
     this.applyCursorEvent("pointer");
     this.requestUpdate();
   }
@@ -479,10 +388,10 @@ export class AutomaticCaption extends LitElement {
   }
 
   cancelAnalysis() {
-    const api = this._transcribeApi();
-    if (api != null && this.jobId != null) {
-      void api.cancel(this.jobId);
-    }
+    // Reads the live job id, so it has to run *before* `_endAnalysis` clears it.
+    // Reversed, main is sent nothing and silently ignores it, and Cancel appears
+    // to work while the job runs on.
+    this._session?.requestCancel();
     this._endAnalysis();
   }
 
@@ -519,17 +428,17 @@ export class AutomaticCaption extends LitElement {
     this.mediaElement()?.pause();
     this.analyzingVideoModal?.close();
 
-    // `captionsFrom` drops a line the user emptied and guarantees a positive
-    // duration; `captionOptions` is the same factory the preview drew with, so
-    // what is placed is what was on screen.
-    const result = captionsFrom(this.lines).map((caption, index) => ({
-      // The clip that was transcribed. `startTime`/`duration` are in that
-      // file's own time, since that is what a transcript timestamps; the app
-      // converts them to timeline time before placing the captions.
-      sourceKey: this.selectedKey,
-      ...this.captionOptions(index),
-      ...caption,
-    }));
+    // `captionRows` drops a line the user emptied, guarantees a positive
+    // duration, and applies the same `captionStyle` the preview drew with — so
+    // what is placed is what was on screen. `startTime`/`duration` are in the
+    // transcribed file's own time, since that is what a transcript timestamps;
+    // `Control` converts them to timeline time before placing the captions.
+    const result = captionRows(
+      this.lines,
+      this.selectedKey,
+      this.previewSize,
+      this._verticalPlacement,
+    );
 
     this.dispatchEvent(
       new CustomEvent("editComplate", {
@@ -620,10 +529,6 @@ export class AutomaticCaption extends LitElement {
 
     this.redrawPreview();
     this.syncChrome();
-
-    if (!this._done) {
-      this._animationFrameId = window.requestAnimationFrame(() => this._step());
-    }
   }
 
   /**
@@ -637,24 +542,17 @@ export class AutomaticCaption extends LitElement {
    * orders of magnitude and changes nothing on screen.
    */
   private syncChrome() {
-    const lineIndex = lineIndexAt(this.lines, this.progress);
-    const wordIndex = wordIndexAt(
-      lineIndex == null ? undefined : this.lines[lineIndex],
+    // Gated on the string the template actually shows, not on a rounded second —
+    // see `ChromeGate`.
+    const { active, label } = chromeStateOf(
+      this.lines,
       this.progress,
+      this.durationSec(),
     );
-    const active = `${lineIndex ?? -1}:${wordIndex ?? -1}`;
-    // Gate on the string the template actually shows, not on a rounded second.
-    // `formatPlayhead` floors; gating on `Math.round` would hold the re-render
-    // back across the very boundary where the readout changes, leaving it a
-    // second stale.
-    const label = playheadLabel(this.progress, this.durationSec());
 
-    if (active === this._shownActive && label === this._shownLabel) {
-      return;
+    if (this._chrome.changed(active, label)) {
+      this.requestUpdate();
     }
-    this._shownActive = active;
-    this._shownLabel = label;
-    this.requestUpdate();
   }
 
   /**
@@ -691,12 +589,9 @@ export class AutomaticCaption extends LitElement {
 
   playVideo() {
     this.isPlay = true;
-    this._done = false;
-
-    if (this._animationFrameId) {
-      window.cancelAnimationFrame(this._animationFrameId);
-    }
-    this._animationFrameId = window.requestAnimationFrame(() => this._step());
+    // `start` cancels a frame already armed, so double-clicking Play cannot
+    // leave two loops compositing the same frame.
+    this._loop.start(() => this._step());
 
     void this.mediaElement()?.play();
     this.requestUpdate();
@@ -737,55 +632,50 @@ export class AutomaticCaption extends LitElement {
   // ----------------------------------------------------------- the editor
 
   /**
-   * Apply a pure operation from `caption/lines.ts`, with undo.
+   * `lines` and `_undo` as one value, for `caption/editor.ts`.
    *
-   * An operation that declines returns its input **by identity**, which is what
-   * lets this skip the snapshot: pressing Enter at the end of a line should not
-   * fill the undo stack with states identical to the one before.
+   * The two stay separate fields because the template, the preview and
+   * `captionRows` all read `this.lines` directly, and Lit re-renders off a
+   * manual `requestUpdate()` rather than off reactive state — so moving the
+   * list behind an object would mean touching every reader for no gain.
    */
-  private applyLines(next: CaptionLine[]) {
-    if (next === this.lines) {
-      return false;
-    }
-    this._undo.push(this.lines);
-    if (this._undo.length > UNDO_LIMIT) {
-      this._undo.shift();
-    }
-    this.lines = next;
-    this.schedulePaint();
-    this.requestUpdate();
-    return true;
+  private _editorState(): CaptionEditor {
+    return { lines: this.lines, undo: this._undo };
   }
 
   /**
-   * Undo one split or merge.
+   * Carry out one editing intent.
    *
-   * Typing is left to the input's own native undo — a snapshot per keystroke
-   * would bury the structural edits this is for under hundreds of character
-   * states, which is the opposite of useful.
+   * `applyCaptionEdit` returns its input **by identity** when the underlying op
+   * declined, which is what lets this repaint nothing and record nothing:
+   * pressing Enter at the end of a line should cost the user nothing, and the
+   * undo stack should not fill with states identical to the one before.
    */
-  undoEdit() {
-    const previous = this._undo.pop();
-    if (previous == null) {
+  private _applyIntent(intent: CaptionKeyIntent) {
+    const { editor, focus } = applyCaptionEdit(this._editorState(), intent);
+    if (editor.lines === this.lines) {
       return;
     }
-    this.lines = previous;
+    this.lines = editor.lines;
+    this._undo = editor.undo;
     this.schedulePaint();
     this.requestUpdate();
+    if (focus != null) {
+      this.focusLine(focus.index, focus.caretOffset);
+    }
+  }
+
+  /** Undo one split or merge. Typing is not on the stack — see `editText`. */
+  undoEdit() {
+    this._applyIntent({ kind: "undo" });
   }
 
   splitLine(index: number, caretOffset: number) {
-    if (this.applyLines(splitLineAt(this.lines, index, caretOffset))) {
-      // The caret belongs at the start of the new line, as in any editor.
-      this.focusLine(index + 1, 0);
-    }
+    this._applyIntent({ kind: "split", index, caretOffset });
   }
 
   mergeLine(index: number) {
-    const caret = mergeCaretOffset(this.lines, index);
-    if (this.applyLines(mergeLineWithPrevious(this.lines, index))) {
-      this.focusLine(index - 1, caret);
-    }
+    this._applyIntent({ kind: "merge", index });
   }
 
   /** Put the caret back where the gesture left it, after Lit has re-rendered. */
@@ -803,60 +693,55 @@ export class AutomaticCaption extends LitElement {
     });
   }
 
+  /**
+   * A keystroke in a caption's input.
+   *
+   * The whole matrix — the IME guard, Enter, Backspace, Delete, Cmd+Z — is
+   * `caption/editor.ts#captionKeyIntent`, and `capturesKey` decides whether the
+   * keystroke is cancelled. This is a dispatcher over plain numbers, which is
+   * what makes the matrix testable without a DOM.
+   */
   _handleCaptionKeydown(event: KeyboardEvent, index: number) {
     const input = event.target as HTMLInputElement;
+    // Named explicitly, not spread: a DOM event's properties are prototype
+    // getters rather than own enumerable ones, so `{ ...event }` is `{}` and
+    // every branch below would see an undefined `key`.
+    const intent = captionKeyIntent(
+      {
+        key: event.key,
+        isComposing: event.isComposing,
+        keyCode: (event as any).keyCode,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+      },
+      {
+        selectionStart: input.selectionStart,
+        selectionEnd: input.selectionEnd,
+        valueLength: input.value.length,
+      },
+      index,
+      this.lines.length,
+    );
 
-    // A Korean IME fires Enter to commit a composition. Splitting on it would
-    // cut the line in half every time someone finished typing a word — the
-    // reason this is an <input> and not a contenteditable.
-    if (event.isComposing || (event as any).keyCode === 229) {
+    if (!capturesKey(intent)) {
       return;
     }
-
-    if (event.key === "Enter") {
-      event.preventDefault();
-      this.splitLine(index, input.selectionStart ?? 0);
-      return;
-    }
-
-    if (
-      event.key === "Backspace" &&
-      input.selectionStart === 0 &&
-      input.selectionEnd === 0
-    ) {
-      event.preventDefault();
-      this.mergeLine(index);
-      return;
-    }
-
-    if (
-      event.key === "Delete" &&
-      input.selectionStart === input.value.length &&
-      input.selectionEnd === input.value.length &&
-      index + 1 < this.lines.length
-    ) {
-      event.preventDefault();
-      this.mergeLine(index + 1);
-      return;
-    }
-
-    if ((event.metaKey || event.ctrlKey) && event.key === "z") {
-      event.preventDefault();
-      this.undoEdit();
-    }
+    event.preventDefault();
+    this._applyIntent(intent);
   }
 
   _handleChangeInput(event: Event, index: number) {
     const value = (event.target as HTMLInputElement).value;
     // Straight to state, no snapshot: typing is the input's own undo to manage.
-    this.lines = setLineText(this.lines, index, value);
+    this.lines = editText(this._editorState(), index, value).lines;
     this.schedulePaint();
   }
 
   render() {
-    const activeLine = lineIndexAt(this.lines, this.progress);
-    const activeWord = wordIndexAt(
-      activeLine == null ? undefined : this.lines[activeLine],
+    // The same pair `syncChrome` gates on, from the same function — these were
+    // two independent copies of the same three lines.
+    const { lineIndex: activeLine, wordIndex: activeWord } = activeAt(
+      this.lines,
       this.progress,
     );
 
@@ -1002,7 +887,7 @@ export class AutomaticCaption extends LitElement {
                 value=${locale.id}
                 ?selected=${locale.id === this.selectedLocale}
               >
-                ${locale.name}${locale.installed ? "" : " (downloads once)"}
+                ${localeLabel(locale)}
               </option>`,
             )}
           </select>
@@ -1029,21 +914,15 @@ export class AutomaticCaption extends LitElement {
           <div class="modal-content bg-dark">
             <div class="modal-body">
               <h5 class="modal-title text-white font-weight-lg">
-                ${this.progressStage == "downloading"
-                  ? "Downloading the language model..."
-                  : this.progressStage == "extracting"
-                    ? "Extracting audio..."
-                    : "Transcribing..."}
+                ${progressCopy(this._progress.stage).title}
               </h5>
 
               <b class="text-secondary"
-                >${this.progressStage == "downloading"
-                  ? "This happens once per language, and the model stays on this Mac."
-                  : "The audio never leaves your computer."}</b
+                >${progressCopy(this._progress.stage).note}</b
               >
 
               <progress-bar
-                percent="${Math.round(this.progressFraction * 100)}"
+                percent="${progressPercent(this._progress.fraction)}"
               ></progress-bar>
 
               <div class="d-flex justify-content-end mt-3">

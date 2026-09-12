@@ -76,6 +76,61 @@ export function sortLocales(
   });
 }
 
+/** How a locale reads in the picker. */
+export function localeLabel(locale: TranscriptionLocale): string {
+  return `${locale.name}${locale.installed ? "" : " (downloads once)"}`;
+}
+
+/**
+ * What `transcribe:locales` answered, as the panel's own state.
+ *
+ * The shape main sends — `{ available, locales, reason }` — read defensively,
+ * because it crosses IPC and the web build has no main process behind the
+ * bridge at all.
+ *
+ * Two rules, and both were invisible in the panel:
+ *
+ * - **Sort, then choose.** `chooseDefaultLocale`'s region fallback takes the
+ *   first same-language entry and its last resort takes the first installed
+ *   one, so both read array *order* — and `sortLocales` is what puts an
+ *   installed `en-US` above an `en-ZA` the OS happened to enumerate first.
+ *   Choosing from the unsorted list gives a different answer for any language
+ *   whose regions are not all installed, which is the defect this module was
+ *   extracted to fix in the first place.
+ * - **An unavailable recogniser forces `openai`.** Leaving `method` at `apple`
+ *   would transcribe through OpenAI while the button still read On-device —
+ *   the panel disables that button but its *styling* keys on `method`, so the
+ *   UI would claim one thing and the wire would carry another.
+ */
+export function applyLocales(
+  result: unknown,
+  preferences: readonly string[],
+): {
+  available: boolean;
+  reason: string;
+  locales: TranscriptionLocale[];
+  selectedLocale: string;
+  method: "apple" | "openai";
+} {
+  const payload = (result ?? {}) as {
+    available?: unknown;
+    locales?: unknown;
+    reason?: unknown;
+  };
+  const available = payload.available === true;
+  const locales = sortLocales(
+    Array.isArray(payload.locales) ? (payload.locales as TranscriptionLocale[]) : [],
+  );
+
+  return {
+    available,
+    reason: typeof payload.reason === "string" ? payload.reason : "",
+    locales,
+    selectedLocale: chooseDefaultLocale(locales, preferences),
+    method: available ? "apple" : "openai",
+  };
+}
+
 function languageOf(identifier: string): string {
   return identifier.split("-")[0].toLowerCase();
 }

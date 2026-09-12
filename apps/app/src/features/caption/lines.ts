@@ -69,6 +69,59 @@ export function linesFromWordGroups(groups: CaptionWord[][]): CaptionLine[] {
 }
 
 /**
+ * One word as the transcriber reports it, across the IPC boundary.
+ *
+ * Milliseconds, and `confidence` rather than `score` — the shape
+ * `electron/mcp/analysis/segments.ts#TranscriptWord` sends. Restated
+ * structurally rather than imported, because `apps/app` must not reach into
+ * `electron/`, and because the panel is a *consumer* of that shape: declaring
+ * it here is what makes a change on the far side a type error on this one.
+ */
+export type TranscribedWord = {
+  word: string;
+  startMs: number;
+  endMs: number;
+  /** 0..1. Absent for the OpenAI back end, which reports none per word. */
+  confidence?: number;
+  /** A diarisation label. Used by main to break lines; nothing here shows it. */
+  speaker?: string;
+};
+
+/**
+ * Build from the transcriber's own grouping, converting units on the way in.
+ *
+ * **The two clocks meet here and nowhere else.** Main counts in milliseconds
+ * because that is what a media timestamp is; this module counts in seconds
+ * because that is what a media element's `currentTime` gives, which is what the
+ * panel compares against sixty times a second. Converting at the boundary keeps
+ * a single unit inside each side instead of a field-by-field mixture, which is
+ * the defect `captionLayout` was lifted out of the panel to fix.
+ *
+ * `confidence` becomes `score` **only when it is there**, so a word the back end
+ * said nothing about has no key rather than an explicit `undefined` — the rule
+ * `toSegment` already keeps on the other side of the wire. The guard is
+ * `!= null`, not truthiness, so a reported confidence of exactly `0` survives.
+ *
+ * `speaker` is dropped. A change of speaker still breaks a line, in main, but
+ * the panel has nowhere to show the label and inventing a chip for it here would
+ * put the vocabulary in two places.
+ */
+export function linesFromTranscript(
+  groups: TranscribedWord[][] | null | undefined,
+): CaptionLine[] {
+  return linesFromWordGroups(
+    (groups ?? []).map((group) =>
+      group.map((word) => ({
+        word: word.word,
+        start: word.startMs / 1000,
+        end: word.endMs / 1000,
+        ...(word.confidence != null ? { score: word.confidence } : {}),
+      })),
+    ),
+  );
+}
+
+/**
  * Split a line at a caret position in its text.
  *
  * **Picks a cut *time*, then partitions the words by it** — one rule, two ways
@@ -226,6 +279,33 @@ export function wordIndexAt(
     }
   }
   return null;
+}
+
+/**
+ * Which line, and which word inside it, at `timeSec`.
+ *
+ * The pair every caller actually wants, written once. The panel computed it
+ * twice — in its 60Hz re-render gate and again in `render()` — from two
+ * independent copies of the same three lines, and the gate keyed on a string
+ * derived from only one of them. Two answers to "what is highlighted" is one
+ * too many, and the one that drifts is the one nothing is watching.
+ *
+ * `wordIndex` is null whenever `lineIndex` is, and also inside a line during a
+ * gap between its words, which is a real state: a caption is on screen for its
+ * whole span, and nobody is speaking between two of its words.
+ */
+export function activeAt(
+  lines: CaptionLine[],
+  timeSec: number,
+): { lineIndex: number | null; wordIndex: number | null } {
+  const lineIndex = lineIndexAt(lines, timeSec);
+  return {
+    lineIndex,
+    wordIndex: wordIndexAt(
+      lineIndex == null ? undefined : lines[lineIndex],
+      timeSec,
+    ),
+  };
 }
 
 /**

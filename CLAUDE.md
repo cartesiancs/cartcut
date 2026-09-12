@@ -524,20 +524,52 @@ and its suite did not change.
 webpack compiles it and the root `tsconfig.json` typechecks it. It is a leaf that
 `Control` mounts; nothing in `apps/app` imports back.
 
+**Every decision it makes lives in `apps/app/src/features/caption/`**, not in the
+component. `apps/automatic-caption/` is outside every vitest include pattern, and
+this repo has no DOM test environment — so a rule kept inside the Lit class is a
+rule nothing can check. The class is a dispatcher over these:
+
 ```
-apps/app/src/features/caption/lines.ts    the caption model: split, merge, edit
-apps/app/src/features/caption/layout.ts   captionLayout — where a caption sits
+apps/app/src/features/caption/lines.ts    the caption model: split, merge, edit,
+                                          linesFromTranscript (ms -> s), activeAt
+apps/app/src/features/caption/layout.ts   captionLayout / captionStyle — where a
+                                          caption sits, and what one *is*
 apps/app/src/features/caption/locale.ts   which language to offer first
+apps/app/src/features/caption/rows.ts     the `editComplate` payload
+apps/app/src/features/caption/editor.ts   the keymap AND the undo stack
+apps/app/src/features/caption/preview.ts  the canvas paint
+apps/app/src/features/caption/previewLoop.ts  the two rAF handles, the 60Hz gate
+apps/app/src/features/caption/transcribeSession.ts  the job, over a port
 apps/app/src/features/caption/timing.ts   source ms -> timeline ms
 apps/app/src/features/media/seek.ts       seek, and know when the frame arrived
 ```
 
-**The preview draws the element it will place.** `captionOptions` is one factory:
-the preview feeds it to `createTextElement` and paints with `renderElement`, and
-`handleClickComplate` emits it for `Control` → `addText` to hand to the *same*
-`createTextElement`. Parity is therefore structural rather than maintained —
-verified by diffing the panel's canvas against `renderTimelineAtTime` over the
-same element: **0 differing pixels of 2,073,600**.
+The keymap and the undo reducer share `editor.ts` deliberately — the keymap's
+output is the reducer's input, so the behaviour worth testing is the chain, which
+is the arrangement `mask/penSession.ts` makes for `penKey`. Bootstrap, the
+transcription bridge and `requestAnimationFrame` are each reached only through a
+narrow port (`ModalLike`, `TranscribePort`, `FrameScheduler`), which is what lets
+all of it run under `environment: "node"` against a fake.
+
+**The preview draws the element it will place.** `layout.ts#captionStyle` is one
+factory: `preview.ts` feeds it to `createTextElement` and paints with
+`renderElement`, and `rows.ts` emits it for `Control` → `addText` to hand to the
+*same* `createTextElement`. Parity is therefore structural rather than
+maintained, and `caption/preview.parity.test.ts` now asserts it on every run
+rather than once by hand — one side `paintCaptionPreview`, the other
+`renderTimelineAtTime`: **0 differing pixels of 2,073,600**.
+
+Two things about that suite. It asserts the *difference* between two renders in
+one process, which is why it is host-independent even though `golden.test.ts`
+keeps text out of its digests for the opposite reason. And **it asserts ink
+before asserting equality** — `paint` filters on `isElementVisibleAtTime` and the
+preview does not, so a caption whose span misses the cursor is drawn by one side
+and skipped by the other, and two blank frames differ in zero pixels too. A first
+draft passed that way.
+
+The one known exception is pinned in the same file: `captionsFrom` trims a line's
+text and the preview does not, so **a trailing space moves a centred caption**
+between the preview and the placed clip.
 
 It replaced a hand-rolled `drawCaption`/`drawTextBackground` that was out by a
 font size vertically, used a line advance of 52 against the renderer's 62.4, and
@@ -546,7 +578,7 @@ spaces** — `width` from the source clip's native size, `locationY` from a lite
 1080, and the element landing on a canvas sized by `previewSize`. What you
 positioned was not what you got, and on a vertical project it was not close.
 
-Four things that are easy to get wrong:
+Five things that are easy to get wrong:
 
 - **`renderElement` with `context` omitted is the right call**, not `renderText`
   after a translate. For today's caption the two are identical — no blend, no
@@ -579,7 +611,12 @@ Four things that are easy to get wrong:
   every time someone finishes a word — which is why this is an `<input>` and not
   a `contenteditable`. The old `window`-level listener split on *any* Enter in
   the editor, including one inside a caption field, and could never be removed
-  because it was registered with `.bind(this)`.
+  because it was registered with `.bind(this)`. The guard is
+  `editor.ts#captionKeyIntent` now, and it short-circuits **every** key — Cmd+Z
+  included. Two more things that rule decides, both pinned: the comparison is
+  `key === "z"`, lower case only, so there is no redo and **Caps Lock disables
+  undo**; and the handler must name the event's fields rather than spread it, because
+  a DOM event's properties are prototype getters and `{ ...event }` is `{}`.
 
 `splitCaption` used to rebuild every line's text from the raw words, so one Enter
 discarded every correction typed so far; the line that would have restored it was

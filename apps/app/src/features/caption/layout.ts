@@ -50,6 +50,13 @@ export type CaptionLayout = {
   locationY: number;
 };
 
+/** A `CaptionLayout` plus the fixed look. Assignable to `TextElementOptions`. */
+export type CaptionStyle = CaptionLayout & {
+  textcolor: string;
+  optionsAlign: "center";
+  backgroundEnable: true;
+};
+
 /**
  * A caption box for this frame.
  *
@@ -76,6 +83,39 @@ export function captionLayout(
     width: style.width ?? w,
     locationX: style.locationX ?? 0,
     locationY: style.locationY ?? defaultY(h, fontsize, height, placement),
+  };
+}
+
+/**
+ * Everything that makes a caption a caption, except its words.
+ *
+ * The box from `captionLayout` plus the four constants the auto-caption panel
+ * has always applied: white, centred, with a background band. It is what both
+ * halves of the panel are built on — the preview draws
+ * `createTextElement(captionStyle(...) + text)`, and the emitted row is the same
+ * object with the caption's own `text`/`startTime`/`duration` spread over it —
+ * so the preview and the placed clip cannot differ in anything that reaches the
+ * picture.
+ *
+ * **It takes no line index, and that is the point.** The panel's version read
+ * `lines[index].text` and was called with the index of the *filtered*
+ * `captionsFrom` output, so on any transcript where the user had emptied a line
+ * the two lists disagreed from that line on. It was harmless only because the
+ * caption's own `text` was spread afterwards and overwrote the wrong one — a
+ * load-bearing spread order, and a trap waiting for the first per-line style
+ * property anyone adds. Taking the index away is a subtraction, not a fix:
+ * nothing downstream was reading the field it produced.
+ */
+export function captionStyle(
+  frame: CaptionFrame,
+  placement: CaptionPlacement = "lowerThird",
+  style: CaptionStyleOverrides = {},
+): CaptionStyle {
+  return {
+    ...captionLayout(frame, placement, style),
+    textcolor: "#ffffff",
+    optionsAlign: "center",
+    backgroundEnable: true,
   };
 }
 
