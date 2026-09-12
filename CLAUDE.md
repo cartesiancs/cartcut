@@ -29,11 +29,18 @@ npm test         # vitest run
 npx tsc --noEmit -p ./.tsconfig    # typecheck the main process
 npx webpack --mode=development     # build the renderer once
 npm run build:overlay              # the screen recorder's own Vite app
+npm run build:speech               # the native STT sidecar (Swift, macOS only)
 ```
 
 `npm run dev` does **not** build `apps/overlay-record`; it has its own lockfile
 and its own `tsc`. Build it after changing anything under it, or the recorder
 windows load a stale bundle. The release scripts do run it.
+
+It **does** build `native/cartcut-stt`, the Swift speech sidecar — that one is a
+staleness check and two `swiftc` calls, so it costs nothing after the first run,
+and a checkout with no binary would otherwise silently lose on-device
+transcription. It skips itself, loudly, on Windows or without the macOS 26 SDK.
+See "On-device speech-to-text".
 
 FFmpeg and ffprobe binaries live in `./bin/<platform>-<arch>/` — `darwin-arm64`,
 `darwin-x64`, `win32-x64` — and `electron/lib/ffmpeg.ts` picks the directory from
@@ -420,6 +427,95 @@ clip that has a reveal. That list is now pinned against
 `@types/timeline.ts#ALL_ANIMATABLE_PROPERTIES` rather than against the families
 spelled out in the test — which is the third time that guard would otherwise
 have gone stale at the same moment as the copy it guards.
+
+## On-device speech-to-text
+
+Transcription with **per-word timings**, from macOS's own recogniser. No key, no
+network, no server. It is what the auto-caption panel's word chips and
+split-at-a-word are built on, and the reason the panel's "Local" method is
+finally local: it used to ask for a `CartcutAutoServer` URL, read it out of a DOM
+input by id, and POST the wav to a WhisperX server the user had to run.
+
+```
+native/cartcut-stt/Sources/     the Swift CLI — main.swift, Transcribe.swift, Emitter.swift
+scripts/buildSpeech.mjs         two swiftc calls into bin/<platform>-<arch>/
+electron/lib/speechBin.ts       where the binary is, and whether this Mac can use it
+electron/lib/speechStt.ts       spawn + NDJSON parse + abort. No Electron, so it is tested
+electron/mcp/transcribe.ts      the three back ends and the disk cache
+electron/ipc/ipcTranscribe.ts   the renderer's job queue, progress and cancel
+apps/app/src/features/caption/locale.ts   which language to offer first
+```
+
+**A sidecar process, not a native Node addon.** A N-API module would couple the
+app to Electron's ABI and an `electron-rebuild` step this repo has never needed —
+it has zero first-party native modules. Speech.framework also wants a Swift
+concurrency runtime and an async result stream, which is natural in a process
+and awkward across that boundary, and a framework crash cannot take the editor
+with it. Same shape as `ffmpeg`, `ffprobe` and `yt-dlp`.
+
+**`"apple"`, never `"native"` and never folded into `"local"`.** The WhisperX
+server is *also* local, so the useful distinction is whose engine it is:
+`local` is a server you run, `openai` is an API you pay for, `apple` is the OS.
+The panel's button says **On-device**.
+
+Five things that are easy to get wrong:
+
+- **Word timings live on the runs of the `AttributedString`, not on
+  `Result.range`.** `Result.range` is the whole segment, so reading it gives one
+  pseudo-word per sentence — which is exactly the defect the OpenAI path has and
+  the reason this exists. The attribute is
+  `AttributeScopes.SpeechAttributes.TimeRangeAttribute`, and it is only populated
+  because the transcriber was built with `attributeOptions: [.audioTimeRange]`.
+- **A finish call is mandatory.** Ending the input does not end the session, so
+  omitting `finalizeAndFinish*` leaves the results stream open and the process
+  **hangs** instead of failing.
+- **Built at a macOS 12 deployment target, though everything it uses is
+  macOS 26.** At 12.0 the Speech symbols are weak imports, `if #available` never
+  touches them, and the binary launches on an old system and reports
+  `requires_macos_26` in the same NDJSON as everything else. Built at
+  `-target …macos26.0` it fails at `exec` with a dyld diagnostic on stderr, which
+  a caller cannot tell from a missing binary. 12.0 is also where Swift
+  concurrency is in the OS, so no back-deployment dylib has to be found a home.
+- **`assetInstallationRequest` is not nil for an installed locale.** It hands
+  back a request that completes at once, so acting on it alone flashed
+  "Downloading language model" on every single run. `AssetInventory.status` is
+  the separate question, and the one to ask first.
+- **Availability is decided in JS before anything is spawned**
+  (`speechBin.ts#isNativeSpeechAvailable`), from `process.getSystemVersion()` and
+  the binary's existence. The Swift `if #available` is the second line of
+  defence, not the first.
+
+Nothing signs the binary here. electron-builder signs every Mach-O under
+`Contents/`, deepest-first with the `.app` last — verified against the 0.5.4
+build, where an entirely unsigned `bin/darwin-x64/ffmpeg` came out carrying
+Developer ID, the hardened runtime and this repo's `entitlementsInherit`. So
+`extraResources` needed no change, and an `afterSign` hook would be actively
+wrong: it would invalidate the outer signature that seals `Contents/Resources`
+and fail notarization. **No new entitlement either** — the macOS 26 Speech API
+has no authorization call at all (`grep -i authoriz` over its `.swiftinterface`
+finds nothing), so there is no TCC prompt for on-device file transcription;
+`NSSpeechRecognitionUsageDescription` belongs to the legacy `SFSpeechRecognizer`
+and is in `extendInfo` only as belt-and-braces.
+
+**The panel and the agent call one function.** Both go through
+`transcribeFile`, which already owned ffmpeg extraction (16 kHz mono, exactly
+what the recogniser wants) and the disk cache — so a clip the agent has read
+opens instantly in the panel, and there is one ffmpeg pass per clip rather than
+two. The locale is folded into the cache key's `method` component
+(`apple:ko-KR`), because the same file read as Korean and as English gives
+different words; `method` was already part of the hash, so `CACHE_VERSION` did
+not move and every transcript cached before this stays valid.
+
+Measured on the machine this was built on, at 11s of Korean speech: a cold run
+8.7s — essentially all of it the one-off model download — and a warm run 0.44s,
+about 25x real time. That ratio is why the progress UI names the stage: the
+download is the only wait worth a bar, and it happens once per language.
+
+`analysis/segments.ts` gained `groupWords` so the break rule is written once.
+The panel needs the *words* of each caption line and an agent needs the *text*,
+and two copies of "where does a caption break" is two answers to the one
+judgement in that file. `segmentWords` is now `groupWords(...).map(toSegment)`
+and its suite did not change.
 
 ## The application menu
 

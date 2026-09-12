@@ -6,7 +6,7 @@
   "author": "cartesiancs",
   "scripts": {
     "start": "electron .",
-    "dev": "concurrently \"npm run compile\" \"npm run bundle:src\"",
+    "dev": "npm run build:speech && concurrently \"npm run compile\" \"npm run bundle:src\"",
     "compile": "tsc -w -p ./.tsconfig",
     "bundle": "npm run bundle:src",
     "vendor:sync": "node scripts/syncVendor.mjs",
@@ -24,7 +24,8 @@
     "build:web": "npm run bundle:prod:src && node scripts/buildWeb.mjs",
     "build:main": "tsc -p ./.tsconfig",
     "build:overlay": "npm --prefix apps/overlay-record ci && npm --prefix apps/overlay-record run build",
-    "build:osx": "npm run build:main && npm run bundle:prod:src && npm run build:overlay && electron-builder build --mac --arm64 --x64 -p always",
+    "build:speech": "node scripts/buildSpeech.mjs",
+    "build:osx": "npm run build:main && npm run bundle:prod:src && npm run build:overlay && node scripts/buildSpeech.mjs --all && electron-builder build --mac --arm64 --x64 -p always",
     "build:win": "npm run build:main && npm run bundle:prod:src && npm run build:overlay && electron-builder build --win --x64 -p always",
     "build": "npm run build:osx && npm run build:win"
   },
@@ -83,7 +84,8 @@
       "entitlementsInherit": "assets/entitlements.mac.plist",
       "extendInfo": {
         "NSCameraUsageDescription": "Cartcut uses your camera to record a picture-in-picture bubble alongside your screen.",
-        "NSMicrophoneUsageDescription": "Cartcut uses your microphone to record narration alongside your screen."
+        "NSMicrophoneUsageDescription": "Cartcut uses your microphone to record narration alongside your screen.",
+        "NSSpeechRecognitionUsageDescription": "Cartcut transcribes your clips on this Mac to generate captions. The audio never leaves your computer."
       }
     },
     "dmg": {},

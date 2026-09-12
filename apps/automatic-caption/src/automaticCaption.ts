@@ -1,15 +1,16 @@
 import { LitElement, html } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import { v4 as uuidv4 } from "uuid";
-import axios from "axios";
+import {
+  chooseDefaultLocale,
+  sortLocales,
+} from "../../app/src/features/caption/locale";
 import "./progress";
 
 @customElement("automatic-caption")
 export class AutomaticCaption extends LitElement {
   isLoadVideo: boolean;
   videoPath: string;
-  isProgressProcessing: boolean;
-  processingVideoModal: any;
   analyzingVideoModal: any;
   analyzedText: any[];
   selectVideoModal: any;
@@ -29,22 +30,31 @@ export class AutomaticCaption extends LitElement {
   analyzedEditCaption: any[];
   mediaType: string;
   captionLocationY: number;
-  targetTranslateLang: any;
-  sttMethod: "local" | "openai";
+  sttMethod: "apple" | "openai";
   mediaDuration: number;
   resolution: { w: number; h: number };
+
+  /** Languages this Mac can transcribe, and whether it can at all. */
+  locales: { id: string; name: string; installed: boolean }[];
+  selectedLocale: string;
+  speechAvailable: boolean;
+  speechReason: string;
+
+  /** The running job. Minted here so a model download can be cancelled. */
+  jobId: string | null;
+  progressFraction: number;
+  progressStage: string;
+  private _unsubscribeProgress: (() => void) | null;
 
   constructor() {
     super();
 
     this.isLoadVideo = false;
-    this.isProgressProcessing = false;
     this.videoPath = "";
     this.mediaType = "";
     this.analyzedText = [];
     this.analyzedEditCaption = [];
 
-    this.processingVideoModal = undefined;
     this.analyzingVideoModal = undefined;
 
     this.selectedRow = null;
@@ -68,9 +78,17 @@ export class AutomaticCaption extends LitElement {
     this._done = false;
     this._animationFrameId = null;
 
-    this.targetTranslateLang = "en";
+    this.locales = [];
+    this.selectedLocale = "";
+    this.speechAvailable = false;
+    this.speechReason = "";
 
-    this.sttMethod = "local";
+    this.jobId = null;
+    this.progressFraction = 0;
+    this.progressStage = "";
+    this._unsubscribeProgress = null;
+
+    this.sttMethod = "apple";
 
     const fontSize = 52;
     const screenHeight = 1080;
@@ -82,27 +100,64 @@ export class AutomaticCaption extends LitElement {
 
     window.addEventListener("keydown", this._handleKeydown.bind(this));
 
-    window.electronAPI.res.ffmpeg.extractAudioFromVideoProgress(
-      (event, progress) => {
-        //this.processingVideoModal.show();
-        console.log(progress);
-      },
-    );
-
-    window.electronAPI.res.ffmpeg.extractAudioFromVideoFinish(
-      (event, outputWav) => {
-        this.isProgressProcessing = true;
-        setTimeout(() => {
-          this.processingVideoModal.hide();
-          this.analyzingVideoModal.show();
-        }, 500);
-
-        this.analyzeAudioToText(outputWav);
+    // Audio extraction used to happen here, through the legacy fluent-ffmpeg
+    // IPC, with the result arriving as a fire-and-forget event. Main owns the
+    // whole job now — extract, then recognise — so there is one promise to
+    // await and one place a failure can come from.
+    const api = this._transcribeApi();
+    if (api != null) {
+      this._unsubscribeProgress = api.onProgress((payload: any) => {
+        // Progress for a job we are no longer waiting on is not ours to draw.
+        if (payload?.jobId !== this.jobId) {
+          return;
+        }
+        this.progressFraction = payload.fraction ?? 0;
+        this.progressStage = payload.stage ?? "";
         this.requestUpdate();
+      });
 
-        console.log(outputWav);
-      },
-    );
+      api.locales().then((result: any) => {
+        this.speechAvailable = result?.available === true;
+        this.speechReason = result?.reason ?? "";
+        this.locales = sortLocales(result?.locales ?? []);
+        this.selectedLocale = this._defaultLocale();
+        // Falling back silently would transcribe with OpenAI while the button
+        // still said On-device.
+        if (!this.speechAvailable) {
+          this.sttMethod = "openai";
+        }
+        this.requestUpdate();
+      });
+    }
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this._unsubscribeProgress?.();
+    this._unsubscribeProgress = null;
+  }
+
+  private _transcribeApi(): any {
+    // Null in the web build, which has no main process behind the bridge.
+    return (window as any).electronAPI?.req?.transcribe ?? null;
+  }
+
+  /**
+   * The language to offer first.
+   *
+   * `navigator.languages` is the user's own ranked list, which is more than
+   * `navigator.language` alone knows: a Korean user running macOS in English
+   * has `ko-KR` in it. The rule itself lives in `features/caption/locale.ts`
+   * because this file is outside every test include pattern and getting it
+   * wrong is invisible — the first version offered South African English to an
+   * `en-US` user and looked entirely reasonable doing it.
+   */
+  private _defaultLocale(): string {
+    const preferences = [
+      ...(navigator.languages ?? []),
+      navigator.language ?? "",
+    ];
+    return chooseDefaultLocale(this.locales, preferences);
   }
 
   @query("#previewCanvasCaption") canvas!: HTMLCanvasElement;
@@ -149,104 +204,102 @@ export class AutomaticCaption extends LitElement {
     );
   }
 
-  async analyzeAudioToText(audioPath) {
-    this.applyCursorEvent("lockKeyboard");
-
-    if (this.sttMethod == "local") {
-      const serverUrl = document.querySelector("#CartcutAutoServer").value;
-      const response = await fetch(audioPath);
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch audio file: ${response.statusText}`);
-      }
-
-      const audioBlob = await response.blob();
-
-      const formData = new FormData();
-      formData.append("file", audioBlob, "audio.wav");
-
-      const request = await axios.post(`${serverUrl}/api/audio/test`, formData);
-
-      const result = request.data.result;
-
-      this.analyzingVideoModal.hide();
-
-      setTimeout(() => {
-        this.analyzingVideoModal.hide();
-      }, 1000);
-
-      this.analyzedText = [];
-
-      for (let index = 0; index < result.length; index++) {
-        const element = result[index] as any;
-        this.analyzedText.push(element.words);
-        this.analyzedEditCaption.push(
-          element.words
-            .map((item: any) => {
-              return item.word;
-            })
-            .join(" "),
-        );
-      }
-
-      this.requestUpdate();
-
-      this.panelVideoModal.show();
+  /**
+   * Transcribe the selected clip.
+   *
+   * One call into main, which extracts the audio and runs the recogniser. The
+   * panel used to do the first half itself through the legacy fluent-ffmpeg IPC
+   * and the second half with `axios`, against a server the user had to run and
+   * whose URL lived in a DOM input. Both halves are gone: main's `transcribeFile`
+   * is the same function the MCP `get_transcript` tool calls, so the two share
+   * one disk cache and a clip the agent has already read opens instantly here.
+   */
+  async transcribeSelectedClip() {
+    const api = this._transcribeApi();
+    if (api == null) {
+      this._failAnalysis("Transcription needs the desktop app.");
+      return;
     }
 
-    if (this.sttMethod == "openai") {
-      window.electronAPI.req.ai.stt(audioPath).then((result) => {
-        console.log(result);
+    // Minted before the call so Cancel works during a first-run model download,
+    // which is the long wait and resolves `start` only when it finishes.
+    this.jobId = uuidv4();
+    this.progressFraction = 0;
+    this.progressStage = "extracting";
+    this.requestUpdate();
 
-        this.analyzingVideoModal.hide();
-
-        setTimeout(() => {
-          this.analyzingVideoModal.hide();
-        }, 1000);
-
-        this.analyzedText = [];
-
-        let seg = result.text.segments.map((item) => {
-          return {
-            word: item.text,
-            start: item.start,
-            end: item.end,
-            score: 1,
-          };
-        });
-
-        for (let index = 0; index < seg.length; index++) {
-          const element = seg[index] as any;
-          this.analyzedText.push([element]);
-          this.analyzedEditCaption.push(element.word);
-        }
-
-        this.requestUpdate();
-
-        this.panelVideoModal.show();
+    let result: any;
+    try {
+      result = await api.start(this.jobId, {
+        source: this.videoPath,
+        method: this.sttMethod,
+        locale: this.sttMethod === "apple" ? this.selectedLocale : undefined,
       });
+    } catch (error) {
+      this._failAnalysis(String(error));
+      return;
+    } finally {
+      this.jobId = null;
     }
+
+    if (result?.ok !== true) {
+      if (result?.cancelled === true) {
+        this._endAnalysis();
+        return;
+      }
+      this._failAnalysis(result?.error ?? "Transcription failed.");
+      return;
+    }
+
+    this.analyzedText = [];
+    this.analyzedEditCaption = [];
+
+    for (const line of result.lines) {
+      // Into the panel's own word shape: seconds rather than ms, and `score`
+      // for what a back end calls confidence. Everything downstream — the word
+      // chips, the split cursor, the preview — already speaks it, so none of it
+      // had to change.
+      this.analyzedText.push(
+        line.map((word: any) => ({
+          word: word.word,
+          start: word.startMs / 1000,
+          end: word.endMs / 1000,
+          score: word.confidence ?? 1,
+        })),
+      );
+      this.analyzedEditCaption.push(
+        line.map((word: any) => word.word).join(" "),
+      );
+    }
+
+    this.analyzingVideoModal.hide();
+    this.requestUpdate();
+    this.panelVideoModal.show();
   }
 
-  async translateText() {
-    try {
-      const serverUrl = document.querySelector("#CartcutAutoServer").value;
-      const formData = new FormData();
-      formData.append("contents", JSON.stringify(this.analyzedEditCaption));
-      formData.append("target_lang", this.targetTranslateLang);
+  /** Give the keyboard back and close the progress modal. */
+  _endAnalysis() {
+    this.analyzingVideoModal?.hide();
+    this.isLoadVideo = false;
+    this.jobId = null;
+    this.applyCursorEvent("pointer");
+    this.requestUpdate();
+  }
 
-      const request = await axios.post(`${serverUrl}/api/translate`, formData);
+  _failAnalysis(message: string) {
+    this._endAnalysis();
+    // The old local path swallowed every failure into an empty catch with a
+    // `// NOTE: alert 띄우기` beside it, so a server that was not running looked
+    // exactly like a clip with no speech in it.
+    window.alert(message);
+  }
 
-      const result = JSON.parse(request.data.result.content);
-
-      console.log(result);
-
-      this.analyzedEditCaption = [...result];
-      this.appendAnalyzedEditCaption();
-      this.requestUpdate();
-    } catch (error) {
-      // NOTE: alert 띄우기
+  cancelAnalysis() {
+    const api = this._transcribeApi();
+    if (api != null && this.jobId != null) {
+      void api.cancel(this.jobId);
     }
+    this._endAnalysis();
   }
 
   appendAnalyzedEditCaption() {
@@ -259,34 +312,10 @@ export class AutomaticCaption extends LitElement {
   }
 
   async handleClickLoadVideo() {
-    console.log(this.timeline);
     this.videoRows = this.timelineMap();
     this.requestUpdate();
 
     this.selectVideoModal.show();
-
-    // window.electronAPI.req.dialog.openFile().then(async (result) => {
-    //   const filePath = result;
-    //   const fileType = mime.lookup(filePath).type;
-    //   if (fileType == "video") {
-    //     this.isLoadVideo = true;
-    //     this.videoPath = filePath;
-    //     this.processingVideoModal.show();
-
-    //     const tempPath = await window.electronAPI.req.app.getTempPath();
-    //     const outputAudio = tempPath.path + `${uuidv4()}.wav`;
-
-    //     console.log(tempPath, outputAudio);
-
-    //     window.electronAPI.req.ffmpeg.extractAudioFromVideo(
-    //       outputAudio,
-    //       filePath,
-    //     );
-
-    //     this.requestUpdate();
-    //     // pass
-    //   }
-    // });
   }
 
   async handleClickSelectVideo() {
@@ -294,32 +323,15 @@ export class AutomaticCaption extends LitElement {
 
     this.selectVideoModal.hide();
     this.isLoadVideo = true;
-
     this.videoPath = this.selectedRow;
-    this.processingVideoModal.show();
 
-    if (this.mediaType == "video") {
-      const tempPath = await window.electronAPI.req.app.getTempPath();
-      const outputAudio = tempPath.path + `${uuidv4()}.wav`;
-
-      window.electronAPI.req.ffmpeg.extractAudioFromVideo(
-        outputAudio,
-        this.videoPath,
-      );
-    }
-
-    if (this.mediaType == "audio") {
-      this.isProgressProcessing = true;
-      setTimeout(() => {
-        this.processingVideoModal.hide();
-        this.analyzingVideoModal.show();
-      }, 500);
-
-      this.analyzeAudioToText(this.videoPath);
-      this.requestUpdate();
-    }
-
+    // One path for video and audio alike: main runs ffmpeg over whatever it is
+    // handed. The panel used to skip extraction for audio and give the file
+    // straight to the recogniser, which was two flows and two ways to fail.
+    this.analyzingVideoModal.show();
     this.requestUpdate();
+
+    await this.transcribeSelectedClip();
   }
 
   handleClickComplate() {
@@ -402,13 +414,6 @@ export class AutomaticCaption extends LitElement {
     if (this.hasUpdatedOnce == false) {
       this.selectVideoModal = new bootstrap.Modal(
         document.getElementById("SelectVideo"),
-        {
-          keyboard: false,
-        },
-      );
-
-      this.processingVideoModal = new bootstrap.Modal(
-        document.getElementById("ProcessingVideo"),
         {
           keyboard: false,
         },
@@ -714,7 +719,7 @@ export class AutomaticCaption extends LitElement {
     this.requestUpdate();
   }
 
-  setSttMethod(method) {
+  setSttMethod(method: "apple" | "openai") {
     this.sttMethod = method;
     this.requestUpdate();
   }
@@ -756,8 +761,11 @@ export class AutomaticCaption extends LitElement {
   }
 
   _handleKeydown(event) {
-    if (event.keyCode == 13) {
-      // enter
+    // This listener is on `window`, so it hears every Enter in the editor — not
+    // just the ones meant for the caption list. Without the guard, an Enter
+    // pressed before anything has been transcribed indexes an empty array and
+    // throws inside `splitCaption`.
+    if (event.keyCode == 13 && this.analyzedText.length > 0) {
       this.splitCaption();
     }
   }
@@ -766,11 +774,6 @@ export class AutomaticCaption extends LitElement {
     console.log(event, index);
     this.analyzedEditCaption[index] = event.target.value;
     this.requestUpdate();
-  }
-
-  _handleChangeTargetLang(event) {
-    console.log(event.target.value);
-    this.targetTranslateLang = event.target.value;
   }
 
   render() {
@@ -872,12 +875,13 @@ export class AutomaticCaption extends LitElement {
       >
         <div class="d-flex gap-2 col">
           <button
-            @click=${() => this.setSttMethod("local")}
-            class="btn btn-sm ${this.sttMethod == "local"
+            @click=${() => this.setSttMethod("apple")}
+            ?disabled=${!this.speechAvailable}
+            class="btn btn-sm ${this.sttMethod == "apple"
               ? "btn-primary"
               : "btn-default"} text-light"
           >
-            Local
+            On-device
           </button>
           <button
             @click=${() => this.setSttMethod("openai")}
@@ -889,19 +893,31 @@ export class AutomaticCaption extends LitElement {
           </button>
         </div>
 
-        <div class="input-group ${this.sttMethod == "local" ? "" : "d-none"}">
-          <span class="input-group-text bg-dark text-light" id="basic-addon2"
-            >CartcutAutoServer</span
+        ${this.speechAvailable
+          ? html``
+          : html`<span class="text-secondary" style="font-size: 0.75rem;"
+              >${this.speechReason}</span
+            >`}
+
+        <div class="input-group ${this.sttMethod == "apple" ? "" : "d-none"}">
+          <span class="input-group-text bg-dark text-light">Language</span>
+          <select
+            id="CartcutSttLocale"
+            class="form-select form-control bg-default bg-dark text-light"
+            @change=${(e) => {
+              this.selectedLocale = e.target.value;
+              this.requestUpdate();
+            }}
           >
-          <input
-            id="CartcutAutoServer"
-            type="text"
-            class="form-control bg-default bg-dark text-light ${this.isLoadVideo
-              ? "d-none"
-              : ""}"
-            placeholder="http(s)://custom.domain:port"
-            value="http://127.0.0.1:8000"
-          />
+            ${this.locales.map(
+              (locale) => html`<option
+                value=${locale.id}
+                ?selected=${locale.id === this.selectedLocale}
+              >
+                ${locale.name}${locale.installed ? "" : " (downloads once)"}
+              </option>`,
+            )}
+          </select>
         </div>
 
         <button
@@ -916,26 +932,6 @@ export class AutomaticCaption extends LitElement {
 
       <div
         class="modal fade"
-        id="ProcessingVideo"
-        data-bs-keyboard="false"
-        data-bs-backdrop="static"
-        tabindex="-1"
-      >
-        <div class="modal-dialog modal-dialog-centered modal-lg">
-          <div class="modal-content bg-dark">
-            <div class="modal-body">
-              <h5 class="modal-title text-white font-weight-lg">
-                Extracting audio from video...
-              </h5>
-
-              <b class="text-secondary">Processing video... </b>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div
-        class="modal fade"
         id="AnalyzingVideo"
         data-bs-keyboard="false"
         data-bs-backdrop="static"
@@ -945,10 +941,32 @@ export class AutomaticCaption extends LitElement {
           <div class="modal-content bg-dark">
             <div class="modal-body">
               <h5 class="modal-title text-white font-weight-lg">
-                Analyzing video captions...
+                ${this.progressStage == "downloading"
+                  ? "Downloading the language model..."
+                  : this.progressStage == "extracting"
+                    ? "Extracting audio..."
+                    : "Transcribing..."}
               </h5>
 
-              <b class="text-secondary">Processing</b>
+              <b class="text-secondary"
+                >${this.progressStage == "downloading"
+                  ? "This happens once per language, and the model stays on this Mac."
+                  : "The audio never leaves your computer."}</b
+              >
+
+              <progress-bar
+                percent="${Math.round(this.progressFraction * 100)}"
+              ></progress-bar>
+
+              <div class="d-flex justify-content-end mt-3">
+                <button
+                  type="button"
+                  class="btn btn-sm btn-secondary"
+                  @click=${this.cancelAnalysis}
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1104,14 +1122,6 @@ export class AutomaticCaption extends LitElement {
                     </button>
                   </div>
 
-                  <button
-                    type="button"
-                    class="btn btn-primary  btn-sm w-auto"
-                    data-bs-toggle="modal"
-                    data-bs-target="#TranslateText"
-                  >
-                    Translate
-                  </button>
                 </div>
 
                 <div
@@ -1151,39 +1161,6 @@ export class AutomaticCaption extends LitElement {
         </div>
       </div>
 
-      <div class="modal fade" id="TranslateText" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered modal-lg">
-          <div class="modal-content bg-dark">
-            <div class="modal-body">
-              <h5 class="modal-title text-white font-weight-lg">
-                Translate Text...
-              </h5>
-
-              <b class="text-secondary">Select target language</b>
-
-              <select
-                @change=${this._handleChangeTargetLang}
-                ref="lists"
-                id="fontSelect"
-                class="form-select form-control bg-default text-light"
-                aria-label="Select target lang"
-              >
-                <option value="en" selected>English</option>
-                <option value="ko">Korean</option>
-              </select>
-
-              <button
-                type="button"
-                @click=${this.translateText}
-                class="btn btn-primary  btn-sm"
-                data-bs-dismiss="modal"
-              >
-                Translate
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
     `;
   }
 

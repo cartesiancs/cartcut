@@ -280,6 +280,27 @@ const request = {
       return () => ipcRenderer.removeListener("reverse:progress", wrapped);
     },
   },
+  /**
+   * Speech-to-text. `start(jobId, { source, method, locale })` resolves with the
+   * words already grouped into caption lines — or `{ ok: false, cancelled }` —
+   * and `onProgress` hears `{ jobId, fraction, stage }` meanwhile. The stage
+   * separates a first-run model download, which can be minutes, from the
+   * transcription itself, which is seconds.
+   *
+   * The job id is minted by the caller so it can cancel that download before
+   * `start` resolves.
+   */
+  transcribe: {
+    locales: () => ipcRenderer.invoke("transcribe:locales"),
+    start: (jobId, request) =>
+      ipcRenderer.invoke("transcribe:start", jobId, request),
+    cancel: (jobId) => ipcRenderer.invoke("transcribe:cancel", jobId),
+    onProgress: (handler) => {
+      const wrapped = (_event, payload) => handler(payload);
+      ipcRenderer.on("transcribe:progress", wrapped);
+      return () => ipcRenderer.removeListener("transcribe:progress", wrapped);
+    },
+  },
   selfhosted: {
     run: () => ipcRenderer.invoke("selfhosted:run"),
   },

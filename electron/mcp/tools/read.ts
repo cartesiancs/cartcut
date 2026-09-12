@@ -348,9 +348,21 @@ export function registerReadTools(define: Registrar) {
           .describe("Only entries overlapping this timeline window."),
         endMs: z.number().optional(),
         method: z
-          .enum(["local", "openai"])
+          .enum(["local", "openai", "apple"])
           .optional()
-          .describe("Defaults to whichever back end the user has configured."),
+          .describe(
+            'Defaults to the best available: "apple" is macOS\'s own on-device recogniser ' +
+              "(no key, no network, per-word timings and confidence), then OpenAI if a key is set, " +
+              "then a local WhisperX server.",
+          ),
+        locale: z
+          .string()
+          .optional()
+          .describe(
+            'BCP-47, for the "apple" method only — e.g. "ko-KR". Defaults to the app\'s language. ' +
+              "Transcribing with the wrong language returns confident nonsense rather than an error, " +
+              "so pass it when the speech is not in the user's own language.",
+          ),
       },
       annotations: readOnly,
     },
@@ -362,7 +374,9 @@ export function registerReadTools(define: Registrar) {
       // Transcription is minutes, not milliseconds — the bridge's default
       // timeout does not apply here because this runs entirely in main.
       const { transcribeFile } = await import("../transcribe");
-      const transcript = await transcribeFile(source.localpath, args.method);
+      const transcript = await transcribeFile(source.localpath, args.method, {
+        locale: args.locale,
+      });
 
       // `confidence` and `speaker` are spread rather than named so a field a
       // back end starts reporting reaches the agent without another edit here,

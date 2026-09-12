@@ -56,61 +56,83 @@ function meanConfidence(words: TranscriptWord[]): number | undefined {
 }
 
 /**
- * Group words into caption-sized lines.
+ * Does a caption line end before this word?
  *
  * Breaks on a long pause, on length, on duration, on sentence-final
  * punctuation — and on a **change of speaker**, which is not a nicety: a line
  * carrying two people's words is wrong as a caption however well it fits, and a
  * segment list that cannot be attributed is no use for cutting between takes.
+ *
+ * Extracted so `groupWords` and `segmentWords` cannot disagree. The auto-caption
+ * panel needs the words of each line and the agent needs the text of each line,
+ * and a second copy of this rule is a second answer to "where does a caption
+ * break" — which is the one judgement in this file.
  */
-export function segmentWords(words: TranscriptWord[]): TranscriptSegment[] {
-  const segments: TranscriptSegment[] = [];
+function breaksBefore(word: TranscriptWord, current: TranscriptWord[]): boolean {
+  if (current.length === 0) {
+    return false;
+  }
+  const previous = current[current.length - 1];
+  const gap = word.startMs - previous.endMs;
+  const chars = current.reduce((n, w) => n + w.word.length + 1, 0);
+  const span = word.endMs - current[0].startMs;
+  const endsSentence = /[.!?。？！]$/.test(previous.word);
+  const speakerChanged = word.speaker !== previous.speaker;
+
+  return (
+    speakerChanged ||
+    gap >= GAP_MS ||
+    chars >= MAX_CHARS ||
+    span >= MAX_MS ||
+    endsSentence
+  );
+}
+
+/**
+ * Group words into caption-sized lines, keeping the words.
+ *
+ * The auto-caption panel shows one clickable chip per word and splits a line at
+ * a chosen word, so it needs the grouping itself rather than the joined text
+ * `segmentWords` returns.
+ */
+export function groupWords(words: TranscriptWord[]): TranscriptWord[][] {
+  const lines: TranscriptWord[][] = [];
   let current: TranscriptWord[] = [];
 
-  const flush = () => {
-    if (current.length === 0) {
-      return;
-    }
-    const confidence = meanConfidence(current);
-    const speaker = current[0].speaker;
-    segments.push({
-      text: current
-        .map((w) => w.word)
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .trim(),
-      startMs: current[0].startMs,
-      endMs: current[current.length - 1].endMs,
-      ...(confidence != null ? { confidence } : {}),
-      ...(speaker != null ? { speaker } : {}),
-    });
-    current = [];
-  };
-
   for (const word of words) {
-    if (current.length > 0) {
-      const previous = current[current.length - 1];
-      const gap = word.startMs - previous.endMs;
-      const chars = current.reduce((n, w) => n + w.word.length + 1, 0);
-      const span = word.endMs - current[0].startMs;
-      const endsSentence = /[.!?。？！]$/.test(previous.word);
-      const speakerChanged = word.speaker !== previous.speaker;
-
-      if (
-        speakerChanged ||
-        gap >= GAP_MS ||
-        chars >= MAX_CHARS ||
-        span >= MAX_MS ||
-        endsSentence
-      ) {
-        flush();
-      }
+    if (breaksBefore(word, current)) {
+      lines.push(current);
+      current = [];
     }
     current.push(word);
   }
-  flush();
+  if (current.length > 0) {
+    lines.push(current);
+  }
 
-  return segments;
+  return lines;
+}
+
+/** One line of words as a caption-sized segment. */
+function toSegment(line: TranscriptWord[]): TranscriptSegment {
+  const confidence = meanConfidence(line);
+  const speaker = line[0].speaker;
+  return {
+    text: line
+      .map((w) => w.word)
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim(),
+    startMs: line[0].startMs,
+    endMs: line[line.length - 1].endMs,
+    ...(confidence != null ? { confidence } : {}),
+    ...(speaker != null ? { speaker } : {}),
+  };
+}
+
+/** Caption-sized lines, as text. The same grouping `groupWords` makes. */
+export function segmentWords(words: TranscriptWord[]): TranscriptSegment[] {
+  return groupWords(words).map(toSegment);
 }
 
 /**

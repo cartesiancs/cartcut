@@ -22,6 +22,17 @@ import { app } from "electron";
 import axios from "axios";
 import Store from "electron-store";
 import { ffmpegConfig } from "../lib/ffmpeg";
+import {
+  isNativeSpeechAvailable,
+  nativeSpeechUnavailableReason,
+  SPEECH_BIN_PATH,
+} from "../lib/speechBin";
+import {
+  readLocales,
+  transcribeWav,
+  type SpeechLocales,
+  type SpeechStage,
+} from "../lib/speechStt";
 import { toFsPath } from "./localpath";
 import {
   confidenceFromLogProb,
@@ -34,11 +45,31 @@ const store = new Store();
 
 export type { TranscriptWord, TranscriptSegment } from "./analysis/segments";
 
+/**
+ * Which engine produced a transcript.
+ *
+ * `"apple"` rather than `"native"`, and deliberately not folded into `"local"`:
+ * the WhisperX server is *also* local, so the useful distinction is whose engine
+ * it is. `local` is a server you run, `openai` is an API you pay for, `apple` is
+ * the OS.
+ */
+export type TranscriptMethod = "local" | "openai" | "apple";
+
 export type Transcript = {
   words: TranscriptWord[];
   segments: TranscriptSegment[];
-  method: "local" | "openai";
+  method: TranscriptMethod;
 };
+
+/** What a caller can watch and interrupt. */
+export type TranscribeOptions = {
+  /** BCP-47, for the `apple` method. Ignored by the other two. */
+  locale?: string;
+  onProgress?: (fraction: number, stage: TranscribeStage) => void;
+  signal?: AbortSignal;
+};
+
+export type TranscribeStage = "extracting" | SpeechStage;
 
 export const DEFAULT_LOCAL_STT_URL = "http://127.0.0.1:8000";
 
@@ -293,17 +324,64 @@ async function transcribeOpenAi(wavPath: string): Promise<Transcript> {
   return { words, segments, method: "openai" };
 }
 
+/** The languages this Mac can transcribe on device, for a language picker. */
+export async function appleSpeechLocales(): Promise<SpeechLocales> {
+  if (!isNativeSpeechAvailable()) {
+    return {
+      available: false,
+      locales: [],
+      reason: nativeSpeechUnavailableReason() ?? undefined,
+    };
+  }
+  return readLocales(SPEECH_BIN_PATH);
+}
+
+/**
+ * macOS's own recogniser, through the `cartcut-stt` sidecar.
+ *
+ * The only back end here that reports **per-word** timings without being asked
+ * twice, which is what the auto-caption panel's word chips and split-at-a-word
+ * are built on. It is also the only one that needs no network and no key.
+ *
+ * Confidence comes per word, so — unlike the OpenAI path, which has only a
+ * per-segment mean log probability — `segmentWords` gets real numbers to
+ * average and nothing is invented.
+ */
+async function transcribeApple(
+  wavPath: string,
+  options: TranscribeOptions,
+): Promise<Transcript> {
+  const reason = nativeSpeechUnavailableReason();
+  if (reason != null) {
+    throw new Error(reason);
+  }
+
+  const words = await transcribeWav(
+    SPEECH_BIN_PATH,
+    wavPath,
+    options.locale ?? app.getLocale(),
+    options.onProgress,
+    options.signal,
+  );
+
+  return { words, segments: segmentWords(words), method: "apple" };
+}
+
 /**
  * Transcribe one media file.
  *
- * `method` defaults to whichever back end is configured: a local server if one
- * is set, otherwise OpenAI. Times in the result are **source-file** ms; mapping
- * them onto the timeline is the renderer's job, because only it knows the
- * clip's trim and speed.
+ * `method` defaults to the best back end this machine actually has: macOS's own
+ * recogniser when it is available, then OpenAI if a key is set, then a local
+ * server. That ordering is what makes `get_transcript` work on a fresh install
+ * with no key and no server running, which it previously could not.
+ *
+ * Times in the result are **source-file** ms; mapping them onto the timeline is
+ * the renderer's job, because only it knows the clip's trim and speed.
  */
 export async function transcribeFile(
   source: string,
-  method?: "local" | "openai",
+  method?: TranscriptMethod,
+  options: TranscribeOptions = {},
 ): Promise<Transcript> {
   // A clip's `localpath` is a percent-encoded `file://` URL, not a path, so
   // everything below that reaches `fs` — this guard and `cacheKey`'s `statSync`
@@ -314,21 +392,37 @@ export async function transcribeFile(
     throw new Error(`No such media file: ${mediaPath}`);
   }
 
-  const chosen: "local" | "openai" =
-    method ?? (store.get("ai_openai_key") ? "openai" : "local");
+  const chosen: TranscriptMethod =
+    method ??
+    (isNativeSpeechAvailable()
+      ? "apple"
+      : store.get("ai_openai_key")
+        ? "openai"
+        : "local");
 
-  const key = cacheKey(mediaPath, chosen);
+  // The locale is part of the identity of an `apple` transcript — the same file
+  // read as Korean and as English gives different words — so it has to be part
+  // of the key. Folding it into the `method` component is what lets that happen
+  // without moving `CACHE_VERSION`, so every transcript cached before this
+  // feature stays valid.
+  const locale = options.locale ?? app.getLocale();
+  const cacheMethod = chosen === "apple" ? `apple:${locale}` : chosen;
+
+  const key = cacheKey(mediaPath, cacheMethod);
   const cached = readCache(key);
   if (cached != null) {
     return cached;
   }
 
+  options.onProgress?.(0, "extracting");
   const wavPath = await extractAudio(mediaPath);
   try {
     const transcript =
-      chosen === "local"
-        ? await transcribeLocal(wavPath)
-        : await transcribeOpenAi(wavPath);
+      chosen === "apple"
+        ? await transcribeApple(wavPath, { ...options, locale })
+        : chosen === "local"
+          ? await transcribeLocal(wavPath)
+          : await transcribeOpenAi(wavPath);
 
     writeCache(key, transcript);
     return transcript;
