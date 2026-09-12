@@ -45,8 +45,16 @@ export type RasterizeResult =
   | { ok: true; elementId: string; localpath: string; box: RasterBox }
   | { ok: false; elementId: string; reason: string };
 
-/** Wait for webfonts, but never hang the command on a face that never arrives. */
-async function fontsSettled(timeoutMs = 3000): Promise<void> {
+/**
+ * Wait for webfonts, but never hang the command on a face that never arrives.
+ *
+ * Exported for the auto-caption panel, which draws text onto its own canvas and
+ * has the same hazard this module opens with: ask before the `@font-face` has
+ * loaded and the fallback face is what gets measured and drawn. The panel's
+ * *first* caption is the one at risk, and it is the one a user judges the
+ * feature by.
+ */
+export async function fontsSettled(timeoutMs = 3000): Promise<void> {
   const fonts = (document as Document & { fonts?: FontFaceSet }).fonts;
   if (fonts?.ready == null) {
     return;

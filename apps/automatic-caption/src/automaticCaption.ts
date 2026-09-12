@@ -5,34 +5,84 @@ import {
   chooseDefaultLocale,
   sortLocales,
 } from "../../app/src/features/caption/locale";
+import {
+  captionLayout,
+  type CaptionPlacement,
+} from "../../app/src/features/caption/layout";
+import {
+  captionsFrom,
+  lineIndexAt,
+  linesFromWordGroups,
+  mergeCaretOffset,
+  mergeLineWithPrevious,
+  setLineText,
+  splitLineAt,
+  wordIndexAt,
+  type CaptionLine,
+} from "../../app/src/features/caption/lines";
+import {
+  captionSources,
+  sourceDisplayName,
+  type CaptionSource,
+} from "../../app/src/features/caption/sources";
+import { seekMedia } from "../../app/src/features/media/seek";
+import {
+  displayDurationSec,
+  playbackFraction,
+  playheadLabel,
+} from "../../app/src/features/media/playback";
+import { createTextElement } from "../../app/src/features/element/textElement";
+import { fontsSettled } from "../../app/src/features/element/rasterizeText";
+import { renderElement } from "../../app/src/features/renderer/element";
+import { renderText } from "../../app/src/features/renderer/text";
 import "./progress";
+
+/** How many split/merge steps the panel's own Cmd+Z can walk back. */
+const UNDO_LIMIT = 50;
 
 @customElement("automatic-caption")
 export class AutomaticCaption extends LitElement {
   isLoadVideo: boolean;
   videoPath: string;
   analyzingVideoModal: any;
-  analyzedText: any[];
   selectVideoModal: any;
-  selectedRow: any;
   videoRows: any;
   hasUpdatedOnce: boolean;
   panelVideoModal: any;
   isPlay: boolean;
-  private _start: any;
-  private _previousTimeStamp: any;
   private _done: boolean;
   private _animationFrameId: any;
+  private _paintRequest: number;
+  /** Seconds into the source media. Read from the media element, never accumulated. */
   progress: number;
-  previousProgress: number;
-  splitCursor: number[];
-  selectedKey: null;
-  analyzedEditCaption: any[];
+  /** The element key of the chosen clip. Identifies the row and the source. */
+  selectedKey: string | null;
   mediaType: string;
-  captionLocationY: number;
   sttMethod: "apple" | "openai";
   mediaDuration: number;
-  resolution: { w: number; h: number };
+
+  /**
+   * The captions, as one list.
+   *
+   * Replaces `analyzedText` (words) and `analyzedEditCaption` (strings), two
+   * arrays joined only by a shared index, which drifted the moment anything was
+   * edited. See `features/caption/lines.ts`.
+   */
+  lines: CaptionLine[];
+  private _undo: CaptionLine[][];
+
+  /**
+   * Vertical placement of the caption block.
+   *
+   * Deliberately not called "align": `optionsAlign` is the *horizontal*
+   * alignment of the text inside its own box, and the panel used to call both
+   * axes by the same word.
+   */
+  private _verticalPlacement: CaptionPlacement;
+
+  /** What the template last showed, so a 60Hz loop does not re-render it. */
+  private _shownActive = "";
+  private _shownLabel = "";
 
   /** Languages this Mac can transcribe, and whether it can at all. */
   locales: { id: string; name: string; installed: boolean }[];
@@ -52,12 +102,11 @@ export class AutomaticCaption extends LitElement {
     this.isLoadVideo = false;
     this.videoPath = "";
     this.mediaType = "";
-    this.analyzedText = [];
-    this.analyzedEditCaption = [];
+    this.lines = [];
+    this._undo = [];
 
     this.analyzingVideoModal = undefined;
 
-    this.selectedRow = null;
     this.selectedKey = null;
 
     this.hasUpdatedOnce = false;
@@ -66,17 +115,9 @@ export class AutomaticCaption extends LitElement {
     this.progress = 0;
     this.mediaDuration = 0;
 
-    this.resolution = {
-      w: 1920,
-      h: 1080,
-    };
-
-    this.previousProgress = 0;
-
-    this._start = undefined;
-    this._previousTimeStamp = undefined;
     this._done = false;
     this._animationFrameId = null;
+    this._paintRequest = 0;
 
     this.locales = [];
     this.selectedLocale = "";
@@ -89,16 +130,14 @@ export class AutomaticCaption extends LitElement {
     this._unsubscribeProgress = null;
 
     this.sttMethod = "apple";
+    this._verticalPlacement = "lowerThird";
 
-    const fontSize = 52;
-    const screenHeight = 1080;
-    const yPadding = 100;
-
-    this.captionLocationY = screenHeight - yPadding - fontSize;
-
-    this.splitCursor = [0, 0];
-
-    window.addEventListener("keydown", this._handleKeydown.bind(this));
+    // There used to be a `window` keydown listener here that split the caption
+    // at the cursor on *any* Enter — including one pressed inside a caption
+    // input, which both split the wrong line and discarded the edit being made.
+    // Enter is handled on the input itself now. The listener could not have been
+    // removed anyway: it was registered with `.bind(this)`, so a second instance
+    // of this panel would have split twice per keypress.
 
     // Audio extraction used to happen here, through the legacy fluent-ffmpeg
     // IPC, with the result arriving as a fire-and-forget event. Main owns the
@@ -135,6 +174,22 @@ export class AutomaticCaption extends LitElement {
     super.disconnectedCallback();
     this._unsubscribeProgress?.();
     this._unsubscribeProgress = null;
+    // The animation loop used to outlive the component, going on compositing a
+    // full-resolution frame every 16ms against a canvas nobody could see.
+    this._stopLoop();
+    this.mediaElement()?.pause();
+  }
+
+  private _stopLoop() {
+    this._done = true;
+    if (this._animationFrameId) {
+      window.cancelAnimationFrame(this._animationFrameId);
+      this._animationFrameId = null;
+    }
+    if (this._paintRequest) {
+      window.cancelAnimationFrame(this._paintRequest);
+      this._paintRequest = 0;
+    }
   }
 
   private _transcribeApi(): any {
@@ -165,6 +220,20 @@ export class AutomaticCaption extends LitElement {
   @property()
   timeline: any;
 
+  /**
+   * The project's frame, from `Control`.
+   *
+   * Captions are laid out in these pixels and previewed at this size. The panel
+   * used to mix three spaces — `width` from the source clip's native size,
+   * `locationY` from a literal 1080, and the element then landing on a canvas
+   * sized by the project — so what you positioned was not what you got.
+   */
+  @property()
+  previewSize: { w: number; h: number } = { w: 1920, h: 1080 };
+
+  @property()
+  backgroundColor = "#000000";
+
   @property()
   isDev = false;
 
@@ -172,22 +241,140 @@ export class AutomaticCaption extends LitElement {
     return this;
   }
 
-  handleRowSelection(
-    rowId: any,
-    key: any,
-    mediaType: any,
-    duration: any,
-    resolution: { w: number; h: number },
-  ) {
-    this.selectedRow = rowId;
-    this.selectedKey = key;
-    this.mediaType = mediaType;
-    this.mediaDuration = duration;
-    this.resolution = {
-      w: resolution.w,
-      h: resolution.h,
+  // ---------------------------------------------------------------- painting
+
+  private mediaElement(): HTMLMediaElement | null {
+    return this.querySelector(
+      this.mediaType === "audio" ? "#captionPreviewAudio" : "#captionPreviewVideo",
+    );
+  }
+
+  /**
+   * One caption's options, and the single source of what a caption *is*.
+   *
+   * `redrawPreview` turns these into an element to draw; `handleClickComplate`
+   * emits them, and `Control` → `elementControl.addText` hands them to the same
+   * `createTextElement`. The preview and the placed element therefore cannot
+   * differ in anything that reaches the picture — which is the whole point, and
+   * what the hand-rolled `drawCaption` could never promise. It was out by a
+   * font size vertically, used a line advance of 52 against the renderer's 62.4,
+   * and padded the background band on one side only.
+   */
+  private captionOptions(index: number) {
+    const line = this.lines[index];
+    const layout = captionLayout(this.previewSize, this._verticalPlacement);
+
+    return {
+      ...layout,
+      text: line?.text ?? "",
+      textcolor: "#ffffff",
+      optionsAlign: "center" as const,
+      backgroundEnable: true,
     };
-    console.log("Selected Row:", this.selectedRow, key);
+  }
+
+  private captionElement(index: number) {
+    return createTextElement(this.captionOptions(index));
+  }
+
+  /**
+   * The one place pixels are written.
+   *
+   * Never called from `render()` or `updated()`: those fire for every unrelated
+   * state change — the locale picker, the method toggle, transcription progress
+   * — and painting there would couple the paint rate to that noise.
+   */
+  private redrawPreview(): void {
+    const canvas = this.canvas;
+    if (canvas == null) {
+      return;
+    }
+    const ctx = canvas.getContext("2d");
+    if (ctx == null) {
+      return;
+    }
+
+    // Fill rather than clear, with the project's own background — what
+    // `renderer/timeline.ts#paint` does before drawing anything. There was no
+    // clear of any kind here before, so an audio-only clip stacked every caption
+    // it had ever drawn on top of the last.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = this.backgroundColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    this.drawSourceFrame(ctx);
+
+    const index = lineIndexAt(this.lines, this.progress);
+    if (index != null) {
+      // The real path: `renderTimelineAtTime` → `paint` → `renderElement` →
+      // `renderText`. `context` is omitted deliberately — it is only read for
+      // parent lookups, and a caption that is not on the timeline yet has no
+      // parent. The cursor is inert for a plain caption (every animation track
+      // is inactive and there is no reveal), but it is passed honestly anyway.
+      renderElement(
+        ctx,
+        "caption-preview",
+        this.captionElement(index),
+        this.progress * 1000,
+        false,
+        renderText,
+      );
+    }
+  }
+
+  /**
+   * The clip's own picture, in the clip's own box.
+   *
+   * Drawn at the frame's size rather than the canvas's: a 4K clip in a 1080p
+   * project overflows here exactly as it will on the timeline, instead of being
+   * silently squashed to fit, which is information the user needs while
+   * positioning captions over it.
+   */
+  private drawSourceFrame(ctx: CanvasRenderingContext2D): void {
+    if (this.mediaType !== "video") {
+      return;
+    }
+    const video = this.mediaElement() as HTMLVideoElement | null;
+    if (video == null || video.readyState < 2) {
+      return;
+    }
+    ctx.drawImage(video, 0, 0, this.previewSize.w, this.previewSize.h);
+  }
+
+  /**
+   * The canvas backing store is the project's own frame, and CSS does the
+   * downscale — the arrangement `templateThumbnail.ts` and the contact sheet
+   * use. Scaling the context instead would leave the wrap width, band padding
+   * and outline geometrically right but no longer bit-identical to the export.
+   * See the `<canvas>` in `render`: `width:auto; height:auto` under both maxima
+   * is what stops a vertical project being stretched, and its column had to
+   * stop being `position: fixed` with no box before that could mean anything.
+   */
+
+  /** Coalesce repaints through one frame, as `previewCanvas.scheduleDraw` does. */
+  private schedulePaint(): void {
+    if (this._paintRequest) {
+      return;
+    }
+    this._paintRequest = window.requestAnimationFrame(() => {
+      this._paintRequest = 0;
+      this.redrawPreview();
+    });
+  }
+
+  /**
+   * `key` identifies the row, not the path.
+   *
+   * Two clips cut from one file share a `localpath`, and comparing on that lit
+   * up both radio buttons and transcribed whichever came first.
+   */
+  handleRowSelection(row: CaptionSource) {
+    this.selectedKey = row.key;
+    this.videoPath = row.localpath;
+    this.mediaType = row.filetype;
+    this.mediaDuration = row.durationMs;
     this.requestUpdate();
   }
 
@@ -251,26 +438,20 @@ export class AutomaticCaption extends LitElement {
       return;
     }
 
-    this.analyzedText = [];
-    this.analyzedEditCaption = [];
-
-    for (const line of result.lines) {
-      // Into the panel's own word shape: seconds rather than ms, and `score`
-      // for what a back end calls confidence. Everything downstream — the word
-      // chips, the split cursor, the preview — already speaks it, so none of it
-      // had to change.
-      this.analyzedText.push(
+    // Main groups the words into caption lines with `analysis/segments.ts`,
+    // which is where the rule for where a caption breaks lives and is tested.
+    // Only the units change here: ms to seconds, and `confidence` to `score`.
+    this.lines = linesFromWordGroups(
+      (result.lines ?? []).map((line: any[]) =>
         line.map((word: any) => ({
           word: word.word,
           start: word.startMs / 1000,
           end: word.endMs / 1000,
-          score: word.confidence ?? 1,
+          ...(word.confidence != null ? { score: word.confidence } : {}),
         })),
-      );
-      this.analyzedEditCaption.push(
-        line.map((word: any) => word.word).join(" "),
-      );
-    }
+      ),
+    );
+    this._undo = [];
 
     this.analyzingVideoModal.hide();
     this.requestUpdate();
@@ -302,17 +483,8 @@ export class AutomaticCaption extends LitElement {
     this._endAnalysis();
   }
 
-  appendAnalyzedEditCaption() {
-    for (let index = 0; index < this.analyzedEditCaption.length; index++) {
-      try {
-        document.querySelector(`#analyzedEditCaption_${index}`).value =
-          this.analyzedEditCaption[index];
-      } catch (error) {}
-    }
-  }
-
   async handleClickLoadVideo() {
-    this.videoRows = this.timelineMap();
+    this.videoRows = captionSources(this.timeline);
     this.requestUpdate();
 
     this.selectVideoModal.show();
@@ -323,7 +495,11 @@ export class AutomaticCaption extends LitElement {
 
     this.selectVideoModal.hide();
     this.isLoadVideo = true;
-    this.videoPath = this.selectedRow;
+    // `videoPath` is set by `handleRowSelection`, from the row's `localpath`.
+    // It used to be re-derived here from the field that identifies the row,
+    // which was the path once and is the element key now — so this handed a key
+    // to ffmpeg and every transcription failed with "No such media file". One
+    // name for one value is why the field is `selectedKey` and nothing else.
 
     // One path for video and audio alike: main runs ffmpeg over whatever it is
     // handed. The panel used to skip extraction for audio and give the file
@@ -335,79 +511,45 @@ export class AutomaticCaption extends LitElement {
   }
 
   handleClickComplate() {
-    this.analyzingVideoModal.hide();
     this.applyCursorEvent("pointer");
+    this._stopLoop();
+    this.mediaElement()?.pause();
 
-    const screenWidth = this.resolution.w;
-    const screenHeight = this.resolution.h;
-    const xPadding = 100;
-    const yPadding = 100;
-    const fontSize = 52;
-
-    let resultArray: any = [];
-    for (let index = 0; index < this.analyzedText.length; index++) {
-      const element = this.analyzedText[index];
-      const text = this.analyzedEditCaption[index];
-      const x = xPadding;
-      const y = this.captionLocationY;
-      const w = screenWidth - xPadding * 2;
-      const h = fontSize;
-
-      const startTime = element[0].start * 1000;
-      const duration =
-        (element[element.length - 1].end - element[0].start) * 1000 || 1000;
-
-      resultArray.push({
-        // The clip that was transcribed. `startTime`/`duration` below are in
-        // that file's own time, since that is what a transcript timestamps;
-        // the app converts them to timeline time before placing the captions.
-        sourceKey: this.selectedKey,
-        text: text,
-        textcolor: "#ffffff",
-        fontsize: 52,
-        optionsAlign: "center",
-        backgroundEnable: true,
-        locationX: x,
-        locationY: y - fontSize,
-        height: h + 12,
-        width: w,
-        startTime: startTime,
-        duration: duration,
-      });
-    }
+    // `captionsFrom` drops a line the user emptied and guarantees a positive
+    // duration; `captionOptions` is the same factory the preview drew with, so
+    // what is placed is what was on screen.
+    const result = captionsFrom(this.lines).map((caption, index) => ({
+      // The clip that was transcribed. `startTime`/`duration` are in that
+      // file's own time, since that is what a transcript timestamps; the app
+      // converts them to timeline time before placing the captions.
+      sourceKey: this.selectedKey,
+      ...this.captionOptions(index),
+      ...caption,
+    }));
 
     this.dispatchEvent(
       new CustomEvent("editComplate", {
-        detail: {
-          result: resultArray,
-        },
+        detail: { result },
         bubbles: true,
         composed: true,
       }),
     );
 
     this.isLoadVideo = false;
-
     this.requestUpdate();
   }
 
-  handleClickAlignCaptionButton(position: "center" | "bottom") {
-    const fontSize = 52 + 12;
-    const screenHeight = 1080;
-    const yPadding = 100;
-
-    switch (position) {
-      case "center":
-        this.captionLocationY = screenHeight / 2;
-        break;
-
-      case "bottom":
-        this.captionLocationY = screenHeight - yPadding - fontSize;
-
-        break;
-      default:
-        break;
-    }
+  /**
+   * Where the caption block sits vertically.
+   *
+   * Repaints. It previously did not — not even `requestUpdate()` — so while the
+   * preview was paused, which is the normal state when someone is positioning
+   * captions, both buttons appeared to do nothing at all.
+   */
+  handleClickAlignCaptionButton(placement: CaptionPlacement) {
+    this._verticalPlacement = placement;
+    this.schedulePaint();
+    this.requestUpdate();
   }
 
   updated() {
@@ -426,296 +568,161 @@ export class AutomaticCaption extends LitElement {
         },
       );
 
-      this.panelVideoModal = new bootstrap.Modal(
-        document.getElementById("VideoPanel"),
-        {
-          keyboard: false,
-        },
+      const panel = document.getElementById("VideoPanel");
+      this.panelVideoModal = new bootstrap.Modal(panel, {
+        keyboard: false,
+      });
+
+      // The canvas has no layout box until the modal is shown, and nothing
+      // painted on open before — the preview stayed blank until the user
+      // pressed play, reset, or clicked a word.
+      panel?.addEventListener("shown.bs.modal", () => {
+        void fontsSettled().then(() => this.schedulePaint());
+      });
+      panel?.addEventListener("hidden.bs.modal", () => {
+        this.mediaElement()?.pause();
+        this._stopLoop();
+        this.isPlay = false;
+      });
+
+      // `renderer/text.ts` clears its wrap cache when a face lands, but a
+      // cleared cache does not repaint a canvas. The first caption drawn is the
+      // one at risk of being measured in the fallback face.
+      (document as any).fonts?.addEventListener?.("loadingdone", () =>
+        this.schedulePaint(),
       );
     }
 
     this.hasUpdatedOnce = true;
   }
 
-  _step(timestamp) {
-    if (this._start === undefined) {
-      this._start = timestamp;
+  // ------------------------------------------------------------ the clock
+
+  /**
+   * One animation frame.
+   *
+   * **`progress` is read from the media element, not accumulated.** The editor
+   * deliberately runs its cursor off a wall clock, because it has many handles
+   * that must all obey one authoritative time; the panel has exactly one media
+   * element and nothing to stay in sync with, so the media *is* the clock.
+   * Accumulating rAF timestamps drifted from the audio the user could hear, and
+   * `stopVideo` snapshotted the drifted value, so the error compounded across
+   * every pause and resume.
+   */
+  _step() {
+    const media = this.mediaElement();
+    if (media != null) {
+      this.progress = media.currentTime;
     }
-    const elapsed = timestamp - this._start;
-    this.progress = this.previousProgress + elapsed;
 
-    if (this.mediaType == "video") {
-      const video: HTMLVideoElement = document.querySelector(
-        "#captionPreviewVideo",
-      );
-
-      const ctx = this.canvas.getContext("2d") as CanvasRenderingContext2D;
-      ctx.drawImage(video, 0, 0, this.resolution.w, this.resolution.h);
-    }
-
-    this.showRightIndexCaption();
-
-    this.requestUpdate();
+    this.redrawPreview();
+    this.syncChrome();
 
     if (!this._done) {
-      this._animationFrameId = window.requestAnimationFrame((ts) =>
-        this._step(ts),
-      );
+      this._animationFrameId = window.requestAnimationFrame(() => this._step());
     }
   }
 
-  drawCaption(index) {
-    const ctx = this.canvas.getContext("2d") as any;
-    const fontSize = 52;
-    const fontName = "notosanskr";
+  /**
+   * Re-render only when something the template shows has actually changed.
+   *
+   * `_step` used to call `requestUpdate()` every frame, which rebuilt a
+   * `TemplateResult` for every word of the whole transcript sixty times a
+   * second, on the same thread compositing the frame. Nothing in the template
+   * moves that fast: only which word is highlighted, and a readout rounded to
+   * whole seconds. Gating on exactly those two drops updates by about two
+   * orders of magnitude and changes nothing on screen.
+   */
+  private syncChrome() {
+    const lineIndex = lineIndexAt(this.lines, this.progress);
+    const wordIndex = wordIndexAt(
+      lineIndex == null ? undefined : this.lines[lineIndex],
+      this.progress,
+    );
+    const active = `${lineIndex ?? -1}:${wordIndex ?? -1}`;
+    // Gate on the string the template actually shows, not on a rounded second.
+    // `formatPlayhead` floors; gating on `Math.round` would hold the re-render
+    // back across the very boundary where the readout changes, leaving it a
+    // second stale.
+    const label = playheadLabel(this.progress, this.durationSec());
 
-    const text = this.analyzedEditCaption[index];
-
-    const screenWidth = this.resolution.w;
-    const screenHeight = this.resolution.h;
-    const xPadding = 100;
-    const yPadding = 100;
-
-    const x = xPadding;
-    const y = this.captionLocationY;
-    const w = screenWidth - xPadding * 2;
-    const h = fontSize;
-
-    let scaleW = w;
-    let scaleH = h;
-    let tx = x;
-    let ty = y;
-
-    ctx.fillStyle = "#ffffff";
-    ctx.lineWidth = 0;
-    ctx.letterSpacing = `0px`;
-
-    ctx.font = `${fontSize}px ${fontName}`;
-
-    this.drawTextBackground(ctx, text, tx, ty, scaleW, scaleH);
-    ctx.fillStyle = "#ffffff";
-
-    const textSplited = text.split(" ");
-    let line = "";
-    let textY = ty + fontSize;
-    let lineHeight = h;
-
-    for (let index = 0; index < textSplited.length; index++) {
-      const testLine = line + textSplited[index] + " ";
-      const metrics = ctx.measureText(testLine);
-      const testWidth = metrics.width;
-
-      if (testWidth < w) {
-        line = testLine;
-      } else {
-        const wordWidth = ctx.measureText(line).width;
-
-        ctx.fillText(line, tx + w / 2 - wordWidth / 2, textY);
-        line = textSplited[index] + " ";
-        textY += lineHeight;
-      }
+    if (active === this._shownActive && label === this._shownLabel) {
+      return;
     }
-
-    const lastWordWidth = ctx.measureText(line).width;
-
-    ctx.fillText(line, tx + w / 2 - lastWordWidth / 2, textY);
-    // const fontBoxWidth = ctx.measureText(text).width;
-
-    // ctx.fillStyle = "#ffffff";
-
-    // ctx.fillStyle = "#000000";
-    // ctx.fillRect(x, y - fontSize, w, h + 6);
-
-    // ctx.fillStyle = "#ffffff";
-
-    // ctx.fillText(text, x + w / 2 - fontBoxWidth / 2, y);
+    this._shownActive = active;
+    this._shownLabel = label;
+    this.requestUpdate();
   }
 
-  drawTextBackground(ctx, text, x, y, w, h) {
-    const backgroundPadding = 12;
-    let backgroundX = x;
-    let backgroundW = w;
-
-    const textSplited = text.split(" ");
-    let line = "";
-    let textY = y;
-    let lineHeight = h;
-
-    for (let index = 0; index < textSplited.length; index++) {
-      const testLine = line + textSplited[index] + " ";
-      const metrics = ctx.measureText(testLine);
-      const testWidth = metrics.width;
-
-      if (testWidth < w) {
-        line = testLine;
-      } else {
-        const wordWidth = ctx.measureText(line).width;
-
-        backgroundX = x + w / 2 - wordWidth / 2 - backgroundPadding;
-        backgroundW = wordWidth + backgroundPadding;
-
-        ctx.fillStyle = "#000000";
-        ctx.fillRect(backgroundX, textY, backgroundW, h);
-
-        line = textSplited[index] + " ";
-        textY += lineHeight;
-      }
-    }
-
-    const wordWidth = ctx.measureText(line).width;
-    backgroundX = x + w / 2 - wordWidth / 2 - backgroundPadding;
-    backgroundW = wordWidth + backgroundPadding;
-
-    ctx.fillStyle = "#000000";
-    ctx.fillRect(backgroundX, textY, backgroundW, h);
+  /**
+   * The length to show, in seconds.
+   *
+   * The media element's own, not the clip's `duration` — that is the length of
+   * its *trimmed span*, while the panel transcribes and plays the whole file.
+   * Reading the clip's made the bar reach 100% a third of the way through any
+   * trimmed clip, and behave perfectly on the untrimmed ones anyone would test.
+   */
+  private durationSec(): number {
+    return displayDurationSec(
+      this.mediaElement()?.duration,
+      this.mediaDuration,
+    );
   }
 
-  showRightIndexCaption() {
-    let nowCaptionIndex = 0;
-
-    for (let index = 0; index < this.analyzedText.length; index++) {
-      const element: any = this.analyzedText[index];
-      let partText: any = [];
-
-      for (let indexpart = 0; indexpart < element.length; indexpart++) {
-        const partElement = element[indexpart];
-        const isNow =
-          this.progress / 1000 > partElement.start &&
-          this.progress / 1000 < partElement.end + 1;
-
-        if (isNow) {
-          nowCaptionIndex = index;
-          break;
-        }
-      }
+  /** Seek the media and wait for a frame, then repaint. */
+  private async seekTo(timeSec: number) {
+    const media = this.mediaElement();
+    if (media == null) {
+      return;
     }
-
-    console.log(nowCaptionIndex, "SSS");
-
-    this.drawCaption(nowCaptionIndex);
+    try {
+      await seekMedia(media, timeSec);
+    } catch {
+      // A media element that cannot be read is already visible as a blank
+      // preview; there is nothing useful to say about it here.
+    }
+    this.progress = media.currentTime;
+    this.schedulePaint();
+    this.syncChrome();
   }
 
   playVideo() {
     this.isPlay = true;
-    this._start = undefined;
-    this._previousTimeStamp = undefined;
     this._done = false;
 
     if (this._animationFrameId) {
       window.cancelAnimationFrame(this._animationFrameId);
     }
+    this._animationFrameId = window.requestAnimationFrame(() => this._step());
 
-    this._animationFrameId = window.requestAnimationFrame((ts) =>
-      this._step(ts),
-    );
-
-    if (this.mediaType == "video") {
-      const video: HTMLVideoElement = document.querySelector(
-        "#captionPreviewVideo",
-      );
-      console.log(video);
-      video.play();
-    }
-
-    if (this.mediaType == "audio") {
-      const audio: HTMLAudioElement = document.querySelector(
-        "#captionPreviewAudio",
-      );
-      audio.play();
-    }
-
+    void this.mediaElement()?.play();
     this.requestUpdate();
   }
 
   stopVideo() {
     this.isPlay = false;
-    this.previousProgress = this.progress;
-
-    if (this.mediaType == "video") {
-      const video: HTMLVideoElement = document.querySelector(
-        "#captionPreviewVideo",
-      );
-      video.pause();
-    }
-
-    if (this.mediaType == "audio") {
-      const audio: HTMLAudioElement = document.querySelector(
-        "#captionPreviewAudio",
-      );
-      audio.pause();
-    }
-
-    if (this._animationFrameId) {
-      window.cancelAnimationFrame(this._animationFrameId);
-    }
-    this._done = true;
-
-    this.showRightIndexCaption();
-
+    this.mediaElement()?.pause();
+    this._stopLoop();
+    this.schedulePaint();
     this.requestUpdate();
   }
 
-  resetVideo() {
+  async resetVideo() {
     this.isPlay = false;
-    this._done = true;
-    this.progress = 0;
-    this.previousProgress = 0;
-
-    if (this.mediaType == "video") {
-      const video: HTMLVideoElement = document.querySelector(
-        "#captionPreviewVideo",
-      );
-      video.currentTime = 0;
-
-      const ctx = this.canvas.getContext("2d") as CanvasRenderingContext2D;
-      ctx.drawImage(video, 0, 0, this.resolution.w, this.resolution.h);
-    }
-
-    if (this.mediaType == "audio") {
-      const audio: HTMLAudioElement = document.querySelector(
-        "#captionPreviewAudio",
-      );
-      audio.currentTime = 0;
-    }
-
-    this.showRightIndexCaption();
-
+    // It used to kill the loop without pausing, so the audio went on playing
+    // audibly underneath a frozen canvas.
+    this.mediaElement()?.pause();
+    this._stopLoop();
+    await this.seekTo(0);
     this.requestUpdate();
   }
 
-  clickCaptionText(e, index, indexPart, time) {
-    this.stopVideo();
-    if (time != -1) {
-      this.progress = time * 1000;
-      this.previousProgress = time * 1000;
-
-      if (this.mediaType == "video") {
-        const video: HTMLVideoElement = document.querySelector(
-          "#captionPreviewVideo",
-        );
-        video.currentTime = time;
-
-        const ctx = this.canvas.getContext("2d") as CanvasRenderingContext2D;
-        ctx.drawImage(video, 0, 0, this.resolution.w, this.resolution.h);
-      }
-
-      if (this.mediaType == "audio") {
-        const audio: HTMLAudioElement = document.querySelector(
-          "#captionPreviewAudio",
-        );
-        audio.currentTime = time;
-      }
-    }
-
-    this.showRightIndexCaption();
-
-    console.log(e.target.offsetWidth, e.offsetX);
-    if (e.offsetX / e.target.offsetWidth > 0.5) {
-      this.splitCursor = [index, indexPart];
-    } else {
-      this.splitCursor = [index, indexPart - 1];
-    }
-
+  /** Seek to a word. The chips are the timing ribbon, and this is what they are for. */
+  async clickCaptionText(timeSec: number) {
+    this.isPlay = false;
+    this.mediaElement()?.pause();
+    this._stopLoop();
+    await this.seekTo(timeSec);
     this.requestUpdate();
   }
 
@@ -724,105 +731,167 @@ export class AutomaticCaption extends LitElement {
     this.requestUpdate();
   }
 
-  splitCaption() {
-    const index = this.splitCursor[0];
-    const indexPart = this.splitCursor[1] + 1;
+  // ----------------------------------------------------------- the editor
 
-    if (index < 0 || index > this.analyzedText.length) {
-      throw new Error("Invalid index");
+  /**
+   * Apply a pure operation from `caption/lines.ts`, with undo.
+   *
+   * An operation that declines returns its input **by identity**, which is what
+   * lets this skip the snapshot: pressing Enter at the end of a line should not
+   * fill the undo stack with states identical to the one before.
+   */
+  private applyLines(next: CaptionLine[]) {
+    if (next === this.lines) {
+      return false;
     }
-
-    const prevValue = this.analyzedText[index].slice(0, indexPart);
-    const nextValue = this.analyzedText[index].slice(indexPart);
-
-    this.analyzedText.splice(index, 1, prevValue);
-
-    this.analyzedText.splice(index + 1, 0, nextValue);
-
-    let copyEditCaption = [...this.analyzedEditCaption];
-    this.analyzedEditCaption = [];
-
-    for (let itr = 0; itr < this.analyzedText.length; itr++) {
-      const element = this.analyzedText[itr];
-      let text = this.analyzedText[itr]
-        .map((item: any) => {
-          return item.word;
-        })
-        .join(" ");
-
-      //   if (index == itr) {
-      //     text = copyEditCaption[itr];
-      //   }
-
-      this.analyzedEditCaption.push(text);
+    this._undo.push(this.lines);
+    if (this._undo.length > UNDO_LIMIT) {
+      this._undo.shift();
     }
-    this.appendAnalyzedEditCaption();
+    this.lines = next;
+    this.schedulePaint();
+    this.requestUpdate();
+    return true;
+  }
+
+  /**
+   * Undo one split or merge.
+   *
+   * Typing is left to the input's own native undo — a snapshot per keystroke
+   * would bury the structural edits this is for under hundreds of character
+   * states, which is the opposite of useful.
+   */
+  undoEdit() {
+    const previous = this._undo.pop();
+    if (previous == null) {
+      return;
+    }
+    this.lines = previous;
+    this.schedulePaint();
     this.requestUpdate();
   }
 
-  _handleKeydown(event) {
-    // This listener is on `window`, so it hears every Enter in the editor — not
-    // just the ones meant for the caption list. Without the guard, an Enter
-    // pressed before anything has been transcribed indexes an empty array and
-    // throws inside `splitCaption`.
-    if (event.keyCode == 13 && this.analyzedText.length > 0) {
-      this.splitCaption();
+  splitLine(index: number, caretOffset: number) {
+    if (this.applyLines(splitLineAt(this.lines, index, caretOffset))) {
+      // The caret belongs at the start of the new line, as in any editor.
+      this.focusLine(index + 1, 0);
     }
   }
 
-  _handleChangeInput(event, index) {
-    console.log(event, index);
-    this.analyzedEditCaption[index] = event.target.value;
-    this.requestUpdate();
+  mergeLine(index: number) {
+    const caret = mergeCaretOffset(this.lines, index);
+    if (this.applyLines(mergeLineWithPrevious(this.lines, index))) {
+      this.focusLine(index - 1, caret);
+    }
+  }
+
+  /** Put the caret back where the gesture left it, after Lit has re-rendered. */
+  private focusLine(index: number, caretOffset: number) {
+    void this.updateComplete.then(() => {
+      const input = this.querySelector<HTMLInputElement>(
+        `#analyzedEditCaption_${index}`,
+      );
+      if (input == null) {
+        return;
+      }
+      input.focus();
+      const at = Math.min(caretOffset, input.value.length);
+      input.setSelectionRange(at, at);
+    });
+  }
+
+  _handleCaptionKeydown(event: KeyboardEvent, index: number) {
+    const input = event.target as HTMLInputElement;
+
+    // A Korean IME fires Enter to commit a composition. Splitting on it would
+    // cut the line in half every time someone finished typing a word — the
+    // reason this is an <input> and not a contenteditable.
+    if (event.isComposing || (event as any).keyCode === 229) {
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      this.splitLine(index, input.selectionStart ?? 0);
+      return;
+    }
+
+    if (
+      event.key === "Backspace" &&
+      input.selectionStart === 0 &&
+      input.selectionEnd === 0
+    ) {
+      event.preventDefault();
+      this.mergeLine(index);
+      return;
+    }
+
+    if (
+      event.key === "Delete" &&
+      input.selectionStart === input.value.length &&
+      input.selectionEnd === input.value.length &&
+      index + 1 < this.lines.length
+    ) {
+      event.preventDefault();
+      this.mergeLine(index + 1);
+      return;
+    }
+
+    if ((event.metaKey || event.ctrlKey) && event.key === "z") {
+      event.preventDefault();
+      this.undoEdit();
+    }
+  }
+
+  _handleChangeInput(event: Event, index: number) {
+    const value = (event.target as HTMLInputElement).value;
+    // Straight to state, no snapshot: typing is the input's own undo to manage.
+    this.lines = setLineText(this.lines, index, value);
+    this.schedulePaint();
   }
 
   render() {
-    let analyzedTextMap: any = [];
+    const activeLine = lineIndexAt(this.lines, this.progress);
+    const activeWord = wordIndexAt(
+      activeLine == null ? undefined : this.lines[activeLine],
+      this.progress,
+    );
 
-    for (let index = 0; index < this.analyzedText.length; index++) {
-      const element: any = this.analyzedText[index];
-      let partText: any = [];
-      let analyzedText = "";
+    const analyzedTextMap = this.lines.map(
+      (line, index) => html`<div class="text-light caption">
+        <div class="caption-ribbon">
+          ${line.words.map(
+            (word, wordIndex) => html`<span
+              @click=${() => this.clickCaptionText(word.start)}
+              class="${activeLine === index && activeWord === wordIndex
+                ? "caption-part active"
+                : "caption-part"}"
+              >${word.word}</span
+            >`,
+          )}
+        </div>
 
-      for (let indexPart = 0; indexPart < element.length; indexPart++) {
-        const partElement = element[indexPart];
-        const isNow =
-          this.progress / 1000 > partElement.start &&
-          this.progress / 1000 < partElement.end;
-
-        const isNowCursor =
-          this.splitCursor[0] == index && this.splitCursor[1] == indexPart;
-
-        analyzedText += partElement.word + " ";
-
-        partText.push(
-          html`<span
-              @click=${(e) =>
-                this.clickCaptionText(
-                  e,
-                  index,
-                  indexPart,
-                  partElement.start || -1,
-                )}
-              class="${isNow ? "caption-part active" : "caption-part"}"
-              >${partElement.word}</span
-            >
-            <div class="${isNowCursor ? "caption-split" : "d-none"}"></div>`,
-        );
-      }
-      analyzedTextMap.push(
-        html`<span class="text-light caption"
-          >${partText}
+        <div class="d-flex gap-1 mt-2 align-items-center">
+          <button
+            class="btn btn-sm btn-secondary caption-merge"
+            ?disabled=${index === 0}
+            title="Merge into the line above (Backspace at the start of the line)"
+            @click=${() => this.mergeLine(index)}
+          >
+            <span class="material-symbols-outlined icon-white">merge</span>
+          </button>
           <input
-            @input=${(e) => this._handleChangeInput(e, index)}
-            class="form-control bg-dark text-light mt-2"
+            @input=${(e: Event) => this._handleChangeInput(e, index)}
+            @keydown=${(e: KeyboardEvent) =>
+              this._handleCaptionKeydown(e, index)}
+            class="form-control bg-dark text-light"
             type="text"
             id="analyzedEditCaption_${index}"
-            value=${this.analyzedEditCaption[index]}
+            .value=${line.text}
           />
-        </span>`,
-      );
-    }
+        </div>
+      </div>`,
+    );
 
     return html`
       <style>
@@ -857,13 +926,29 @@ export class AutomaticCaption extends LitElement {
           display: inline-block;
         }
 
-        .caption-split {
-          width: 2px;
-          background-color: #5a5abe;
-          height: 1.25rem;
-          z-index: 9999;
-          position: relative;
-          display: inline-block;
+        .caption-part {
+          cursor: pointer;
+          padding: 0 0.15rem;
+        }
+
+        /* The read-only timing ribbon. Clicking a word seeks to it; the text
+           below is what gets edited and what gets placed. */
+        .caption-ribbon {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.15rem;
+          user-select: none;
+        }
+
+        .caption-merge {
+          flex: 0 0 auto;
+          line-height: 1;
+          padding: 0.25rem 0.4rem;
+        }
+
+        .caption-merge .material-symbols-outlined {
+          font-size: 1rem;
+          vertical-align: middle;
         }
       </style>
       <div
@@ -1013,7 +1098,7 @@ export class AutomaticCaption extends LitElement {
                     Close
                   </button>
                   <button
-                    ?disabled=${this.selectedRow == null}
+                    ?disabled=${this.selectedKey == null}
                     type="button"
                     class="col btn btn-primary"
                     data-bs-dismiss="modal"
@@ -1038,34 +1123,39 @@ export class AutomaticCaption extends LitElement {
         <div class="modal-dialog modal-dialog-dark modal-fullscreen">
           <div class="modal-content modal-dark modal-darker">
             <div class="modal-body">
-              <div class="d-flex col gap-2 mt-4">
-                <div class="d-flex col-5 row gap-2" style="position: fixed;">
+              <div class="d-flex gap-3 mt-4 align-items-start">
+                <div
+                  class="d-flex flex-column gap-2 caption-preview-column"
+                  style="position: sticky; top: 0; align-self: flex-start; flex: 0 0 42%; min-width: 0;"
+                >
                   <canvas
                     id="previewCanvasCaption"
-                    width=${this.resolution.w}
-                    height=${this.resolution.h}
+                    width=${this.previewSize.w}
+                    height=${this.previewSize.h}
+                    style="display: block; max-width: 100%; max-height: 55vh; width: auto; height: auto; background: #000;"
                   ></canvas>
 
                   <video
-                    class="d-none col-3"
+                    class="d-none"
                     id="captionPreviewVideo"
                     src=${this.isDev ? "/test.MOV" : this.videoPath}
                   ></video>
 
                   <audio
-                    class="d-none col-3"
+                    class="d-none"
                     id="captionPreviewAudio"
                     src=${this.videoPath}
                   ></audio>
 
-                  <span class="text-light"
-                    >${Math.round(this.progress / 1000)}s</span
+                  <span class="text-light font-monospace"
+                    >${playheadLabel(this.progress, this.durationSec())}</span
                   >
 
                   <progress-bar
-                    percent="${(Math.round(this.progress / 1000) /
-                      (this.mediaDuration / 1000)) *
-                    100}"
+                    percent="${playbackFraction(
+                      this.progress,
+                      this.durationSec(),
+                    ) * 100}"
                   ></progress-bar>
 
                   <div class="d-flex col gap-2">
@@ -1107,16 +1197,20 @@ export class AutomaticCaption extends LitElement {
                   </div>
                   <div class="d-flex col gap-2">
                     <button
-                      class=" btn btn-sm btn-secondary"
+                      class="btn btn-sm ${this._verticalPlacement == "center"
+                        ? "btn-primary"
+                        : "btn-secondary"}"
                       @click=${() =>
                         this.handleClickAlignCaptionButton("center")}
                     >
                       align center
                     </button>
                     <button
-                      class=" btn btn-sm btn-secondary"
+                      class="btn btn-sm ${this._verticalPlacement == "lowerThird"
+                        ? "btn-primary"
+                        : "btn-secondary"}"
                       @click=${() =>
-                        this.handleClickAlignCaptionButton("bottom")}
+                        this.handleClickAlignCaptionButton("lowerThird")}
                     >
                       align bottom
                     </button>
@@ -1124,12 +1218,8 @@ export class AutomaticCaption extends LitElement {
 
                 </div>
 
-                <div
-                  class="col-6"
-                  style="position: absolute;
-    right: 20px;"
-                >
-                  <div class="d-flex row gap-2">${analyzedTextMap}</div>
+                <div style="flex: 1 1 0; min-width: 0;">
+                  <div class="d-flex flex-column gap-2">${analyzedTextMap}</div>
                 </div>
               </div>
             </div>
@@ -1164,103 +1254,27 @@ export class AutomaticCaption extends LitElement {
     `;
   }
 
-  timelineMap(): {
-    id: number;
-    video?: string;
-    key: string;
-    filetype: string;
-    duration: number;
-    resolution: {
-      w: number;
-      h: number;
-    };
-  }[] {
-    const timeline = this.timeline;
-    const timelineArray: {
-      id: number;
-      video?: string;
-      key: string;
-      filetype: string;
-      duration: number;
-      resolution: {
-        w: number;
-        h: number;
-      };
-    }[] = [];
-    let index = 1;
-
-    for (const key in timeline) {
-      if (Object.prototype.hasOwnProperty.call(timeline, key)) {
-        const element = timeline[key];
-
-        if (element.filetype == "video") {
-          timelineArray.push({
-            id: index,
-            video: element.localpath,
-            key: key,
-            filetype: element.filetype,
-            duration: element.duration,
-            resolution: {
-              w: element.origin.width,
-              h: element.origin.height,
-            },
-          });
-          index += 1;
-        }
-
-        if (element.filetype == "audio") {
-          timelineArray.push({
-            id: index,
-            video: element.localpath,
-            key: key,
-            filetype: element.filetype,
-            duration: element.duration,
-            resolution: {
-              w: 1920,
-              h: 1080,
-            },
-          });
-          index += 1;
-        }
-      }
-    }
-
-    console.log(timelineArray);
-
-    return timelineArray;
-  }
-
   renderRows() {
-    try {
-      return this.videoRows.map(
-        (row) => html`
-          <tr
-            @click="${() =>
-              this.handleRowSelection(
-                row.video,
-                row.key,
-                row.filetype,
-                row.duration,
-                {
-                  w: row.resolution.w,
-                  h: row.resolution.h,
-                },
-              )}"
-          >
-            <th scope="row">${row.id}</th>
-            <td>${row.video}</td>
-            <td>
-              <input
-                type="radio"
-                name="videoSelect"
-                .checked="${this.selectedRow === row.video}"
-              />
-            </td>
-          </tr>
-        `,
-      );
-    } catch (error) {
+    if (!Array.isArray(this.videoRows)) {
       return html``;
     }
+
+    return this.videoRows.map(
+      (row) => html`
+        <tr @click=${() => this.handleRowSelection(row)}>
+          <th scope="row">${row.id}</th>
+          <td class="text-truncate" style="max-width: 26rem;" title=${row.localpath}>
+            ${sourceDisplayName(row.localpath)}
+          </td>
+          <td>
+            <input
+              type="radio"
+              name="videoSelect"
+              .checked=${this.selectedKey === row.key}
+            />
+          </td>
+        </tr>
+      `,
+    );
   }
 }

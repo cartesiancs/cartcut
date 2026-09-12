@@ -517,6 +517,77 @@ and two copies of "where does a caption break" is two answers to the one
 judgement in that file. `segmentWords` is now `groupWords(...).map(toSegment)`
 and its suite did not change.
 
+## The auto-caption panel
+
+`apps/automatic-caption/` is not a separate build despite having its own
+`package.json` — `apps/app/src/ui/control/Control.ts` imports its source, so root
+webpack compiles it and the root `tsconfig.json` typechecks it. It is a leaf that
+`Control` mounts; nothing in `apps/app` imports back.
+
+```
+apps/app/src/features/caption/lines.ts    the caption model: split, merge, edit
+apps/app/src/features/caption/layout.ts   captionLayout — where a caption sits
+apps/app/src/features/caption/locale.ts   which language to offer first
+apps/app/src/features/caption/timing.ts   source ms -> timeline ms
+apps/app/src/features/media/seek.ts       seek, and know when the frame arrived
+```
+
+**The preview draws the element it will place.** `captionOptions` is one factory:
+the preview feeds it to `createTextElement` and paints with `renderElement`, and
+`handleClickComplate` emits it for `Control` → `addText` to hand to the *same*
+`createTextElement`. Parity is therefore structural rather than maintained —
+verified by diffing the panel's canvas against `renderTimelineAtTime` over the
+same element: **0 differing pixels of 2,073,600**.
+
+It replaced a hand-rolled `drawCaption`/`drawTextBackground` that was out by a
+font size vertically, used a line advance of 52 against the renderer's 62.4, and
+padded the background band on one side only. Worse, it mixed **three coordinate
+spaces** — `width` from the source clip's native size, `locationY` from a literal
+1080, and the element landing on a canvas sized by `previewSize`. What you
+positioned was not what you got, and on a vertical project it was not close.
+
+Four things that are easy to get wrong:
+
+- **`renderElement` with `context` omitted is the right call**, not `renderText`
+  after a translate. For today's caption the two are identical — no blend, no
+  mask, no parent, so the fast path in `element.ts` fires and nothing is
+  allocated — but the identity has to be structural. The moment a caption gains a
+  rotation, an opacity or a group parent, the translate diverges silently, which
+  is the class of bug this replaced. `drawTextToCanvas` is for *baking*: it
+  allocates a canvas per call and passes no backdrop, so a frosted band bakes as
+  flat tint.
+- **The canvas backing store is the project frame; CSS does the downscale.** The
+  `templateThumbnail`/`contactSheet` family, and not the DPR-aware one. Scaling
+  the context instead leaves wrap width, band padding and outline geometrically
+  right but no longer bit-identical to the export.
+- **The line owns its span.** `CaptionLine.start`/`end` are the line's, not
+  `words[0].start`. That is what lets an edited line, a line split inside a word,
+  and a line whose words were all deleted still have valid timing — reading the
+  span off the words is what used to throw on an empty line the split had just
+  made. A split picks a cut *time* then partitions the words by it; a caret
+  inside a word snaps to that word's edge rather than halving its second,
+  because a caption boundary mid-word is a time nothing audible happens at.
+- **The two columns are explicit flex, not Bootstrap grid.** `.row` carries
+  negative gutters (`margin: 0 -12px`) and forces `width: 100%` on its children,
+  and it was being used on a flex child purely to stack things vertically — so
+  the preview column sat 12px outside its parent on each side and overlapped the
+  caption column by 4px, while the captions themselves ran 12px past the row's
+  right edge. `col-*` outside a `.row` is the same trap. Measured across
+  1600→800px, the replacement holds a constant 16px gutter with zero overlap.
+- **Enter is handled on the input, guarded on `isComposing`.** A Korean IME fires
+  Enter to commit a composition, so an unguarded handler cuts the line in half
+  every time someone finishes a word — which is why this is an `<input>` and not
+  a `contenteditable`. The old `window`-level listener split on *any* Enter in
+  the editor, including one inside a caption field, and could never be removed
+  because it was registered with `.bind(this)`.
+
+`splitCaption` used to rebuild every line's text from the raw words, so one Enter
+discarded every correction typed so far; the line that would have restored it was
+in the source, commented out. The operations are pure now and **decline by
+returning their input by identity**, which is also what lets the panel's Cmd+Z
+skip a gesture that did nothing. Undo covers split and merge only — a snapshot
+per keystroke would bury them under hundreds of character states.
+
 ## The application menu
 
 The macOS menu bar is a second surface onto the editor's commands, and it obeys

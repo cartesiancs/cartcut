@@ -23,6 +23,7 @@ import {
   controlPanelStore,
 } from "../../states/controlPanelStore";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
+import { renderOptionStore } from "../../states/renderOptionStore";
 import { captionToTimeline } from "../../features/caption/timing";
 import { LocaleController } from "../../controllers/locale";
 
@@ -60,9 +61,29 @@ export class Control extends LitElement {
   @property()
   nowActivePanel = this.controlPanel.nowActive;
 
+  /**
+   * The project's frame, for the auto-caption panel.
+   *
+   * Passed down rather than read there, because `apps/automatic-caption/`
+   * resolves its packages from its own `node_modules` and reaching
+   * `renderOptionStore` would make it depend on zustand. The panel lays its
+   * captions out in these pixels and previews them at this size, which is what
+   * makes its preview and the placed element the same picture.
+   */
+  @property()
+  previewSize = renderOptionStore.getInitialState().options.previewSize;
+
+  @property()
+  backgroundColor = renderOptionStore.getInitialState().options.backgroundColor;
+
   createRenderRoot() {
     useTimelineStore.subscribe((state) => {
       this.timeline = state.timeline;
+    });
+
+    renderOptionStore.subscribe((state) => {
+      this.previewSize = state.options.previewSize;
+      this.backgroundColor = state.options.backgroundColor;
     });
 
     uiStore.subscribe((state) => {
@@ -392,6 +413,8 @@ export class Control extends LitElement {
         >
           <automatic-caption
             .timeline=${this.timeline}
+            .previewSize=${this.previewSize}
+            .backgroundColor=${this.backgroundColor}
             .isDev=${false}
             @editComplate=${this._handleComplateAutoCaption}
             @changeCursorType=${this._handleChangeCursorType}

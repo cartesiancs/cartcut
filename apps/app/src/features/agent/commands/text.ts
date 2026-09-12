@@ -21,11 +21,11 @@ import { overlaps } from "../../timeline/overlap";
 import { trackIndexOf, type TimelineDocument } from "../../timeline/tracks";
 import { createTextElement } from "../../element/textElement";
 import { captionToTimeline } from "../../caption/timing";
+import { captionLayout } from "../../caption/layout";
 import { ensureUndoBaseline } from "../checkpoint";
 import { currentDoc } from "../context";
 import { registerCommands } from "../registry";
 import { clipRow } from "../serialize";
-import { defaultTextHeight } from "../../text/metrics";
 
 type SubtitleStyle = {
   fontsize?: number;
@@ -41,23 +41,18 @@ type SubtitleStyle = {
 /**
  * Where a caption sits when the caller does not say.
  *
- * Lower third, full width, centred — the same placement the auto-caption panel
- * computes, derived from the project's own resolution rather than assuming
- * 1080p, so a vertical project does not put its subtitles off-screen.
+ * Lower third, full width, derived from the project's own resolution rather
+ * than assuming 1080p. The arithmetic lives in `caption/layout.ts` because the
+ * auto-caption panel needs the same answer — this comment used to claim it
+ * already matched the panel, which was untrue for every project that was not
+ * 1080p, since the panel worked in a literal 1080.
  */
 function defaultLayout(style: SubtitleStyle) {
-  const { w, h } = renderOptionStore.getState().options.previewSize;
-  const fontsize = style.fontsize ?? Math.round(h / 20);
-  const height = style.height ?? defaultTextHeight(fontsize);
-  const bottomPadding = Math.round(h / 10);
-
-  return {
-    fontsize,
-    height,
-    width: style.width ?? w,
-    locationX: style.locationX ?? 0,
-    locationY: style.locationY ?? h - bottomPadding - fontsize,
-  };
+  return captionLayout(
+    renderOptionStore.getState().options.previewSize,
+    "lowerThird",
+    style,
+  );
 }
 
 /** Most covering clips a warning names before it stops being a list. */
