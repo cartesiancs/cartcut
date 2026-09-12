@@ -1168,6 +1168,10 @@ export class elementTimelineCanvas extends LitElement {
     }
 
     if (state.phase === "idle") {
+      // Captured before the reset below, because it is the one thing that says
+      // this gesture was a band: a click and a clip drag never set it. See the
+      // `syncSideOption` call at the end of this branch.
+      const wasMarquee = this.marqueeRect != null;
       window.clearTimeout(this.longPressTimer);
       this.longPressTimer = 0;
       this.dragBase = null;
@@ -1185,6 +1189,13 @@ export class elementTimelineCanvas extends LitElement {
       // document on top of whatever happened in between. An ordinary imprecise
       // click — press, drift two pixels, release — was enough.
       this.pendingDoc = null;
+      // A band names no clip, so `_handleMouseDown` — the only thing that
+      // pushes the option column — never fired for it, and the column went on
+      // showing whichever clip was last clicked. Once, here, rather than from
+      // `applyMarquee`: see `syncSideOption`.
+      if (wasMarquee) {
+        this.syncSideOption();
+      }
       this.drawCanvas();
       return;
     }
@@ -1820,6 +1831,41 @@ export class elementTimelineCanvas extends LitElement {
   }
 
   // ------------------------------------------------------------ side panel
+
+  /**
+   * Point the option column at whatever is selected now.
+   *
+   * `showSideOption` takes the clip the gesture named, and only one gesture
+   * names one: `_handleMouseDown`. A rubber-band names none — it produces a
+   * selection and nothing else — so the column went on showing the clip that
+   * was last clicked, with its single-clip header, while three clips sat lit on
+   * the timeline. This is the half that was missing.
+   *
+   * The representative is `ids[0]`, which is what `option-transition`,
+   * `option-effect`, `lut-browser` and `default-transform#targetId` already
+   * read a selection as. A multi-clip selection of text still routes through
+   * `showOptions`, because `showSideOption` derives that from the whole
+   * selection rather than from the id handed to it.
+   *
+   * Deliberately *not* a `selectionStore` subscription, which is where the two
+   * panels that patched around this individually put theirs: a band rewrites
+   * the selection on every sweep, and `optionGroup.showOption` hides and
+   * re-shows every panel in the column — `option-text` alone rebuilds a
+   * dropdown of every installed font each time. So the caller decides when,
+   * and the only caller that needs it runs once, as the gesture ends.
+   *
+   * An empty selection is left alone: clearing the selection does not empty
+   * the column anywhere else in the app either (clicking off the timeline, the
+   * toolbar narrowing a selection), and a band that swept nothing should not be
+   * the one place that does.
+   */
+  private syncSideOption() {
+    const ids = this.targetId;
+    if (ids.length === 0) {
+      return;
+    }
+    this.showSideOption(ids[0]);
+  }
 
   showSideOption(elementId: string) {
     const optionGroup: any = document.querySelector("option-group");
