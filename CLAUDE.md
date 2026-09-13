@@ -134,6 +134,186 @@ host platform, which is the wrong one half the time here, and webpack has no
 `"posix" | "win32"` parameter, the same rule `utils/platform.ts` states for
 `isMac` and for the same reason: both branches have to be covered on one CI host.
 
+## Auto Save
+
+Every change to the timeline lands in a per-project cache within seconds. A
+`.ngt` is written **only** by ⌘S, and a successful ⌘S drops that project's
+cache entirely — so
+
+> **"File ▸ Auto Save ▸" being empty means nothing, anywhere, is unsaved.**
+
+Recovery is explicit and refuses rather than overwrites. There is no button, no
+keystroke and no offer on launch: the File menu is the only way back in.
+
+```
+apps/app/src/features/project/projectDigest.ts    the fingerprint
+apps/app/src/features/project/projectDirty.ts     the one owner of "is it dirty"
+apps/app/src/features/project/projectEntries.ts   the five entries, and the anchor
+apps/app/src/features/project/projectDocument.ts  the one load order
+apps/app/src/features/project/projectArchive.ts   the zip half
+apps/app/src/features/project/autosaveIdentity.ts what a ring is keyed by
+apps/app/src/features/project/autosaveSession.ts  the state machine, over ports
+apps/app/src/features/project/autosaveBridge.ts   the stores, the DOM, the IPC
+apps/app/src/features/project/recoverAutosave.ts  the guard and the load
+electron/lib/autosaveCache.ts   the directory. Plain fs, `root` a parameter
+electron/lib/autosaveMenu.ts    the submenu, type-only Electron import
+electron/lib/autosave.ts        userData, the cached list, the rebuild gate
+```
+
+### The decision the feature turns on
+
+**The cache holds the divergence, and the anchor is path arithmetic — never an
+identity.**
+
+An autosave of `Film.ngt` lives in `userData/autosave/f-<digest>-Film/`, but its
+`assetPaths.json` is built against `/…/Film.ngt` — the SSOT path, not where the
+file actually sits. That one string has exactly two uses and no third:
+
+- **At write** it decides which absolute paths are inside the project folder.
+  Anchor on the autosave's real location instead and `relativizeInside` emits
+  *nothing*, because no asset is under `userData/autosave/` — silently
+  discarding the portability half of `assetsFile.ts`.
+- **At recovery** `relinkAssets` resolves those same relative paths against the
+  same anchor.
+- **It is never adopted as the project's path.** Recovery leaves `#projectFile`
+  empty, so ⌘S opens Save As and the original `.ngt` is never touched.
+
+The way this goes wrong is a later edit reasoning "we already have the path,
+let's set `#projectFile`" — which makes the next ⌘S overwrite the user's file
+with recovered older state. So `recoverAutosave` holds a `ProjectPathPort` it
+**never calls**, and the port throws if called, which makes "the session stays
+detached" a node assertion rather than a hope.
+
+### On disk
+
+```
+userData/autosave/
+  f-3a9c1e77b2d40915-Film/        a project saved as Film.ngt
+    meta.json                     { v, label, anchor }
+    20260913T142530-123Z-a1b2.ngt
+  s-9d41c0a2fe8b5613/             a project never saved — the ring is the only copy
+```
+
+- **The filename carries the time**, fixed-width and UTC, so a lexicographic
+  sort is chronological and the menu opens no zips. `filesystem:getDirectory`
+  reports no mtime, so the name is the only place it can live. No colons —
+  illegal on Windows, shown as `/` by Finder. Four hex characters break a
+  same-millisecond collision between two launches.
+- **`.part` then rename**, the `reverse.ts` idiom. A truncated autosave the menu
+  offers is worse than none: it looks like a recovery point and restores nothing.
+- **A ring with an unreadable `meta.json` is still listed**, labelled from its
+  directory. Never hide a recovery point because its label could not be read.
+- **Six zip entries, not five.** An autosave carries `autosave.json`
+  (`{v, anchor, writtenAtMs, sessionId}`) so each archive is self-sufficient and
+  a lost `meta.json` cannot make a ring unrecoverable. `project.load` reads five
+  *named* entries and ignores the rest, so **`SCHEMA_VERSION` did not move**.
+- **Main owns the directory.** `autosave:write` takes bytes and main mints the
+  filename; `autosave:dropRings` takes a *key* that `isValidAutosaveKey` must
+  accept. There is no call shape in which the renderer can name a path to
+  delete.
+
+### Two timers, and they are not the same timer
+
+5s idle debounce, 60s ceiling. The **idle** timer is re-armed by every change,
+so a burst costs one write. The **ceiling** is armed on the `idle → armed`
+transition and **never re-armed by a later change** — that is the whole point of
+a max-wait, because a user dragging continuously for ten minutes re-arms the
+idle timer forever and would otherwise never be written at all.
+
+The invariant is **armed implies a ceiling is pending**, which is why
+`ensureCeiling` is idempotent and is called from the deferral paths too. Without
+that, a deferral (unreadable document, or a running export) cleared the ceiling
+and continuous editing reached the same unbounded failure by a second route.
+`autosaveSession.test.ts` pins both, and the 120-second case — *exactly two
+writes* — is the one whose absence makes the feature fail silently.
+
+### Four more things that are easy to get wrong
+
+- **Failure never clears dirt.** A write that rejects *or* answers
+  `{ ok: false }` leaves the session armed and backs off 5/15/45/60s. Treating a
+  failed write as done is the defect `writeFileEnsured` exists to fix, one layer
+  up, and here it deletes the user's only unsaved copy on the next save. After
+  three consecutive failures it raises a `backgroundTaskStore` row — not a
+  toast, because a toast every five seconds on a full disk is worse than the
+  failure.
+- **The digest takes the store's `RenderOptions`, not `RenderOptionsFile`.** The
+  file shape carries `videoDestination` and `previewRatio`, which are save
+  *context* and differ between the `.ngt`'s path and an autosave's. Hashing them
+  would make every autosave read as diverged from the save baseline forever, and
+  the ring would never drop. Taking the store shape makes those fields absent
+  *by construction*.
+- **The subscription gate is two reference compares.** `useTimelineStore` has no
+  `subscribeWithSelector`, so every listener fires on every write including
+  `setCursor` at the display rate. `autosave.noteChange` is counted beside
+  `store.notify`, so the ratio is visible from `__cartcutPerf`.
+- **A recovery is read-only on the cache.** It leaves the ring completely
+  alone — the other nine entries are still the only copies of those states, and
+  a user who picked 14:22 when they meant 14:25 must not have destroyed the
+  right one by looking at the wrong one. A ring dies only on a successful save.
+
+### The guard is stricter for recovery than for Open
+
+Recovery refuses on **non-empty OR dirty**; File → Open refuses on **dirty
+only**. Not an inconsistency: a clean project is on disk, so opening another
+loses nothing, and refusing Open on non-empty would mean never being able to
+open a second project. A recovery has no such out — it overwrites whatever is
+loaded, saved or not. `tracks.length` counts on its own, because three added
+rows is work, and it is exactly what the detector this replaced read as
+unmodified.
+
+### What this replaced, and what it cost
+
+The old change detector lived on `features/element/elementTimeline.ts` — marked
+`조만간 deprecated` — and was a 32-bit DJB2 hash of `JSON.stringify(timeline)`
+in an unbounded table keyed by `Date.now()`. It **hashed elements only**, so a
+track rename or reorder read as unmodified and File → Open would
+`clearTimeline()` straight over it. It is gone; `projectDirty.ts` is the one
+owner now, and the quit guard, Open and Auto Save all read it.
+
+Two live data-loss defects were fixed on the way, both prerequisites rather than
+tidying:
+
+- **`saveProjectFile` could not tell a failed save from a successful one.** It
+  wrote through `filesystem.writeFile`, which calls the *callback* form of
+  `fs.writeFile` and returns before it runs — so it resolved `undefined` always
+  and the toast, the clean baseline and the retitled window fired regardless.
+  Survivable until a save deletes the recovery copy. It uses `writeFileEnsured`
+  and returns a `SaveOutcome` now.
+- **A cancelled File → Open wiped the timeline**, because `clearTimeline()` ran
+  before the `undefined` path was checked.
+
+One behaviour change to know about: the digest covers `renderOptions`, so
+changing the frame rate, frame size or background colour now counts as an
+unsaved change — which it is, and which the old elements-only hash missed.
+File → Open therefore refuses after a settings-only change until it is saved.
+
+### How it is known to be right
+
+`tests/e2e/specs/autosave.spec.ts` is the load-bearing half, and the second test
+is the whole feature in one: save a project, edit it, **kill the app with
+`app.exit(0)`** — no graceful close, which is the disaster this exists for —
+relaunch into the same `userData`, read the real `File ▸ Auto Save` submenu
+through `Menu.getApplicationMenu()`, click the entry, and then require that the
+work came back, that `#projectFile` is **empty**, that the original `.ngt` is
+**byte-identical** to what was saved, and that the ring it came from survives.
+
+The unit suites are worth two notes about measuring rather than asserting.
+`projectDigest.test.ts`'s collision case took two wrong drafts: a 20k sweep
+passed against the 32-bit DJB2 it replaces (expected collisions there are ~0.05),
+and so did a 300k sweep over *sequential* payloads, because DJB2 maps short
+distinct numeric suffixes near-injectively and the birthday bound does not apply
+to structured input. Only 300k *pseudo-random* payloads separate the two — 12
+collisions against 0. And `autosaveCache.test.ts` runs against a real
+filesystem in a real temporary directory, because the failures this module can
+have are filesystem failures.
+
+`electron/mcp/contactSheet.ts` states a policy *against* sweeping, and the ring
+prune is the repo's first, so it owes an answer: **every file it deletes is one
+this module wrote, in a directory this module created, named by a pattern this
+module mints, and matched against that pattern before it is unlinked.** A ring
+is never dropped because its `.ngt` has gone — that is precisely when the ring
+is the only copy.
+
 ## Compositing and blend modes
 
 Everything visual is composited in the **renderer, on a 2D canvas**, by one

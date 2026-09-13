@@ -10,7 +10,6 @@ import { timelineContext } from "../../context/timelineContext";
 @customElement("element-timeline")
 export class ElementTimeline extends LitElement {
   elementControl: any;
-  timelineHashTable: {};
   copyedTimelineData: {};
   editGuideBreakPoint: any[];
 
@@ -40,49 +39,20 @@ export class ElementTimeline extends LitElement {
       this.elementControl = document.querySelector("element-control");
     });
 
-    this.timelineHashTable = {};
-    this.appendCheckpointInHashTable();
     this.copyedTimelineData = {};
 
     // NOTE: edit guide == 정렬 가이드, 모든 엘리먼트의 시작점과 끝 점을 담은 배열입니다.
     this.editGuideBreakPoint = [];
   }
 
-  generateHash(text) {
-    let hash = 0,
-      i,
-      chr;
-    if (text.length === 0) return hash;
-    for (i = 0; i < text.length; i++) {
-      chr = text.charCodeAt(i);
-      hash = (hash << 5) - hash + chr;
-      hash |= 0;
-    }
-    return hash;
-  }
-
-  getTime() {
-    return Date.now();
-  }
-
-  appendCheckpointInHashTable() {
-    // NOTE: 해시 테이블에 변경점 입력
-    let hashString = JSON.stringify(this.timeline);
-    let hash = this.generateHash(hashString);
-    let nowTimestamp = this.getTime();
-    this.timelineHashTable[nowTimestamp] = hash;
-  }
-
-  isTimelineChange() {
-    let nowHashString = JSON.stringify(this.timeline);
-    let nowTimelineHash = this.generateHash(nowHashString);
-    let timelineHashLength = Object.keys(this.timelineHashTable).length;
-    let firstKeyInTimelineHashTable = Object.keys(this.timelineHashTable)[
-      timelineHashLength - 1
-    ];
-    let prevTimelineHash = this.timelineHashTable[firstKeyInTimelineHashTable];
-    return nowTimelineHash != prevTimelineHash;
-  }
+  // The change detector that used to live here is now
+  // `features/project/projectDirty.ts`. It hashed `this.timeline` only, so a
+  // track rename or reorder read as unmodified and File → Open would clear it;
+  // it was 32-bit DJB2; it compared against `Object.keys(table)[length - 1]`,
+  // which is the newest entry only because V8 sorts integer-like keys
+  // numerically and which two saves in one millisecond collide on; and the
+  // table grew for the life of the session while only its last entry was ever
+  // read. See that module's header.
 
   replaceTimelineBarHeight(height) {
     let timelineBar: any = this.querySelector(".timeline-bar");

@@ -83,6 +83,14 @@ export type LaunchOptions = {
   keepUserData?: boolean;
   /** Extra Electron/Chromium switches. */
   extraArgs?: string[];
+  /**
+   * Launch into an existing userData directory instead of a fresh one.
+   *
+   * For the Auto Save crash test, which has to be two launches sharing one
+   * cache — that is the whole scenario. The directory is never deleted on
+   * close when it was supplied, because the caller owns it.
+   */
+  userDataDir?: string;
 };
 
 export async function launchApp(options: LaunchOptions = {}): Promise<AppSession> {
@@ -95,7 +103,11 @@ export async function launchApp(options: LaunchOptions = {}): Promise<AppSession
     }
   }
 
-  const userDataDir = await fsp.mkdtemp(path.join(os.tmpdir(), "cartcut-e2e-"));
+  const reusing = options.userDataDir != null;
+  const userDataDir =
+    options.userDataDir ??
+    (await fsp.mkdtemp(path.join(os.tmpdir(), "cartcut-e2e-")));
+  await fsp.mkdir(userDataDir, { recursive: true });
 
   // electron-store reads `config.json` out of userData on first access, so
   // seeding it before launch is how the test instance asks for two things
@@ -233,7 +245,9 @@ export async function launchApp(options: LaunchOptions = {}): Promise<AppSession
       await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => {});
       await app.close().catch(() => {});
     } finally {
-      if (!options.keepUserData) {
+      // A supplied directory belongs to the caller, whatever `keepUserData`
+      // says — deleting it would destroy the second launch's whole point.
+      if (!options.keepUserData && !reusing) {
         await fsp.rm(userDataDir, { recursive: true, force: true }).catch(() => {});
       }
     }

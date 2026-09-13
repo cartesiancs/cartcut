@@ -21,6 +21,7 @@
 
 import JSZip from "jszip";
 import type { Timeline } from "../../@types/timeline";
+import { arrayBufferToBase64 } from "../../utils/base64";
 import { serializeAssetPaths } from "../project/assetsFile";
 import { SCHEMA_VERSION, type TimelineTrack } from "../timeline/tracks";
 import { planTemplateExport } from "./exportPlan";
@@ -81,16 +82,6 @@ function filesystem(): FilesystemBridge | null {
     (globalThis as { electronAPI?: { req?: { filesystem?: FilesystemBridge } } })
       ?.electronAPI?.req?.filesystem ?? null
   );
-}
-
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { BrowserWindow, Menu, screen } from "electron";
-import { menu } from "./menu.js";
+import { installMenu } from "./menu.js";
 import { autoUpdater } from "electron-updater";
 import { installDisplayMediaHandler } from "./displayMedia.js";
 
@@ -35,7 +35,7 @@ const window = {
     // dialog in `lib/autoUpdater.ts`. Development is already a no-op — the
     // updater bails on `app.isPackaged`.
     autoUpdater.checkForUpdates();
-    Menu.setApplicationMenu(menu);
+    installMenu();
 
     // The handler moved to `lib/displayMedia.ts`. The one that used to be
     // inline here granted `sources[0]` to anything that asked — including a

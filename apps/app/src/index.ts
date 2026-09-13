@@ -10,6 +10,7 @@ import {
 } from "./features/debug/frameStats";
 import { useTimelineStore } from "./states/timelineStore";
 import { installProxyBridge } from "./features/proxy/proxyBridge";
+import { installAutosave } from "./features/project/autosaveBridge";
 
 enableIpcWrapper();
 
@@ -90,6 +91,13 @@ installFrameStats();
 // here — this only learns what already exists, so a session with no proxies
 // costs one IPC round trip.
 installProxyBridge();
+
+// Auto Save. Writes a recovery copy of the project into `userData/autosave`
+// after five seconds of quiet, and at least once a minute while editing
+// continues; a successful ⌘S drops that project's ring. Nothing reads a
+// recovery point without the user asking — File → Auto Save is the only way
+// back in. A no-op in the web build, which has no bridge.
+installAutosave();
 
 // One more subscriber, to count the subscribers.
 //

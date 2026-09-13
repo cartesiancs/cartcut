@@ -9,6 +9,7 @@ import { exportStore } from "./states/exportStore";
 import { clearCancelTimeout } from "./features/export/exportSession";
 import { runMenuCommand } from "./features/editor/menuCommands";
 import { installTextEditingShortcuts } from "./features/editor/textEditing";
+import { isProjectDirty } from "./features/project/projectDirty";
 
 // The legacy `PROCESSING` channel. Nothing in the renderer drives it any more
 // (`render/renderMain.ts` is the unused fluent-ffmpeg path), but a number
@@ -74,10 +75,11 @@ window.electronAPI.res.render.v2Cancelled(() => {
 });
 
 window.electronAPI.res.app.forceClose((evt) => {
-  let isTimelineChange = document
-    .querySelector("element-timeline")
-    .isTimelineChange();
-  if (isTimelineChange == true) {
+  // `isProjectDirty` rather than the hash table that used to live on
+  // `<element-timeline>`: that one covered elements only, so quitting with
+  // unsaved *track* work raised no warning at all. One owner for the
+  // question now, so this and File → Open cannot disagree.
+  if (isProjectDirty()) {
     rendererModal.whenClose.show();
   } else {
     window.electronAPI.req.app.forceClose();
@@ -86,8 +88,10 @@ window.electronAPI.res.app.forceClose((evt) => {
 
 // The application menu, as one channel. `features/editor/menuCommands` holds
 // the table; `electron/lib/menuCommands.ts` is the other end of it.
-window.electronAPI.res.menu.command((evt, id) => {
-  runMenuCommand(id);
+window.electronAPI.res.menu.command((evt, id, payload) => {
+  // The payload is `undefined` for all but the Auto Save rows, whose id is
+  // static and whose *entry* is what varies. See `electron/lib/menu.ts`.
+  runMenuCommand(id, payload);
 });
 
 // The Edit menu's items are the editor's own commands now, so a keystroke that

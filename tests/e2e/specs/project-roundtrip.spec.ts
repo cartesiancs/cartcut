@@ -109,8 +109,28 @@ test("the project frame rate survives a save and a reopen", async ({
   await test.step("move the project somewhere else entirely", async () => {
     // So that reading 30 back afterwards cannot be the store having simply kept
     // what it already had.
+    //
+    // Saved to a scratch file rather than left unsaved, because the rate is
+    // part of the project and changing it now counts as an unsaved change —
+    // `features/project/projectDirty.ts` covers `renderOptions` as well as
+    // the document, so File → Open refuses until the change is written. That
+    // guard is the thing under test in `projectDirty.test.ts`; here it just
+    // has to be respected.
     await setFps(page, 120);
     expect((await optionsOf(page)).fps).toBe(120);
+
+    const scratch = path.join(artifactDir, "scratch-120.ngt");
+    await answerSaveDialog(scratch);
+    await page.evaluate(() => {
+      const field = document.querySelector("#projectFile") as any;
+      if (field != null) {
+        field.value = "";
+      }
+      return (globalThis as any).CARTCUT.project.save();
+    });
+    await expect.poll(() => fs.existsSync(scratch), { timeout: 30_000 }).toBe(
+      true,
+    );
   });
 
   await test.step("reopen it", async () => {
@@ -151,7 +171,20 @@ test("a project written before frame rates were configurable opens at 60", async
   });
 
   await test.step("it opens, and it opens at 60", async () => {
+    // Same as above: the rate change has to be written before Open will run.
     await setFps(page, 120);
+    const scratch = path.join(artifactDir, "legacy-scratch-120.ngt");
+    await answerSaveDialog(scratch);
+    await page.evaluate(() => {
+      const field = document.querySelector("#projectFile") as any;
+      if (field != null) {
+        field.value = "";
+      }
+      return (globalThis as any).CARTCUT.project.save();
+    });
+    await expect.poll(() => fs.existsSync(scratch), { timeout: 30_000 }).toBe(
+      true,
+    );
 
     await answerOpenDialog([file]);
     await page.evaluate(() => (globalThis as any).CARTCUT.project.load());

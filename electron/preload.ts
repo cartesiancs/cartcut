@@ -134,6 +134,17 @@ const request = {
     cancel: () => ipcRenderer.invoke("overlayRecord:cancel"),
     openFolder: () => ipcRenderer.invoke("overlayRecord:openFolder"),
   },
+  /**
+   * Auto Save. Three calls, and deliberately no way to name a path inside the
+   * cache: main mints the filename on a write and takes a *key* on a drop.
+   * See `electron/lib/autosave.ts`.
+   */
+  autosave: {
+    write: (key, bytes, meta) =>
+      ipcRenderer.invoke("autosave:write", key, bytes, meta),
+    dropRings: (keys) => ipcRenderer.invoke("autosave:dropRings", keys),
+    list: () => ipcRenderer.invoke("autosave:list"),
+  },
   filesystem: {
     getDirectory: (dir) => ipcRenderer.invoke("filesystem:getDirectory", dir),
     openDirectory: (path) => ipcRenderer.send("OPEN_PATH", path),

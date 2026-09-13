@@ -36,6 +36,7 @@ import { atPlayhead, importPathsAt } from "../asset/importDrop";
 import { spanEnd } from "../timeline/geometry";
 import { rendererModal } from "../../utils/modal";
 import { startExport } from "../export/exportSession";
+import { recoverAutosaveEntry } from "../project/recoverAutosave";
 import {
   clearSelection,
   copySelection,
@@ -152,7 +153,21 @@ function saveProjectAs(): void {
   if (field != null) {
     field.value = "";
   }
-  CARTCUT.project.save();
+  runSave();
+}
+
+/**
+ * ⌘S and Save As, with the promise handled.
+ *
+ * `project.save` reports its outcome now rather than starting a write nobody
+ * holds, so a rejection here is a bug in the save path rather than a failed
+ * save — a failed save comes back as `{ ok: false }` and has already toasted.
+ */
+function runSave(): void {
+  void CARTCUT.project.save().catch((error: unknown) => {
+    console.error("[menu] the save path threw", error);
+    toast("The project could not be saved.");
+  });
 }
 
 /**
@@ -164,11 +179,18 @@ function saveProjectAs(): void {
  * instead of dead code. The renderer is type-checked by webpack, so both show
  * up in the build that would have shipped them.
  */
-const COMMANDS: Record<MenuCommandId, () => void> = {
+const COMMANDS: Record<MenuCommandId, (payload?: unknown) => void> = {
   // -------------------------------------------------------------------- File
   "file.open": () => CARTCUT.project.load(),
-  "file.save": () => CARTCUT.project.save(),
+  "file.save": runSave,
   "file.saveAs": saveProjectAs,
+  // The Auto Save submenu's rows all send this id, with the chosen entry as
+  // the payload — so the *id* stays a member of the closed `MenuCommandId`
+  // union and only the entry varies. The item is also offered without an
+  // accelerator: a recovery replaces the whole timeline.
+  "file.autoSaveRecover": (payload) => {
+    void recoverAutosaveEntry(payload);
+  },
   "file.importMedia": () => {
     void importMedia().catch((error) => {
       console.error("[menu] could not import media", error);
@@ -246,11 +268,11 @@ const COMMANDS: Record<MenuCommandId, () => void> = {
  * `main/` is newer than the bundle, and a stale menu item should not take the
  * editor down with it.
  */
-export function runMenuCommand(id: string): void {
+export function runMenuCommand(id: string, payload?: unknown): void {
   const command = COMMANDS[id as MenuCommandId];
   if (command == null) {
     console.warn(`[menu] no handler for ${id}`);
     return;
   }
-  command();
+  command(payload);
 }

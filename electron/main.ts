@@ -1,4 +1,4 @@
-import { app, ipcMain } from "electron";
+import { Menu, app, ipcMain } from "electron";
 import { autoUpdater } from "electron-updater";
 import { renderMain } from "./lib/render.js";
 import { window } from "./lib/window.js";
@@ -24,6 +24,7 @@ import { ipcTimeline } from "./ipc/ipcTimeline.js";
 import { ipcDialog } from "./ipc/ipcDialog.js";
 import { ipcEditing } from "./ipc/ipcEditing.js";
 import { ipcFilesystem } from "./ipc/ipcFilesystem.js";
+import { ipcAutosave } from "./ipc/ipcAutosave.js";
 import { downloadFfmpeg, validateFFmpeg } from "./validate.js";
 import { ipcStream } from "./ipc/ipcStream.js";
 import { ipcDesktopCapturer } from "./ipc/ipcDesktopCapturer.js";
@@ -42,6 +43,8 @@ import { httpFFmpegRenderV2 } from "./server/controllers/render.js";
 import { ipcAi } from "./ipc/ipcAi.js";
 import { ipcYtdlp } from "./ipc/ipcYtdlp.js";
 import { attachBridge } from "./mcp/bridge.js";
+import { initAutosave, onAutosaveChange, setMenuOpen } from "./lib/autosave.js";
+import { installMenu } from "./lib/menu.js";
 import { startMcpServer, stopMcpServer } from "./mcp/server.js";
 import Store from "electron-store";
 
@@ -122,6 +125,10 @@ ipcMain.handle("dialog:openFiles", ipcDialog.openFiles);
 ipcMain.handle("dialog:exportVideo", ipcDialog.exportVideo);
 ipcMain.handle("dialog:saveProject", ipcDialog.saveProject);
 ipcMain.handle("dialog:saveTemplate", ipcDialog.saveTemplate);
+
+ipcMain.handle("autosave:write", ipcAutosave.write);
+ipcMain.handle("autosave:dropRings", ipcAutosave.dropRings);
+ipcMain.handle("autosave:list", ipcAutosave.list);
 
 ipcMain.handle("filesystem:getDirectory", ipcFilesystem.getDirectory);
 ipcMain.handle("filesystem:mkdir", ipcFilesystem.makeDirectory);
@@ -340,6 +347,21 @@ if (!gotTheLock) {
     // tool call fails with "editor window is not available".
     attachBridge(mainWindow.webContents);
 
+    // Reads the recovery cache and sweeps last run's debris, then draws the
+    // File → Auto Save submenu. Not awaited: a slow or unreadable cache must
+    // not hold up the editor, and the menu rebuilds itself when the list
+    // arrives.
+    //
+    // The callback is set here rather than imported by `autosave.ts` so that
+    // module keeps no dependency on the menu — it is the same reason
+    // `recordTray.ts` takes its model from outside.
+    onAutosaveChange(() => {
+      installMenu();
+      watchMenuOpen();
+    });
+    void initAutosave();
+    watchMenuOpen();
+
     // Started here rather than behind the settings button so that Claude Code
     // can connect to a running Cartcut without the user first remembering to
     // switch something on. It listens on loopback and requires a bearer token
@@ -355,7 +377,24 @@ if (!gotTheLock) {
 
     // window.createAutomaticCaptionWindow();
 
-    mainWindow.on("close", function (e) {
+    /**
+ * Track whether a menu is open, so a rebuild cannot close it.
+ *
+ * Re-attached after every `installMenu`, because `setApplicationMenu` replaces
+ * the `Menu` instance and the listeners belong to the instance rather than to
+ * the app. Cheap: two listeners on an object that is rebuilt at most once
+ * every few seconds.
+ */
+function watchMenuOpen(): void {
+  const menu = Menu.getApplicationMenu();
+  if (menu == null) {
+    return;
+  }
+  menu.on("menu-will-show", () => setMenuOpen(true));
+  menu.on("menu-will-close", () => setMenuOpen(false));
+}
+
+mainWindow.on("close", function (e) {
       e.preventDefault();
       mainWindow.webContents.send("WHEN_CLOSE_EVENT", "message");
     });

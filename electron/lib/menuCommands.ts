@@ -42,6 +42,7 @@ export type MenuCommandId =
   | "file.open"
   | "file.save"
   | "file.saveAs"
+  | "file.autoSaveRecover"
   | "file.importMedia"
   | "file.exportVideo"
   // Edit
@@ -97,6 +98,13 @@ export const MENU_COMMANDS: readonly MenuCommand[] = [
     label: "Save Project As…",
     accelerator: "CmdOrCtrl+Shift+S",
   },
+  // **No accelerator, deliberately.** A recovery replaces everything on the
+  // timeline, so it must never be one keystroke away — and this id is the one
+  // the Auto Save submenu's dynamic rows send, carrying the chosen entry as a
+  // payload. Only the payload is dynamic; the id stays a member of the closed
+  // union above, so the renderer's exhaustive handler table still catches a
+  // missing implementation at build time.
+  { id: "file.autoSaveRecover", label: "Recover Auto Save" },
   {
     id: "file.importMedia",
     label: "Import Media…",
