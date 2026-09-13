@@ -99,7 +99,7 @@ export type RecoverEffectsPort = {
 
 export const RECOVER_NOT_EMPTY_MESSAGE =
   "There is already an edit open. Auto Save recovery replaces everything on " +
-  "the timeline, so it only runs on an empty project — save or close this " +
+  "the timeline, so it only runs on an empty project. save or close this " +
   "one first.";
 
 export const RECOVER_DIRTY_MESSAGE =
@@ -162,9 +162,11 @@ export async function recoverAutosave(
     entries = await readNgtEntries(zip);
     const raw = parse(await readNgtExtra(zip, "autosave.json"));
     autosaveMeta =
-      raw != null && typeof raw === "object" ? (raw as AutosaveArchiveMeta) : null;
+      raw != null && typeof raw === "object"
+        ? (raw as AutosaveArchiveMeta)
+        : null;
   } catch (error) {
-    const message = `That auto-save could not be read — ${String(error)}.`;
+    const message = `That auto-save could not be read : ${String(error)}.`;
     effects.warn(message);
     return { kind: "failed", message };
   }
@@ -188,11 +190,12 @@ export async function recoverAutosave(
 
   // `setProjectPath` is *not* called. The session is detached, so ⌘S opens
   // Save As and the original `.ngt` cannot be overwritten with older state.
-  const name = typeof autosaveMeta?.anchor === "string" ? autosaveMeta.anchor : null;
+  const name =
+    typeof autosaveMeta?.anchor === "string" ? autosaveMeta.anchor : null;
   effects.setTitle(
     name == null
-      ? `Cartcut - Recovered — unsaved`
-      : `Cartcut - Recovered (${basename(name)}) — unsaved`,
+      ? `CartCut Recovered - unsaved`
+      : `CartCut Recovered (${basename(name)}) - unsaved`,
   );
 
   effects.markRecovered();
