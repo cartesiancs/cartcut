@@ -128,3 +128,5 @@ Please refer to the [roadmap file](./docs/ROADMAP.md) for more details.
 ## License
 
 We are adopting the MIT license. [license file](./LICENSE)
+
+<a href="https://fazier.com" target="_blank"><img src="https://fazier.com/api/v1//public/badges/launch_badges.svg?badge_type=featured&theme=neutral" width=250 alt="Fazier badge" /></a>
