@@ -6,18 +6,27 @@
  * state and the rebuild gate are the parts with invariants and the parts a
  * mistake in is silent.
  *
- * ## Always two levels
+ * ## One flat list, and every row names its project
  *
  * ```
- * File ▸ Auto Save ▸ Film.ngt               ▸ Today 14:25:30
- *                                             Today 14:24:12
- *                    Untitled (13 Sep 09:12) ▸ 13 Sep 09:41:02
+ * File ▸ Auto Save ▸ Film.ngt — Today 14:25:30
+ *                    Untitled (13 Sep 09:12) — 13 Sep 09:41:02
  * ```
  *
- * Even for a single ring. A flat list of bare times with no project name is
- * Premiere's arrangement and is the single most confusing thing about its
- * recovery: you cannot tell which project a time belongs to. Keeping it
- * uniform also means the shape the suite drives is the shape that ships.
+ * A ring keeps exactly one recovery point (`autosaveCache.ts#RING_SIZE`), so
+ * a second level would be a submenu of one item every time — three levels of
+ * nesting to reach a single choice. Flattening puts the project and the time
+ * in the same row, which is the pair that identifies a recovery point.
+ *
+ * The **project name is never dropped**, and that is the part worth keeping
+ * from the nested arrangement: a flat list of bare times is Premiere's, and
+ * being unable to tell which project a time belongs to is the single most
+ * confusing thing about its recovery.
+ *
+ * A ring holding more than one entry — a cache written by an older build, or
+ * files copied in by hand — is listed as one row per entry rather than
+ * hidden. The cap is a policy about what is written, not an assumption about
+ * what is found.
  *
  * ## The empty state is a disabled row, never an empty flyout
  *
@@ -152,17 +161,20 @@ export function autosaveSubmenu(
 
   return {
     label: "Auto Save",
-    submenu: byRecency.map((ring) => ({
-      label: ring.label,
-      submenu: [...ring.entries]
+    submenu: byRecency.flatMap((ring) =>
+      [...ring.entries]
         .sort((a, b) => b.writtenAtMs - a.writtenAtMs)
         .map((entry) => ({
-          label: entryLabel(entry.writtenAtMs, nowMs, tzOffsetMinutes),
+          label: `${ring.label} — ${entryLabel(
+            entry.writtenAtMs,
+            nowMs,
+            tzOffsetMinutes,
+          )}`,
           // No accelerator, ever. A recovery replaces the whole timeline and
           // must never be one keystroke away.
           click: () => onPick(ring.key, entry.file),
         })),
-    })),
+    ),
   };
 }
 

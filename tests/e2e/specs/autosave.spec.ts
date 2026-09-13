@@ -113,6 +113,17 @@ test("a successful save retires the project's recovery ring", async ({
       })
       .toBe(1);
   });
+
+  await test.step("and each further edit supersedes the last, never accumulating", async () => {
+    // The retention rule, through the real app: a session keeps only its
+    // newest recovery point. The ceiling is 60s, so three edits a few seconds
+    // apart produce several writes, and the count must stay at one.
+    for (const body of ["three", "four", "five"]) {
+      await addClip(page, body);
+      await new Promise((resolve) => setTimeout(resolve, 6_000));
+      expect(entries(userDataDir)).toHaveLength(1);
+    }
+  });
 });
 
 test("no autosave is written for a project nobody has touched", async ({
@@ -168,7 +179,7 @@ test("work survives a kill, and recovery leaves the original alone", async ({
 
       // The submenu names it. Read through Electron rather than by clicking,
       // because a native menu is not in the page.
-      const labels = await second.app.evaluate(({ Menu }) => {
+      const menu = await second.app.evaluate(({ Menu }) => {
         const file = Menu.getApplicationMenu()?.items.find(
           (item) => item.label === "File",
         );
@@ -177,19 +188,14 @@ test("work survives a kill, and recovery leaves the original alone", async ({
         );
         return {
           enabled: autoSave?.enabled ?? null,
-          projects:
-            autoSave?.submenu?.items.map((item) => ({
-              label: item.label,
-              entries: item.submenu?.items.map((e) => e.label) ?? [],
-            })) ?? [],
+          rows: autoSave?.submenu?.items.map((item) => item.label) ?? [],
         };
       });
 
-      expect(labels.enabled).toBe(true);
-      expect(labels.projects).toHaveLength(1);
-      expect(labels.projects[0].label).toBe("crash.ngt");
-      expect(labels.projects[0].entries).toHaveLength(1);
-      expect(labels.projects[0].entries[0]).toMatch(/^Today \d\d:\d\d:\d\d$/);
+      // One flat row, naming the project and the time together.
+      expect(menu.enabled).toBe(true);
+      expect(menu.rows).toHaveLength(1);
+      expect(menu.rows[0]).toMatch(/^crash\.ngt — Today \d\d:\d\d:\d\d$/);
 
       // Click the entry, the way a user would.
       await clickFirstRecoveryPoint(second.app);
@@ -246,7 +252,7 @@ async function clickFirstRecoveryPoint(app: any): Promise<void> {
     const autoSave = file?.submenu?.items.find(
       (item: any) => item.label === "Auto Save",
     );
-    const entry = autoSave?.submenu?.items[0]?.submenu?.items[0];
+    const entry = autoSave?.submenu?.items[0];
     if (entry == null) {
       throw new Error("File ▸ Auto Save offered no recovery point");
     }
@@ -299,5 +305,46 @@ test("recovery refuses a timeline that has anything on it", async ({
 
   await test.step("and the recovery point it refused is still there", async () => {
     expect(entries(userDataDir)).toHaveLength(1);
+  });
+});
+
+test("closing with unsaved work warns, even though Auto Save has run", async ({
+  session,
+}) => {
+  const { page, userDataDir } = session;
+
+  // The modal is hidden until something shows it. (That an *untouched*
+  // project closes quietly is `projectDirty.test.ts`'s job — driving it here
+  // would end the session before the interesting half.)
+  const modal = page.locator("#whenClose");
+  await expect(modal).toBeHidden();
+
+  await test.step("edit, and let Auto Save write a recovery point", async () => {
+    await addClip(page, "unsaved");
+    await expect
+      .poll(() => entries(userDataDir).length, { timeout: 30_000 })
+      .toBe(1);
+  });
+
+  await test.step("closing now warns rather than quitting", async () => {
+    // LOAD-BEARING. An autosave is not a save: the user's `.ngt` does not
+    // exist, so the window must not go without asking. This regressed once —
+    // the dirty baseline was seeded lazily by the guard's own first call, so
+    // it reported clean whatever the timeline held.
+    await session.app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].close();
+    });
+
+    await expect(modal).toBeVisible({ timeout: 10_000 });
+
+    // And the app is still running, with the work intact.
+    expect(
+      await page.evaluate(
+        () =>
+          Object.keys(
+            (globalThis as any).CARTCUT.useTimelineStore.getState().timeline,
+          ).length,
+      ),
+    ).toBe(1);
   });
 });

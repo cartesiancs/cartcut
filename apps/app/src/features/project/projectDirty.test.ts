@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   currentProjectDigest,
+  initProjectBaseline,
   isProjectDirty,
   isProjectEmpty,
   markProjectSaved,
@@ -63,11 +64,48 @@ beforeEach(() => {
 });
 
 describe("isProjectDirty", () => {
-  it("seeds a baseline on the first ask and reports clean", () => {
-    // A fresh launch must not warn about an untouched project.
+  it("reports dirty when no baseline has been established", () => {
+    // LOAD-BEARING, and the cause of a real bug.
+    //
+    // The first draft *seeded* the baseline here and answered `false`. For a
+    // project that has never been saved nothing else establishes one — only
+    // `load` and a successful save do — so the first ask was the quit guard
+    // itself, which seeded from the already-edited timeline and reported
+    // clean. The window closed on unsaved work with no warning at all.
+    //
+    // Unknown means assume unsaved. `initProjectBaseline` is what makes a
+    // fresh launch quiet, and it runs at startup against the empty project
+    // rather than lazily against whatever is on screen.
     expect(projectBaseline()).toBeNull();
+    expect(isProjectDirty()).toBe(true);
+    // And asking must not have changed the answer.
+    expect(projectBaseline()).toBeNull();
+    expect(isProjectDirty()).toBe(true);
+  });
+
+  it("reports clean for an untouched project once seeded at startup", () => {
+    // The other half: a fresh launch must not warn about a project nobody
+    // has touched.
+    initProjectBaseline();
     expect(isProjectDirty()).toBe(false);
-    expect(projectBaseline()).not.toBeNull();
+  });
+
+  it("reports dirty for work done after startup seeding", () => {
+    // The quit-guard scenario, end to end: launch, edit, quit.
+    initProjectBaseline();
+    setDocument({ a: clip() } as unknown as Timeline);
+    expect(isProjectDirty()).toBe(true);
+  });
+
+  it("still reports dirty after an autosave has been written", () => {
+    // An autosave is not a save. It records nothing in `projectDirty`, so a
+    // project whose only copy is a recovery point still warns on quit —
+    // which is the whole point of the warning.
+    initProjectBaseline();
+    setDocument({ a: clip() } as unknown as Timeline);
+    // ...autosave runs here and writes a ring entry. It does not, and must
+    // not, touch the baseline.
+    expect(isProjectDirty()).toBe(true);
   });
 
   it("reports dirty after an edit", () => {

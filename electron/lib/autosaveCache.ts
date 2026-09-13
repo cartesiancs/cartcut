@@ -1,5 +1,5 @@
 /**
- * The Auto Save cache on disk: one ring of recovery points per project.
+ * The Auto Save cache on disk: one recovery point per project.
  *
  * No Electron in here — `root` is a parameter — so `autosaveCache.test.ts`
  * drives the real thing against a real temporary directory. `autosave.ts` is
@@ -11,12 +11,16 @@
  * <root>/
  *   f-3a9c1e77b2d40915-Film/          a project saved as Film.ngt
  *     meta.json                       { v, label, anchor }
- *     20260913T142530-123Z-a1b2.ngt
- *     20260913T142631-088Z-7f3e.ngt
+ *     20260913T142631-088Z-7f3e.ngt   the newest, and the only one
  *   s-9d41c0a2fe8b5613/               a project never saved
  *     meta.json                       { v, label, anchor: null }
  *     20260913T094102-401Z-c55d.ngt
  * ```
+ *
+ * A directory holds one entry, not a history — see `RING_SIZE`. "Ring" is
+ * still the word for it because the shape is a ring of one: a write appends
+ * and the surplus is unlinked behind it, and the code does not care whether
+ * the cap is 1 or 10.
  *
  * ## Four rules, each paid for by a failure mode
  *
@@ -46,15 +50,30 @@
  * wrote, in a directory this module created, named by a pattern this module
  * mints, and matched against that pattern before it is unlinked.** That is a
  * different act from sweeping a directory it does not own. A contact sheet is
- * also a few kilobytes; a ring of ten projects is not.
+ * also a few kilobytes; a project's timeline with its baked animation lanes is
+ * not, and superseding one every few seconds without deleting the last would
+ * fill a disk in an afternoon.
  */
 
 import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
 
-/** How many recovery points a ring keeps. */
-export const RING_SIZE = 10;
+/**
+ * How many recovery points a ring keeps. **One.**
+ *
+ * A ring is one project's unsaved divergence, and only its newest state is
+ * that. Every earlier write is superseded the moment the next one lands, so it
+ * is deleted then rather than aged out — which keeps the cache the size of the
+ * work outstanding rather than ten times it, and keeps the menu a list of
+ * projects rather than a history nobody asked for.
+ *
+ * The order within `writeEntry` is what makes this safe: the new entry is
+ * written to a `.part`, renamed into place, and only then is the old one
+ * unlinked. There is no instant at which a project has no recovery point
+ * because the replacement had not landed yet.
+ */
+export const RING_SIZE = 1;
 
 /** A ring untouched for this long is dropped at startup. */
 export const ORPHAN_TTL_DAYS = 14;

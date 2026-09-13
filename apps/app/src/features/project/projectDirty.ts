@@ -52,11 +52,25 @@ export function currentProjectDigest(): string {
 /**
  * `null` until something establishes a baseline.
  *
- * A fresh launch has an empty project that matches an empty baseline, so
- * `baseline` is seeded at module load rather than left null — otherwise the
- * quit guard would warn about an untouched project.
+ * Established by exactly three things: `initProjectBaseline` at startup, a
+ * successful load, and a successful save. **An autosave is not one of them** —
+ * a recovery copy is not a save, so a project whose only copy is in the ring
+ * stays dirty and still warns on quit.
  */
 let baseline: string | null = null;
+
+/**
+ * Record the empty project the app starts with as the baseline.
+ *
+ * Called once from `index.ts`. It has to be eager, and that is the whole
+ * point: the first draft seeded lazily inside `isProjectDirty`, and since
+ * nothing else establishes a baseline for a never-saved project, the first ask
+ * *was* the quit guard — which seeded from the already-edited timeline and
+ * answered "clean". The window closed on unsaved work with no warning.
+ */
+export function initProjectBaseline(): void {
+  baseline = currentProjectDigest();
+}
 
 /**
  * Record that the project as it stands is what is on disk.
@@ -71,11 +85,18 @@ export function markProjectSaved(digest?: string): void {
   baseline = digest ?? currentProjectDigest();
 }
 
-/** Whether the project differs from the last thing known to be on disk. */
+/**
+ * Whether the project differs from the last thing known to be on disk.
+ *
+ * **Unknown means dirty.** Answering `false` for an unestablished baseline is
+ * the shape of the bug above: it makes the very first ask report clean
+ * whatever the timeline holds. Erring the other way costs at worst one
+ * needless "are you sure" on a project nobody touched, and `initProjectBaseline`
+ * means that does not happen either.
+ */
 export function isProjectDirty(): boolean {
   if (baseline == null) {
-    baseline = currentProjectDigest();
-    return false;
+    return true;
   }
   return currentProjectDigest() !== baseline;
 }

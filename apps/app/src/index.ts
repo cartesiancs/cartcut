@@ -11,6 +11,7 @@ import {
 import { useTimelineStore } from "./states/timelineStore";
 import { installProxyBridge } from "./features/proxy/proxyBridge";
 import { installAutosave } from "./features/project/autosaveBridge";
+import { initProjectBaseline } from "./features/project/projectDirty";
 
 enableIpcWrapper();
 
@@ -97,6 +98,11 @@ installProxyBridge();
 // continues; a successful ⌘S drops that project's ring. Nothing reads a
 // recovery point without the user asking — File → Auto Save is the only way
 // back in. A no-op in the web build, which has no bridge.
+// Before `installAutosave`, and unconditionally — the web build has no
+// autosave but still has a quit guard. This records the empty project the app
+// starts with, so an untouched session quits quietly and an edited one does
+// not. See `projectDirty.ts` for what happens without it.
+initProjectBaseline();
 installAutosave();
 
 // One more subscriber, to count the subscribers.

@@ -190,9 +190,24 @@ detached" a node assertion rather than a hope.
 userData/autosave/
   f-3a9c1e77b2d40915-Film/        a project saved as Film.ngt
     meta.json                     { v, label, anchor }
-    20260913T142530-123Z-a1b2.ngt
-  s-9d41c0a2fe8b5613/             a project never saved — the ring is the only copy
+    20260913T142631-088Z-7f3e.ngt the newest, and the only one
+  s-9d41c0a2fe8b5613/             a project never saved — this is the only copy
 ```
+
+**One recovery point per project, not a history.** A ring is one project's
+unsaved divergence, and only its newest state is that; every earlier write is
+superseded the moment the next lands and is deleted then. The order inside
+`writeEntry` is what makes a cap of one safe — write the `.part`, rename it into
+place, *then* unlink the superseded one — so there is no instant at which a
+project has no recovery point because the replacement had not arrived yet.
+`RING_SIZE` is still a parameter and the code does not care whether it is 1 or
+10; what ships is 1.
+
+The menu is therefore **one flat row per project**, naming the project and the
+time together — `Film.ngt — Today 14:25:30`. A second level would be a submenu
+of one item every time. The project name is never dropped: a flat list of bare
+times is Premiere's arrangement, and not being able to tell which project a time
+belongs to is the most confusing thing about its recovery.
 
 - **The filename carries the time**, fixed-width and UTC, so a lexicographic
   sort is chronological and the menu opens no zips. `filesystem:getDirectory`
@@ -246,10 +261,19 @@ writes* — is the one whose absence makes the feature fail silently.
   `subscribeWithSelector`, so every listener fires on every write including
   `setCursor` at the display rate. `autosave.noteChange` is counted beside
   `store.notify`, so the ratio is visible from `__cartcutPerf`.
-- **A recovery is read-only on the cache.** It leaves the ring completely
-  alone — the other nine entries are still the only copies of those states, and
-  a user who picked 14:22 when they meant 14:25 must not have destroyed the
-  right one by looking at the wrong one. A ring dies only on a successful save.
+- **A recovery is read-only on the cache.** It leaves the ring alone, and a
+  ring dies only on a successful save. With a cap of one that mostly means "the
+  entry survives being recovered from", which matters because a recovered
+  session is detached — nothing else would put those bytes back.
+- **An autosave is not a save, and the quit guard must agree.** Nothing on the
+  autosave path touches `projectDirty`'s baseline, so a project whose only copy
+  is a recovery point stays dirty and still raises the close warning. The
+  baseline is seeded eagerly at startup by `initProjectBaseline`, and an
+  *unestablished* baseline reads as **dirty**. Both halves are needed: the first
+  draft seeded lazily inside `isProjectDirty`, and since nothing else
+  establishes one for a never-saved project, the first ask *was* the quit guard —
+  which seeded from the already-edited timeline and answered "clean". The window
+  closed on unsaved work with no warning.
 
 ### The guard is stricter for recovery than for Open
 
@@ -289,8 +313,10 @@ File → Open therefore refuses after a settings-only change until it is saved.
 
 ### How it is known to be right
 
-`tests/e2e/specs/autosave.spec.ts` is the load-bearing half, and the second test
-is the whole feature in one: save a project, edit it, **kill the app with
+`tests/e2e/specs/autosave.spec.ts` is the load-bearing half. One test drives the
+close warning with a real `BrowserWindow.close()` and requires the modal rather
+than a quit — verified against the bug by restoring the lazy seeding, which
+turns it red. Another is the whole feature in one: save a project, edit it, **kill the app with
 `app.exit(0)`** — no graceful close, which is the disaster this exists for —
 relaunch into the same `userData`, read the real `File ▸ Auto Save` submenu
 through `Menu.getApplicationMenu()`, click the entry, and then require that the

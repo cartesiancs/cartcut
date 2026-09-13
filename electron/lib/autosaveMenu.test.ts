@@ -106,46 +106,45 @@ describe("autosaveSubmenu", () => {
     expect(item.toolTip).toContain("everything is saved");
   });
 
-  it("is two levels even for one ring", () => {
+  it("is one flat row per recovery point", () => {
+    // A ring keeps exactly one entry, so a second level would be a submenu of
+    // one item every time — three levels of nesting to reach one choice.
     const item = autosaveSubmenu([ring()], () => {}, T0, 0) as any;
-    const projects = subOf(item);
-    expect(projects).toHaveLength(1);
-    expect(projects[0].label).toBe("Film.ngt");
-    expect(subOf(projects[0])).toHaveLength(1);
+    const rows = subOf(item);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].submenu).toBeUndefined();
   });
 
-  it("names each ring by its label", () => {
+  it("names the project and the time in the same row", () => {
+    // LOAD-BEARING for legibility: a flat list of bare times is Premiere's,
+    // and being unable to tell which project a time belongs to is the single
+    // most confusing thing about its recovery.
+    const item = autosaveSubmenu([ring()], () => {}, T0, 0) as any;
+    expect(subOf(item)[0].label).toBe("Film.ngt — Today 14:25:30");
+  });
+
+  it("names every ring, including an untitled one", () => {
     const item = autosaveSubmenu(
-      [ring({ key: "f-a-A", label: "A.ngt" }), ring({ key: "s-b", label: "Untitled (13 Sep 09:12)" })],
+      [
+        ring({ key: "f-a-A", label: "A.ngt" }),
+        ring({
+          key: "s-b",
+          label: "Untitled (13 Sep 09:12)",
+          entries: [{ file: "/c/b.ngt", writtenAtMs: T0 - MIN }],
+        }),
+      ],
       () => {},
       T0,
       0,
     ) as any;
-    expect(subOf(item).map((p: any) => p.label)).toEqual([
-      "A.ngt",
-      "Untitled (13 Sep 09:12)",
+    expect(subOf(item).map((r: any) => r.label)).toEqual([
+      "A.ngt — Today 14:25:30",
+      "Untitled (13 Sep 09:12) — Today 14:24:30",
     ]);
   });
 
-  it("orders entries newest first whatever order they arrive in", () => {
+  it("orders rows newest first whatever order they arrive in", () => {
     // LOAD-BEARING. The order *is* the information in a recovery list.
-    const shuffled = ring({
-      entries: [
-        { file: "/c/mid.ngt", writtenAtMs: T0 },
-        { file: "/c/old.ngt", writtenAtMs: T0 - 5 * MIN },
-        { file: "/c/new.ngt", writtenAtMs: T0 + 5 * MIN },
-      ],
-    });
-    const item = autosaveSubmenu([shuffled], () => {}, T0 + MIN, 0) as any;
-    const labels = subOf(subOf(item)[0]).map((e: any) => e.label);
-    expect(labels).toEqual([
-      "Today 14:30:30",
-      "Today 14:25:30",
-      "Today 14:20:30",
-    ]);
-  });
-
-  it("orders rings by their newest entry whatever order they arrive in", () => {
     const older = ring({
       key: "f-old-A",
       label: "Older.ngt",
@@ -157,13 +156,32 @@ describe("autosaveSubmenu", () => {
       entries: [{ file: "/c/b.ngt", writtenAtMs: T0 }],
     });
     const item = autosaveSubmenu([older, newer], () => {}, T0, 0) as any;
-    expect(subOf(item).map((p: any) => p.label)).toEqual([
-      "Newer.ngt",
-      "Older.ngt",
+    expect(subOf(item).map((r: any) => r.label)).toEqual([
+      "Newer.ngt — Today 14:25:30",
+      "Older.ngt — Today 14:15:30",
     ]);
   });
 
-  it("reports the key and file of the entry that was clicked, unaltered", () => {
+  it("lists a ring that somehow holds several entries, newest first", () => {
+    // The cap is a policy about what is *written*. A cache from an older
+    // build, or files copied in by hand, must still be offered rather than
+    // silently truncated to one.
+    const shuffled = ring({
+      entries: [
+        { file: "/c/mid.ngt", writtenAtMs: T0 },
+        { file: "/c/old.ngt", writtenAtMs: T0 - 5 * MIN },
+        { file: "/c/new.ngt", writtenAtMs: T0 + 5 * MIN },
+      ],
+    });
+    const item = autosaveSubmenu([shuffled], () => {}, T0 + MIN, 0) as any;
+    expect(subOf(item).map((r: any) => r.label)).toEqual([
+      "Film.ngt — Today 14:30:30",
+      "Film.ngt — Today 14:25:30",
+      "Film.ngt — Today 14:20:30",
+    ]);
+  });
+
+  it("reports the key and file of the row that was clicked, unaltered", () => {
     // LOAD-BEARING. A row that recovers something other than what it says is
     // the worst thing this menu could do, and nothing here parses either
     // value out of a label or an id.
@@ -188,9 +206,9 @@ describe("autosaveSubmenu", () => {
       0,
     ) as any;
 
-    const projects = subOf(item);
-    subOf(projects[0])[1].click();
-    subOf(projects[1])[0].click();
+    const rows = subOf(item);
+    rows[1].click();
+    rows[2].click();
 
     expect(picks).toEqual([
       ["f-abc-Film", "/cache/f-abc-Film/old.ngt"],
@@ -198,15 +216,12 @@ describe("autosaveSubmenu", () => {
     ]);
   });
 
-  it("gives no entry an accelerator", () => {
+  it("gives no row an accelerator", () => {
     // A recovery replaces the whole timeline; it must never be one keystroke
     // away.
     const item = autosaveSubmenu([ring()], () => {}, T0, 0) as any;
-    for (const project of subOf(item)) {
-      expect(project.accelerator).toBeUndefined();
-      for (const entry of subOf(project)) {
-        expect(entry.accelerator).toBeUndefined();
-      }
+    for (const row of subOf(item)) {
+      expect(row.accelerator).toBeUndefined();
     }
   });
 
@@ -217,7 +232,9 @@ describe("autosaveSubmenu", () => {
       T0,
       0,
     ) as any;
-    expect(subOf(item).map((p: any) => p.label)).toEqual(["Film.ngt"]);
+    expect(subOf(item).map((r: any) => r.label)).toEqual([
+      "Film.ngt — Today 14:25:30",
+    ]);
   });
 
   it("is the disabled row when every ring is empty", () => {
@@ -231,24 +248,19 @@ describe("autosaveSubmenu", () => {
     expect(item.submenu).toBeUndefined();
   });
 
-  it("holds 200 rows in order", () => {
-    // 20 rings x 10 entries is the shipped cap. Ordering has to survive it.
+  it("holds a row per project at the shipped caps, in order", () => {
+    // 20 rings of one entry each is what ships: `MAX_RINGS` x `RING_SIZE`.
     const many = Array.from({ length: 20 }, (_, r) =>
       ring({
         key: `f-${r}-P`,
         label: `P${r}.ngt`,
-        entries: Array.from({ length: 10 }, (_, e) => ({
-          file: `/c/${r}-${e}.ngt`,
-          writtenAtMs: T0 - r * DAY - e * MIN,
-        })),
+        entries: [{ file: `/c/${r}.ngt`, writtenAtMs: T0 - r * DAY }],
       }),
     );
-    const item = autosaveSubmenu(many, () => {}, T0, 0) as any;
-    const projects = subOf(item);
-    expect(projects).toHaveLength(20);
-    expect(projects[0].label).toBe("P0.ngt");
-    expect(projects[19].label).toBe("P19.ngt");
-    expect(subOf(projects[0])).toHaveLength(10);
+    const rows = subOf(autosaveSubmenu(many, () => {}, T0, 0) as any);
+    expect(rows).toHaveLength(20);
+    expect(rows[0].label).toContain("P0.ngt");
+    expect(rows[19].label).toContain("P19.ngt");
   });
 });
 
