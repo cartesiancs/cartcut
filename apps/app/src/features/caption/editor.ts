@@ -33,6 +33,8 @@
 import {
   mergeCaretOffset,
   mergeLineWithPrevious,
+  removeLine,
+  restoreLine,
   setLineText,
   splitLineAt,
   type CaptionLine,
@@ -195,6 +197,39 @@ export function applyCaptionEdit(
     case "none":
       return { editor, focus: null };
   }
+}
+
+/**
+ * Strike a line out, or put it back.
+ *
+ * Deliberately **not** a `CaptionKeyIntent`. That union is documented as what a
+ * *keystroke* means, and `capturesKey` is derived from it for one purpose: to
+ * decide whether the panel cancels the key event. A button press has no key
+ * event to cancel, so a `deleteLine` member would force `capturesKey` to answer
+ * a question about something that never happened.
+ *
+ * It shares the undo stack with split and merge, through the same private
+ * `commit`, because it is a structural edit of the same kind: Cmd+Z after a
+ * delete should put the line back, and after a delete *and* a split should walk
+ * back through both. Typing stays off that stack for the reason `editText`
+ * gives.
+ *
+ * Declines by identity when the underlying op does, so a second click on an
+ * already struck-out line records nothing.
+ */
+export function applyLineRemoval(
+  editor: CaptionEditor,
+  index: number,
+  removed: boolean,
+): CaptionEditor {
+  const lines = removed
+    ? removeLine(editor.lines, index)
+    : restoreLine(editor.lines, index);
+
+  // The caret is discarded: the row's input is disabled while the line is
+  // struck out, so there is nowhere to put it and stealing focus would move it
+  // off whatever the user was actually typing in.
+  return commit(editor, lines, { index, caretOffset: 0 }).editor;
 }
 
 /**

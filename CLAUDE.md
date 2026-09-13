@@ -974,6 +974,118 @@ returning their input by identity**, which is also what lets the panel's Cmd+Z
 skip a gesture that did nothing. Undo covers split and merge only — a snapshot
 per keystroke would bury them under hundreds of character states.
 
+## Cutting from the transcript
+
+Two gestures in the auto-caption panel that change the **picture**, not just the
+words: striking a caption line out cuts its footage, and a sweep cuts the
+silences. Descript's arrangement, and the reason the panel exists at all. Before
+this it could only add text, so a user found the dead weight in the transcript,
+closed the panel, and went hunting for the same moment on the timeline by eye.
+
+```
+apps/app/src/features/timeline/rippleMap.ts   where a time goes after a cut
+apps/app/src/features/caption/cuts.ts         intent -> one list of timeline ranges
+apps/app/src/features/caption/silence.ts      what counts as a silence
+apps/app/src/features/caption/applyCaptions.ts  cut and place, one transform
+electron/mcp/analyze.ts#analyzeSilences       the measurement, at a chosen threshold
+electron/ipc/ipcAnalyze.ts                    the renderer's way to it
+```
+
+Nothing reaches the timeline until **Complate Edit**. Until then a struck-out
+line is `removed: true` on the line and a swept silence is a panel field, and the
+whole edit is one `commit`, so one Cmd+Z takes back the cuts *and* the captions.
+The loop of `elementControl.addText` that used to place captions is gone: one
+store commit per caption was survivable while the panel only added text, and is
+not now that the same press also removes footage.
+
+### The decision the feature turns on
+
+> **Where a caption lands after the cut is computed from the cut list, not read
+> back from the document.**
+
+`removeRanges` leaves the clip as N pieces with new ids, so the single
+`sourceKey` the panel started with no longer names the footage most captions sit
+on. Re-finding the piece per caption is possible; it is also unnecessary,
+because a rippled lane leaves the surviving footage contiguous:
+
+```
+t' = t - (everything cut before t)
+d' = d - (everything cut inside [t, t+d))
+```
+
+`rippleMap.ts` is that, and nothing else. The claim is about `removeRanges`
+rather than about arithmetic, so `rippleMap.parity.test.ts` performs the real
+edit and checks the prediction against where the footage measurably landed:
+three speeds, six shapes of cut, probing the source window every 97ms. Breaking
+`shiftPoint` turns it red, which is how it is known to measure something.
+
+**One list feeds both consumers, and that is what makes it exact.** `onFrame`
+can pull a short range's two edges onto the same frame, and `removeRanges` skips
+a range whose clamped width is zero, so a caller that snapped *after* predicting
+would predict a cut that never happened and place every later caption early.
+`planCuts` clamps to the trim window, converts, snaps, merges and drops the
+collapsed ranges once, before either side sees the array.
+
+### Five things that are easy to get wrong
+
+- **Resolve the clip before cutting it.** A cut flush to the left edge makes the
+  head the deleted middle, so the original id is **gone** and the survivor
+  carries a new one with a different `trim.startTime`. Reading
+  `doc.elements[sourceKey]` afterwards gets `undefined` for an entirely ordinary
+  case, and `captionToTimeline` then quietly treats source times as timeline
+  times. Pinned by a test that asserts `elements.clip` is undefined and the
+  captions are still right.
+- **A struck-out line declines split and merge.** Both build fresh object
+  literals rather than spreading, so before the guards a split un-deleted the
+  line and both halves came back. Refusing is one line each and is what a test
+  can see; spreading would break again the moment `CaptionLine` gains a field.
+- **The silence rule is an intersection, and neither half is optional.** The
+  signal alone cuts a word quiet enough to dip under the threshold, and keeps
+  laughter or a music sting because they are not quiet. The words alone call
+  every wordless gap dead air, sting included. `signal.ts` already says the
+  transcript cannot see a silence that is not between words; this is the other
+  direction of the same point.
+- **A pause is trimmed *to* `keepMs`, never to nothing.** The rule
+  `style.ts#cutting.maxSilenceMs` already states. Two sentences butted hard
+  together read as a mistake rather than as tightening.
+- **The ripple is lane-local, so say so.** A music bed, a detached audio twin or
+  a caption from an earlier pass keeps its old timing while the picture under it
+  gets shorter, and nothing repairs that. `rippleMap.ts#clipsAcrossCuts` names
+  them and the panel warns before committing. **Text tracks are included**: an
+  earlier caption is the likeliest thing sitting over the cuts, and excluding it
+  would leave the warning silent in the commonest case.
+
+Cuts that would remove the whole clip are refused, and the captions are placed
+anyway: that half is recoverable by hand, while an emptied track is not.
+
+### The measurement
+
+`analyzeSilences` re-runs `silentRanges` over the **cached** envelope rather than
+returning `AudioAnalysis.silences`, which is baked at the defaults. The decode is
+the expensive half and it is already cached by file identity, so a threshold
+control costs one pass over an array. The envelope never crosses IPC: at a 10ms
+hop it is six thousand numbers a minute.
+
+`analyzeFile` also gained an in-flight map keyed the way its cache is. The cache
+is written only *after* the decode, so two callers arriving during one both
+missed and both decoded. Harmless while the only caller was an agent asking
+once; with a button behind it, a double-click was two full decodes of the same
+take.
+
+### Two things fixed on the way past
+
+- **`plan.ts` minted one split id per range, and `removeRanges` mints two.** A
+  range in the middle of a clip splits twice, so the pool drained and fell
+  through to `?? uuidv4()`. `commit` runs its transform twice, so the probe and
+  the committed run then minted *different* ids, which is precisely what the
+  pool exists to prevent. `applyCaptionCommit` throws rather than falling back.
+- **The preview drew struck-out lines.** `captionsFrom` drops them, so the
+  panel's "the preview draws the element it will place" claim was false for
+  exactly the lines the user had just acted on.
+
+`SCHEMA_VERSION` did not move. `removed` is an optional field that restoring
+deletes, and it never reaches the timeline: it is panel state that becomes a cut.
+
 ## The application menu
 
 The macOS menu bar is a second surface onto the editor's commands, and it obeys

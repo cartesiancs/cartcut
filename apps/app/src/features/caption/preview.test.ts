@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { createCanvas, type Canvas } from "@napi-rs/canvas";
 import { inkBounds, pixel, solid } from "../renderer/testing";
 import { captionStyle } from "./layout";
-import { linesFromWordGroups, type CaptionLine } from "./lines";
+import {
+  linesFromWordGroups,
+  removeLine,
+  restoreLine,
+  type CaptionLine,
+} from "./lines";
 import { captionElementAt, paintCaptionPreview } from "./preview";
 
 /**
@@ -266,3 +271,43 @@ describe("captionElementAt", () => {
 function bytes(canvas: Canvas): Uint8ClampedArray {
   return canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
 }
+
+describe("paintCaptionPreview and struck-out lines", () => {
+  const frame = { w: 640, h: 360 };
+  const lines = (): CaptionLine[] =>
+    linesFromWordGroups([[{ word: "hello", start: 0, end: 2 }]]);
+
+  function paint(ls: CaptionLine[]): Canvas {
+    const canvas = createCanvas(frame.w, frame.h);
+    paintCaptionPreview(canvas.getContext("2d") as any, {
+      canvasSize: frame,
+      frame,
+      backgroundColor: "#000000",
+      lines: ls,
+      progressSec: 1,
+      placement: "lowerThird",
+      sourceImage: null,
+    });
+    return canvas;
+  }
+
+  // The preview's whole claim is that it draws the element it will place, and
+  // `captionsFrom` no longer places a struck-out line.
+  it("draws nothing for a line the user struck out", () => {
+    // Assert the kept line drew ink first. Two blank frames also have no
+    // difference between them, so without this the test passes either way -
+    // the trap `preview.parity.test.ts` records having fallen into once.
+    expect(
+      inkBounds(paint(lines())).count,
+      "the kept line drew no ink, so this test proves nothing",
+    ).toBeGreaterThan(0);
+
+    expect(inkBounds(paint(removeLine(lines(), 0))).count).toBe(0);
+  });
+
+  it("draws it again once it is restored", () => {
+    const struck = removeLine(lines(), 0);
+    const restored = restoreLine(struck, 0);
+    expect(inkBounds(paint(restored))).toEqual(inkBounds(paint(lines())));
+  });
+});

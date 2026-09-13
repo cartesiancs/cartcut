@@ -312,6 +312,18 @@ const request = {
       return () => ipcRenderer.removeListener("transcribe:progress", wrapped);
     },
   },
+  /**
+   * Where a file goes quiet, in source milliseconds.
+   *
+   * One call, no job id and no progress: the measurement is cached on disk by
+   * file identity and deduped while it runs, so the first call costs one ffmpeg
+   * decode and every later one costs nothing. Answers `{ ok: false, error }`
+   * rather than rejecting, because the caller treats a sweep as an offer that
+   * may decline.
+   */
+  analyze: {
+    silences: (request) => ipcRenderer.invoke("analyze:silences", request),
+  },
   selfhosted: {
     run: () => ipcRenderer.invoke("selfhosted:run"),
   },

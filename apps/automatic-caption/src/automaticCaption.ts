@@ -7,10 +7,13 @@ import {
 } from "../../app/src/features/caption/locale";
 import { type CaptionPlacement } from "../../app/src/features/caption/layout";
 import {
+  hasRemovedLines,
+  removedSpans,
   activeAt,
   type CaptionLine,
 } from "../../app/src/features/caption/lines";
 import {
+  applyLineRemoval,
   applyCaptionEdit,
   captionKeyIntent,
   capturesKey,
@@ -19,6 +22,12 @@ import {
   type CaptionKeyIntent,
 } from "../../app/src/features/caption/editor";
 import { captionRows } from "../../app/src/features/caption/rows";
+import {
+  DEFAULT_SILENCE_OPTIONS,
+  silenceCuts,
+  wordGaps,
+} from "../../app/src/features/caption/silence";
+import { sourceWindowOf } from "../../app/src/features/caption/cuts";
 import {
   ChromeGate,
   PreviewLoop,
@@ -60,6 +69,15 @@ export class AutomaticCaption extends LitElement {
   isPlay: boolean;
   /** The two animation-frame handles. See `caption/previewLoop.ts`. */
   private readonly _loop = new PreviewLoop(windowScheduler());
+
+  /** Silences the sweep found, in source ms. Cleared by the Clear button. */
+  private _silenceCuts: Array<{ startMs: number; endMs: number }> = [];
+
+  /** A decode is running. One ffmpeg pass, so a spinner rather than a bar. */
+  private _silenceBusy = false;
+
+  /** Why the last sweep found nothing, shown rather than swallowed. */
+  private _silenceError: string | null = null;
   /** Seconds into the source media. Read from the media element, never accumulated. */
   progress: number;
   /** The element key of the chosen clip. Identifies the row and the source. */
@@ -440,14 +458,24 @@ export class AutomaticCaption extends LitElement {
       this._verticalPlacement,
     );
 
+    // `sourceKey` and `cuts` travel beside the rows rather than inside them:
+    // they belong to the gesture, not to any one caption. The cuts are source
+    // milliseconds, the clock a transcript keeps. `Control` owns the frame rate
+    // and the document, so it is where they become timeline ranges.
     this.dispatchEvent(
       new CustomEvent("editComplate", {
-        detail: { result },
+        detail: {
+          result,
+          sourceKey: this.selectedKey,
+          cuts: this.pendingCuts(),
+        },
         bubbles: true,
         composed: true,
       }),
     );
 
+    this._silenceCuts = [];
+    this._silenceError = null;
     this.isLoadVideo = false;
     this.requestUpdate();
   }
@@ -678,6 +706,116 @@ export class AutomaticCaption extends LitElement {
     this._applyIntent({ kind: "merge", index });
   }
 
+  /**
+   * Strike a line out, or put it back.
+   *
+   * Not an intent, because there is no keystroke to cancel; see
+   * `editor.ts#applyLineRemoval`. The identity check is the same one
+   * `_applyIntent` makes and for the same reason: a second click on an already
+   * struck-out line must cost no repaint and no undo entry.
+   */
+  toggleLineRemoved(index: number, removed: boolean) {
+    const editor = applyLineRemoval(this._editorState(), index, removed);
+    if (editor.lines === this.lines) {
+      return;
+    }
+    this.lines = editor.lines;
+    this._undo = editor.undo;
+    this.schedulePaint();
+    this.requestUpdate();
+  }
+
+  /**
+   * Find the silences worth cutting, and offer them.
+   *
+   * The sweep is a panel field rather than part of `CaptionEditor` on purpose.
+   * That editor's undo stack is `CaptionLine[][]`, and the panel's whole
+   * "a declined gesture costs nothing" check is `editor.lines === this.lines`.
+   * A sweep changes neither, so folding it in would mean rewriting the one line
+   * everything else rests on, to serve a gesture with a different lifetime: the
+   * lines change per keystroke, a sweep is an async result replaced whole. A
+   * deletion needs the undo stack and has it through `removed`; a sweep has a
+   * Clear button.
+   *
+   * `analyzeSilences` is cached on disk by file identity and deduped while it
+   * runs, so this is one ffmpeg decode the first time and nothing after.
+   */
+  async handleClickRemoveSilence() {
+    const api = this._analyzeApi();
+    const source = this.selectedSource();
+    if (api == null || source == null || this._silenceBusy) {
+      return;
+    }
+
+    this._silenceBusy = true;
+    this.requestUpdate();
+
+    try {
+      const response = await api.silences({ source: this.videoPath });
+      if (response?.ok !== true) {
+        this._silenceError =
+          response?.error ?? "Could not read the audio for this clip.";
+        return;
+      }
+
+      // Bounded by the clip's window rather than the file's length: the panel
+      // plays the whole file, but only what the clip holds can be cut, and a
+      // gap outside it would be clamped away later anyway.
+      const window = sourceWindowOf(source);
+      if (window == null) {
+        return;
+      }
+
+      this._silenceError = null;
+      this._silenceCuts = silenceCuts(
+        response.silences,
+        wordGaps(this.lines, window),
+        DEFAULT_SILENCE_OPTIONS,
+      );
+    } catch (error) {
+      this._silenceError =
+        error instanceof Error ? error.message : String(error);
+    } finally {
+      this._silenceBusy = false;
+      this.requestUpdate();
+    }
+  }
+
+  /** Put the swept silences back. Nothing has been cut yet either way. */
+  clearSilenceCuts() {
+    if (this._silenceCuts.length === 0) {
+      return;
+    }
+    this._silenceCuts = [];
+    this._silenceError = null;
+    this.requestUpdate();
+  }
+
+  /**
+   * The clip the transcript came from, as it stands in the timeline now.
+   *
+   * `this.timeline` is the element map, kept fresh by `Control`'s store
+   * subscription, so this sees an edit made while the panel was open.
+   */
+  private selectedSource() {
+    return this.selectedKey ? this.timeline?.[this.selectedKey] : undefined;
+  }
+
+  /**
+   * The silences bridge, or null.
+   *
+   * Null in the web build, which has no `electronAPI` at all. Same shape and
+   * same reason as `_transcribeApi`: the button is hidden rather than throwing.
+   */
+  private _analyzeApi() {
+    return (window as any).electronAPI?.req?.analyze ?? null;
+  }
+
+  /** Every range a Complate would cut, in source ms. */
+  private pendingCuts() {
+    return [...removedSpans(this.lines), ...this._silenceCuts];
+  }
+
   /** Put the caret back where the gesture left it, after Lit has re-rendered. */
   private focusLine(index: number, caretOffset: number) {
     void this.updateComplete.then(() => {
@@ -746,7 +884,9 @@ export class AutomaticCaption extends LitElement {
     );
 
     const analyzedTextMap = this.lines.map(
-      (line, index) => html`<div class="text-light caption">
+      (line, index) => html`<div
+        class="text-light caption ${line.removed === true ? "caption-cut" : ""}"
+      >
         <div class="caption-ribbon">
           ${line.words.map(
             (word, wordIndex) => html`<span
@@ -762,11 +902,23 @@ export class AutomaticCaption extends LitElement {
         <div class="d-flex gap-1 mt-2 align-items-center">
           <button
             class="btn btn-sm btn-secondary caption-merge"
-            ?disabled=${index === 0}
+            ?disabled=${index === 0 || line.removed === true}
             title="Merge into the line above (Backspace at the start of the line)"
             @click=${() => this.mergeLine(index)}
           >
             <span class="material-symbols-outlined icon-white">merge</span>
+          </button>
+          <button
+            class="btn btn-sm btn-secondary caption-merge"
+            title=${line.removed === true
+              ? "Keep this line, and its footage"
+              : "Delete this line and cut its footage out of the video"}
+            @click=${() =>
+              this.toggleLineRemoved(index, line.removed !== true)}
+          >
+            <span class="material-symbols-outlined icon-white"
+              >${line.removed === true ? "undo" : "content_cut"}</span
+            >
           </button>
           <input
             @input=${(e: Event) => this._handleChangeInput(e, index)}
@@ -775,11 +927,32 @@ export class AutomaticCaption extends LitElement {
             class="form-control bg-dark text-light"
             type="text"
             id="analyzedEditCaption_${index}"
+            ?disabled=${line.removed === true}
             .value=${line.text}
           />
         </div>
       </div>`,
     );
+
+    // Said before the button is pressed, not discovered afterwards. A Complate
+    // that silently shortens the timeline is the version of this feature nobody
+    // could trust.
+    const pending = this.pendingCuts();
+    const pendingMs = pending.reduce(
+      (total, cut) => total + Math.max(0, cut.endMs - cut.startMs),
+      0,
+    );
+    const cutSummary =
+      this._silenceError != null
+        ? html`<div class="caption-summary text-warning">
+            ${this._silenceError}
+          </div>`
+        : pending.length === 0
+          ? ""
+          : html`<div class="caption-summary text-light">
+              ${pending.length} cut${pending.length === 1 ? "" : "s"},
+              ${(pendingMs / 1000).toFixed(1)}s removed when you finish.
+            </div>`;
 
     return html`
       <style>
@@ -790,6 +963,26 @@ export class AutomaticCaption extends LitElement {
           border: 1px solid #26262b;
           border-radius: 8px;
           cursor: text;
+        }
+
+        /* Struck out, not gone: what was deleted stays readable and can be put
+           back. A row that vanished would leave nothing to name. */
+        .caption-cut .caption-ribbon,
+        .caption-cut input {
+          text-decoration: line-through;
+          opacity: 0.45;
+        }
+
+        .caption-cut {
+          border-color: #4a2b2b;
+        }
+
+        .caption-summary {
+          background-color: #19181a;
+          border: 1px solid #26262b;
+          border-radius: 8px;
+          padding: 0.5rem 0.75rem;
+          font-size: 0.8rem;
         }
 
         .caption-part {
@@ -1098,6 +1291,32 @@ export class AutomaticCaption extends LitElement {
                     </button>
                   </div>
 
+                  ${this._analyzeApi() == null
+                    ? ""
+                    : html`<div class="d-flex col gap-2">
+                        <button
+                          class="btn btn-sm ${this._silenceCuts.length > 0
+                            ? "btn-primary"
+                            : "btn-secondary"}"
+                          ?disabled=${this._silenceBusy ||
+                          this.lines.length === 0}
+                          title="Find the gaps that are both silent and wordless, and cut them"
+                          @click=${() => void this.handleClickRemoveSilence()}
+                        >
+                          ${this._silenceBusy
+                            ? "finding silence…"
+                            : "remove silence"}
+                        </button>
+                        ${this._silenceCuts.length > 0
+                          ? html`<button
+                              class="btn btn-sm btn-secondary"
+                              @click=${() => this.clearSilenceCuts()}
+                            >
+                              clear
+                            </button>`
+                          : ""}
+                      </div>`}
+                  ${cutSummary}
                 </div>
 
                 <div style="flex: 1 1 0; min-width: 0;">

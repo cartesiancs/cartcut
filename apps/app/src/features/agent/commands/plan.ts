@@ -181,8 +181,14 @@ registerCommands({
     const effectTrackId = uuidv4();
     // `removeRanges` mints an id per piece a cut splits off. Pre-generating a
     // pool keeps that stable across the probe too; it is drawn from in order.
+    //
+    // **Two per range, not one.** A range in the middle of a clip splits twice,
+    // once to cut the tail off and once to cut the head off, so a pool of one
+    // drained and fell through to the `?? uuidv4()` below. That mints a fresh
+    // id on each of `commit`'s two runs, which is exactly what the pool exists
+    // to prevent: the ids reported back were not the ids in the document.
     const splitIds = (plan.cuts ?? []).map((cut) =>
-      cut.ranges.map(() => uuidv4()),
+      cut.ranges.flatMap(() => [uuidv4(), uuidv4()]),
     );
 
     return commit((d: TimelineDocument) => {

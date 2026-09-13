@@ -10,6 +10,7 @@ import {
   type CaptionEditor,
   type CaptionField,
   type CaptionKeyEvent,
+  applyLineRemoval,
 } from "./editor";
 import { linesFromWordGroups, type CaptionWord } from "./lines";
 
@@ -613,5 +614,57 @@ describe("keystroke to result, end to end", () => {
 
     expect(result.captured).toBe(true);
     expect(result.editor).toBe(before);
+  });
+});
+
+describe("applyLineRemoval", () => {
+  const two = (): CaptionLine[] => [
+    { words: [], start: 0, end: 1, text: "first" },
+    { words: [], start: 1, end: 2, text: "second" },
+  ];
+
+  it("strikes a line out", () => {
+    const editor = applyLineRemoval(editorFrom(two()), 1, true);
+    expect(editor.lines[1].removed).toBe(true);
+  });
+
+  it("records exactly one undo entry", () => {
+    const editor = applyLineRemoval(editorFrom(two()), 1, true);
+    expect(editor.undo).toHaveLength(1);
+  });
+
+  it("is undone by Cmd+Z", () => {
+    const before = editorFrom(two());
+    const after = applyLineRemoval(before, 1, true);
+    expect(undoEdit(after).lines).toBe(before.lines);
+  });
+
+  it("declines by identity on a second strike", () => {
+    const once = applyLineRemoval(editorFrom(two()), 1, true);
+    expect(applyLineRemoval(once, 1, true)).toBe(once);
+  });
+
+  it("declines by identity on an index that is not there", () => {
+    const editor = editorFrom(two());
+    expect(applyLineRemoval(editor, 9, true)).toBe(editor);
+  });
+
+  it("restores, and that is its own undo step", () => {
+    const struck = applyLineRemoval(editorFrom(two()), 0, true);
+    const restored = applyLineRemoval(struck, 0, false);
+    expect(restored.lines[0].removed).toBeUndefined();
+    expect(restored.undo).toHaveLength(2);
+    expect(undoEdit(restored).lines).toBe(struck.lines);
+  });
+
+  it("shares the stack with split and merge, newest first out", () => {
+    const struck = applyLineRemoval(editorFrom(two()), 1, true);
+    const split = applyCaptionEdit(struck, {
+      kind: "split",
+      index: 0,
+      caretOffset: 2,
+    }).editor;
+    expect(split.undo).toHaveLength(2);
+    expect(undoEdit(split).lines).toBe(struck.lines);
   });
 });

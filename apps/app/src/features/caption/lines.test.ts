@@ -6,7 +6,11 @@ import {
   linesFromTranscript,
   linesFromWordGroups,
   mergeCaretOffset,
+  hasRemovedLines,
   mergeLineWithPrevious,
+  removeLine,
+  removedSpans,
+  restoreLine,
   setLineText,
   splitLineAt,
   splitLineAt as split,
@@ -377,5 +381,137 @@ describe("activeAt", () => {
         ),
       });
     }
+  });
+});
+
+/** Two lines, one word each, a second apart. */
+const twoLines = () =>
+  linesFromWordGroups([
+    [{ word: "hello", start: 0, end: 1 }],
+    [{ word: "again", start: 4, end: 5 }],
+  ]);
+
+describe("removeLine / restoreLine", () => {
+  it("strikes a line out without touching its timing or text", () => {
+    const lines = twoLines();
+    const next = removeLine(lines, 1);
+    expect(next[1].removed).toBe(true);
+    expect(next[1].text).toBe(lines[1].text);
+    expect(next[1].start).toBe(lines[1].start);
+    expect(next[1].end).toBe(lines[1].end);
+  });
+
+  it("leaves the other lines alone, by identity", () => {
+    const lines = twoLines();
+    const next = removeLine(lines, 1);
+    expect(next[0]).toBe(lines[0]);
+  });
+
+  // The convention `features/timeline/` states, and what keeps a repeated click
+  // off the panel's undo stack.
+  it("declines by identity on a line that is already struck out", () => {
+    const once = removeLine(twoLines(), 0);
+    expect(removeLine(once, 0)).toBe(once);
+  });
+
+  it("declines by identity on an index that is not there", () => {
+    const lines = twoLines();
+    expect(removeLine(lines, 9)).toBe(lines);
+    expect(removeLine(lines, -1)).toBe(lines);
+    expect(restoreLine(lines, 9)).toBe(lines);
+  });
+
+  it("declines by identity when restoring a line that was never struck out", () => {
+    const lines = twoLines();
+    expect(restoreLine(lines, 0)).toBe(lines);
+  });
+
+  // Deleting the key rather than writing `false` is what makes a restored line
+  // indistinguishable from one nobody touched.
+  it("deletes the key on restore rather than setting it false", () => {
+    const restored = restoreLine(removeLine(twoLines(), 0), 0);
+    expect("removed" in restored[0]).toBe(false);
+  });
+
+  it("round-trips to an equal line", () => {
+    const lines = twoLines();
+    expect(restoreLine(removeLine(lines, 0), 0)).toEqual(lines);
+  });
+
+  it("reports whether anything is struck out", () => {
+    const lines = twoLines();
+    expect(hasRemovedLines(lines)).toBe(false);
+    expect(hasRemovedLines(removeLine(lines, 1))).toBe(true);
+  });
+});
+
+describe("captionsFrom and struck-out lines", () => {
+  it("does not place a struck-out line", () => {
+    const lines = twoLines();
+    const kept = captionsFrom(removeLine(lines, 0));
+    expect(kept).toHaveLength(1);
+    expect(kept[0].text).toBe(lines[1].text);
+  });
+
+  it("places everything again once the line is restored", () => {
+    const lines = twoLines();
+    expect(captionsFrom(restoreLine(removeLine(lines, 0), 0))).toEqual(
+      captionsFrom(lines),
+    );
+  });
+
+  it("places nothing when every line is struck out", () => {
+    expect(captionsFrom(removeLine(removeLine(twoLines(), 0), 1))).toEqual([]);
+  });
+});
+
+describe("struck-out lines and the structural ops", () => {
+  // Both ops build fresh object literals, so before these guards a split or a
+  // merge silently dropped `removed` and un-deleted the line.
+  it("declines a split on a struck-out line, by identity", () => {
+    const once = removeLine(twoLines(), 0);
+    expect(splitLineAt(once, 0, 3)).toBe(once);
+  });
+
+  it("declines a merge into a struck-out line, by identity", () => {
+    const once = removeLine(twoLines(), 0);
+    expect(mergeLineWithPrevious(once, 1)).toBe(once);
+  });
+
+  it("declines a merge of a struck-out line, by identity", () => {
+    const once = removeLine(twoLines(), 1);
+    expect(mergeLineWithPrevious(once, 1)).toBe(once);
+  });
+
+  it("still splits and merges lines nobody struck out", () => {
+    const lines = twoLines();
+    expect(mergeLineWithPrevious(lines, 1)).not.toBe(lines);
+  });
+
+  // `setLineText` spreads, so the flag survives. The panel disables the input
+  // instead; this pins that the model does not quietly undo the deletion.
+  it("keeps the flag through an edit to the text", () => {
+    const once = removeLine(twoLines(), 0);
+    expect(setLineText(once, 0, "typed")[0].removed).toBe(true);
+  });
+});
+
+describe("removedSpans", () => {
+  it("is empty when nothing is struck out", () => {
+    expect(removedSpans(twoLines())).toEqual([]);
+  });
+
+  it("converts seconds to milliseconds", () => {
+    expect(removedSpans(removeLine(twoLines(), 1))).toEqual([
+      { startMs: 4000, endMs: 5000 },
+    ]);
+  });
+
+  it("reports every struck-out line, in order", () => {
+    const both = removeLine(removeLine(twoLines(), 0), 1);
+    expect(removedSpans(both)).toEqual([
+      { startMs: 0, endMs: 1000 },
+      { startMs: 4000, endMs: 5000 },
+    ]);
   });
 });

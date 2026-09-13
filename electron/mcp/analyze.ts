@@ -191,6 +191,33 @@ export async function analyzeFile(source: string): Promise<AudioAnalysis> {
     return cached;
   }
 
+  // The cache is only written *after* the decode, so two callers arriving
+  // during it both miss and both decode the same file. That was survivable
+  // while the only caller was an agent asking once; with a button behind it, a
+  // double-click is two full decodes of the same minutes-long take. The map
+  // holds the promise rather than the result, so the second caller waits on the
+  // first rather than starting anything.
+  const running = inFlight.get(key);
+  if (running != null) {
+    return running;
+  }
+
+  const work = measure(mediaPath, key);
+  inFlight.set(key, work);
+  try {
+    return await work;
+  } finally {
+    inFlight.delete(key);
+  }
+}
+
+/** Decodes in progress, keyed the same way the cache is. */
+const inFlight = new Map<string, Promise<AudioAnalysis>>();
+
+async function measure(
+  mediaPath: string,
+  key: string,
+): Promise<AudioAnalysis> {
   const samples = await decodeMono(mediaPath);
   const envelope = rmsEnvelope(samples, ANALYSIS_RATE, HOP_MS);
   const tempo = estimateTempo(envelope);
@@ -212,6 +239,39 @@ export async function analyzeFile(source: string): Promise<AudioAnalysis> {
 
   writeCache(key, analysis);
   return analysis;
+}
+
+/**
+ * Silences at a threshold the caller chooses.
+ *
+ * `AudioAnalysis.silences` is baked at `silentRanges`' own defaults, so it
+ * cannot answer for a caller that wants to be stricter or looser. What makes a
+ * choice cheap is that the **envelope is cached**: the expensive half is the
+ * decode, and re-running the run-detector over a cached `db[]` is microseconds.
+ * So a sensitivity control costs one pass over an array rather than another
+ * decode, and the first call warms the cache for every later one.
+ *
+ * The envelope itself never leaves this process. At a 10ms hop it is six
+ * thousand numbers a minute, which is not a thing to put through IPC when the
+ * caller wants a handful of ranges.
+ *
+ * `durationMs` comes back because the caller needs the **file's** length to
+ * know where the trailing silence ends, and a clip's own duration is the length
+ * of its trim window rather than of the file behind it.
+ */
+export async function analyzeSilences(
+  source: string,
+  options: { thresholdDb?: number; minMs?: number } = {},
+): Promise<{ durationMs: number; silences: Range[] }> {
+  const analysis = await analyzeFile(source);
+  return {
+    durationMs: analysis.durationMs,
+    silences: silentRanges(
+      analysis.envelope,
+      options.thresholdDb,
+      options.minMs,
+    ),
+  };
 }
 
 /**

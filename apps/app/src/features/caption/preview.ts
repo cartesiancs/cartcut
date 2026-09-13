@@ -101,6 +101,15 @@ export function paintCaptionPreview(
     return;
   }
 
+  // A struck-out line is not placed, so drawing it here would show the user a
+  // caption that is about to exist nowhere, over footage that is about to exist
+  // nowhere either. `captionsFrom` drops it on the other side, and the parity
+  // suite compares the two: skipping it keeps "the preview draws the element it
+  // will place" true rather than nearly true.
+  if (state.lines[index].removed === true) {
+    return;
+  }
+
   // The real path: `renderTimelineAtTime` → `paint` → `renderElement` →
   // `renderText`. `context` is omitted deliberately — it is only read for parent
   // lookups, and a caption that is not on the timeline yet has no parent. The

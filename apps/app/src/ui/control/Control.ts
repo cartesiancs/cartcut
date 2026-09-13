@@ -24,7 +24,14 @@ import {
 } from "../../states/controlPanelStore";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { renderOptionStore } from "../../states/renderOptionStore";
-import { captionToTimeline } from "../../features/caption/timing";
+import {
+  applyCaptionCommit,
+  mintCaptionIds,
+} from "../../features/caption/applyCaptions";
+import { planCuts } from "../../features/caption/cuts";
+import { clipsAcrossCuts } from "../../features/timeline/rippleMap";
+import { snapMsToFrame } from "../../features/timeline/frames";
+import { commit } from "../../features/agent/commit";
 import { LocaleController } from "../../controllers/locale";
 
 @customElement("control-ui")
@@ -134,30 +141,85 @@ export class Control extends LitElement {
   }
 
   /**
-   * Place transcribed captions on the timeline.
+   * Cut the footage the user struck out, and place what is left.
    *
    * The transcript timestamps the *source file*, so each caption's start has to
-   * be mapped through the clip it came from — trim offset and speed included —
+   * be mapped through the clip it came from, trim offset and speed included,
    * before it can be placed. Captions used to carry a `parentKey` and be
    * rendered at `parent.startTime + own.startTime`, which was the same
    * conversion done implicitly, at draw time, forever, and only for a 1x
-   * untrimmed clip. Doing it once here leaves every caption an ordinary clip
-   * holding an absolute time, so many of them share one text track.
+   * untrimmed clip. Doing it once leaves every caption an ordinary clip holding
+   * an absolute time, so many of them share one text track.
+   *
+   * This was a loop of `control.addText`, one store commit and one undo step per
+   * caption. That is no longer survivable: the same gesture now removes footage,
+   * and a Cmd+Z that took back one caption while leaving the cuts in place would
+   * be worse than useless. `applyCaptionCommit` is the whole thing as one
+   * document transform, and `commit` records exactly one step for it.
+   *
+   * Everything decided here is decided somewhere testable: `planCuts` owns the
+   * conversion and the snapping, `applyCaptionCommit` owns the order. What is
+   * left is reading the store, minting ids and warning the user.
    */
   _handleComplateAutoCaption(e) {
-    const result = e.detail.result;
-    const control = document.querySelector("element-control");
-    const timeline = useTimelineStore.getState().timeline;
+    const rows = e.detail.result ?? [];
+    const sourceKey = e.detail.sourceKey ?? null;
+    const sourceCuts = e.detail.cuts ?? [];
 
-    for (let index = 0; index < result.length; index++) {
-      const { sourceKey, ...caption } = result[index];
-      const source = sourceKey ? timeline[sourceKey] : undefined;
+    const doc = useTimelineStore.getState().getDocument();
+    const source = sourceKey ? doc.elements[sourceKey] : undefined;
+    const fps = renderOptionStore.getState().options.fps;
 
-      control.addText({
-        ...caption,
-        ...captionToTimeline(caption, source),
-      });
+    // Snapped here rather than inside the pure module, which must not read a
+    // store. The grid is the same one the mouse is held to.
+    const plan = planCuts(sourceCuts, source, (ms) => snapMsToFrame(ms, fps));
+
+    // Refusing the cuts and keeping the captions is the recoverable half: the
+    // user gets their transcript and can cut by hand. Cutting would leave an
+    // empty track and nothing to undo back to but the checkpoint.
+    const cuts = plan.coversWholeClip ? [] : plan.cuts;
+    if (plan.coversWholeClip) {
+      this.toastCaption(
+        "Those cuts would remove the whole clip, so nothing was cut. The captions were placed.",
+      );
     }
+
+    if (cuts.length > 0 && sourceKey != null) {
+      // The ripple is lane-local, so anything already sitting on another row
+      // keeps its old timing and drifts out of sync with the speech. Said
+      // plainly rather than discovered at playback.
+      const stranded = clipsAcrossCuts(doc, source?.trackId ?? "", cuts);
+      if (stranded.length > 0) {
+        this.toastCaption(
+          `${stranded.length} clip(s) on other tracks overlap the cuts and were not moved, so they may now be out of sync.`,
+        );
+      }
+    }
+
+    if (cuts.length === 0 && rows.length === 0) {
+      return;
+    }
+
+    commit(
+      (d) =>
+        applyCaptionCommit(d, {
+          sourceKey,
+          cuts,
+          rows,
+          // Minted outside the transform: `commit` runs it twice, once to probe
+          // whether it declines, and ids made inside would differ between the
+          // two runs.
+          ids: mintCaptionIds(rows.length, cuts.length),
+        }),
+      "Nothing to place, and nothing to cut.",
+    );
+  }
+
+  private toastCaption(message: string) {
+    (document.querySelector("toast-box") as any)?.showToast({
+      message,
+      delay: "6000",
+    });
   }
 
   _handleChangeCursorType(e) {

@@ -44,6 +44,18 @@ export type CaptionLine = {
   end: number;
   /** What will be placed. Starts as the words joined; diverges once edited. */
   text: string;
+  /**
+   * Struck out by the user, and therefore cut from the picture too.
+   *
+   * A flag rather than removal from the array, for two reasons. The undo stack
+   * in `editor.ts` snapshots `lines` whole, so a delete is undoable with no new
+   * machinery. And a struck-out line stays on screen, which is the only way to
+   * see what was deleted and put it back; a line that vanishes from the list
+   * takes with it any way of naming what just went.
+   *
+   * Absent means kept, so nothing about an untouched transcript changes shape.
+   */
+  removed?: boolean;
 };
 
 /** A caption ready for the timeline, in **milliseconds**. */
@@ -156,6 +168,16 @@ export function splitLineAt(
     return lines;
   }
 
+  // A struck-out line has no split worth making: both halves would be struck
+  // out too, and the range about to be cut is the same either way. It declines
+  // rather than spreading `removed` onto the halves because the halves are
+  // built as fresh literals below, and any field added to `CaptionLine` later
+  // would be dropped by them in exactly the same silent way. Refusing is one
+  // line, and it is the one a test can see.
+  if (line.removed === true) {
+    return lines;
+  }
+
   const head = line.text.slice(0, caretOffset).trimEnd();
   const tail = line.text.slice(caretOffset).trimStart();
   if (head.length === 0 || tail.length === 0) {
@@ -202,6 +224,13 @@ export function mergeLineWithPrevious(
   const previous = lines[index - 1];
   const current = lines[index];
 
+  // Joining a kept line to a struck-out one has no answer: the merged line is
+  // either placed, losing the deletion, or not, losing text the user kept. The
+  // literal below would silently choose "placed" by dropping the flag.
+  if (previous.removed === true || current.removed === true) {
+    return lines;
+  }
+
   const merged: CaptionLine = {
     words: [...previous.words, ...current.words],
     start: Math.min(previous.start, current.start),
@@ -242,6 +271,74 @@ export function setLineText(
     { ...line, text },
     ...lines.slice(index + 1),
   ];
+}
+
+/**
+ * Strike a line out, so it is neither placed nor left in the picture.
+ *
+ * The gesture behind the per-line delete button. It writes no time anywhere:
+ * the range to cut is the line's own `start`/`end`, read back by
+ * `caption/cuts.ts#planCuts` when the user confirms. Storing a cut here instead
+ * would put the same fact in two places and let them disagree the moment a
+ * split or a merge moved the line's span.
+ *
+ * Declines by identity on a line that is already struck out, which is what lets
+ * the panel skip a repaint and keeps a repeated click off the undo stack.
+ */
+export function removeLine(
+  lines: CaptionLine[],
+  index: number,
+): CaptionLine[] {
+  const line = lines[index];
+  if (line == null || line.removed === true) {
+    return lines;
+  }
+  return [
+    ...lines.slice(0, index),
+    { ...line, removed: true },
+    ...lines.slice(index + 1),
+  ];
+}
+
+/**
+ * Put a struck-out line back.
+ *
+ * The key is deleted rather than set to `false`, so a restored line is
+ * indistinguishable from one nobody touched. That is the rule `blend`, `lut`
+ * and `replaceable` all follow, and here it keeps `removed` from accumulating
+ * on every line of a transcript the user only looked at.
+ */
+export function restoreLine(
+  lines: CaptionLine[],
+  index: number,
+): CaptionLine[] {
+  const line = lines[index];
+  if (line == null || line.removed !== true) {
+    return lines;
+  }
+  const { removed, ...rest } = line;
+  return [...lines.slice(0, index), rest, ...lines.slice(index + 1)];
+}
+
+/**
+ * The source-millisecond spans of every struck-out line.
+ *
+ * The conversion lives here for the reason `linesFromTranscript` gives about
+ * the other direction: this module counts in seconds because a media element's
+ * `currentTime` does, and everything downstream of it counts in milliseconds.
+ * One place where the two clocks meet beats a `* 1000` at each call site.
+ */
+export function removedSpans(
+  lines: CaptionLine[],
+): Array<{ startMs: number; endMs: number }> {
+  return lines
+    .filter((line) => line.removed === true)
+    .map((line) => ({ startMs: line.start * 1000, endMs: line.end * 1000 }));
+}
+
+/** Whether anything is struck out. What the panel's summary line asks. */
+export function hasRemovedLines(lines: CaptionLine[]): boolean {
+  return lines.some((line) => line.removed === true);
 }
 
 /**
@@ -314,10 +411,15 @@ export function activeAt(
  * Empty lines are dropped rather than placed: a split cannot make one, but a
  * user can empty a line's input, and an empty text element on the timeline is
  * invisible and unfindable.
+ *
+ * A struck-out line is dropped for a different reason and by the same filter:
+ * its footage is about to be cut, so a caption over it would be a caption over
+ * nothing. `rows.ts` needs no change for either, because its style is computed
+ * once rather than per index.
  */
 export function captionsFrom(lines: CaptionLine[]): CaptionOut[] {
   return lines
-    .filter((line) => line.text.trim().length > 0)
+    .filter((line) => line.removed !== true && line.text.trim().length > 0)
     .map((line) => ({
       text: line.text.trim(),
       startTime: Math.max(0, Math.round(line.start * 1000)),

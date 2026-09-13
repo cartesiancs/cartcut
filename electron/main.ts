@@ -37,6 +37,7 @@ import { ipcMedia } from "./ipc/ipcMedia.js";
 import { ipcProxy } from "./ipc/ipcProxy.js";
 import { ipcReverse } from "./ipc/ipcReverse.js";
 import { ipcTranscribe } from "./ipc/ipcTranscribe.js";
+import { ipcAnalyze } from "./ipc/ipcAnalyze.js";
 import { runServer } from "./webServer.js";
 import { ipcSelfhosted } from "./ipc/ipcSelfhosted.js";
 import { httpFFmpegRenderV2 } from "./server/controllers/render.js";
@@ -176,6 +177,7 @@ ipcMain.handle("reverse:cancel", ipcReverse.cancel);
 ipcMain.handle("transcribe:locales", ipcTranscribe.locales);
 ipcMain.handle("transcribe:start", ipcTranscribe.start);
 ipcMain.handle("transcribe:cancel", ipcTranscribe.cancel);
+ipcMain.handle("analyze:silences", ipcAnalyze.silences);
 
 ipcMain.handle("app:getResourcesPath", ipcApp.getResourcesPath);
 ipcMain.handle("app:getTempPath", ipcApp.getTempPath);
