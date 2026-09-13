@@ -442,7 +442,7 @@ export class FxCompositor {
           : "screen");
       target.globalAlpha = Math.max(
         0,
-        Math.min(1, active.element.intensity / 100),
+        Math.min(1, active.intensity / 100),
       );
       target.drawImage(overlayFrame, 0, 0, width, height);
       target.restore();
@@ -463,7 +463,7 @@ export class FxCompositor {
 
     const intensity = Math.max(
       0,
-      Math.min(1, active.element.intensity / 100),
+      Math.min(1, active.intensity / 100),
     );
 
     /** One step of the chain, drawing `input` into `into`. */
@@ -482,7 +482,11 @@ export class FxCompositor {
         gl.uniform1f(program.uniform("intensity"), intensity);
         gl.uniform2f(program.uniform("resolution"), width, height);
         gl.uniform1f(program.uniform("time"), timeSeconds);
-        this.applyParams(program, preset, active.element.params);
+        // The plan's parameters, not the element's: `planFrame` resolved every
+        // live `fx:` track at this frame. A multi-pass preset therefore uploads
+        // the same sampled values on every pass, which is what the parameters
+        // of a single effect mean.
+        this.applyParams(program, preset, active.params);
         // Written after the parameters so a pass constant wins where the two
         // name the same uniform — which is the point of having both: the same
         // blur shader takes its radius from the user and its axis from here.
@@ -552,7 +556,7 @@ export class FxCompositor {
       return;
     }
 
-    const amount = Math.max(0, Math.min(1, active.element.intensity / 100));
+    const amount = Math.max(0, Math.min(1, active.intensity / 100));
     const uniforms = lutUniformsFor(table.atlas);
 
     this.outputTarget.use(width, height, () => {

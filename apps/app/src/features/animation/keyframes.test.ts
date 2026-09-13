@@ -6,8 +6,11 @@ import {
   addKeyframe,
   assertBakedInvariants,
   bakeTrack,
+  carriesTrack,
   cloneAnimation,
   emptyAnimation,
+  isConditionalTrack,
+  isForeignTrack,
   lanesOf,
   moveKeyframe,
   normalizeAnimation,
@@ -26,7 +29,13 @@ import {
   type Baked,
   type Keyframe,
 } from "./keyframes";
-import { imageElement, keys, mulberry32, points } from "../renderer/testing";
+import {
+  effectElement,
+  imageElement,
+  keys,
+  mulberry32,
+  points,
+} from "../renderer/testing";
 import { handlesInBounds } from "./handleBounds";
 
 /** A deep structural copy, for proving a function did not touch its input. */
@@ -939,6 +948,118 @@ describe("normalizeAnimation", () => {
       animation: { position: "nope", opacity: null, scale: 5 } as any,
     });
     expect(() => normalizeAnimation(el)).not.toThrow();
+  });
+
+  // An effect's two families exist only while they are animated: nothing seeds
+  // them, `keyframeOps` mints one when the stopwatch is clicked, and that is
+  // what keeps an effect nobody has touched saving exactly as it did before the
+  // feature. Orphan collection is the other half of the same rule.
+  describe("an effect's tracks", () => {
+    const withTracks = (animation: Record<string, unknown>, params: any = { amount: 0.5 }) =>
+      effectElement({
+        params,
+        animation: { ...(effectElement().animation as any), ...animation },
+      } as any);
+
+    it("seeds neither intensity nor a parameter track", () => {
+      const out = normalizeAnimation(effectElement({ params: { amount: 0.5 } } as any)) as any;
+      expect(Object.keys(out.animation)).toEqual(["opacity"]);
+    });
+
+    it("leaves an effect nobody has animated byte-identical", () => {
+      const el = effectElement({ params: { amount: 0.5 } } as any);
+      expect(normalizeAnimation(el)).toBe(el);
+    });
+
+    it("keeps a track whose parameter is still a number", () => {
+      const out = normalizeAnimation(
+        withTracks({ "fx:amount": { isActivate: true, x: [], ax: [] } }),
+      ) as any;
+      expect(Object.keys(out.animation)).toContain("fx:amount");
+    });
+
+    it("drops a track whose parameter has gone, as a preset change leaves it", () => {
+      const out = normalizeAnimation(
+        withTracks({ "fx:radius": { isActivate: true, x: [], ax: [] } }),
+      ) as any;
+      expect(Object.keys(out.animation)).not.toContain("fx:radius");
+    });
+
+    it("drops a track whose parameter is not a number", () => {
+      const out = normalizeAnimation(
+        withTracks(
+          { "fx:tint": { isActivate: true, x: [], ax: [] } },
+          { tint: "#000000" },
+        ),
+      ) as any;
+      expect(Object.keys(out.animation)).not.toContain("fx:tint");
+    });
+
+    it("keeps intensity on an effect", () => {
+      const out = normalizeAnimation(
+        withTracks({ intensity: { isActivate: true, x: [], ax: [] } }),
+      ) as any;
+      expect(Object.keys(out.animation)).toContain("intensity");
+    });
+
+    it("drops intensity and a parameter track from a clip that is not one", () => {
+      // A hand-edited project, or a newer build's element pasted into an older
+      // one. Neither name means anything on an image.
+      const el = imageElement({
+        animation: {
+          ...(imageElement().animation as any),
+          intensity: { isActivate: true, x: [], ax: [] },
+          "fx:amount": { isActivate: true, x: [], ax: [] },
+        } as any,
+      });
+      const out = normalizeAnimation(el) as any;
+      expect(Object.keys(out.animation)).not.toContain("intensity");
+      expect(Object.keys(out.animation)).not.toContain("fx:amount");
+    });
+  });
+});
+
+describe("carriesTrack", () => {
+  it("says yes to every unconditional track", () => {
+    expect(carriesTrack(imageElement(), "position")).toBe(true);
+  });
+
+  it("gates a parameter track on the parameter still being a number", () => {
+    const element = effectElement({ params: { amount: 0.5, tint: "#000" } } as any);
+    expect(carriesTrack(element, "fx:amount")).toBe(true);
+    expect(carriesTrack(element, "fx:tint")).toBe(false);
+    expect(carriesTrack(element, "fx:radius")).toBe(false);
+  });
+
+  it("gates intensity on the element being an effect", () => {
+    expect(carriesTrack(effectElement(), "intensity")).toBe(true);
+    expect(carriesTrack(imageElement(), "intensity")).toBe(false);
+  });
+
+  it("gates a parameter track on that too, so a video never carries one", () => {
+    expect(carriesTrack(imageElement(), "fx:amount")).toBe(false);
+  });
+});
+
+describe("isForeignTrack", () => {
+  // `clearAnimation` reads this, and the distinction it draws is the reason it
+  // is not simply `isConditionalTrack`: a mask's curves belong to the mask, and
+  // an effect's intensity is the only movement the effect has.
+  it("calls the mask's and the reveal's tracks foreign", () => {
+    expect(isForeignTrack("maskFeather")).toBe(true);
+    expect(isForeignTrack("revealProgress")).toBe(true);
+  });
+
+  it("calls an effect's own, conditional though they are", () => {
+    expect(isConditionalTrack("intensity")).toBe(true);
+    expect(isForeignTrack("intensity")).toBe(false);
+    expect(isConditionalTrack("fx:amount")).toBe(true);
+    expect(isForeignTrack("fx:amount")).toBe(false);
+  });
+
+  it("calls an unconditional track neither", () => {
+    expect(isConditionalTrack("position")).toBe(false);
+    expect(isForeignTrack("position")).toBe(false);
   });
 });
 

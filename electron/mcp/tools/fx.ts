@@ -236,8 +236,9 @@ export function registerFxTools(define: Registrar) {
         "sits is the whole point — the first one is made at the very top, applying to the entire composite, " +
         "and you narrow it by moving its track down with move_track. " +
         Z_ORDER_NOTE +
-        " `intensity` is 0-100 and is static; to make an effect come and go, use several short effect clips " +
-        "rather than keyframes.",
+        " `intensity` is 0-100. It animates, and so does any preset parameter list_effect_presets reports as " +
+        "`number`: use set_animation and add_keyframes with `intensity` or `fx:<key>`. That is how an effect " +
+        "comes and goes, rather than several short clips butted together.",
       inputSchema: {
         presetId: z.string().describe("An id from list_effect_presets."),
         startMs: z.number(),

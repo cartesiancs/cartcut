@@ -9,6 +9,7 @@ import {
   type TimelineDocument,
 } from "../../timeline/tracks";
 import { videoElement } from "../testing";
+import { bakeTrack, normalizeKeyframes } from "../../animation/keyframes";
 
 function clip(over: {
   startTime: number;
@@ -222,5 +223,93 @@ describe("effects and transitions together", () => {
     expect(result.transitions.size).toBe(1);
     expect(result.effects.size).toBe(1);
     expect(result.needsScratch).toBe(true);
+  });
+});
+
+/*
+ * The sampled half of the plan.
+ *
+ * The compositor reads `active.intensity` and `active.params` rather than the
+ * element, which is what makes an animated effect reach the shader, the overlay
+ * fast path and the LUT amount through one change. `effectSample.test.ts` pins
+ * the sampling itself; this pins that the plan carries it.
+ */
+describe("an effect's animated values", () => {
+  function withTrack(
+    property: string,
+    stops: Array<[number, number]>,
+  ): TimelineDocument {
+    const base = addEffect(baseDoc(), "fx", "p", 0, 2000, "e0", {
+      amount: 0.25,
+    });
+    const x = normalizeKeyframes(
+      stops.map(([t, v]) => ({
+        type: "linear",
+        p: [t, v],
+        cs: [t, v],
+        ce: [t, v],
+      })),
+    );
+    const element: any = base.elements.fx;
+    return {
+      ...base,
+      elements: {
+        ...base.elements,
+        fx: {
+          ...element,
+          animation: {
+            ...element.animation,
+            [property]: { isActivate: true, x, ax: bakeTrack(x, 60) },
+          },
+        },
+      },
+    };
+  }
+
+  it("carries the element's own values when nothing is animated", () => {
+    const doc = addEffect(baseDoc(), "fx", "p", 0, 2000, "e0", { amount: 0.25 });
+    const active = plan(doc, 1000).effects.get("fx")!;
+    expect(active.intensity).toBe((doc.elements.fx as any).intensity);
+    // By identity, so `applyParams` uploads exactly the object it always did.
+    expect(active.params).toBe((doc.elements.fx as any).params);
+  });
+
+  it("resolves a parameter track at the frame it is planning", () => {
+    const doc = withTrack("fx:amount", [
+      [0, 0],
+      [2000, 1],
+    ]);
+    expect(plan(doc, 1000).effects.get("fx")!.params.amount).toBeCloseTo(0.5, 2);
+    // 2000 is the exclusive end of the span, so the last frame inside it.
+    expect(plan(doc, 1990).effects.get("fx")!.params.amount).toBeCloseTo(1, 1);
+  });
+
+  it("resolves the intensity track", () => {
+    const doc = withTrack("intensity", [
+      [0, 0],
+      [2000, 100],
+    ]);
+    expect(plan(doc, 500).effects.get("fx")!.intensity).toBeCloseTo(25, 1);
+  });
+
+  it("samples on the frame grid, so the preview and the export agree", () => {
+    // At 60fps a frame is 16.67ms. Two cursors inside one frame must plan the
+    // same value, or a baked lane read by nearest sample can hand the preview
+    // and the export different pictures of the same frame.
+    const doc = withTrack("fx:amount", [
+      [0, 0],
+      [2000, 1],
+    ]);
+    const a = plan(doc, 1000).effects.get("fx")!.params.amount;
+    const b = plan(doc, 1010).effects.get("fx")!.params.amount;
+    expect(b).toBe(a);
+  });
+
+  it("leaves a transition's parameters alone", () => {
+    // A transition has no animation block, and its `progress` already owns the
+    // time inside its window.
+    const doc = addTransition(baseDoc(), "t1", "a", "b", "x", 800, "center");
+    const active = plan(doc, 4000).transitions.get("a")!;
+    expect(active.element.params).toBe((doc.elements.t1 as any).params);
   });
 });

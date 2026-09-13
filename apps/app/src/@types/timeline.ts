@@ -1220,6 +1220,63 @@ export type TextAnimatableProperty =
   (typeof TEXT_ANIMATABLE_PROPERTIES)[number];
 
 /**
+ * The one track every effect carries, whatever preset is behind it.
+ *
+ * `intensity` is a field on `EffectElementType` rather than a preset parameter
+ * precisely because every effect has one, so unlike the `fx:` family below it
+ * is a name that can be written down ahead of time, and it goes in
+ * `ALL_ANIMATABLE_PROPERTIES` and in the MCP enum like any other.
+ *
+ * An effect's `opacity` track is *not* here, and is no longer offered at all.
+ * It has existed since the element type did and nothing has ever read it:
+ * `isVisualTimelineElement` excludes an effect from the paint loop, so it never
+ * reaches `renderElement` where opacity is applied, and the compositor reads
+ * `intensity`. Keying it made diamonds appear and changed no pixel. On an
+ * effect the two words name one idea, and only one of them reaches the picture.
+ * The key itself stays in `emptyAnimation("effect")` so that no existing file
+ * changes shape.
+ */
+export const EFFECT_ANIMATABLE_PROPERTIES = ["intensity"] as const;
+
+export type EffectAnimatableProperty =
+  (typeof EFFECT_ANIMATABLE_PROPERTIES)[number];
+
+/**
+ * The prefix that makes an effect preset's parameter into a track name.
+ *
+ * **Split on the FIRST colon.** `presetValidate.ts` requires `param.uniform` to
+ * be a GLSL identifier but asks of `param.key` only that it be a non-empty
+ * string, so a key may itself contain a colon, a dot or a space. `slice` past
+ * this prefix; never `split(":")`.
+ */
+export const FX_PARAM_TRACK_PREFIX = "fx:";
+
+/**
+ * An effect preset parameter's track.
+ *
+ * The one open member of `AnimatableProperty`, and it has to be open: the keys
+ * come from a manifest on disk, so there is no list to close over. That is also
+ * why this family is absent from `ALL_ANIMATABLE_PROPERTIES`: membership there
+ * means "enumerable ahead of time", which these are not.
+ *
+ * Which of an effect's parameters may carry one is answered by
+ * `animatableProperties` from the element's own `params`, never from the preset
+ * registry: this module cannot read the disk, and an effect whose preset is
+ * missing must still show the curves its author drew.
+ */
+export type FxParamAnimatableProperty = `fx:${string}`;
+
+/** The parameter key a `fx:` track names. */
+export function fxParamKeyOf(property: string): string {
+  return property.slice(FX_PARAM_TRACK_PREFIX.length);
+}
+
+/** Whether a track name belongs to an effect preset's parameters. */
+export function isFxParamTrack(property: string): boolean {
+  return property.startsWith(FX_PARAM_TRACK_PREFIX);
+}
+
+/**
  * The tracks a clip carries on its own account, as a value rather than a type.
  *
  * A runtime list because `electron/` cannot import this module — `rootDir` is
@@ -1241,7 +1298,9 @@ export const OWN_ANIMATABLE_PROPERTIES = [
 export type AnimatableProperty =
   | (typeof OWN_ANIMATABLE_PROPERTIES)[number]
   | MaskAnimatableProperty
-  | TextAnimatableProperty;
+  | TextAnimatableProperty
+  | EffectAnimatableProperty
+  | FxParamAnimatableProperty;
 
 /**
  * Every property that can carry a track — the conditional families included.
@@ -1261,6 +1320,7 @@ export const ALL_ANIMATABLE_PROPERTIES: readonly AnimatableProperty[] = [
   ...OWN_ANIMATABLE_PROPERTIES,
   ...MASK_ANIMATABLE_PROPERTIES,
   ...TEXT_ANIMATABLE_PROPERTIES,
+  ...EFFECT_ANIMATABLE_PROPERTIES,
 ];
 
 /**
@@ -1272,13 +1332,12 @@ export const ALL_ANIMATABLE_PROPERTIES: readonly AnimatableProperty[] = [
  * reason: its other properties were simply unimplemented. It now carries the
  * full `Animatable` block, so it animates like any other visual element.
  *
- * An effect's `intensity` is deliberately not here. `AnimatableProperty` is a
- * closed union that `keyframeOps`, the curve editor and the timeline's diamond
- * lane all switch on, so a new animatable property is a change to the keyframe
- * subsystem rather than a line added to this list — `size` cost a lane
- * registration in `lanesOf`, a `staticValueOf` case, a seeded track in
- * `emptyAnimation` and a sampled box in `transform.ts`. `intensity` stays
- * static until someone does that work for it.
+ * An effect answers with `intensity` and one `fx:` track per numeric preset
+ * parameter, and with nothing else. That work is done; what the note here used
+ * to say about its cost still describes it. `AnimatableProperty` stopped being
+ * a closed union to pay for it: the parameter keys come from a manifest on
+ * disk, so the two exhaustive switches in `keyframeOps` gained a branch each
+ * and the MCP enum gained an alternative rather than an entry.
  *
  * **The mask made this a function of the element's state, not just its
  * filetype**, and that is the one surprising thing about it. A clip's mask
@@ -1299,7 +1358,27 @@ export function animatableProperties(
     return [];
   }
   if (element.filetype === "effect") {
-    return ["opacity"];
+    // Answered from the element's own `params`, never from the preset registry:
+    // this module cannot read the disk, an effect whose preset is missing must
+    // still show the curves its author drew, and a project written before this
+    // feature must animate the moment it is opened rather than after some
+    // migration nobody would write.
+    //
+    // A parameter is offered when its stored value is a finite number. That
+    // admits a `select`, whose values are numbers too, and the panel and the
+    // context menu, which do hold the registry, offer a diamond only for
+    // `type: "number"`. The asymmetry is the price of keeping this file free of
+    // the registry, and it errs towards offering rather than refusing.
+    const params =
+      (element as { params?: Record<string, unknown> }).params ?? {};
+    const own: AnimatableProperty[] = [...EFFECT_ANIMATABLE_PROPERTIES];
+    for (const key of Object.keys(params)) {
+      const value = params[key];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        own.push(`${FX_PARAM_TRACK_PREFIX}${key}`);
+      }
+    }
+    return own;
   }
   // `size` is offered to a group as well, and that is deliberate rather than
   // an oversight: a group's box is its rotate/scale pivot, so animating it

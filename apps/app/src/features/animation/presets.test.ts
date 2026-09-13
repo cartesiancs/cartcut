@@ -140,11 +140,15 @@ describe("applyPreset", () => {
     expect(applyPreset(before, "a", "zoom_in", 250)).toBe(before);
   });
 
-  it("still fades an effect, which does animate opacity", () => {
+  it("fades an effect through intensity, not opacity", () => {
+    // An effect has no opacity any renderer reads, so `applyPreset` substitutes
+    // the one 0-100 scale it does honour. Writing `opacity` here is what the
+    // preset used to do, and it produced a curve and no fade.
     const before = doc({ a: effectElement({ trackId: "v1" }) });
     const after = applyPreset(before, "a", "fade_in", 250);
     expect(after).not.toBe(before);
-    expect(after.elements.a.animation.opacity.isActivate).toBe(true);
+    expect((after.elements.a as any).animation.intensity.isActivate).toBe(true);
+    expect((after.elements.a as any).animation.opacity.isActivate).toBe(false);
   });
 
   it("scales and rotates a shape, which now animates all four", () => {

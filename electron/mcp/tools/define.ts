@@ -211,7 +211,41 @@ export const ANIMATABLE = [
   "maskFeather",
   "maskRoundness",
   "revealProgress",
+  "intensity",
 ] as const;
+
+/**
+ * The `property` argument of every animation tool.
+ *
+ * A union rather than the bare enum, because one family of tracks cannot be
+ * enumerated at all: an effect's preset parameters are named by a manifest on
+ * disk, so `fx:` plus a key is the only thing that can be written down here.
+ * `list_effect_presets` reports each parameter's `key`, `min` and `max`, which
+ * is where an agent learns the names.
+ *
+ * The enum branch survives into the emitted JSON schema, so the closed list is
+ * still advertised. `animatableProperties` is the real gate either way, and
+ * `commands/animation.ts#requireAnimatable` declines through it with a message
+ * naming what the clip actually offers.
+ *
+ * Shared so the four tools cannot drift, which is the same reason `ANIMATABLE`
+ * is one array rather than four literals.
+ */
+export const animatableProperty = z
+  .union([
+    z.enum(ANIMATABLE),
+    z
+      .string()
+      .regex(
+        /^fx:.+$/,
+        "An effect preset parameter: `fx:` followed by the parameter key from list_effect_presets.",
+      ),
+  ])
+  .describe(
+    "On an effect: `intensity` is 0-100, and `fx:<key>` is a preset parameter in whatever units its " +
+      "manifest declares. list_effect_presets reports each `key`, `min` and `max`. Only parameters it " +
+      "reports as `number` animate.",
+  );
 
 /** The mask shapes a clip can be cut to. A copy of `MASK_SHAPES`. */
 export const MASK_SHAPES = ["rectangle", "star", "heart", "pen"] as const;

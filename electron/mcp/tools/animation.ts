@@ -10,7 +10,7 @@
 import { z } from "zod";
 import { requestEditor } from "../bridge";
 import {
-  ANIMATABLE,
+  animatableProperty,
   EASINGS,
   PRESETS,
   mutating,
@@ -76,7 +76,7 @@ export function registerAnimationTools(define: Registrar) {
         "driving the property. add_keyframes activates the track on its own, so you rarely need this first.",
       inputSchema: {
         elementId: z.string(),
-        property: z.enum(ANIMATABLE),
+        property: animatableProperty,
         active: z.boolean(),
         seedAtMs: z.number().optional().describe("Defaults to the clip's start."),
       },
@@ -106,7 +106,7 @@ export function registerAnimationTools(define: Registrar) {
         "`linear` for a constant drift, and `ease_in`/`ease_out`/`ease_in_out` where CSS would use them.",
       inputSchema: {
         elementId: z.string(),
-        property: z.enum(ANIMATABLE),
+        property: animatableProperty,
         keyframes: z
           .array(
             z.object({
@@ -151,7 +151,7 @@ export function registerAnimationTools(define: Registrar) {
         "Use get_keyframes to see what is there.",
       inputSchema: {
         elementId: z.string(),
-        property: z.enum(ANIMATABLE),
+        property: animatableProperty,
         atMs: z.array(z.number()).min(1),
       },
       annotations: mutating,

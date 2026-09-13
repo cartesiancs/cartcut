@@ -259,6 +259,32 @@ describe("uniformValueOf", () => {
     expect(uniformValueOf(select, 99)).toBe(1);
   });
 
+  // This is the one place that holds both the value and the manifest's range,
+  // and there are two ways past the panel's own slider bounds now: an `fx:`
+  // keyframe curve, which is *supposed* to overshoot between its keyframes the
+  // way every other curve in the app does, and `set_effect` over MCP, which
+  // takes parameters as an opaque record. Clamping here rather than in the
+  // curve keeps the authored shape readable in the curve editor.
+  it("clamps a number to the range the manifest declares", () => {
+    expect(uniformValueOf(number, 40)).toBe(10);
+    expect(uniformValueOf(number, -40)).toBe(0);
+    expect(uniformValueOf(number, 7)).toBe(7);
+  });
+
+  it("clamps each component of a point", () => {
+    const point: FxParamSpec = {
+      key: "e",
+      label: "E",
+      uniform: "e",
+      type: "point",
+      default: [0.5, 0.5],
+      min: 0,
+      max: 1,
+    };
+    expect(uniformValueOf(point, [-2, 3])).toEqual([0, 1]);
+    expect(uniformValueOf(point, [0.25, 0.75])).toEqual([0.25, 0.75]);
+  });
+
   it("falls back when nothing is stored at all", () => {
     expect(uniformValueOf(number, undefined)).toBe(5);
     expect(uniformValueOf(select, undefined)).toBe(1);

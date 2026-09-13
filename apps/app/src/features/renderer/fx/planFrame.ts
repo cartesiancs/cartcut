@@ -24,12 +24,15 @@
 
 import type {
   EffectElementType,
+  FxParams,
   Timeline,
   TransitionElementType,
 } from "../../../@types/timeline";
 import { isTimeInRange } from "../../../utils/time";
 import { spanOf } from "../../timeline/geometry";
+import { frameStartMs } from "../../timeline/frames";
 import { progressOf, windowOf } from "../../timeline/transitionGeometry";
+import { effectSampleAt } from "./effectSample";
 
 /** How a preset wants to be executed. `null` when it is not installed. */
 export type PresetMode = "overlay" | "shader" | "lut";
@@ -52,10 +55,35 @@ export type ActiveTransition = {
   drawAtId: string;
 };
 
+/**
+ * One effect the compositor has to apply this frame.
+ *
+ * **`planFrame` is not its only constructor.** `fx/fxPreviewProvider.ts` builds
+ * one by hand for each tile in the preset browser, with no document behind it
+ * at all. A field added here has to be answered there too, which is why that
+ * literal is annotated rather than cast: a cast tells the checker to stop
+ * looking at exactly the place a second caller needs it to look, and adding
+ * `intensity` and `params` under one shipped a `TypeError` in every tile.
+ */
 export type ActiveEffect = {
   id: string;
   element: EffectElementType;
   mode: PresetMode;
+  /**
+   * `element.intensity` with its track resolved at this frame, 0-100.
+   *
+   * The compositor reads these two rather than the element, which is what makes
+   * one line cover all three modes: the shader's `intensity` uniform, an
+   * overlay's `globalAlpha` and a LUT's `amount`.
+   */
+  intensity: number;
+  /**
+   * `element.params` with every live `fx:` track resolved at this frame.
+   *
+   * The element's own object by identity when nothing is animated, which is
+   * almost always, so the common path allocates nothing.
+   */
+  params: FxParams;
 };
 
 export type FramePlan = {
@@ -182,7 +210,18 @@ export function planFrame(input: PlanFrameInput): FramePlan {
         continue;
       }
 
-      effects.set(id, { id, element, mode });
+      // Sampled at the instant `effectTimeOf` snaps to, not at the raw cursor.
+      // A baked lane is read by nearest sample, so an unsnapped preview cursor
+      // and a snapped export time can land on different samples and the two
+      // pictures diverge by one step. `progressOf` snaps for the same reason.
+      const sampled = effectSampleAt(element, frameStartMs(timeInMs, fps));
+      effects.set(id, {
+        id,
+        element,
+        mode,
+        intensity: sampled.intensity,
+        params: sampled.params,
+      });
       if (mode === "shader" || mode === "lut") {
         needsScratch = true;
       }

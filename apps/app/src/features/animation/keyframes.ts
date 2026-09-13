@@ -21,7 +21,12 @@
  * element, per frame — and that the array it searches is now guaranteed sorted.
  */
 
-import type { CubicKeyframeType, TimelineElement } from "../../@types/timeline";
+import {
+  fxParamKeyOf,
+  isFxParamTrack,
+  type CubicKeyframeType,
+  type TimelineElement,
+} from "../../@types/timeline";
 import { clampHandles } from "./handleBounds";
 import { normalizeFps } from "../timeline/frames";
 
@@ -1071,6 +1076,17 @@ export function isRevealTrack(property: string): boolean {
 }
 
 /**
+ * Whether a track name is an effect's overall strength.
+ *
+ * Conditional on the filetype rather than on a field, because every effect has
+ * an `intensity` and nothing else has one. Listing it here is what makes an
+ * `intensity` track on a video an orphan that `normalizeAnimation` collects.
+ */
+export function isEffectIntensityTrack(property: string): boolean {
+  return property === "intensity";
+}
+
+/**
  * The tracks that exist only while the element carries the thing they describe,
  * and how to ask whether it does.
  *
@@ -1083,10 +1099,41 @@ export function isRevealTrack(property: string): boolean {
  */
 const CONDITIONAL_TRACKS: Array<{
   match: (property: string) => boolean;
-  present: (element: any) => boolean;
+  present: (element: any, property: string) => boolean;
+  /**
+   * Whether the track belongs to another feature rather than to the clip's own
+   * movement.
+   *
+   * The one thing "conditional" used to mean two of. A mask's curves belong to
+   * the mask and a reveal's to the reveal, which is why `clearAnimation` leaves
+   * them where they are: clearing exactly what the animation grid can write is
+   * what keeps its "None" tile honest.
+   *
+   * An effect's two families are the opposite case. They are conditional, so
+   * they take part in orphan collection, and they are also the *only* movement
+   * an effect has, so anything asking "does this clip animate" must count them.
+   */
+  foreign: boolean;
 }> = [
-  { match: isMaskTrack, present: (element) => element?.mask != null },
-  { match: isRevealTrack, present: (element) => element?.reveal != null },
+  { match: isMaskTrack, present: (element) => element?.mask != null, foreign: true },
+  { match: isRevealTrack, present: (element) => element?.reveal != null, foreign: true },
+  {
+    match: isEffectIntensityTrack,
+    present: (element) => element?.filetype === "effect",
+    foreign: false,
+  },
+  // The one rule that reads the property as well as the element, which is why
+  // `present` takes both. A preset change replaces `params` wholesale, so the
+  // tracks of parameters that have gone stop being carried here and are
+  // collected on the next ingress; `effectOps.setEffectPreset` drops them in
+  // the same transform so they do not survive the edit either.
+  {
+    match: isFxParamTrack,
+    present: (element, property) =>
+      element?.filetype === "effect" &&
+      typeof element?.params?.[fxParamKeyOf(property)] === "number",
+    foreign: false,
+  },
 ];
 
 /**
@@ -1098,7 +1145,7 @@ const CONDITIONAL_TRACKS: Array<{
 export function carriesTrack(element: any, property: string): boolean {
   for (const rule of CONDITIONAL_TRACKS) {
     if (rule.match(property)) {
-      return rule.present(element);
+      return rule.present(element, property);
     }
   }
   return true;
@@ -1107,6 +1154,21 @@ export function carriesTrack(element: any, property: string): boolean {
 /** Whether a track name belongs to one of the conditional families. */
 export function isConditionalTrack(property: string): boolean {
   return CONDITIONAL_TRACKS.some((rule) => rule.match(property));
+}
+
+/**
+ * Whether a track belongs to a feature of its own rather than to the clip's
+ * movement. The mask's five and a reveal's one, and nothing else.
+ *
+ * Split from `isConditionalTrack` when an effect gained tracks that are
+ * conditional *and* its own: an effect's `intensity` is the only thing it can
+ * animate, so counting it as somebody else's would have made `hasAnimation`
+ * answer "no" about a clip visibly fading.
+ */
+export function isForeignTrack(property: string): boolean {
+  return CONDITIONAL_TRACKS.some(
+    (rule) => rule.foreign && rule.match(property),
+  );
 }
 
 function normalizeTrackValue(raw: any, lanes: Lane[]): any {

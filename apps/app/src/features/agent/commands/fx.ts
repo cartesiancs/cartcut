@@ -23,6 +23,7 @@
  */
 
 import { v4 as uuidv4 } from "uuid";
+import { animatableProperties } from "../../../@types/timeline";
 import { effectOf } from "../../timeline/effectOps";
 import {
   addEffect,
@@ -349,6 +350,14 @@ registerCommands({
 
     if (element.filetype === "effect") {
       const effect = effectOf(element);
+      // The track names, not the curves. `get_keyframes` pages through those,
+      // and the baked lanes behind them run to 36,000 samples apiece, which is
+      // the cap `serialize.ts` exists for. What an agent needs from here is which of
+      // these numbers already moves, and what the rest are called.
+      const animatable = animatableProperties(element);
+      const animated = animatable.filter(
+        (property) => element.animation?.[property]?.isActivate === true,
+      );
       return {
         id: params.elementId,
         type: "effect",
@@ -359,6 +368,8 @@ registerCommands({
         startMs: Math.round(element.startTime),
         endMs: Math.round(element.startTime + element.duration),
         trackId: element.trackId,
+        animatable,
+        animated,
       };
     }
 

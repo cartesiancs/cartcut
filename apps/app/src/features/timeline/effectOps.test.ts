@@ -94,6 +94,60 @@ describe("addEffect", () => {
   });
 });
 
+describe("setEffectPreset and the parameter tracks", () => {
+  /** An effect with a live curve on `amount`. */
+  function animated() {
+    const base = addEffect(videoDoc(), "fx", "rain", 0, 2000, "e0", {
+      amount: 0.5,
+    });
+    const element: any = base.elements.fx;
+    const track = { isActivate: true, x: [], ax: [] };
+    return {
+      ...base,
+      elements: {
+        ...base.elements,
+        fx: {
+          ...element,
+          animation: {
+            ...element.animation,
+            "fx:amount": track,
+            intensity: track,
+          },
+        },
+      },
+    };
+  }
+
+  it("drops a track whose parameter the new preset does not have", () => {
+    // `carriesTrack` already calls it an orphan, but `normalizeAnimation` runs
+    // on ingress only, and an edit reaches the store through `withCheckpoint`.
+    // Left to that, the curve would ride along invisibly for the whole session.
+    const after = setEffectPreset(animated(), "fx", "vignette", { radius: 0.7 });
+    const animation = (after.elements.fx as any).animation;
+    expect("fx:amount" in animation).toBe(false);
+  });
+
+  it("keeps a track whose parameter the new preset still has", () => {
+    const after = setEffectPreset(animated(), "fx", "vignette", { amount: 0.1 });
+    expect("fx:amount" in (after.elements.fx as any).animation).toBe(true);
+  });
+
+  it("keeps intensity, which belongs to the effect rather than the preset", () => {
+    // Trying a different look should not discard how it was dialled in over
+    // time. That is the same reason `intensity` is a field and not a parameter.
+    const after = setEffectPreset(animated(), "fx", "vignette", { radius: 0.7 });
+    expect("intensity" in (after.elements.fx as any).animation).toBe(true);
+  });
+
+  it("leaves an effect with no parameter tracks by identity", () => {
+    const doc = addEffect(videoDoc(), "fx", "rain", 0, 2000, "e0");
+    const after = setEffectPreset(doc, "fx", "vignette", { radius: 0.7 });
+    expect((after.elements.fx as any).animation).toBe(
+      (doc.elements.fx as any).animation,
+    );
+  });
+});
+
 describe("setEffectPreset", () => {
   it("re-seeds the parameters instead of carrying them across", () => {
     const doc = addEffect(videoDoc(), "fx", "rain", 0, 2000, "e0", {
@@ -194,11 +248,18 @@ describe("an effect's place in the type system", () => {
     expect(isVisualTimelineElement(doc.elements.fx)).toBe(false);
   });
 
-  it("animates opacity and nothing else", () => {
-    const doc = addEffect(videoDoc(), "fx", "rain", 0, 2000, "e0");
+  it("animates intensity, and its numeric parameters", () => {
+    const doc = addEffect(videoDoc(), "fx", "rain", 0, 2000, "e0", {
+      amount: 0.5,
+      tint: "#ffffff",
+    });
     expect(canAnimate(doc.elements.fx)).toBe(true);
-    // No position, scale or rotation: there is no box to move.
-    expect(animatableProperties(doc.elements.fx)).toEqual(["opacity"]);
+    // No position, scale or rotation: there is no box to move. No `opacity`
+    // either, which nothing has ever read on an effect.
+    expect(animatableProperties(doc.elements.fx)).toEqual([
+      "intensity",
+      "fx:amount",
+    ]);
   });
 
   it("carries the opacity animation block that keyframe editing needs", () => {

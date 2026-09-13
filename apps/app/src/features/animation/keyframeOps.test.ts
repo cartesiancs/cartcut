@@ -12,6 +12,7 @@ import {
   rebakeAnimations,
   setHandles,
   setTrackActive,
+  toggleKeyframe,
 } from "./keyframeOps";
 import { BAKE_HZ, bakeRateFor, bakeTrack, sampleBaked } from "./keyframes";
 import {
@@ -949,16 +950,26 @@ describe("clearAnimation", () => {
     expect(animation.maskRotation.x).toHaveLength(2);
   });
 
-  it("clears an effect, which animates opacity and nothing else", () => {
+  it("clears an effect's intensity and its parameter tracks", () => {
+    // Both families are conditional, so they take part in orphan collection,
+    // and both are the effect's *own* movement, which is why `clearAnimation`
+    // covers them where it leaves a mask's five alone.
     const base = effectElement({ trackId: "v1" });
     const before = doc({
       a: {
         ...base,
+        params: { amount: 0.5 },
         animation: {
-          opacity: {
+          opacity: { isActivate: false, x: [], ax: [] },
+          intensity: {
             isActivate: true,
             x: keys([0, 0], [1000, 100]),
             ax: points([0, 0], [1000, 100]),
+          },
+          "fx:amount": {
+            isActivate: true,
+            x: keys([0, 0], [1000, 1]),
+            ax: points([0, 0], [1000, 1]),
           },
         },
       },
@@ -966,8 +977,11 @@ describe("clearAnimation", () => {
 
     const after = clearAnimation(before, "a");
     expect(after).not.toBe(before);
-    expect((after.elements.a as any).animation.opacity.isActivate).toBe(false);
-    expect((after.elements.a as any).animation.opacity.x).toEqual([]);
+    const animation = (after.elements.a as any).animation;
+    expect(animation.intensity.isActivate).toBe(false);
+    expect(animation.intensity.x).toEqual([]);
+    expect(animation["fx:amount"].isActivate).toBe(false);
+    expect(animation["fx:amount"].x).toEqual([]);
   });
 
   // ------------------------------------------------------- decline by identity
@@ -1174,5 +1188,145 @@ describe("paired lanes share one curve", () => {
         6,
       );
     }
+  });
+});
+
+/*
+ * An effect's two track families, which no other element has.
+ *
+ * They are conditional and unseeded: a track exists exactly while the value is
+ * animated. Arming mints one, the last keyframe leaving takes it away again,
+ * and a saved effect nobody has animated therefore carries the block it carried
+ * before any of this existed.
+ */
+describe("an effect's intensity and parameter tracks", () => {
+  const FPS = 30;
+
+  function fx(over: Record<string, any> = {}) {
+    return doc({
+      a: effectElement({
+        trackId: "v1",
+        startTime: 0,
+        duration: 2000,
+        intensity: 80,
+        params: { amount: 0.25, tint: "#ff0000" },
+        ...over,
+      } as any),
+    });
+  }
+
+  describe("minting", () => {
+    it("arms a track the document does not carry yet", () => {
+      // Nothing seeds these, so without minting the stopwatch would decline by
+      // identity and in silence on every effect there has ever been.
+      const before = fx();
+      expect((before.elements.a as any).animation["fx:amount"]).toBeUndefined();
+
+      const after = setTrackActive(before, "a", "fx:amount", true);
+      expect(after).not.toBe(before);
+      expect((after.elements.a as any).animation["fx:amount"].isActivate).toBe(
+        true,
+      );
+    });
+
+    it("seeds the minted track from the parameter's own value", () => {
+      // The rule every stopwatch follows: the first thing the user sees after
+      // enabling animation is not the picture jumping.
+      const after = setTrackActive(fx(), "a", "fx:amount", true, { atMs: 500 });
+      const track = (after.elements.a as any).animation["fx:amount"];
+      expect(track.x).toHaveLength(1);
+      expect(track.x[0].p).toEqual([500, 0.25]);
+    });
+
+    it("seeds intensity from the element's own field", () => {
+      const after = setTrackActive(fx(), "a", "intensity", true, { atMs: 0 });
+      expect(
+        (after.elements.a as any).animation.intensity.x[0].p[1],
+      ).toBe(80);
+    });
+
+    it("mints one for a keyframe written straight onto it", () => {
+      // `add_keyframes` over MCP reaches a parameter without arming it first,
+      // and must behave as it does on `position`.
+      const after = addKeyframe(fx(), "a", "fx:amount", "x", 0, 1);
+      expect((after.elements.a as any).animation["fx:amount"].x).toHaveLength(1);
+    });
+
+    it("declines a parameter the element does not carry", () => {
+      const before = fx();
+      expect(setTrackActive(before, "a", "fx:radius", true)).toBe(before);
+    });
+
+    it("declines a parameter that is not a number", () => {
+      const before = fx();
+      expect(setTrackActive(before, "a", "fx:tint", true)).toBe(before);
+    });
+
+    it("declines intensity on a clip that is not an effect", () => {
+      const before = doc({ a: imageElement({ trackId: "v1" }) });
+      expect(setTrackActive(before, "a", "intensity", true)).toBe(before);
+    });
+  });
+
+  describe("the track goes away again", () => {
+    it("removes an armed-then-disarmed track rather than storing it empty", () => {
+      const armed = setTrackActive(fx(), "a", "fx:amount", true);
+      const after = setTrackActive(armed, "a", "fx:amount", false);
+      expect("fx:amount" in (after.elements.a as any).animation).toBe(false);
+    });
+
+    it("keeps a disarmed track that still holds a curve", () => {
+      // Switching off preserves the keyframes: deleting the user's work is what
+      // the remove button is for.
+      const armed = setTrackActive(fx(), "a", "fx:amount", true, { atMs: 0 });
+      const after = setTrackActive(armed, "a", "fx:amount", false);
+      expect((after.elements.a as any).animation["fx:amount"].x).toHaveLength(1);
+    });
+
+    it("leaves the block as it found it once the last keyframe goes", () => {
+      const before = fx();
+      const armed = toggleKeyframe(before, "a", "fx:amount", 0, FPS);
+      expect((armed.elements.a as any).animation["fx:amount"]).toBeDefined();
+
+      const after = toggleKeyframe(armed, "a", "fx:amount", 0, FPS);
+      expect(Object.keys((after.elements.a as any).animation)).toEqual(
+        Object.keys((before.elements.a as any).animation),
+      );
+    });
+
+    it("adopts the curve's last value as the static one on the way out", () => {
+      // The symmetric half of the seed. Without it the picture jumps to
+      // whatever the parameter happened to hold before it was animated.
+      let next = setTrackActive(fx(), "a", "fx:amount", true, { atMs: 0 });
+      next = addKeyframe(next, "a", "fx:amount", "x", 0, 0.9);
+      next = toggleKeyframe(next, "a", "fx:amount", 0, FPS);
+      expect((next.elements.a as any).params.amount).toBe(0.9);
+    });
+
+    it("writes intensity back through the op, so it is clamped", () => {
+      // `withStaticValue` goes through `setEffectIntensity` rather than `setIn`
+      // for exactly this: the 0-100 bound has one implementation.
+      let next = setTrackActive(fx(), "a", "intensity", true, { atMs: 0 });
+      next = addKeyframe(next, "a", "intensity", "x", 0, 400);
+      next = toggleKeyframe(next, "a", "intensity", 0, FPS);
+      expect((next.elements.a as any).intensity).toBe(100);
+    });
+  });
+
+  describe("clearAnimation and hasAnimation agree about them", () => {
+    it("reports an effect with a live intensity track as animated", () => {
+      const armed = setTrackActive(fx(), "a", "intensity", true, { atMs: 0 });
+      expect(hasAnimation(armed.elements.a)).toBe(true);
+    });
+
+    it("reports an effect nobody has touched as not animated", () => {
+      expect(hasAnimation(fx().elements.a)).toBe(false);
+    });
+
+    it("clears a parameter track", () => {
+      const armed = setTrackActive(fx(), "a", "fx:amount", true, { atMs: 0 });
+      const cleared = clearAnimation(armed, "a");
+      expect(hasAnimation(cleared.elements.a)).toBe(false);
+    });
   });
 });

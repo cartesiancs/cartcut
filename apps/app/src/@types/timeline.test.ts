@@ -98,8 +98,26 @@ describe("canAnimate / animatableProperties", () => {
     expect(animatableProperties(audioElement({}))).not.toContain("size");
   });
 
-  it("offers only opacity for an effect, which covers the whole frame", () => {
-    expect(animatableProperties(effectElement({}))).toEqual(["opacity"]);
+  it("offers intensity for an effect, and not the opacity nothing reads", () => {
+    // It covers the whole frame, so there is no box to move. `intensity` is the
+    // one number every effect has whatever preset is behind it; `opacity` is
+    // still in the block for shape's sake and is deliberately not offered,
+    // because no renderer has ever read an effect's.
+    expect(animatableProperties(effectElement({}))).toEqual(["intensity"]);
+  });
+
+  it("offers a track per numeric preset parameter, named from the element", () => {
+    const element = effectElement({
+      params: { amount: 0.6, radius: 0.75, tint: "#000000", centre: [0.5, 0.5] },
+    } as any);
+    // The keys come from a manifest on disk, so this file cannot check them
+    // against one. A stored number can carry a curve; a colour and a point
+    // cannot, and are simply not offered.
+    expect(animatableProperties(element)).toEqual([
+      "intensity",
+      "fx:amount",
+      "fx:radius",
+    ]);
   });
 
   it("offers nothing for an element that cannot animate", () => {

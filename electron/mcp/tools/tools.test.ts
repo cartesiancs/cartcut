@@ -14,6 +14,7 @@ import { describe, it, expect } from "vitest";
 import { registerToolsWith } from "../tools";
 import {
   ANIMATABLE,
+  animatableProperty,
   BLEND_MODES,
   COLOR_ADJUSTMENTS,
   EASINGS,
@@ -204,6 +205,21 @@ describe("every tool is usable as declared", () => {
     expect([...ANIMATABLE].sort()).toEqual(
       [...ALL_ANIMATABLE_PROPERTIES].sort(),
     );
+  });
+
+  it("also accepts an effect parameter, which no enum could name", () => {
+    // The one family that cannot be listed: the keys come from a preset
+    // manifest on disk. The enum branch still carries the closed list into the
+    // emitted schema, so an agent sees both halves.
+    expect(animatableProperty.safeParse("fx:amount").success).toBe(true);
+    expect(animatableProperty.safeParse("fx:blur radius").success).toBe(true);
+    expect(animatableProperty.safeParse("position").success).toBe(true);
+    expect(animatableProperty.safeParse("intensity").success).toBe(true);
+  });
+
+  it("refuses a bare parameter key, which would name no track", () => {
+    expect(animatableProperty.safeParse("amount").success).toBe(false);
+    expect(animatableProperty.safeParse("fx:").success).toBe(false);
   });
 
   it("advertises exactly the filetypes the renderer defines", async () => {

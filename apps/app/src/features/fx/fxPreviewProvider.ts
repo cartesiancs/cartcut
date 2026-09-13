@@ -211,14 +211,20 @@ export function createFxPreviewProvider(): FxPreviewProvider {
     if (preset.kind === "transition") {
       // A hand-built literal is enough: the compositor reads only `progress`,
       // `params` and the two ids off it, and never touches the document.
-      const active = {
+      //
+      // **Annotated, not cast.** Only the fake `element` is cast, and only as
+      // far as it has to be. `as ActiveTransition` on the whole literal is what
+      // let its sibling below ship missing two fields the compositor then read
+      // off `undefined`: a cast tells the checker to stop looking at exactly
+      // the place a second caller of a growing type needs it to look.
+      const active: ActiveTransition = {
         id: "preview",
         element: { params } as unknown as TransitionElementType,
         fromId: "a",
         toId: "b",
         progress: progressForStep(request.step),
         drawAtId: "a",
-      } as ActiveTransition;
+      };
 
       compositor.drawTransition(
         ctx,
@@ -241,7 +247,12 @@ export function createFxPreviewProvider(): FxPreviewProvider {
         },
       );
     } else {
-      const active = {
+      // The values the compositor uploads live on the plan, not on the
+      // element: `planFrame` resolves an effect's animated `intensity` and
+      // parameters once per frame and `applyEffect` reads the result. A tile
+      // animates nothing, so these are simply the preset's defaults. The
+      // `element` beside them is still needed for `blend` and `startTime`.
+      const active: ActiveEffect = {
         id: "preview",
         element: {
           params,
@@ -249,7 +260,9 @@ export function createFxPreviewProvider(): FxPreviewProvider {
           startTime: 0,
         } as unknown as EffectElementType,
         mode: preset.render.type === "overlay" ? "overlay" : "shader",
-      } as ActiveEffect;
+        intensity: 100,
+        params,
+      };
 
       // An overlay preset has no still to show — its media is a video this
       // panel does not decode — so it previews as its sample frame untouched

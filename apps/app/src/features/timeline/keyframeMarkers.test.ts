@@ -102,17 +102,20 @@ describe("keyframeTimes", () => {
     expect(keyframeTimes(el)).toEqual([]);
   });
 
-  it("gives an effect its opacity track and nothing else", () => {
-    // An effect's type carries opacity alone, so any other track on it is data
-    // the renderer never reads and must not be advertised. This used to be
-    // asserted of a shape, which now animates position too — see below.
+  it("gives an effect its intensity and parameter tracks and nothing else", () => {
+    // `position` is data the renderer never reads on an effect, and so is
+    // `opacity`, which is why neither is advertised. This used to be asserted
+    // of a shape, which now animates position too; see below.
     const el = effectElement({
+      params: { amount: 0.5 },
       animation: {
-        opacity: track([[0, 0]]),
+        intensity: track([[0, 0]]),
+        "fx:amount": track([[250, 1]]),
+        opacity: track([[750, 50]]),
         position: track([[500, 5]]),
       } as any,
-    });
-    expect(keyframeTimes(el)).toEqual([0]);
+    } as any);
+    expect(keyframeTimes(el)).toEqual([0, 250]);
   });
 
   it("gives a shape both tracks, now that its type carries them", () => {

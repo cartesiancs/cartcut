@@ -13,6 +13,8 @@ import {
 import {
   MASK_ANIMATABLE_PROPERTIES,
   animatableProperties,
+  fxParamKeyOf,
+  isFxParamTrack,
   type AnimatableProperty,
   type TimelineElement,
 } from "../../@types/timeline";
@@ -167,7 +169,65 @@ const ANIMATION_MENU: Record<string, { label: string; icon: string }> = {
   maskFeather: { label: "Feather", icon: "blur_on" },
   maskRoundness: { label: "Roundness", icon: "rounded_corner" },
   revealProgress: { label: "Reveal", icon: "keyboard" },
+  // An effect's overall strength. Its `fx:` siblings are not here and cannot
+  // be: their names come from a preset manifest on disk, so `labelForTrack`
+  // reads them from there instead.
+  intensity: { label: "Intensity", icon: "tune" },
 };
+
+/**
+ * An attribute value, escaped.
+ *
+ * The rows below are built as a template string and handed to `innerHTML`, and
+ * one of the labels now comes from a **preset manifest**, which is data a user
+ * installs from somewhere else. Everything else on this menu is a literal from
+ * the table above. `presetTypes.ts` makes the case at length that a preset is
+ * declarative data and never code; this is the line that keeps that true on the
+ * way to the DOM.
+ */
+function attr(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * What one animation row says, and whether there is one at all.
+ *
+ * `null` means the property is not offered. That happens for exactly one
+ * family: `animatableProperties` cannot read a preset manifest, so it offers an
+ * `fx:` track for any parameter whose stored value is a number, a `select`'s
+ * included. Here the manifest is in scope and gets the last word, which is the
+ * same split `<option-effect>` makes for the sidebar's diamonds.
+ *
+ * A track the element already carries is always offered, whatever the manifest
+ * says or whether there is one to read. Refusing there would strand a curve the
+ * user drew behind an uninstalled preset, with no way back to it.
+ */
+function labelForTrack(
+  element: TimelineElement,
+  property: string,
+): { label: string; icon: string } | null {
+  const entry = ANIMATION_MENU[property];
+  if (entry != null) {
+    return entry;
+  }
+  if (!isFxParamTrack(property)) {
+    return { label: property, icon: "" };
+  }
+  const key = fxParamKeyOf(property);
+  const param =
+    element.filetype === "effect"
+      ? presetById(element.presetId)?.params.find((p) => p.key === key)
+      : undefined;
+  if (param != null) {
+    return param.type === "number" ? { label: param.label, icon: "tune" } : null;
+  }
+  const carried = (element as any).animation?.[property];
+  return carried != null ? { label: key, icon: "tune" } : null;
+}
 
 /** The mask's five, as a set, for splitting the menu in two. */
 const MASK_ANIMATION_PROPERTIES = new Set<string>(MASK_ANIMATABLE_PROPERTIES);
@@ -1942,12 +2002,20 @@ export class elementTimelineCanvas extends LitElement {
       return "";
     }
 
+    const element = this.currentDoc().elements[elementId];
     const items = properties
       .map((type) => {
-        const entry = ANIMATION_MENU[type] ?? { label: type, icon: "" };
-        return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').openAnimationPanel('${elementId}', '${type}')" item-name="${entry.label}" item-icon="${entry.icon}"></menu-dropdown-item>`;
+        const entry = element == null ? null : labelForTrack(element, type);
+        if (entry == null) {
+          return "";
+        }
+        return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').openAnimationPanel('${elementId}', '${attr(type)}')" item-name="${attr(entry.label)}" item-icon="${entry.icon}"></menu-dropdown-item>`;
       })
       .join("");
+
+    if (items === "") {
+      return "";
+    }
 
     return `<menu-dropdown-sub item-name="${label}" item-icon="${icon}">${items}</menu-dropdown-sub>`;
   }

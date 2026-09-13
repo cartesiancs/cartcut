@@ -19,7 +19,9 @@
  */
 
 import {
+  fxParamKeyOf,
   isEffectElement,
+  isFxParamTrack,
   type EffectElementType,
   type FxParams,
   type TimelineElement,
@@ -145,6 +147,44 @@ export function addEffect(
 }
 
 /**
+ * The `fx:` tracks of parameters the new preset does not have.
+ *
+ * `carriesTrack` already calls these orphans, so `normalizeAnimation` would
+ * collect them, but only on ingress, and an edit reaches the store through
+ * `withCheckpoint`, which runs `normalizeDocument` and not `normalizeAnimations`.
+ * Left to that, a curve on the old preset's Radius would ride along invisibly
+ * for the rest of the session and come back as an undo step nobody could
+ * explain. Dropping them here makes the preset change one edit.
+ *
+ * `intensity` is deliberately kept: it belongs to the effect rather than to the
+ * preset, and trying a different look should not silently discard how it was
+ * dialled in over time. That is the same reason it is a field and not a
+ * parameter.
+ */
+function withoutStaleParamTracks(
+  element: EffectElementType,
+  params: FxParams,
+): EffectElementType {
+  const animation = (element as any).animation;
+  if (animation == null) {
+    return element;
+  }
+  const next: Record<string, unknown> = {};
+  let dropped = false;
+  for (const property of Object.keys(animation)) {
+    if (
+      isFxParamTrack(property) &&
+      typeof params[fxParamKeyOf(property)] !== "number"
+    ) {
+      dropped = true;
+      continue;
+    }
+    next[property] = animation[property];
+  }
+  return dropped ? ({ ...element, animation: next } as EffectElementType) : element;
+}
+
+/**
  * Swap which preset an effect uses, re-seeding its parameters.
  *
  * `params` is replaced wholesale — see this module's header for why merging is
@@ -160,7 +200,11 @@ export function setEffectPreset(
   if (effect == null || effect.presetId === presetId) {
     return doc;
   }
-  return writeEffect(doc, elementId, { ...effect, presetId, params });
+  return writeEffect(
+    doc,
+    elementId,
+    withoutStaleParamTracks({ ...effect, presetId, params }, params),
+  );
 }
 
 /** Patch individual parameter values, leaving the rest alone. */

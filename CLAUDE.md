@@ -585,6 +585,114 @@ records that a preset was what wrote them. That is also why no tile but "None"
 shows an applied state — a highlight on Fade In would be a guess presented as a
 fact.
 
+## What an effect can animate
+
+An effect's `intensity`, and every preset parameter the manifest declares as
+`type: "number"`. So a vignette closes in, a bloom swells on a beat, a blur
+racks off over half a second. `add_effect`'s tool description used to tell the
+agent to butt several short effect clips together instead; that was the only way
+there was.
+
+```
+apps/app/src/@types/timeline.ts          the names, and who may carry them
+apps/app/src/features/animation/keyframes.ts     the conditional-track table
+apps/app/src/features/animation/keyframeOps.ts   minting, and the two switches
+apps/app/src/features/renderer/fx/effectSample.ts  the values at a cursor
+apps/app/src/features/renderer/fx/planFrame.ts     where they are sampled
+apps/app/src/features/fx/fxParamControls.ts        the diamond on a number row
+apps/app/src/features/option/optionEffect.ts       the panel
+```
+
+**A parameter's curve is an ordinary keyframe track, named `fx:` plus the
+parameter's key.** Everything that rewrites keyframes walks
+`Object.keys(animation)` or `animatableProperties(element)`, so split, trim,
+duplicate, paste and a frame-rate change carry an effect's curves for free. That
+is the argument the mask's five and text's `revealProgress` make for living
+there, and a `paramAnimation` field of its own would have meant reimplementing
+`cloneAnimation`, `rebaseAnimation`, `sliceAnimation` and `rebakeElement`, with
+the one anybody forgot failing silently on one edit.
+
+The price is that **`AnimatableProperty` is no longer a closed union**. It gains
+one literal, `"intensity"`, and one open member, `` `fx:${string}` ``: parameter
+keys come from a manifest on disk, so there is no list to close over. The two
+exhaustive switches in `keyframeOps.ts` gained a branch each rather than a case
+each, and the MCP schema gained an alternative rather than an entry.
+
+**The pure layer decides from the value's shape; the UI decides from the
+manifest.** `@types/timeline.ts` cannot read the preset registry, which reads
+disk, so `animatableProperties` answers from `element.params`: a key whose
+stored value is a finite number can carry a track. That admits a `select`, whose
+values are numbers too, and `optionEffect` and the context menu, which do hold
+the registry, offer a diamond only for `type: "number"`. Answering from the
+element is what makes a project written before this feature animate the moment
+it is opened, and what keeps an effect whose preset is missing showing the
+curves its author drew.
+
+**A track exists exactly while the parameter is animated.** Nothing seeds one:
+`keyframeOps.trackOrEmpty` mints it when the stopwatch is clicked, disarming an
+empty one deletes the key, and `setEffectPreset` drops the ones whose parameter
+has gone. So an effect nobody has animated saves byte-identically to one written
+before the feature and **`SCHEMA_VERSION` did not move**: the rule `blend`,
+`lut`, `adjust` and `reveal` follow, applied to a track instead of a field.
+
+### The opacity track this replaced
+
+An effect has carried `animation.opacity` since the element type existed, and
+**nothing has ever read it**: `isVisualTimelineElement` excludes an effect from
+the paint loop, so it never reaches `renderElement` where opacity is applied,
+and the compositor reads `intensity`. Keying it produced a curve, a row of
+diamonds and no change to any pixel. It is no longer offered; the key stays in
+`emptyAnimation("effect")` so no existing file changes shape.
+
+`applyPreset` follows: on an effect, a preset's `opacity` stops are written to
+`intensity` instead (`presets.ts#trackFor`). `fade_in` on an effect now fades.
+Nothing else in the table needs a mapping, because an effect offers no transform
+at all, so a `slide` or a `pop` still fails the every-property-or-none check.
+
+### Five things that are easy to get wrong
+
+- **Split the prefix on the FIRST colon.** `presetValidate.ts` requires
+  `param.uniform` to be a GLSL identifier but asks of `param.key` only that it
+  be a non-empty string, so a key may contain a colon, a dot or a space.
+  `slice`, never `split(":")`.
+- **The compositor reads the plan, not the element.** `planFrame` resolves every
+  live track and `ActiveEffect` carries the result, which is what makes one
+  change cover all three modes: the shader's `intensity` uniform, an overlay's
+  `globalAlpha` and a LUT's `amount`. It returns the element's own `params` **by
+  identity** when nothing is animated, so the common path allocates nothing.
+- **Sampled on the frame grid**, at the instant `effectTimeOf` snaps to. A baked
+  lane is read by nearest sample, so an unsnapped preview cursor and a snapped
+  export time can otherwise land on different samples and show different
+  pictures of one frame. `progressOf` snaps for the same reason.
+- **`isForeignTrack`, not `isConditionalTrack`.** The word "conditional" was
+  doing two jobs that have now come apart. A mask's curves are conditional *and*
+  somebody else's, which is why `clearAnimation` leaves them alone. An effect's
+  two families are conditional and its *own* movement, so counting them as
+  somebody else's would make `hasAnimation` answer "no" about a clip visibly
+  fading.
+- **The manifest's range is applied at the uniform**, in
+  `glslWrap.ts#uniformValueOf`. A curve is supposed to overshoot between its
+  keyframes the way every other curve in the app does, so clamping there rather
+  than in the curve keeps the authored shape readable in the editor. It bounds
+  `set_effect` over MCP too, which had never been bounded.
+
+### How it is known to be right
+
+The unit suites cover the ops and the plan; what they cannot see is the shader.
+Driven in the running app over CDP, a vignette with `fx:amount` keyed 0 to 1
+across its clip and rendered through **`createExportFxRuntime`**, the exporter's
+own runtime: corner luminance 255, 191, 128, 64, 2 across five cursors with the
+centre fixed at 255. The same ramp on `intensity` gives 255, 128, 2. A curve
+running -5 to 5 on a 0..1 parameter renders byte-identically to the static
+values at both ends, which is the clamp. The panel offers exactly three diamonds
+on a vignette (Intensity, Amount, Radius) and none on its colour, and a
+seven-step slider drag records exactly one undo step.
+
+One behaviour worth knowing, and it is `GestureCommit`'s rather than this
+feature's: a drag that ends where it began still records a step, because `flush`
+commits whenever *any* step of the gesture changed the document. Every slider
+panel in the app behaves that way.
+
 ## Revealing text
 
 Showing a text clip's lettering a piece at a time — the typewriter, and every

@@ -21,11 +21,32 @@
  */
 
 import { html, type TemplateResult } from "lit";
+import type { AnimatableProperty } from "../../@types/timeline";
 import type { FxParamSpec, FxParamValues } from "./presetTypes";
 import { scrubOn } from "../input/inputScrub";
 import { sweepSpec } from "../input/numberScrub";
+import "../option/controlKeyframeNav";
 
 export type ParamChange = (key: string, value: number | string | boolean | number[]) => void;
+
+/**
+ * What a panel must supply for a parameter row to carry a keyframe diamond.
+ *
+ * Optional, and `<option-transition>` supplies none: a transition has no
+ * `animation` block, and its `progress` already owns the time inside its
+ * window. `<option-effect>` supplies one whose `trackFor` answers only for
+ * `type: "number"`.
+ *
+ * That refusal lives here, on the panel side, rather than in
+ * `animatableProperties`, which cannot read the manifest and so offers a track
+ * for any parameter whose stored value is a number, a `select` included. This
+ * is where the manifest gets the last word.
+ */
+export type ParamKeyframeHost = {
+  elementId: string;
+  /** The track name for a parameter, or `null` when it may not carry one. */
+  trackFor: (param: FxParamSpec) => AnimatableProperty | null;
+};
 
 export type ParamControlOptions = {
   params: FxParamSpec[];
@@ -34,6 +55,8 @@ export type ParamControlOptions = {
   onScrub: ParamChange;
   /** Called when a control settles — a committed edit. */
   onCommit: ParamChange;
+  /** Absent on a panel whose parameters cannot be animated. */
+  keyframe?: ParamKeyframeHost;
 };
 
 /** The value to show, falling back to the preset's default. */
@@ -71,6 +94,7 @@ function numberControl(
   // A step is only a suggestion for the spinner; the slider needs one fine
   // enough that a 0..1 parameter is not three positions wide.
   const step = param.step ?? (param.max - param.min) / 100;
+  const track = opts.keyframe?.trackFor(param) ?? null;
 
   return html`
     <div class="mb-2">
@@ -100,6 +124,13 @@ function numberControl(
           @change=${(e: Event) =>
             opts.onCommit(param.key, Number((e.target as HTMLInputElement).value))}
         />
+        ${track == null || opts.keyframe == null
+          ? ""
+          : html`<control-keyframe-nav
+              .elementId=${opts.keyframe.elementId}
+              .property=${track}
+              .label=${param.label}
+            ></control-keyframe-nav>`}
       </div>
     </div>
   `;

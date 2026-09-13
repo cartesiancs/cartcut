@@ -328,12 +328,31 @@ export function colorToVec3(hex: string): [number, number, number] | null {
 }
 
 /**
+ * A parameter's range, applied.
+ *
+ * `min` and `max` are validated by `presetValidate.ts` to be finite and the
+ * right way round, so this needs no guard of its own.
+ */
+function clampTo(value: number, min: number, max: number): number {
+  return value < min ? min : value > max ? max : value;
+}
+
+/**
  * The uniform value for one parameter, given what the element stores.
  *
  * Falls back to the declared default whenever the stored value is the wrong
  * shape — a project written against an older version of the preset, or a
  * hand-edited `.ngt`. A preset that changed a parameter from `number` to
  * `select` must not make the clip unrenderable.
+ *
+ * A `number` and a `point` are **clamped to the manifest's range** on the way
+ * out. This is the one place that holds both the value and the range, and there
+ * are now two ways past the panel's own slider bounds: an `fx:` keyframe curve,
+ * which is supposed to overshoot between its keyframes the way every other
+ * curve in the app is, and `set_effect` over MCP, which validates parameters as
+ * an opaque record. Clamping here rather than in the curve keeps the authored
+ * shape intact and readable in the curve editor; only what reaches the uniform
+ * is bounded, which is the rule `transform.ts#MIN_SAMPLED_SCALE` states.
  */
 export function uniformValueOf(
   param: FxParamSpec,
@@ -342,7 +361,7 @@ export function uniformValueOf(
   switch (param.type) {
     case "number":
       return typeof stored === "number" && Number.isFinite(stored)
-        ? stored
+        ? clampTo(stored, param.min, param.max)
         : param.default;
     case "bool":
       return (typeof stored === "boolean" ? stored : param.default) ? 1 : 0;
@@ -355,7 +374,9 @@ export function uniformValueOf(
         Array.isArray(stored) &&
         stored.length === 2 &&
         stored.every((n) => typeof n === "number" && Number.isFinite(n));
-      return valid ? (stored as number[]) : [...param.default];
+      return valid
+        ? (stored as number[]).map((n) => clampTo(n, param.min, param.max))
+        : [...param.default];
     }
     case "color":
     default: {

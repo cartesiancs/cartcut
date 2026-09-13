@@ -21,7 +21,7 @@ import {
 // handlers. They are imported lazily where they are used. Registration must
 // stay side-effect-free so `tools/tools.test.ts` can enumerate the tool list.
 import {
-  ANIMATABLE,
+  animatableProperty,
   FILETYPES,
   Z_ORDER_NOTE,
   readOnly,
@@ -251,7 +251,7 @@ export function registerReadTools(define: Registrar) {
         "Paged — a hand-authored curve is a handful of points, but nothing stops one per frame.",
       inputSchema: {
         elementId: z.string(),
-        property: z.enum(ANIMATABLE),
+        property: animatableProperty,
         limit: z.number().int().min(1).max(200).optional().default(100),
         offset: z.number().int().min(0).optional().default(0),
       },

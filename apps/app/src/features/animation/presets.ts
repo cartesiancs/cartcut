@@ -635,6 +635,26 @@ function writeTrack(
  * the caller converts from the playhead with `playheadAnchor`, never by handing
  * an absolute timeline time here.
  */
+/**
+ * The track a preset's stop actually lands on.
+ *
+ * One substitution, and only on an effect: **an effect fades through
+ * `intensity`**. It has no `opacity` any renderer reads, because it never
+ * reaches `renderElement`, where opacity is applied; writing one produced a curve,
+ * a row of diamonds, and no fade. `intensity` is the same 0-100 scale meaning
+ * the same thing, and it is what the compositor uploads, so `fade_in` on an
+ * effect now does what its name says.
+ *
+ * The rest of the table needs no mapping: an effect offers no transform at all,
+ * so a `slide` or a `pop` fails the every-property-or-none check above and
+ * declines, exactly as it did before.
+ */
+function trackFor(element: any, property: AnimatableProperty): AnimatableProperty {
+  return element?.filetype === "effect" && property === "opacity"
+    ? "intensity"
+    : property;
+}
+
 export function applyPreset(
   doc: TimelineDocument,
   elementId: string,
@@ -654,7 +674,7 @@ export function applyPreset(
   const needed = presetProperties(preset);
   // Every property or none. A `pop` that got its scale and not its opacity
   // would be a different move, silently.
-  if (!needed.every((property) => available.includes(property))) {
+  if (!needed.every((property) => available.includes(trackFor(element, property)))) {
     return doc;
   }
 
@@ -703,7 +723,7 @@ export function applyPreset(
     next = writeTrack(
       next,
       elementId,
-      "opacity",
+      trackFor(element, "opacity"),
       [{ lane: "x", values: shape.opacity.map((s) => s.value) }],
       shape.opacity.map((s) => timeOf(s, startAt, length)),
       shape.opacity.map((s) => s.easing),

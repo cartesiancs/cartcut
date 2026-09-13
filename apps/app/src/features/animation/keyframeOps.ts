@@ -17,9 +17,13 @@
 
 import {
   animatableProperties,
+  fxParamKeyOf,
+  isFxParamTrack,
   type AnimatableProperty,
   type TimelineElement,
 } from "../../@types/timeline";
+import { DEFAULT_INTENSITY } from "../element/effectElement";
+import { setEffectIntensity, setEffectParams } from "../timeline/effectOps";
 import {
   DEFAULT_MASK_FEATHER,
   DEFAULT_MASK_LOCATION,
@@ -41,7 +45,8 @@ import {
   type Baked,
   addKeyframe as addToList,
   bakeTrack,
-  isConditionalTrack,
+  isForeignTrack,
+  isEffectIntensityTrack,
   lanesOf,
   moveKeyframe as moveInList,
   normalizeAnimation,
@@ -68,6 +73,92 @@ type Resolved = {
 };
 
 /**
+ * Whether a track belongs to one of the two families an effect carries.
+ *
+ * Both exist only while they are animated, which is the difference between them
+ * and every other track: `position` and its four siblings are in
+ * `emptyAnimation` and are always present whether or not anybody has keyed
+ * them. Nothing seeds these two, `trackOrEmpty` mints one on demand, and
+ * `withoutEffectTrack` takes it away again once there is no curve left on it.
+ *
+ * That round trip is the whole persistence contract. An effect nobody has
+ * animated saves byte-identically to one written before the feature, so
+ * `SCHEMA_VERSION` did not move: the rule `blend`, `lut`, `adjust` and
+ * `reveal` all follow, applied to a track rather than to a field.
+ */
+function isEffectTrack(property: string): boolean {
+  return isEffectIntensityTrack(property) || isFxParamTrack(property);
+}
+
+/** Whether any lane of a track holds an authored keyframe. */
+function hasAnyKeyframe(track: any, lanes: Lane[]): boolean {
+  return lanes.some((lane) => (track?.[lane]?.length ?? 0) > 0);
+}
+
+/** Delete one track outright, leaving the rest of the block alone. */
+function withoutEffectTrack(
+  doc: TimelineDocument,
+  elementId: string,
+  property: AnimatableProperty,
+): TimelineDocument {
+  const element = doc.elements[elementId] as any;
+  const animation = element?.animation;
+  if (animation == null || !(property in animation)) {
+    return doc;
+  }
+  const { [property]: _dropped, ...rest } = animation;
+  return {
+    ...doc,
+    elements: {
+      ...doc.elements,
+      [elementId]: { ...element, animation: rest },
+    },
+  };
+}
+
+/**
+ * An element's track, minted empty when the document does not carry one yet.
+ *
+ * Callers reach this only after `animatableProperties` has said the element is
+ * entitled to the track, so an absent one is a fact about the document rather
+ * than a refusal. It is the effect families that need it: nothing seeds an
+ * `intensity` or an `fx:` track, deliberately, because a track that exists only
+ * while it is animated is what keeps an effect nobody has animated saving
+ * byte-identically to one written before the feature. Without this the
+ * stopwatch would decline, by identity and in silence, on every effect there
+ * has ever been.
+ *
+ * **Only the effect families are minted**, deliberately. Every other track is
+ * in `emptyAnimation` and is seeded on ingress, so an absent one means a
+ * fixture or a file that never went through `normalizeAnimation`, and the
+ * contract there has always been to decline rather than to invent. Narrowing
+ * keeps this change where it belongs.
+ *
+ * The `animation` block itself is still required. An element that carries none
+ * is a gif or an audio clip, and inventing one for it would put keyframes in a
+ * saved project that nothing reads.
+ */
+function trackOrEmpty(element: any, property: AnimatableProperty): any {
+  const animation = element?.animation;
+  if (animation == null || typeof animation !== "object") {
+    return null;
+  }
+  const found = animation[property];
+  if (found != null && typeof found === "object") {
+    return found;
+  }
+  if (!isEffectTrack(property)) {
+    return null;
+  }
+  const fresh: any = { isActivate: false };
+  for (const lane of lanesOf(property)) {
+    fresh[lane] = [];
+    fresh[bakedKeyOf(lane)] = [];
+  }
+  return fresh;
+}
+
+/**
  * Look up an element's track, or `null` if the edit has nowhere to land.
  *
  * `animatableProperties` is the gate rather than a plain `in` check: a shape
@@ -88,8 +179,8 @@ function resolve(
     return null;
   }
 
-  const track = (element as any).animation?.[property];
-  if (track == null || typeof track !== "object") {
+  const track = trackOrEmpty(element, property);
+  if (track == null) {
     return null;
   }
   // Only `position` has a second lane; asking for `y` anywhere else is a bug in
@@ -120,7 +211,7 @@ function withLane(
 ): TimelineDocument {
   const element = doc.elements[elementId] as any;
   const animation = element.animation;
-  const track = animation[property];
+  const track = trackOrEmpty(element, property);
 
   return {
     ...doc,
@@ -574,7 +665,20 @@ function staticValueOf(
     // says otherwise — the same rule `size` states above.
     case "revealProgress":
       return revealOf(element)?.progress ?? DEFAULT_REVEAL_PROGRESS;
+    // The effect's overall strength, 0-100, the number the Intensity row shows.
+    case "intensity":
+      return any.intensity ?? DEFAULT_INTENSITY;
   }
+  // `fx:<key>`, the open half of the union, so this is a branch rather than a
+  // case. The value is in the preset's own units, whatever the manifest says
+  // they are, which is what makes the curve editor readable: it draws raw track
+  // values, and a Radius of 14 should read as 14.
+  //
+  // `animatableProperties` only offers a key whose stored value is a finite
+  // number, so the fallback is unreachable from the app. It is stated rather
+  // than assumed because a hand-edited project can reach here.
+  const value = any.params?.[fxParamKeyOf(property)];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 /**
@@ -808,9 +912,21 @@ function withStaticValue(
     case "maskRoundness":
       return setClipMaskFields(doc, elementId, { roundness: value });
 
+    // Through the ops, like the mask and the reveal above and for the same
+    // reason: `setEffectIntensity` clamps to 0-100 and `setEffectParams`
+    // declines by identity, and neither guarantee should have a second
+    // implementation sitting here.
+    case "intensity":
+      return setEffectIntensity(doc, elementId, value);
+
     case "revealProgress":
       return setClipTextRevealFields(doc, elementId, { progress: value });
   }
+  // `fx:<key>`. `setEffectParams` merges one key and leaves the rest alone, so
+  // this never has to read the other parameters first.
+  return setEffectParams(doc, elementId, {
+    [fxParamKeyOf(property)]: value,
+  });
 }
 
 /**
@@ -836,8 +952,8 @@ export function setTrackActive(
   if (element == null || !animatableProperties(element).includes(property)) {
     return doc;
   }
-  const track = element.animation?.[property];
-  if (track == null || typeof track !== "object") {
+  const track = trackOrEmpty(element, property);
+  if (track == null) {
     return doc;
   }
 
@@ -870,6 +986,13 @@ export function setTrackActive(
     return doc;
   }
 
+  // Switching an effect's track off when there is no curve on it leaves nothing
+  // worth storing, so the key goes rather than being written back empty. See
+  // `withoutEffectTrack`.
+  if (!active && isEffectTrack(property) && !hasAnyKeyframe(nextTrack, lanes)) {
+    return withoutEffectTrack(doc, elementId, property);
+  }
+
   return {
     ...doc,
     elements: {
@@ -893,7 +1016,7 @@ export function setTrackActive(
  */
 function ownAnimatableProperties(element: TimelineElement): AnimatableProperty[] {
   return animatableProperties(element).filter(
-    (property) => !isConditionalTrack(property),
+    (property) => !isForeignTrack(property),
   );
 }
 
