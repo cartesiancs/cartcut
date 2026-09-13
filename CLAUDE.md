@@ -4,7 +4,42 @@ An Electron video editor (`cartcut-app`, formerly "nugget"). Lit web components
 and vanilla zustand in the renderer, plain TypeScript in the main process,
 FFmpeg for export.
 
-## Build layout — read this first
+## Writing rules
+
+**Never use an em-dash (`—`) or a middle dot (`·`). Not in code
+comments, not in documentation, not in commit messages, not in UI strings, not
+in this file, not anywhere.** Both characters are strong markers of
+machine-written prose, and the comments here are meant to read as though a
+person wrote them down for the next person.
+
+Write what you meant instead. An em-dash is always standing in for something
+with an actual meaning, so pick it:
+
+| Instead of | Write |
+| --- | --- |
+| an aside | a comma, or brackets |
+| a consequence, a restatement, an expansion | a colon |
+| two joined thoughts | a semicolon, or two sentences |
+| a range (`1—10`) | `1 to 10`, or an en-dash in a table |
+| multiplication (`a · b`) | `a * b`, or `a × b` |
+| a list bullet inside prose | a real list |
+
+An en-dash (`–`) is acceptable in a numeric range and nowhere else. A hyphen
+is a hyphen and is always fine. Naming either banned character inside backticks,
+as this section does, is the one exception; a grep for them should expect the
+handful of hits above and no others.
+
+Two related habits, for the same reason:
+
+- **No "It's not X, it's Y" constructions.** Say what it is.
+- **No rhetorical flourish where a fact belongs.** The comments here earn their
+  length by naming a specific failure that a specific line prevents. "This is
+  load-bearing" is worth writing only next to the thing it bears.
+
+The rest of this file predates the rule and still holds hundreds of em-dashes;
+they are being removed as files are touched. New and edited prose has no excuse.
+
+## Build layout: read this first
 
 `electron/` is **source**; `main/` is the **compiled output** of it, and
 `package.json` points `"main"` at `main/main.js`. Edit `electron/`, never
@@ -1179,7 +1214,7 @@ Five things about it that are easy to get wrong:
   neither engine is asked to scale anything. An affine matrix maps a cubic's
   control points exactly, so nothing is approximated by doing it.
 - **Everything is a cubic, including a straight edge and a rounded corner.**
-  Corners become quarter-arc beziers (`4/3 · tan(θ/4)` generalises the 0.5523
+  Corners become quarter-arc beziers (`4/3 * tan(θ/4)` generalises the 0.5523
   constant to any angle), never `arcTo` or `roundRect`, because those survive
   only a similarity transform and a stretched mask must give an elliptical
   corner.
@@ -1392,8 +1427,8 @@ Six things that are easy to get wrong, most of them paid for once:
   both appliers clamp *after* the lookup, which is exactly where `toneStep`
   clamps. The tone curve is continued linearly past its ends for the same reason.
 - **White balance and exposure go through a pure 2.2 power, not piecewise
-  sRGB.** Under a power law a gain on light is a gain on the signal —
-  `x·g^(1/2.2)` — so all three fold into one per-channel multiply, which a LUT
+  sRGB.** Under a power law a gain on light is a gain on the signal,
+  `x * g^(1/2.2)`, so all three fold into one per-channel multiply, which a LUT
   reproduces exactly. Through the sRGB toe, +2 EV with warm white balance was
   5.2 steps out near black at 33³. The two curves differ only below ~4% signal,
   and `tone.test.ts` checks 18% grey against sRGB to within 1%.
