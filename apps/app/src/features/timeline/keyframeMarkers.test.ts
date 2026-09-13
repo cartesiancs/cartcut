@@ -130,9 +130,31 @@ describe("keyframeTimes", () => {
 
   it.each([
     ["gif", gifElement()],
-    ["audio", audioElement()],
+    ["an unkeyed audio clip", audioElement()],
   ])("returns nothing for %s, which carries no animation block", (_l, el) => {
     expect(keyframeTimes(el as any)).toEqual([]);
+  });
+
+  it("leaves a level envelope to the rubber band that already draws it", () => {
+    // `volumeDb` is the one excluded property. Its keyframes are drawn as the
+    // points of the level line a few pixels above, so a diamond each would be
+    // the same information twice in the same clip.
+    const el = audioElement({
+      animation: { volumeDb: track([[0, 0], [800, -30]]) },
+    } as any);
+    expect(keyframeTimes(el)).toEqual([]);
+  });
+
+  it("still reports a video's own curves alongside its level", () => {
+    const el = videoElement({
+      isExistAudio: true,
+      animation: {
+        ...(videoElement().animation as any),
+        opacity: track([[0, 0], [500, 100]]),
+        volumeDb: track([[0, 0], [800, -30]]),
+      },
+    } as any);
+    expect(keyframeTimes(el)).toEqual([0, 500]);
   });
 
   it.each([
@@ -170,9 +192,19 @@ describe("keyframeLane", () => {
 
   it.each([
     ["gif", gifElement()],
-    ["audio", audioElement()],
+    ["an unkeyed audio clip", audioElement()],
   ])("is absent for %s, so its waveform keeps the full height", (_l, el) => {
     expect(keyframeLane(rect(), el as any)).toBeNull();
+  });
+
+  it("is still absent on an audio clip whose only curve is its level", () => {
+    // Which is what keeps a bare audio clip's waveform on the full row: the
+    // envelope is drawn as a line rather than as diamonds, so it costs the
+    // waveform nothing.
+    const el = audioElement({
+      animation: { volumeDb: track([[0, 0], [800, -30]]) },
+    } as any);
+    expect(keyframeLane(rect(), el, RANGE)).toBeNull();
   });
 
   it("is absent on a clip too short to spare the room", () => {

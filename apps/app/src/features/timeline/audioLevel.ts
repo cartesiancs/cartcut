@@ -3,12 +3,18 @@
  *
  * The preview mixes nothing: `syncPlayback` hands N independent
  * `HTMLMediaElement`s their `volume` and lets the OS mixer add them up, so
- * there is no master bus in the renderer to tap. Rather than build one — a
- * `createMediaElementSource` per handle is irreversible, silences the clip if
- * the graph is ever left unconnected, and cannot be reached by a suite in a
- * repo with no DOM test environment — the level is *derived* from the same two
- * things the preview itself reads: the decoded waveform of each file and the
- * clip's own `volumeDb`.
+ * there is no master bus in the renderer to tap. Rather than build one, the
+ * level is *derived* from the same two things the preview itself reads: the
+ * decoded waveform of each file and the clip's own level.
+ *
+ * The argument against building one still stands, and `asset/audioGraph.ts`
+ * shows what it costs where a graph genuinely is needed:
+ * `createMediaElementSource` can be called once per handle, cannot be undone,
+ * silences the clip if the graph is ever left unconnected, and cannot be
+ * reached by a suite in a repo with no DOM test environment. That module takes
+ * on all of it for one reason a meter does not have, playing a clip above
+ * unity, and it attaches only to the handles that actually need it. A master
+ * bus would have taken it on for every clip in every project.
  *
  * That makes it pure and node-testable — it answers for a cursor rather than
  * for a moment, so a suite can ask it about the middle of a clip without a
@@ -31,7 +37,7 @@
 
 import type { Timeline, TimelineElement } from "../../@types/timeline";
 import { isTimeInRange } from "../../utils/time";
-import { gainOf, isAudibleElement } from "./audio";
+import { gainAt, isAudibleElement } from "./audio";
 import { isDynamicElement, sourceTimeAt, spanOf } from "./geometry";
 import type { PeakData } from "./strip/peaks";
 
@@ -165,7 +171,10 @@ export function audiblePathsAt(
  * reports what the user is hearing right now, so it follows the preview.
  *
  * Clamped at 1: past unity the output is clipping, and a meter that read 1.4
- * would be describing headroom that does not exist.
+ * would be describing headroom that does not exist. The clamp means more now
+ * than it did, because a clip boosted above 0 dB can reach it on its own rather
+ * than only by overlapping another, and pinning at the top is exactly the
+ * report that wants making.
  */
 export function compositeLevel(
   elements: Timeline,
@@ -179,7 +188,10 @@ export function compositeLevel(
       continue;
     }
 
-    const gain = gainOf(element);
+    // The envelope at this cursor, not the static field. A meter that ignored
+    // the curve would read a clip the user has faded out as still loud, which
+    // is the one question a meter exists to answer.
+    const gain = gainAt(element, cursorMs);
     if (gain <= 0) {
       continue;
     }

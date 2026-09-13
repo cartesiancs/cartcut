@@ -153,7 +153,7 @@ function requireAnimatable(
   const available = animatableProperties(element);
   if (available.length === 0) {
     throw new Error(
-      `A ${element.filetype} clip carries no animation. Animatable types: video, image, text, shape and group.`,
+      `A ${element.filetype} clip carries no animation. Animatable types: video, image, text, shape, group and audio.`,
     );
   }
   if (!available.includes(property)) {

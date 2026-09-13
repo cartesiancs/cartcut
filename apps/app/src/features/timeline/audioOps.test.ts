@@ -17,16 +17,26 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { detachAudio, detachAudioFrom, setVolumeDb } from "./audioOps";
+import {
+  addLevelKeyframe,
+  detachAudio,
+  detachAudioFrom,
+  moveLevelKeyframe,
+  offsetLevelEnvelope,
+  removeLevelKeyframe,
+  setVolumeDb,
+} from "./audioOps";
 import {
   AUDIO_CLIP_COLOR,
   audioTwinOf,
   canDetachAudio,
   isAudibleElement,
+  volumeDbAt,
   volumeDbOf,
 } from "./audio";
+import { addKeyframe, setTrackActive } from "../animation/keyframeOps";
 import { moveClips, splitClip, trimClipEnd, trimClipStart } from "./clipOps";
-import { assertTrimInvariant, spanOf } from "./geometry";
+import { assertTrimInvariant, spanLength, spanOf } from "./geometry";
 import {
   SCHEMA_VERSION,
   createTrack,
@@ -488,10 +498,11 @@ describe("setVolumeDb", () => {
   });
 
   it("declines when the clamp lands on the level already held", () => {
-    // Dragging up past the ceiling from an untouched clip: +12 clamps to 0,
-    // which is where the clip already sits, so nothing happened.
-    const before = base();
-    expect(setVolumeDb(before, "a", 12)).toBe(before);
+    // Dragging up past the ceiling from an untouched clip: +40 clamps to +12.
+    // Set it there twice and the second call is where nothing happened.
+    const before = setVolumeDb(base(), "a", 40);
+    expect(volumeDbOf(before.elements.a)).toBe(12);
+    expect(setVolumeDb(before, "a", 99)).toBe(before);
   });
 
   it("declines a second drag past the floor", () => {
@@ -527,5 +538,198 @@ describe("setVolumeDb", () => {
     const { next } = { next: detachAudio(before, "v", "tw", "t1") };
     expect(volumeDbOf(next.elements.v)).toBe(-9);
     expect(volumeDbOf(next.elements.tw)).toBe(-9);
+  });
+});
+
+describe("the level envelope", () => {
+  const bakeHz = 60;
+
+  const base = () =>
+    doc(
+      {
+        a: audioElement({
+          trackId: "a1",
+          startTime: 0,
+          duration: 1000,
+          trim: { startTime: 0, endTime: 1000 },
+          sourceDuration: 1000,
+        }),
+      },
+      [createTrack("a1", "audio", 0)],
+    );
+
+  function keyed(stops: Array<[number, number]>): TimelineDocument {
+    let doc = setTrackActive(base(), "a", "volumeDb", true, { atMs: 0 }, bakeHz);
+    for (const [tMs, db] of stops) {
+      doc = addKeyframe(doc, "a", "volumeDb", "x", tMs, db, 0, bakeHz);
+    }
+    return doc;
+  }
+
+  const lane = (doc: TimelineDocument) =>
+    (doc.elements.a as any).animation?.volumeDb;
+
+  it("mints the block on an audio clip that had none", () => {
+    // The case the effect families never had to handle: an audio clip carries
+    // no `animation` at all until its level is keyed.
+    expect((base().elements.a as any).animation).toBeUndefined();
+    expect(lane(keyed([]))?.isActivate).toBe(true);
+  });
+
+  it("deletes the block again when an empty track is switched off", () => {
+    // The whole persistence contract. A clip keyed and then unkeyed has to
+    // save exactly the way one that was never keyed does, which is what keeps
+    // `SCHEMA_VERSION` where it is.
+    //
+    // Armed with no seed, so the track really is empty. Arming *with* one
+    // plants a keyframe, and switching a track off deliberately keeps its
+    // curve; the path that empties a real envelope is removing its last point,
+    // which the `removeLevelKeyframe` case below covers.
+    const armed = setTrackActive(base(), "a", "volumeDb", true, undefined, bakeHz);
+    expect((armed.elements.a as any).animation?.volumeDb).toBeDefined();
+    const bare = setTrackActive(armed, "a", "volumeDb", false, undefined, bakeHz);
+    expect((bare.elements.a as any).animation).toBeUndefined();
+  });
+
+  it("keeps the curve when a non-empty track is switched off", () => {
+    // A stopwatch turned off is not a delete: the static level wins while it
+    // is off, and turning it back on brings the envelope back.
+    const doc = keyed([[0, 0], [1000, -30]]);
+    const off = setTrackActive(doc, "a", "volumeDb", false, undefined, bakeHz);
+    expect(lane(off).x).toHaveLength(2);
+    expect(volumeDbAt(off.elements.a, 1000)).toBe(volumeDbOf(off.elements.a));
+  });
+
+  describe("offsetLevelEnvelope", () => {
+    it("shifts every keyframe, keeping the shape the user drew", () => {
+      const doc = keyed([[0, 0], [1000, -20]]);
+      const moved = offsetLevelEnvelope(doc, "a", -6, bakeHz);
+      expect(volumeDbAt(moved.elements.a, 0)).toBeCloseTo(-6, 4);
+      expect(volumeDbAt(moved.elements.a, 1000)).toBeCloseTo(-26, 4);
+    });
+
+    it("declines by identity on a clip with no envelope", () => {
+      // The caller wants `setVolumeDb` there. Arming a track instead would
+      // turn a drag on an ordinary clip into a keyframe nobody asked for.
+      const doc = base();
+      expect(offsetLevelEnvelope(doc, "a", -6, bakeHz)).toBe(doc);
+      expect(offsetLevelEnvelope(keyed([[0, 0]]), "a", 0, bakeHz)).toBeDefined();
+    });
+
+    it("flattens against the ceiling rather than refusing", () => {
+      // What a fader does. Recoverable, too: dragging back down restores the
+      // shape of everything that did not hit the stop.
+      const doc = keyed([[0, 0], [1000, -40]]);
+      const moved = offsetLevelEnvelope(doc, "a", 60, bakeHz);
+      expect(volumeDbAt(moved.elements.a, 0)).toBeCloseTo(12, 4);
+      expect(volumeDbAt(moved.elements.a, 1000)).toBeCloseTo(12, 4);
+    });
+  });
+
+  describe("moveLevelKeyframe", () => {
+    it("moves a point in time and level", () => {
+      const doc = keyed([[0, 0], [1000, -20]]);
+      const moved = moveLevelKeyframe(doc, "a", 1, 600, -30, bakeHz);
+      expect(volumeDbAt(moved.elements.a, 600)).toBeCloseTo(-30, 4);
+    });
+
+    it("keeps a point inside the clip", () => {
+      // A keyframe past the end never plays, so letting a drag put one there
+      // would report success for an edit with no audible effect.
+      const doc = keyed([[0, 0], [1000, -20]]);
+      const moved = moveLevelKeyframe(doc, "a", 1, 999_999, -20, bakeHz);
+      const times = lane(moved).x.map((k: any) => k.p[0]);
+      expect(Math.max(...times)).toBeLessThanOrEqual(spanLength(doc.elements.a));
+    });
+
+    it("does not quantize the time to the frame grid", () => {
+      // `isFrameLocked` exempts audio: frame alignment is a picture
+      // constraint, and a gain change is heard when it happens.
+      const doc = keyed([[0, 0], [1000, -20]]);
+      const moved = moveLevelKeyframe(doc, "a", 1, 617.5, -20, bakeHz);
+      const times = lane(moved).x.map((k: any) => k.p[0]);
+      expect(times).toContain(617.5);
+    });
+  });
+
+  describe("addLevelKeyframe", () => {
+    it("arms the track from the static level on the first point", () => {
+      const doc = setVolumeDb(base(), "a", -9);
+      const armed = addLevelKeyframe(doc, "a", 500, bakeHz);
+      expect(lane(armed).isActivate).toBe(true);
+      expect(volumeDbAt(armed.elements.a, 500)).toBeCloseTo(-9, 4);
+    });
+
+    it("plants on the curve, leaving the shape either side untouched", () => {
+      // The difference between planting and adding: `addKeyframe` seats fresh
+      // handles and re-shapes both neighbouring segments, which is not what
+      // adding a point to a rubber band means.
+      const doc = keyed([[0, 0], [1000, -40]]);
+      const before = [200, 500, 800].map((t) => volumeDbAt(doc.elements.a, t));
+      const planted = addLevelKeyframe(doc, "a", 500, bakeHz);
+      expect(lane(planted).x).toHaveLength(3);
+      const after = [200, 500, 800].map((t) =>
+        volumeDbAt(planted.elements.a, t),
+      );
+      after.forEach((db, i) => expect(db).toBeCloseTo(before[i], 3));
+    });
+
+    it("declines on a clip with no level to animate", () => {
+      const doc = base();
+      expect(addLevelKeyframe(doc, "missing", 500, bakeHz)).toBe(doc);
+    });
+  });
+
+  describe("removeLevelKeyframe", () => {
+    it("takes one point away", () => {
+      const doc = keyed([[0, 0], [500, -10], [1000, -20]]);
+      const fewer = removeLevelKeyframe(doc, "a", 1, bakeHz);
+      expect(lane(fewer).x).toHaveLength(2);
+    });
+
+    it("settles the level it held when the last point goes", () => {
+      // Without this the clip jumps to whatever `volumeDb` happened to hold,
+      // which for a clip that was only ever keyframed is 0 dB, so deleting
+      // the last point of a fade-out would make it suddenly loud.
+      let doc = keyed([[0, -24]]);
+      doc = removeLevelKeyframe(doc, "a", 0, bakeHz);
+      expect(volumeDbOf(doc.elements.a)).toBeCloseTo(-24, 4);
+      expect((doc.elements.a as any).animation).toBeUndefined();
+    });
+
+    it("declines by identity on an index that is not there", () => {
+      const doc = keyed([[0, 0]]);
+      expect(removeLevelKeyframe(doc, "a", 7, bakeHz)).toBe(doc);
+      expect(removeLevelKeyframe(base(), "a", 0, bakeHz)).toBeDefined();
+    });
+  });
+
+  describe("detach", () => {
+    it("carries the envelope to the clip that now owns the sound", () => {
+      // Required rather than tidy: after the detach the video fails
+      // `isAudibleElement`, so its `volumeDb` track is an orphan and the next
+      // ingress deletes it.
+      let doc = normalizeDocument({
+        schemaVersion: SCHEMA_VERSION,
+        tracks: [createTrack("v1", "video", 0)],
+        elements: {
+          v: videoElement({
+            trackId: "v1",
+            startTime: 0,
+            duration: 1000,
+            trim: { startTime: 0, endTime: 1000 },
+            sourceDuration: 1000,
+            isExistAudio: true,
+          }),
+        },
+      });
+      doc = setTrackActive(doc, "v", "volumeDb", true, { atMs: 0 }, bakeHz);
+      doc = addKeyframe(doc, "v", "volumeDb", "x", 0, 0, 0, bakeHz);
+      doc = addKeyframe(doc, "v", "volumeDb", "x", 900, -40, 0, bakeHz);
+
+      const detached = detachAudio(doc, "v", "twin", "a9");
+      expect((detached.elements.v as any).animation?.volumeDb).toBeUndefined();
+      expect(volumeDbAt(detached.elements.twin, 900)).toBeCloseTo(-40, 3);
+    });
   });
 });

@@ -11,6 +11,7 @@
  */
 
 import { getLocationEnv } from "../../../functions/getLocationEnv";
+import { sharedAudioContext } from "../../asset/audioContext";
 import { computePeaks, type PeakData } from "./peaks";
 
 export interface PeakProvider {
@@ -45,16 +46,24 @@ export function createAudioPeakProvider(): AudioPeakProvider {
   const failed = new Set<string>();
   const listeners = new Set<() => void>();
 
-  let context: AudioContext | null = null;
   let readyHandle = 0;
 
+  /**
+   * The context, shared rather than owned.
+   *
+   * This module used to construct its own, and the note on
+   * `sharedAudioPeakProvider` below explains why that was already worth
+   * avoiding: an `AudioContext` is a limited per-document resource. Playback
+   * needs one too, for the level envelope's boost, so the two now share
+   * `asset/audioContext.ts`. Decoding does not care whether it is running, so
+   * nothing here resumes it.
+   */
   function audioContext(): AudioContext {
+    const context = sharedAudioContext();
     if (context == null) {
-      const Ctor =
-        (window as any).AudioContext ?? (window as any).webkitAudioContext;
-      context = new Ctor();
+      throw new Error("no AudioContext");
     }
-    return context!;
+    return context;
   }
 
   function notifyReady() {
@@ -130,8 +139,10 @@ export function createAudioPeakProvider(): AudioPeakProvider {
       inFlight.clear();
       failed.clear();
       listeners.clear();
-      context?.close().catch(() => {});
-      context = null;
+      // The context is not closed here any more. It is shared with playback
+      // now, so closing it on behalf of one reader would silence the other:
+      // a closed `AudioContext` cannot be reopened, and `audioGraph.ts` has
+      // already routed boosted clips through it irreversibly.
       if (readyHandle !== 0) {
         cancelAnimationFrame(readyHandle);
         readyHandle = 0;

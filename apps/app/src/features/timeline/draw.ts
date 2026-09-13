@@ -38,6 +38,12 @@ import {
   keyframeLane,
   planKeyframeMarkers,
 } from "./keyframeMarkers";
+import {
+  LEVEL_POINT_R_PX,
+  levelBandOf,
+  levelPoints,
+  levelPolyline,
+} from "./levelLine";
 
 export type ThemeColors = {
   background: string;
@@ -394,6 +400,12 @@ export function drawClip(
     });
   }
 
+  // After the waveform, so it reads against the trace rather than under it.
+  drawLevelLine(ctx, rect, element, {
+    range: opts.range,
+    viewportW: opts.viewportW,
+  });
+
   if (lane != null) {
     drawKeyframeLane(ctx, rect, element, {
       colors: opts.colors,
@@ -518,10 +530,11 @@ function drawWaveform(
   }
 
   // Room reserved at the bottom for the keyframe lane, and zero whenever the
-  // clip has no keyframes — which is why an unanimated clip's waveform is
-  // pixel-identical to what it was before the lane existed. Audio never has a
-  // lane (its type carries no `animation` block), so a bare audio clip keeps
-  // the full row.
+  // clip has no keyframes, which is why an unanimated clip's waveform is
+  // pixel-identical to what it was before the lane existed. An audio clip used
+  // to be guaranteed that case, because its type carried no `animation` block
+  // at all; it can carry a level envelope now, so it gets a lane like anything
+  // else and this inset is the reason its waveform moves up out of the way.
   const inset = opts.bottomInset ?? 0;
   const isVideo = element.filetype === "video";
   const available = Math.max(0, rect.h - inset);
@@ -554,6 +567,66 @@ function drawWaveform(
     // than as a gap.
     ctx.fillRect(column.x, y0, 1, Math.max(1, y1 - y0));
   }
+}
+
+/** The rubber band, and the dark edge that keeps it readable over a waveform. */
+const LEVEL_LINE_COLOR = "rgba(255, 233, 128, 0.95)";
+const LEVEL_LINE_WIDTH = 1.5;
+
+/**
+ * Draw the clip's level rubber band.
+ *
+ * A flat line at the static level when nothing is keyed, the sampled envelope
+ * when something is, and a ring at each authored keyframe. The envelope is read
+ * through `volumeDbAt`, the same function the preview and the meter ask, so
+ * the line is a picture of what will be heard rather than a second drawing of
+ * the same curve that could disagree with it.
+ *
+ * Haloed rather than plated. The waveform underneath is near-white at full
+ * opacity and a bare yellow line disappears into it; a backing plate would cost
+ * another tenth of the clip's height, which the band cannot spare.
+ */
+function drawLevelLine(
+  ctx: CanvasRenderingContext2D,
+  rect: ClipRect,
+  element: TimelineElement,
+  opts: { range: number; viewportW: number },
+) {
+  const band = levelBandOf(rect, element);
+  if (band == null) {
+    return;
+  }
+
+  const line = levelPolyline(rect, element, band, opts.range, opts.viewportW);
+  if (line.length < 2) {
+    return;
+  }
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(line[0].x, line[0].y);
+  for (let i = 1; i < line.length; i++) {
+    ctx.lineTo(line[i].x, line[i].y);
+  }
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.strokeStyle = LABEL_HALO;
+  ctx.lineWidth = LEVEL_LINE_WIDTH + 2;
+  ctx.stroke();
+  ctx.strokeStyle = LEVEL_LINE_COLOR;
+  ctx.lineWidth = LEVEL_LINE_WIDTH;
+  ctx.stroke();
+
+  for (const point of levelPoints(rect, element, band, opts.range)) {
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, LEVEL_POINT_R_PX, 0, Math.PI * 2);
+    ctx.fillStyle = LEVEL_LINE_COLOR;
+    ctx.fill();
+    ctx.strokeStyle = LABEL_HALO;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 /**

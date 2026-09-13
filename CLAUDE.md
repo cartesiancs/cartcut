@@ -420,6 +420,203 @@ Three things about it that are easy to get wrong:
 restated independently in that file, through a real export — not against a
 reference render, which would use the same code and prove nothing.
 
+## Audio levels and the envelope
+
+How loud a clip plays, and how that changes across it. A clip carries
+`Leveled.volumeDb`, **-60 to +12 dB**, absent meaning 0; `audio.ts#gainFromDb`
+turns it into the linear multiplier the DOM and FFmpeg both want. -60 is a hard
+zero rather than `10 ** (-60/20)`, because a fader at the bottom means off.
+
+```
+apps/app/src/features/timeline/audio.ts       what a level is, and sampling one
+apps/app/src/features/timeline/audioOps.ts    setVolumeDb, detach, the envelope ops
+apps/app/src/features/timeline/levelLine.ts   the rubber band: scale, geometry, hit test
+apps/app/src/features/asset/audioGraph.ts     the only way past unity
+apps/app/src/features/asset/audioContext.ts   the one AudioContext
+apps/app/src/features/timeline/audioLevel.ts  the meter, derived rather than tapped
+electron/render/audioEnvelope.ts              the curve as an FFmpeg expression
+electron/render/ffmpegArgs.ts                 isAudible / gainOf, the hand-copied twins
+```
+
+### The decision the feature turns on
+
+> **`volumeDb` is an ordinary keyframe track, and an audio clip grows an
+> `animation` block only when one is actually written.**
+
+Exactly the arrangement `revealProgress` and an effect's `intensity` already
+have: conditional, unseeded, minted by `keyframeOps.trackOrEmpty` when the
+stopwatch is armed, and deleted outright when the last curve goes. So a clip
+nobody has touched saves byte-identically to one written before the feature and
+**`SCHEMA_VERSION` did not move**.
+
+And the contract `size` states applies unchanged: **a keyframed level behaves
+exactly like the static field it keyframes.** `volumeDbAt` samples the track and
+falls back to `volumeDbOf`, so `playback.ts`, the meter and the exporter each
+read one number and none of them has to learn that envelopes exist.
+
+Everything that rewrites keyframes walks `Object.keys(animation)` or
+`animatableProperties(element)`, with **no gate at any call site** (verified,
+not assumed), so split, trim, move, paste and a frame-rate change carry an
+envelope for free. A `gainEnvelope` field of its own would have meant
+reimplementing `cloneAnimation`, `rebaseAnimation`, `sliceAnimation` and
+`rebakeElement`, with the one anybody forgot failing silently on one edit.
+
+### Audio is animatable now, and it is the only thing it can animate
+
+`canAnimate` admits `audio`, and `AudioElementType.animation` is **optional**,
+so narrowing to `AnimatableTimelineElement` no longer promises the field is
+there. Nothing may write `canAnimate(x) && x.animation.position`. The real gate
+is `animatableProperties`, which every consumer already asks, and for audio it
+answers `["volumeDb"]` and nothing else: an audio clip has no box, no opacity
+and no rotation, and offering the transform five would put tracks in the curve
+editor that nothing reads.
+
+The gate is **audibility**, not filetype, so `isAudibleElement` moved into
+`@types/timeline.ts` (where `animatableProperties` can reach it) and
+`features/timeline/audio.ts` re-exports it. That is the same condition
+`draw.ts#canShowWaveform` asks, which is what makes the waveform and the rubber
+band appear and disappear together. `detachAudio` therefore has to **carry the
+envelope to the twin and strip it from the video**: the silenced video fails the
+gate, so the track becomes an orphan and the next ingress deletes it.
+
+**An emptied `animation` block is deleted, not left as `{}`.** Both in
+`normalizeAnimation` and in `keyframeOps.withoutMintedTrack`. Audio is the first
+filetype with no unconditional tracks, so it is the first that can reach an
+empty block, and `animation: {}` would mean a clip keyed and then unkeyed no
+longer saves the way one that was never keyed does. That equality is the whole
+reason the track is conditional.
+
+### Getting past unity
+
+The ceiling was 0 dB because `HTMLMediaElement.volume` caps at 1.0, and lifting
+it needed a WebAudio `GainNode`. `audioGraph.ts` is that, under one rule:
+
+> **A handle gets a gain node the first time it is asked for more than unity,
+> and keeps it for the rest of its life.**
+
+Lazy rather than universal, because `createMediaElementSource` is a one-way
+door: once per element, never undone, and from that moment the sound reaches the
+speakers only through the graph, so a graph that is wrong or unconnected
+silences the clip. `audioLevel.ts` refused to build a master bus for exactly
+that reason. Attaching only where a boost was asked for keeps the risk inside
+the clips whose level the user just raised.
+
+Four things this rests on, all measured in this Electron build rather than
+assumed:
+
+- **A `file://` media element on a `file://` page is not CORS-tainted here**, so
+  the graph carries sound rather than silence. This was the thing most likely to
+  sink the whole approach.
+- **`handle.volume` multiplies before the node**, which is why the level moves
+  wholesale onto the node instead of being split across the two.
+- **The crossover is free.** At the moment a rising envelope passes 0 dB both
+  paths are the same number, so there is no step to hear.
+- **A suspended context passes nothing**, so the graph is not attached until the
+  context is `running` and a boosted clip plays at unity until then. Never
+  silent outranks the boost. `elementControl.play()` resumes it, the gesture
+  `record/audioRecord.ts` already relies on.
+
+`playback.ts` stays pure: the write goes through an injected `GainSink`, whose
+default is the plain `handle.volume` write capped at 1. Assigning 4 to `volume`
+throws, so the cap is not a rounding convenience.
+
+### The export, and three things ffmpeg made us find out
+
+The renderer plays a curve by sampling it every frame. FFmpeg has no such loop,
+so the curve is handed to it as an expression, from the **baked lane**:
+`keyframeOps.withLane` re-bakes inside the transform that writes a keyframe, so
+`ax` is always current and reading it needs no bezier solver in `electron/`.
+`audioEnvelope.ts` simplifies it (Douglas-Peucker, measured in dB, 0.1 dB
+tolerance) and formats it.
+
+The stage sits **after `atempo` and before `adelay`**:
+
+```
+[i:a] atempo=… , asetnsamples=n=256:p=0 , volume=eval=frame:volume='…' , adelay=d|d [audioN]
+```
+
+- **`atempo` rewrites the timestamps**, so past it `t` is clip-local *timeline*
+  seconds and a baked sample's `tMs / 1000` is the breakpoint directly. Measured:
+  `gte(t,1)` after `atempo=2` switches at output 1.0s, not 0.5s. First in the
+  chain would mean multiplying every breakpoint by `speed`; after `adelay`,
+  adding the clip's offset to every one.
+- **Interpolate in dB, then convert.** The curve is authored over dB values, so
+  a segment is `pow(10,(d0+k*(t-a))/20)`. A first draft interpolated the gain
+  and played a straight 0 to -40 dB fade **3.9 dB loud at its quarter point**.
+  The parity test caught it; nothing else would have.
+- **A flat `a+b+c+…` breaks at about a hundred terms.** FFmpeg parses by
+  recursive descent: 96 terms evaluate, 100 fail, 512 fails at allocation. The
+  same terms folded into a **balanced tree** are `log2(n)` deep and were measured
+  good to 2048. It costs brackets and removes a cliff, so the expression is
+  always emitted folded.
+
+A clip with no envelope emits **the chain it always emitted**, `volume=` stage
+and all omitted at unity. That is also why `gainFromDb`'s unity shortcut had to
+narrow from `db >= MAX_VOLUME_DB` to `db === 0` when the ceiling rose: left
+alone it would have played every level from 0 dB up at 1.0 and thrown the boost
+away in silence.
+
+`MAX_ENVELOPE_SEGMENTS` is 96, and the binding constraint is **Windows' 32,767
+character command line**, not the parser. `-/filter_complex <file>` is the
+escape hatch if a graph ever outgrows it.
+
+### The rubber band
+
+The line across the clip, dragged directly, the way Premiere and Resolve do it.
+`levelLine.ts` is its geometry and is **deliberately the opposite of
+`keyframeMarkers.ts`**: that module stays out of `TimelineLayout` so a press can
+never land on a diamond, and this one has to be grabbed, so `layout.ts` imports
+it and `hitTest` asks it. `ClipRect` crosses as a *type*, so there is no runtime
+cycle.
+
+- **Trim handles win at the edges.** The line runs the full width of the clip,
+  handles included, so `hitTest` asks about it only after the handles have had
+  their say. The other order loses trimming on any clip whose line crosses an
+  edge at the pointer's height, which is most of them.
+- **The scale is tapered, and the measurement is why.** A 40px row leaves 23px
+  for 72 dB; straight, -18 dB lands six pixels below unity, and on a rendered
+  strip that is not a difference anyone can see. Three quarters of the band now
+  carries +12 to -18 and the last quarter carries -18 to -60, which is how every
+  physical fader is laid out. `dbPerPx` is therefore the **local** rate: one
+  average would make the line lag the pointer at the top and outrun it at the
+  bottom.
+- **A drag is relative, not absolute**, and Shift is 0.1 dB per pixel. Together
+  they make the whole range reachable from a band this short. The sidebar fader
+  stays the way to type an exact number.
+- **Dragging the line on a keyed clip shifts the whole envelope.** The shape the
+  user drew is theirs; flattening it to the pointer is not what the gesture
+  means. `offsetLevelEnvelope` declines by identity on an unkeyed clip, where
+  the caller wants `setVolumeDb`.
+- **Alt-click adds or removes a point**, and adding **plants** rather than
+  appends, so dropping a point into a fade cannot re-shape the fade either side
+  of it. Removing the last point writes the level it held back as the static
+  value, or a fade-out would end loud.
+- **Level keyframes are never frame-quantized.** `frames.ts#isFrameLocked`
+  exempts audio from the grid because frame alignment is a picture constraint,
+  and a gain change is heard at the instant it happens. The curve editor's
+  `dragKeyframe.ts` does not know the frame rate either, so both ways in agree.
+- **The diamond lane skips `volumeDb`.** Its keyframes are already drawn as the
+  points of the line, so a diamond each would be the same thing twice. It also
+  means a bare audio clip gets no lane, keeping its waveform on the full row.
+
+### How it is known to be right
+
+`electron/render/audioEnvelope.parity.test.ts` is the load-bearing half, and it
+is the LUT parity argument applied to sound: every other check compares this
+code to itself. It builds a curve through the real `keyframeOps`, asks for the
+expression the exporter would emit, runs the **bundled ffmpeg**, and measures
+the delivered level with `volumedetect` against what the **renderer's own
+sampler** says. The two sides share no code. Worst disagreement **0.3 dB**,
+most of them 0.10, which is `volumedetect`'s own resolution; the dB-versus-gain
+defect above fails it by an order of magnitude. A last case hands the two sides
+different curves and requires them to disagree, so the harness cannot pass by
+measuring nothing.
+
+`ffmpegArgs.test.ts` pins the hand copies, and its `gainOf` table now carries
+levels **above** unity: the old table's highest case was +12, which was out of
+range on both sides and answered exactly 1, so it would have gone on passing
+after the ceiling rose while the two disagreed about everything in between.
+
 ## The frame rate
 
 A project setting, sitting on `renderOptionStore.options` next to `previewSize`

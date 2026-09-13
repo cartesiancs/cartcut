@@ -513,10 +513,10 @@ type Animatable = OpacityAnimatable & {
  */
 type Leveled = {
   /**
-   * Authored output level in **decibels**, -60 … 0. Attenuation only.
+   * Authored output level in **decibels**, -60 to +12.
    *
    * Absent on every clip written before the feature and on every clip the user
-   * has not touched, which is what lets old projects load unchanged — there is
+   * has not touched, which is what lets old projects load unchanged: there is
    * no migration on load. `features/timeline/audio.ts#volumeDbOf` owns the
    * reading of it and supplies the 0 dB default.
    *
@@ -525,13 +525,17 @@ type Leveled = {
    * mean silence without the round trip through `-Infinity` that a stored `0`
    * would need. The linear value `HTMLMediaElement.volume` and the FFmpeg
    * `volume` filter want comes from `gainOf`. **Never assign this to
-   * `handle.volume`** — that line typechecks and is wrong by 20 orders of dB.
+   * `handle.volume`**: that line typechecks and is wrong by 20 orders of dB.
    *
-   * The ceiling is 0 dB because `HTMLMediaElement.volume` maxes at 1.0: any
-   * boost would make the preview and the export disagree, silently.
+   * The ceiling was 0 dB while the preview had only `HTMLMediaElement.volume`,
+   * which maxes at 1.0. It is +12 now, and the price is named at
+   * `features/asset/audioGraph.ts`: a handle that is asked for more than unity
+   * gets a WebAudio `GainNode` for the rest of its life.
    *
-   * Not animatable. `canAnimate` excludes audio and `animatableProperties`
-   * returns `[]` for it, so this is a static field with no keyframe track.
+   * **The static value here is the fallback, not the answer.** A clip may carry
+   * a `volumeDb` keyframe track, and the sampled value replaces this field on
+   * the way to `gainOf` exactly as a sampled `size` replaces `width`. Ask
+   * `audio.ts#volumeDbAt`, never this field, anywhere a cursor is in hand.
    */
   volumeDb?: number;
 };
@@ -1017,6 +1021,18 @@ export type AudioElementType = TimelinePlaced &
     /** Full untrimmed length of the source file, in source ms. */
     sourceDuration: number;
     speed: number;
+    /**
+     * The level envelope, and nothing else.
+     *
+     * **Optional, and that is the whole persistence contract.** An audio clip
+     * has no transform to animate, so it gets no `Animatable` mixin and
+     * `emptyAnimation("audio")` goes on answering `undefined`. The block is
+     * minted by `keyframeOps.trackOrEmpty` when the stopwatch is armed and
+     * deleted outright when the last track goes, so a clip nobody has keyed
+     * saves byte-identically to one written before the feature and
+     * `SCHEMA_VERSION` did not move.
+     */
+    animation?: { volumeDb?: unknown };
   };
 
 export type TimelineElement =
@@ -1131,6 +1147,30 @@ export function occupiesTrack(element: TimelineElement): boolean {
   return element.filetype !== "transition";
 }
 
+/**
+ * Whether this clip contributes sound.
+ *
+ * It lives here rather than in `features/timeline/audio.ts`, which re-exports
+ * it, because `animatableProperties` below has to ask the question and a third
+ * copy of it is exactly what must not exist. There are already two: this one
+ * and `electron/render/ffmpegArgs.ts#isAudible`, which cannot import it
+ * (`electron/` may not reach into `apps/app/src` without moving the whole
+ * main-process build) and which `ffmpegArgs.test.ts` pins against it. If those
+ * two ever drift, the preview and the export make different sounds.
+ */
+export function isAudibleElement(element: TimelineElement): boolean {
+  if (element == null) {
+    return false;
+  }
+  if (element.filetype === "audio") {
+    return true;
+  }
+  if (element.filetype === "video") {
+    return element.isExistAudio === true && element.audioDetached !== true;
+  }
+  return false;
+}
+
 /** Elements that carry an `animation` block at all. */
 export type AnimatableTimelineElement =
   | ImageElementType
@@ -1139,14 +1179,25 @@ export type AnimatableTimelineElement =
   | ShapeElementType
   | GroupElementType
   | EffectElementType
-  | TemplateElementType;
+  | TemplateElementType
+  // Audio is here for one track, `volumeDb`, and its block is optional: see
+  // `AudioElementType.animation`. Narrowing to this union therefore does not
+  // promise an `animation` field is present, which is why nothing may write
+  // `canAnimate(x) && x.animation.position`.
+  | AudioElementType;
 
 export function canAnimate(
   element: TimelineElement,
 ): element is AnimatableTimelineElement {
-  // GIF and audio have no `animation` field, so offering a keyframe editor for
-  // them opens a panel with nothing to edit. The old check gated on "static and
-  // not text", which let GIF through and kept video out — backwards on both.
+  // GIF has no `animation` field, so offering a keyframe editor for it opens a
+  // panel with nothing to edit. The old check gated on "static and not text",
+  // which let GIF through and kept video out, backwards on both.
+  //
+  // Audio was excluded for the same reason until it gained a level envelope.
+  // It carries exactly one track and only while it is audible, so the real
+  // answer to "what can this clip animate" is `animatableProperties`, which
+  // every gate in the codebase already asks rather than testing membership
+  // here. This predicate means no more than "may carry an `animation` block".
   //
   // A transition is absent on purpose and permanently: its progress is driven
   // by the shader's `progress` uniform, derived from the playhead. Giving it
@@ -1156,6 +1207,8 @@ export function canAnimate(
     element.filetype === "video" ||
     element.filetype === "text" ||
     element.filetype === "shape" ||
+    // One track, `volumeDb`, gated on audibility by `animatableProperties`.
+    element.filetype === "audio" ||
     // A group exists to be animated — it has no other purpose. Including it
     // here is what gives it the curve editor, the timeline's keyframe lane and
     // the context menu, with no group-specific code in any of them.
@@ -1242,6 +1295,28 @@ export type EffectAnimatableProperty =
   (typeof EFFECT_ANIMATABLE_PROPERTIES)[number];
 
 /**
+ * The track an audible clip carries: its level envelope, in dB.
+ *
+ * The same name as the static field it keyframes, because that is the whole
+ * contract. `audio.ts#volumeDbAt` samples the track and falls back to
+ * `volumeDbOf`, so a keyframed level behaves exactly like a typed one, the way
+ * a sampled `size` replaces `width`.
+ *
+ * dB and not a linear gain, for the reason `Leveled.volumeDb` gives: it is the
+ * number the user drew, and an envelope interpolated in dB ramps the way an ear
+ * hears while one interpolated in amplitude crowds all its travel near silence.
+ *
+ * Gated in `animatableProperties` on `isAudibleElement`, so a video whose audio
+ * has been detached stops offering it at the same moment it loses its waveform.
+ * `keyframes.ts#CONDITIONAL_TRACKS` carries the matching rule, so a track left
+ * behind by that gesture is collected on ingress.
+ */
+export const AUDIO_ANIMATABLE_PROPERTIES = ["volumeDb"] as const;
+
+export type AudioAnimatableProperty =
+  (typeof AUDIO_ANIMATABLE_PROPERTIES)[number];
+
+/**
  * The prefix that makes an effect preset's parameter into a track name.
  *
  * **Split on the FIRST colon.** `presetValidate.ts` requires `param.uniform` to
@@ -1300,6 +1375,7 @@ export type AnimatableProperty =
   | MaskAnimatableProperty
   | TextAnimatableProperty
   | EffectAnimatableProperty
+  | AudioAnimatableProperty
   | FxParamAnimatableProperty;
 
 /**
@@ -1321,6 +1397,7 @@ export const ALL_ANIMATABLE_PROPERTIES: readonly AnimatableProperty[] = [
   ...MASK_ANIMATABLE_PROPERTIES,
   ...TEXT_ANIMATABLE_PROPERTIES,
   ...EFFECT_ANIMATABLE_PROPERTIES,
+  ...AUDIO_ANIMATABLE_PROPERTIES,
 ];
 
 /**
@@ -1380,12 +1457,26 @@ export function animatableProperties(
     }
     return own;
   }
+  // An audio clip has no box, no opacity and no rotation, so its level is the
+  // only thing about it that can move. Returning the transform list too would
+  // put five tracks in the curve editor that nothing reads and that
+  // `staticValueOf` would have to invent values for.
+  if (element.filetype === "audio") {
+    return isAudibleElement(element) ? [...AUDIO_ANIMATABLE_PROPERTIES] : [];
+  }
   // `size` is offered to a group as well, and that is deliberate rather than
   // an oversight: a group's box is its rotate/scale pivot, so animating it
   // moves the pivot and leaves the children exactly where they are. Excluding
   // it would put a filetype exception here that the context menu, the diamond
   // lane and the MCP schema would each have to re-derive.
   const own: AnimatableProperty[] = [...OWN_ANIMATABLE_PROPERTIES];
+  // A video's sound is its own, so it gets the same envelope, and it loses it
+  // the moment "detach audio" hands the sound to a clip of its own. Asking
+  // `isAudibleElement` rather than `filetype === "video"` is what keeps this in
+  // step with the waveform, which `draw.ts#canShowWaveform` gates identically.
+  if (isAudibleElement(element)) {
+    own.push(...AUDIO_ANIMATABLE_PROPERTIES);
+  }
   if ((element as { mask?: unknown }).mask != null) {
     own.push(...MASK_ANIMATABLE_PROPERTIES);
   }

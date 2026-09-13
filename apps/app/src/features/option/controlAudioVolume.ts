@@ -7,17 +7,18 @@
  * would quietly drift apart. `default-transform` is the precedent for exactly
  * this shape.
  *
- * Deliberately narrower than `default-transform`, in two ways:
+ * The note that used to be here said a level was not animatable and that this
+ * control therefore needed no cursor. It is, and it does: the field shows the
+ * level at the playhead through `volumeDbAt`, and a scrub with the stopwatch
+ * armed writes a keyframe there rather than a static value. The rest of the
+ * arrangement is unchanged.
  *
- *   - **No `timelineCursor`.** A level is not animatable — `canAnimate`
- *     excludes audio and `animatableProperties` returns `[]` for it — so there
- *     is no cursor-dependent sampling to do. Not taking the cursor is what
- *     keeps someone from reaching for `sampleTrack` here later.
- *   - **No `timeline` / `timelineState` props.** This reads the store directly.
- *     `default-transform` reads a `timeline` its *parent* refreshes from a
- *     separately-registered zustand subscriber, which works only because the
- *     parent happens to have subscribed first; there is no reason to inherit
- *     that ordering dependency for one number.
+ * Still narrower than `default-transform` in one way: **no `timeline` /
+ * `timelineState` props.** This reads the store directly.
+ * `default-transform` reads a `timeline` its *parent* refreshes from a
+ * separately-registered zustand subscriber, which works only because the parent
+ * happens to have subscribed first; there is no reason to inherit that ordering
+ * dependency for one number.
  */
 
 import { LitElement, html } from "lit";
@@ -29,9 +30,13 @@ import {
   MAX_VOLUME_DB,
   MIN_VOLUME_DB,
   clampVolumeDb,
-  volumeDbOf,
+  volumeDbAt,
 } from "../timeline/audio";
 import { setVolumeDb } from "../timeline/audioOps";
+import { addKeyframe } from "../animation/keyframeOps";
+import { animatableProperties } from "../../@types/timeline";
+import { projectBakeHz } from "../editor/frameRate";
+import "./controlKeyframeNav";
 
 @customElement("audio-volume")
 export class AudioVolume extends LitElement {
@@ -82,9 +87,31 @@ export class AudioVolume extends LitElement {
           ></number-input>
           <span class="text-secondary" style="font-size: 12px;">dB</span>
         </div>
-        <div class="d-flex flex-row gap-2 justify-content-end"></div>
+        <div class="d-flex flex-row gap-2 justify-content-end">
+          ${this.canAnimate()
+            ? html`<control-keyframe-nav
+                .elementId=${this.elementId}
+                .property=${"volumeDb"}
+                .label=${"level"}
+              ></control-keyframe-nav>`
+            : ""}
+        </div>
       </div>
     `;
+  }
+
+  /**
+   * Whether this clip has a level to keyframe at all.
+   *
+   * Asked of `animatableProperties`, which gates on audibility, so the
+   * stopwatch is absent on a video whose audio has been detached at the same
+   * moment the waveform and the rubber band are. Offering it there would arm a
+   * track nothing reads and `normalizeAnimation` would collect on the next
+   * ingress.
+   */
+  private canAnimate(): boolean {
+    const element = useTimelineStore.getState().timeline[this.elementId];
+    return element != null && animatableProperties(element).includes("volumeDb");
   }
 
   /**
@@ -110,10 +137,13 @@ export class AudioVolume extends LitElement {
     if (element == null) {
       return;
     }
-    // Reading through the resolver, so a clip with no `volumeDb` shows 0.00
-    // rather than NaN — and so a value clamped by the op snaps the display
-    // back to the floor on the next store change.
-    dom.value = volumeDbOf(element);
+    // Read at the playhead, not off the field: with an envelope on the clip the
+    // static value is only the fallback, and a field showing it while the line
+    // says otherwise is a number that disagrees with what is playing.
+    // `volumeDbAt` falls back to `volumeDbOf`, so a clip with no envelope shows
+    // exactly what it always did, and a value clamped by the op still snaps the
+    // display back on the next store change.
+    dom.value = volumeDbAt(element, useTimelineStore.getState().cursor);
   }
 
   private handleVolume() {
@@ -125,9 +155,37 @@ export class AudioVolume extends LitElement {
 
     const elementId = this.elementId;
     const db = clampVolumeDb(raw);
+    const cursor = useTimelineStore.getState().cursor;
+    // `projectBakeHz()`, not the op's 60Hz default: a baked lane is a cache
+    // read by nearest sample, so one written coarser than the project's rate
+    // hands consecutive frames the same value and the curve steps.
+    const bakeHz = projectBakeHz();
     // One step per gesture, not per event: `number-input` dispatches `onChange`
     // on every mousemove of a scrub, and a checkpoint each would evict the
     // whole undo stack on a single drag.
-    this.gesture.apply((doc) => setVolumeDb(doc, elementId, db));
+    this.gesture.apply((doc) => {
+      const element: any = doc.elements[elementId];
+      if (element == null) {
+        return doc;
+      }
+      // The keyframe is written **only where the track is already switched
+      // on**, which is what makes this box usable as both a static control and
+      // the envelope's authoring surface with no mode switch. Written before
+      // the static field so `setVolumeDb` sees the document the keyframe left,
+      // and the two cannot be undone apart.
+      const next = element.animation?.volumeDb?.isActivate
+        ? addKeyframe(
+            doc,
+            elementId,
+            "volumeDb",
+            "x",
+            cursor - element.startTime,
+            db,
+            undefined,
+            bakeHz,
+          )
+        : doc;
+      return setVolumeDb(next, elementId, db);
+    });
   }
 }

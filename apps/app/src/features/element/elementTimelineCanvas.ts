@@ -107,8 +107,33 @@ import {
   setReplaceable,
 } from "../timeline/templateOps";
 import { parentOf, withDescendants } from "../timeline/hierarchy";
-import { canDetachAudio } from "../timeline/audio";
-import { detachAudioFrom } from "../timeline/audioOps";
+import { canDetachAudio, volumeDbOf } from "../timeline/audio";
+import {
+  addLevelKeyframe,
+  detachAudioFrom,
+  moveLevelKeyframe,
+  offsetLevelEnvelope,
+  removeLevelKeyframe,
+  setVolumeDb,
+} from "../timeline/audioOps";
+import {
+  dbPerPx,
+  hasLevelEnvelope,
+  levelBandOf,
+} from "../timeline/levelLine";
+import { KEYFRAME_LANE_PX, keyframeLane } from "../timeline/keyframeMarkers";
+import { bakeRateFor } from "../animation/keyframes";
+import { pxToMsSigned, spanLength } from "../timeline/geometry";
+
+/**
+ * How many decibels one pixel of a Shift-held level drag is worth.
+ *
+ * The band is short by necessity (track height is a constant here), so the
+ * coarse rate is about 3.8 dB per pixel on a 40px row. A tenth of a decibel is
+ * finer than anyone can hear as a step and makes the whole fader reachable
+ * without the band having to be tall.
+ */
+const FINE_LEVEL_DB_PER_PX = 0.1;
 import { rasterizeTextElements } from "./rasterizeText";
 import {
   ASSET_MIME,
@@ -173,6 +198,11 @@ const ANIMATION_MENU: Record<string, { label: string; icon: string }> = {
   // be: their names come from a preset manifest on disk, so `labelForTrack`
   // reads them from there instead.
   intensity: { label: "Intensity", icon: "tune" },
+  // The level envelope. Called "Level" and not "Volume", which is the word the
+  // codebase already uses for it (`audioLevel.ts`, `METER_FLOOR_DB`, "the level
+  // fader"); one thing gets one name, the rule the LUT section states about
+  // "filter".
+  volumeDb: { label: "Level", icon: "volume_up" },
 };
 
 /**
@@ -681,6 +711,18 @@ export class elementTimelineCanvas extends LitElement {
   }
 
   /**
+   * The rate this project's curves must be baked at.
+   *
+   * `keyframeOps` defaults every op to `BAKE_HZ` (60), which is half the rate a
+   * 120fps project reads its lanes at, so a curve authored without this steps
+   * visibly until the file is reloaded. `commands/animation.ts` reads the store
+   * for the same reason and with the same rule.
+   */
+  private projectBakeHz(): number {
+    return bakeRateFor(this.projectFps());
+  }
+
+  /**
    * Move the playhead by whole frames, without accumulating error.
    *
    * Public because the Playback menu offers the same step. The modal-tool
@@ -1014,6 +1056,137 @@ export class elementTimelineCanvas extends LitElement {
    * was the last real decision in the timeline that a suite could not reach,
    * and frame quantization is not something to add to untested code.
    */
+  /**
+   * Alt-click on the rubber band: add a point, or take one away.
+   *
+   * The gesture every editor binds to this, and the two halves are one idea:
+   * the line is a list of points, and Alt toggles whether there is one under
+   * the pointer.
+   *
+   * Adding **plants** rather than appends, so dropping a point into the middle
+   * of a fade cannot re-shape the fade either side of it. Removing the last
+   * point puts the level it held back on the clip as a static value, so
+   * undoing an envelope one point at a time never makes the clip suddenly
+   * loud. `audioOps` owns both rules; this method owns only the arithmetic
+   * that turns an x into a time.
+   */
+  private toggleLevelPointAt(
+    hit: { elementId: string; zone: string; levelIndex?: number },
+    offsetX: number,
+  ) {
+    const bakeHz = this.projectBakeHz();
+    if (hit.zone === "levelPoint") {
+      const index = hit.levelIndex;
+      if (index == null) {
+        return;
+      }
+      this.commit((doc) =>
+        removeLevelKeyframe(doc, hit.elementId, index, bakeHz),
+      );
+      this.drawCanvas();
+      return;
+    }
+
+    const rect = this.layout.clips.find(
+      (clip) => clip.elementId === hit.elementId,
+    );
+    if (rect == null || !(rect.w > 0)) {
+      return;
+    }
+    const element = this.currentDoc().elements[hit.elementId];
+    if (element == null) {
+      return;
+    }
+    // Element-local, and not snapped: audio is exempt from the frame grid, so
+    // the point lands exactly where it was clicked.
+    const tMs = ((offsetX - rect.x) * spanLength(element)) / rect.w;
+    this.commit((doc) => addLevelKeyframe(doc, hit.elementId, tMs, bakeHz));
+    this.drawCanvas();
+  }
+
+  /**
+   * One frame of a level rubber-band drag.
+   *
+   * **Relative, not absolute.** The drag moves the level by how far the pointer
+   * has travelled rather than setting it to where the pointer is. That matters
+   * because the band is short: a 40px track leaves about 19px for 72 dB, so an
+   * absolute mapping would make the level jump to wherever the press landed and
+   * would cap precision at the band's height. Relative travel plus Shift's fine
+   * mode makes the whole range reachable at any height, and it is what every
+   * editor does.
+   *
+   * Three cases, and they are the three things the line can mean:
+   *
+   *   - an unkeyframed clip: the whole clip's static level;
+   *   - a keyframed clip, dragged on the line: the entire envelope, shifted,
+   *     because the shape the user drew is theirs;
+   *   - a point: that keyframe, in time and level both.
+   */
+  private resolveLevelDrag(
+    base: TimelineDocument,
+    drag: DragState,
+  ): TimelineDocument | null {
+    const hit = drag.hit;
+    if (hit.kind !== "clip") {
+      return null;
+    }
+    const element = base.elements[hit.elementId];
+    if (element == null) {
+      return null;
+    }
+    const rect = this.layout.clips.find(
+      (clip) => clip.elementId === hit.elementId,
+    );
+    if (rect == null) {
+      return null;
+    }
+    const band = levelBandOf(rect, element);
+    if (band == null) {
+      return null;
+    }
+
+    // Shift is a tenth of a decibel per pixel. The coarse rate is the band's
+    // own scale *at the level being dragged*, because that scale is tapered:
+    // taking it at one fixed level would make the line lag the pointer near
+    // unity and outrun it near the floor.
+    const perPx = drag.shift
+      ? FINE_LEVEL_DB_PER_PX
+      : dbPerPx(band, volumeDbOf(element));
+    const deltaDb = -drag.dyPx * perPx;
+    const bakeHz = this.projectBakeHz();
+
+    if (drag.phase === "levelPoint") {
+      const index = hit.levelIndex;
+      if (index == null) {
+        return null;
+      }
+      const track = (element as any).animation?.volumeDb;
+      const keyframe = track?.x?.[index];
+      const tMs = keyframe?.p?.[0];
+      const db = keyframe?.p?.[1];
+      if (typeof tMs !== "number" || typeof db !== "number") {
+        return null;
+      }
+      // Time moves with the pointer at the timeline's own scale, and is not
+      // quantized: `frames.ts#isFrameLocked` exempts audio from the grid, and a
+      // gain change is heard at the instant it happens.
+      const movedMs = tMs + pxToMsSigned(drag.dxPx, this.timelineRange);
+      return moveLevelKeyframe(
+        base,
+        hit.elementId,
+        index,
+        movedMs,
+        db + deltaDb,
+        bakeHz,
+      );
+    }
+
+    if (hasLevelEnvelope(element)) {
+      return offsetLevelEnvelope(base, hit.elementId, deltaDb, bakeHz);
+    }
+    return setVolumeDb(base, hit.elementId, volumeDbOf(element) + deltaDb);
+  }
+
   private applyDrag() {
     const base = this.dragBase;
     const drag = this.dragState;
@@ -1061,6 +1234,18 @@ export class elementTimelineCanvas extends LitElement {
     // `null` is a resolver's "no change". `nextDragPreview` keeps that apart
     // from a declined op, and the difference is the whole of it — see there.
     let next: TimelineDocument | null = null;
+
+    if (drag.phase === "level" || drag.phase === "levelPoint") {
+      // Recomputed from `dragBase` every frame rather than compounded, like
+      // every other gesture here: a drag draws from the document as it was when
+      // the press began and writes to the store exactly once, on mouseup.
+      next = this.resolveLevelDrag(base, drag);
+      // The ops clamp at the ends of the fader rather than refusing, so
+      // identity from them means the base and not "declined".
+      this.pendingDoc = nextDragPreview(this.pendingDoc, base, next, "base");
+      this.drawCanvas();
+      return;
+    }
 
     if (drag.phase === "trimStart" || drag.phase === "trimEnd") {
       // Trimming acts on the grabbed clip alone; dragging one edge of a
@@ -1364,7 +1549,13 @@ export class elementTimelineCanvas extends LitElement {
       return;
     }
 
-    const hit = hitTest(this.layout, e.offsetX, e.offsetY);
+    const hit = hitTest(
+      this.layout,
+      e.offsetX,
+      e.offsetY,
+      this.currentDoc().elements,
+      this.timelineRange,
+    );
 
     // The hovered cut, if any. Only one is ever hinted and only while the
     // pointer is on it — a transcript-driven edit has hundreds of cuts, and a
@@ -1379,7 +1570,17 @@ export class elementTimelineCanvas extends LitElement {
     this.hoveredCut = nextHoveredCut;
 
     if (hit.kind === "clip") {
-      this.style.cursor = hit.zone === "body" ? "pointer" : "ew-resize";
+      // The rubber band gets its own cursors, because it is the one part of a
+      // clip where a press means something other than moving or trimming and
+      // the pointer is the only warning of that.
+      this.style.cursor =
+        hit.zone === "body"
+          ? "pointer"
+          : hit.zone === "level"
+            ? "ns-resize"
+            : hit.zone === "levelPoint"
+              ? "grab"
+              : "ew-resize";
     } else if (hit.kind === "transition") {
       this.style.cursor = hit.zone === "body" ? "pointer" : "ew-resize";
     } else if (hit.kind === "cut") {
@@ -1398,7 +1599,13 @@ export class elementTimelineCanvas extends LitElement {
   _handleMouseDown(e) {
     this.timelineState.setCursorType("pointer");
 
-    const hit = hitTest(this.layout, e.offsetX, e.offsetY);
+    const hit = hitTest(
+      this.layout,
+      e.offsetX,
+      e.offsetY,
+      this.currentDoc().elements,
+      this.timelineRange,
+    );
 
     // Selection is settled here, before the machine sees the press, because
     // what the drag carries depends on it.
@@ -1424,6 +1631,24 @@ export class elementTimelineCanvas extends LitElement {
 
     if (hit.kind === "cut") {
       this.addTransitionAtCut(hit.fromId, hit.toId);
+    }
+
+    // Alt on the rubber band adds or removes a point. Handled here, on the
+    // press, because it is a click and not a drag: there is nothing to track
+    // and nothing to preview, so routing it through the drag machine would
+    // mean a phase that commits on `up` having already done its work.
+    //
+    // It returns rather than falling through, so the press arms no gesture. An
+    // Alt press that *did* reach the machine would start an unconstrained clip
+    // move, which is what Alt means everywhere else on a clip.
+    if (
+      e.altKey &&
+      e.button === 0 &&
+      hit.kind === "clip" &&
+      (hit.zone === "level" || hit.zone === "levelPoint")
+    ) {
+      this.toggleLevelPointAt(hit, e.offsetX);
+      return;
     }
 
     // `mousedown` fires for the right button too, and that press still has to
@@ -1740,7 +1965,13 @@ export class elementTimelineCanvas extends LitElement {
       return;
     }
 
-    const hit = hitTest(this.layout, x, y);
+    const hit = hitTest(
+      this.layout,
+      x,
+      y,
+      this.currentDoc().elements,
+      this.timelineRange,
+    );
     if (hit.kind === "clip") {
       if (!isGradable(this.currentDoc().elements[hit.elementId])) {
         this.toast("A filter can only go on a picture clip.");

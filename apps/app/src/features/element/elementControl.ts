@@ -1,4 +1,5 @@
 import { emptyAnimation } from "../animation/keyframes";
+import { resumeAudioContext } from "../asset/audioContext";
 import { LitElement, html } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import { v4 as uuidv4 } from "uuid";
@@ -854,6 +855,13 @@ export class ElementControl extends LitElement {
   }
 
   play() {
+    // The one place a click is certainly in hand, which is what a suspended
+    // `AudioContext` needs. Nothing plays through the graph until a clip is
+    // boosted past unity, but `audioGraph.ts` refuses to attach while the
+    // context is suspended, so without this a boosted clip would play at unity
+    // for the whole session. Resuming an already-running context costs nothing.
+    resumeAudioContext();
+
     const previewCanvas = document.querySelector("preview-canvas");
     previewCanvas.startPlay();
 

@@ -195,9 +195,10 @@ export const BLEND_MODES = [
  * *advertise* a property in one tool's output and *reject* it in another's
  * input — a surface an agent can only discover by being refused.
  *
- * The five `mask*` entries only exist on a clip that has a mask, and
- * `revealProgress` only on a text clip that has a reveal;
- * `animatableProperties` is the gate, and the commands decline through it.
+ * The five `mask*` entries only exist on a clip that has a mask,
+ * `revealProgress` only on a text clip that has a reveal, and `volumeDb` only
+ * on a clip that makes a sound; `animatableProperties` is the gate, and the
+ * commands decline through it.
  */
 export const ANIMATABLE = [
   "position",
@@ -212,6 +213,7 @@ export const ANIMATABLE = [
   "maskRoundness",
   "revealProgress",
   "intensity",
+  "volumeDb",
 ] as const;
 
 /**
@@ -244,7 +246,8 @@ export const animatableProperty = z
   .describe(
     "On an effect: `intensity` is 0-100, and `fx:<key>` is a preset parameter in whatever units its " +
       "manifest declares. list_effect_presets reports each `key`, `min` and `max`. Only parameters it " +
-      "reports as `number` animate.",
+      "reports as `number` animate. On audio, and on video that still carries its sound, `volumeDb` " +
+      "is the level envelope in decibels, -60 to +12, where 0 is unmodified and -60 is silence.",
   );
 
 /** The mask shapes a clip can be cut to. A copy of `MASK_SHAPES`. */

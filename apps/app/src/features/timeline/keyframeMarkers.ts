@@ -89,14 +89,21 @@ export function isTrackLive(
  * job to show.
  *
  * `animatableProperties` is the gate rather than a bare `in` check, so a shape
- * contributes only its opacity track and gif and audio contribute nothing —
- * they carry no `animation` block at all.
+ * contributes only its opacity track and a gif contributes nothing: it carries
+ * no `animation` block at all.
+ *
+ * **`volumeDb` is excluded, and it is the only exclusion.** Its keyframes are
+ * already drawn, as the points of the level rubber band a few pixels above,
+ * and a diamond for each would be the same information twice in the same clip.
+ * It also means an audio clip whose only curve is its level gets no lane at
+ * all, so its waveform keeps the full row exactly as it did before envelopes
+ * existed.
  */
 export function keyframeTimes(element: TimelineElement): number[] {
   const times: number[] = [];
 
   for (const property of animatableProperties(element)) {
-    if (!isTrackLive(element, property)) {
+    if (property === "volumeDb" || !isTrackLive(element, property)) {
       continue;
     }
     const track = (element as any).animation[property];

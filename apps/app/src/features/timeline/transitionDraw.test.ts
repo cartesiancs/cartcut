@@ -47,6 +47,11 @@ function clip(over: { startTime: number; trimIn: number; trimOut: number }) {
     trim: { startTime: trimIn, endTime: trimOut },
     sourceDuration: 20_000,
     timelineOptions: { color: "#204020" },
+    // Silent, so no level rubber band is drawn. Every probe below samples the
+    // vertical middle of a row, which is where the affordance sits and also
+    // where an audible clip's line crosses; a clip with sound would make these
+    // tests about the line rather than about the badge and the cut.
+    isExistAudio: false,
   });
 }
 

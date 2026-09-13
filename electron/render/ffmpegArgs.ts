@@ -37,6 +37,12 @@ import {
   resolveExportSettings,
   videoOutputArgs,
 } from "./exportSettings";
+import {
+  envelopeFor,
+  gainFromDb,
+  volumeExprOf,
+  type EnvelopePoint,
+} from "./audioEnvelope";
 
 /** One audible clip, reduced to what FFmpeg needs. */
 export type AudioInput = {
@@ -50,10 +56,21 @@ export type AudioInput = {
   /** Playback rate; 1 means no tempo adjustment. */
   speed: number;
   /**
-   * Linear output gain, 0..1 — a multiplier, not the element's `volumeDb`.
+   * Linear output gain, a multiplier and not the element's `volumeDb`.
    * `1` means no attenuation and emits no filter stage at all.
+   *
+   * The clip's **static** level. When `envelope` is set this is the fallback
+   * the envelope was drawn over, not what the clip plays at any given instant.
    */
   gain: number;
+  /**
+   * The clip's level envelope, in clip-local timeline ms, or absent.
+   *
+   * Absent is the overwhelmingly common case and the one that must cost
+   * nothing: a clip with no envelope emits exactly the chain it emitted before
+   * this field existed.
+   */
+  envelope?: EnvelopePoint[];
 };
 
 /** How the renderer serialises each frame onto stdin. */
@@ -163,13 +180,25 @@ export const MIN_VOLUME_DB = -60;
 export function gainOf(element: any): number {
   const raw = element?.volumeDb;
   const db = typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
-  if (db <= MIN_VOLUME_DB) {
+  return gainFromDb(clampVolumeDb(db));
+}
+
+/**
+ * The ceiling, four doublings above unity.
+ *
+ * It was 0 dB while the preview could only write `HTMLMediaElement.volume`,
+ * which caps at 1.0. The renderer routes a boosted clip through a WebAudio
+ * `GainNode` now (`features/asset/audioGraph.ts`), so the two can agree above
+ * unity and this is the twin of `audio.ts#MAX_VOLUME_DB`.
+ */
+export const MAX_VOLUME_DB = 12;
+
+/** Twin of `audio.ts#clampVolumeDb`. */
+export function clampVolumeDb(db: number): number {
+  if (!Number.isFinite(db)) {
     return 0;
   }
-  if (db >= 0) {
-    return 1;
-  }
-  return Number((10 ** (db / 20)).toFixed(6));
+  return Math.min(Math.max(db, MIN_VOLUME_DB), MAX_VOLUME_DB);
 }
 
 /**
@@ -201,27 +230,56 @@ export function atempoChain(speed: number): number[] {
 }
 
 /**
+ * How many samples an envelope's gain is held constant for.
+ *
+ * `volume=eval=frame` recomputes once per audio frame and applies one scalar to
+ * the whole frame, so the frame size *is* the envelope's time resolution.
+ * FFmpeg's default is 1024 samples, about 21 ms at 48 kHz, which is audible as
+ * stepping on a fast fade. 256 samples is 5.33 ms and is not.
+ *
+ * `p=0` turns off padding the last frame with zeros, which would otherwise
+ * append up to 255 samples of silence to every enveloped clip.
+ */
+const ENVELOPE_FRAME_SAMPLES = 256;
+
+/**
  * Formats one clip's audio chain: level, then tempo correction, then placement.
  *
- * `volume` is a per-sample scalar multiply, so it commutes with both `atempo`
- * and `adelay` and the rendered samples are the same wherever it sits. It goes
- * first because `adelay` pads with silence — scaling that padding is work spent
- * on nothing, potentially minutes of it for a clip late in a long timeline —
- * and because it keeps the chain reading in the order this file already holds:
- * source-domain work before timeline placement. How loud, then how fast, then
- * where.
+ * A static `volume` is a per-sample scalar multiply, so it commutes with both
+ * `atempo` and `adelay` and the rendered samples are the same wherever it sits.
+ * It goes first because `adelay` pads with silence (scaling that padding is
+ * work spent on nothing, potentially minutes of it for a clip late in a long
+ * timeline) and because it keeps the chain reading in the order this file
+ * already holds: source-domain work before timeline placement. How loud, then
+ * how fast, then where.
  *
  * The stage is omitted entirely at unity, which is what makes a project nobody
  * has touched the faders on produce the exact command it produced before this
  * field existed.
+ *
+ * **An envelope does not commute, and sits after `atempo` instead.** Its
+ * breakpoints are clip-local *timeline* ms, and `t` only means that once
+ * `atempo` has rewritten the timestamps: measured against the bundled ffmpeg,
+ * `gte(t,1)` placed after `atempo=2` switches at output 1.0 s, not at 0.5 s.
+ * Putting it first would mean multiplying every breakpoint by `speed` to reach
+ * source time; putting it after `adelay` would mean adding the clip's timeline
+ * offset to every one. After `atempo` and before `adelay` is the one position
+ * where the numbers need no conversion at all.
+ *
+ * The envelope replaces the static stage rather than joining it. The curve was
+ * drawn in absolute dB, so it already carries the level; multiplying by the
+ * static gain as well would apply it twice.
  */
 export function audioFilterFor(input: AudioInput, streamIndex: number, label: string): string {
   const stages: string[] = [];
+  const envelope = input.envelope;
+  const hasEnvelope = envelope != null && envelope.length > 0;
+
   // A gain that is missing or not a number reads as unity rather than being
   // interpolated: `volume=undefined` is not a command FFmpeg will run, and
   // failing the whole export over an absent field is a far worse answer than
   // playing the clip at the level it already had.
-  if (Number.isFinite(input.gain) && input.gain !== 1) {
+  if (!hasEnvelope && Number.isFinite(input.gain) && input.gain !== 1) {
     stages.push(`volume=${input.gain}`);
   }
   stages.push(
@@ -229,6 +287,10 @@ export function audioFilterFor(input: AudioInput, streamIndex: number, label: st
       (factor) => `atempo=${Number(factor.toFixed(6))}`,
     ),
   );
+  if (hasEnvelope) {
+    stages.push(`asetnsamples=n=${ENVELOPE_FRAME_SAMPLES}:p=0`);
+    stages.push(`volume=eval=frame:volume='${volumeExprOf(envelope)}'`);
+  }
   const delay = Math.round(input.delayMs);
   stages.push(`adelay=${delay}|${delay}`);
 
@@ -260,6 +322,11 @@ export function collectAudioInputs(timeline: Record<string, any>): AudioInput[] 
       continue;
     }
 
+    // Read once, here, rather than inside `audioFilterFor`: the reduction is
+    // where the document is still in hand, and the formatter should be a pure
+    // function of this record.
+    const envelope = envelopeFor(element);
+
     inputs.push({
       localpath: element.localpath,
       ssSec: element.trim.startTime / 1000,
@@ -267,6 +334,7 @@ export function collectAudioInputs(timeline: Record<string, any>): AudioInput[] 
       delayMs: Math.max(0, element.startTime),
       speed: speedOf(element),
       gain: gainOf(element),
+      ...(envelope != null ? { envelope } : {}),
     });
   }
 

@@ -77,7 +77,17 @@ export type DragPhase =
    * clip does.
    */
   | "transitionStart"
-  | "transitionEnd";
+  | "transitionEnd"
+  /**
+   * Dragging a clip's level rubber band, or one point on it.
+   *
+   * Vertical gestures, so they never wait out the hold and never become a move:
+   * the line is the target, and a press within four pixels of it said so.
+   * `levelPoint` moves in both axes because a point has a time as well as a
+   * level; `level` is vertical only.
+   */
+  | "level"
+  | "levelPoint";
 
 export type DragState = {
   phase: DragPhase;
@@ -130,7 +140,12 @@ function isMoving(phase: DragPhase): boolean {
     phase === "trimStart" ||
     phase === "trimEnd" ||
     phase === "transitionStart" ||
-    phase === "transitionEnd"
+    phase === "transitionEnd" ||
+    // Both edit the document and both end in one checkpoint and one commit,
+    // which is exactly what this predicate means. (`marquee` is the one moving
+    // phase that is not here, because it edits no document.)
+    phase === "level" ||
+    phase === "levelPoint"
   );
 }
 
@@ -209,6 +224,20 @@ export function reduceDrag(
         // Handles have no second meaning, so there is nothing to wait for.
         return arm({ ...base, phase: ev.hit.zone }, [
           { type: "cursor", value: "ew-resize" },
+        ]);
+      }
+
+      // The rubber band, and the points on it. Like the trim handles these have
+      // no second meaning: `hitTest` only reports them within a few pixels of
+      // the drawn line, and everywhere else on the clip is still `body`.
+      //
+      // Alt is checked **before** the generic Alt-to-free-drag branch below, so
+      // Alt-clicking the line adds or removes a point rather than starting an
+      // unconstrained clip move. That is the gesture every editor uses for it,
+      // and the component handles the click on `up`.
+      if (ev.hit.zone === "level" || ev.hit.zone === "levelPoint") {
+        return arm({ ...base, phase: ev.hit.zone }, [
+          { type: "cursor", value: ev.hit.zone === "level" ? "ns-resize" : "grabbing" },
         ]);
       }
 

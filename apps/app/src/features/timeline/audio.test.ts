@@ -39,9 +39,11 @@ describe("clampVolumeDb", () => {
   });
 
   it("pins a level outside the range to the nearest bound", () => {
-    // The ceiling is not cosmetic: above 0 dB the preview caps at unity gain
-    // and the export does not, so the two would disagree without saying so.
-    expect(clampVolumeDb(5)).toBe(0);
+    // +12 is inside the range now. The ceiling was unity while the preview
+    // could only write `handle.volume`, which caps at 1.0; `audioGraph.ts`
+    // carries the boost, so the two ends of the fader are -60 and +12.
+    expect(clampVolumeDb(5)).toBe(5);
+    expect(clampVolumeDb(20)).toBe(12);
     expect(clampVolumeDb(-100)).toBe(-60);
   });
 
@@ -75,7 +77,7 @@ describe("volumeDbOf", () => {
   it("clamps an out-of-range level instead of passing it on", () => {
     // Clamping on *read* is what keeps the preview and the export agreeing
     // even about garbage input, since both go through this function.
-    expect(volumeDbOf(audioElement({ volumeDb: 12 }))).toBe(0);
+    expect(volumeDbOf(audioElement({ volumeDb: 40 }))).toBe(12);
     expect(volumeDbOf(audioElement({ volumeDb: -200 }))).toBe(-60);
   });
 });
@@ -111,12 +113,32 @@ describe("gainOf", () => {
     expect(gains.at(-1)).toBe(1);
   });
 
-  it("stays inside 0..1 for every level", () => {
-    for (let db = -70; db <= 10; db += 1) {
+  it("stays non-negative for every level, and passes unity only above 0 dB", () => {
+    for (let db = -70; db <= 20; db += 1) {
       const gain = gainOf(audioElement({ volumeDb: db }));
       expect(gain).toBeGreaterThanOrEqual(0);
-      expect(gain).toBeLessThanOrEqual(1);
+      // Above unity is the whole point of the raised ceiling, and it is also
+      // the thing `playback.ts#writeVolume` must cap rather than assign:
+      // `handle.volume = 4` throws.
+      expect(gain).toBeLessThanOrEqual(gainOf(audioElement({ volumeDb: 12 })));
+      if (db <= 0) {
+        expect(gain).toBeLessThanOrEqual(1);
+      } else {
+        expect(gain).toBeGreaterThan(1);
+      }
     }
+  });
+
+  it("is exactly 1 at 0 dB, and that exactness is load-bearing", () => {
+    // The test is `db === 0`, not `db >= MAX_VOLUME_DB`. It was the latter
+    // while the ceiling *was* unity, and widening the ceiling without
+    // narrowing this would have played every level from 0 dB up at 1.0 and
+    // thrown the boost away in silence. The exactness also lets
+    // `audioFilterFor` drop the `volume=` stage, so an untouched project still
+    // produces byte-identical FFmpeg commands.
+    expect(gainOf(audioElement({ volumeDb: 0 }))).toBe(1);
+    expect(gainOf(audioElement({}))).toBe(1);
+    expect(gainOf(audioElement({ volumeDb: 12 }))).toBeGreaterThan(3.9);
   });
 
   it("returns the same double every call", () => {

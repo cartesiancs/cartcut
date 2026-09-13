@@ -33,6 +33,8 @@ import {
   maskOf,
 } from "../mask/maskShape";
 import { DEFAULT_REVEAL_PROGRESS, revealOf } from "../text/reveal";
+import { volumeDbOf } from "../timeline/audio";
+import { setVolumeDb } from "../timeline/audioOps";
 import { setClipMaskFields } from "../timeline/maskOps";
 import { setClipTextRevealFields } from "../timeline/textRevealOps";
 import { isTrackLive } from "../timeline/keyframeMarkers";
@@ -47,6 +49,7 @@ import {
   bakeTrack,
   isForeignTrack,
   isEffectIntensityTrack,
+  isLevelTrack,
   lanesOf,
   moveKeyframe as moveInList,
   normalizeAnimation,
@@ -73,21 +76,30 @@ type Resolved = {
 };
 
 /**
- * Whether a track belongs to one of the two families an effect carries.
+ * Whether a track exists only for as long as it is animated.
  *
- * Both exist only while they are animated, which is the difference between them
- * and every other track: `position` and its four siblings are in
- * `emptyAnimation` and are always present whether or not anybody has keyed
- * them. Nothing seeds these two, `trackOrEmpty` mints one on demand, and
- * `withoutEffectTrack` takes it away again once there is no curve left on it.
+ * The three families here differ from every other track: `position` and its
+ * four siblings are in `emptyAnimation` and are always present whether or not
+ * anybody has keyed them. Nothing seeds these, `trackOrEmpty` mints one on
+ * demand, and `withoutMintedTrack` takes it away again once there is no curve
+ * left on it.
  *
  * That round trip is the whole persistence contract. An effect nobody has
- * animated saves byte-identically to one written before the feature, so
- * `SCHEMA_VERSION` did not move: the rule `blend`, `lut`, `adjust` and
- * `reveal` all follow, applied to a track rather than to a field.
+ * animated, and an audio clip nobody has drawn a level on, save byte-identically
+ * to ones written before those features, so `SCHEMA_VERSION` did not move: the
+ * rule `blend`, `lut`, `adjust` and `reveal` all follow, applied to a track
+ * rather than to a field.
+ *
+ * It was `isEffectTrack` while the effect's two families were the only ones.
+ * The level envelope is the third, and it is the first that has to mint the
+ * `animation` block as well as the track: see `trackOrEmpty`.
  */
-function isEffectTrack(property: string): boolean {
-  return isEffectIntensityTrack(property) || isFxParamTrack(property);
+function isMintableTrack(property: string): boolean {
+  return (
+    isEffectIntensityTrack(property) ||
+    isFxParamTrack(property) ||
+    isLevelTrack(property)
+  );
 }
 
 /** Whether any lane of a track holds an authored keyframe. */
@@ -95,8 +107,20 @@ function hasAnyKeyframe(track: any, lanes: Lane[]): boolean {
   return lanes.some((lane) => (track?.[lane]?.length ?? 0) > 0);
 }
 
-/** Delete one track outright, leaving the rest of the block alone. */
-function withoutEffectTrack(
+/**
+ * Delete one track outright, and the block with it if that was the last one.
+ *
+ * The block deletion is what makes the round trip exact rather than merely
+ * close. An audio clip has no unconditional tracks at all, so removing its
+ * level envelope empties the block, and an `animation: {}` left behind means a
+ * clip that was keyed and then unkeyed no longer saves the way one that was
+ * never keyed does. `keyframes.ts#normalizeAnimation` keeps the same rule for
+ * the other direction, where the last track goes on ingress.
+ *
+ * Elements whose filetype does carry unconditional tracks can never reach the
+ * empty case, so nothing changes for them.
+ */
+function withoutMintedTrack(
   doc: TimelineDocument,
   elementId: string,
   property: AnimatableProperty,
@@ -107,11 +131,15 @@ function withoutEffectTrack(
     return doc;
   }
   const { [property]: _dropped, ...rest } = animation;
+  const { animation: _block, ...withoutBlock } = element;
   return {
     ...doc,
     elements: {
       ...doc.elements,
-      [elementId]: { ...element, animation: rest },
+      [elementId]:
+        Object.keys(rest).length === 0
+          ? withoutBlock
+          : { ...element, animation: rest },
     },
   };
 }
@@ -128,26 +156,35 @@ function withoutEffectTrack(
  * stopwatch would decline, by identity and in silence, on every effect there
  * has ever been.
  *
- * **Only the effect families are minted**, deliberately. Every other track is
+ * **Only the mintable families are minted**, deliberately. Every other track is
  * in `emptyAnimation` and is seeded on ingress, so an absent one means a
  * fixture or a file that never went through `normalizeAnimation`, and the
  * contract there has always been to decline rather than to invent. Narrowing
  * keeps this change where it belongs.
  *
- * The `animation` block itself is still required. An element that carries none
- * is a gif or an audio clip, and inventing one for it would put keyframes in a
- * saved project that nothing reads.
+ * **For a mintable track the `animation` block need not exist yet.** That
+ * requirement was here while the effect families were the only mintable ones,
+ * and an effect always has a block. An audio clip has none at all until its
+ * level is keyed, so insisting on one made the stopwatch decline on every audio
+ * clip there has ever been, by identity and in silence. `setIn` creates the
+ * intermediate object on the write, so nothing downstream had to change.
+ *
+ * A gif still gets `null`: it carries no mintable track, so it never reaches
+ * the branch below, and inventing a block for it would put keyframes in a saved
+ * project that nothing reads.
  */
 function trackOrEmpty(element: any, property: AnimatableProperty): any {
-  const animation = element?.animation;
-  if (animation == null || typeof animation !== "object") {
+  if (element == null) {
     return null;
   }
-  const found = animation[property];
-  if (found != null && typeof found === "object") {
-    return found;
+  const animation = element.animation;
+  if (animation != null && typeof animation === "object") {
+    const found = animation[property];
+    if (found != null && typeof found === "object") {
+      return found;
+    }
   }
-  if (!isEffectTrack(property)) {
+  if (!isMintableTrack(property)) {
     return null;
   }
   const fresh: any = { isActivate: false };
@@ -668,6 +705,13 @@ function staticValueOf(
     // The effect's overall strength, 0-100, the number the Intensity row shows.
     case "intensity":
       return any.intensity ?? DEFAULT_INTENSITY;
+    // Read through the guard, not off the field, exactly as the mask's five
+    // are: `volumeDbOf` supplies the 0 dB default for a clip that has never
+    // been touched and clamps a hand-edited `-100` into range. A raw
+    // `any.volumeDb` here would bake `undefined` or an out-of-range number
+    // into the lane, where nothing downstream checks it again.
+    case "volumeDb":
+      return volumeDbOf(element);
   }
   // `fx:<key>`, the open half of the union, so this is a branch rather than a
   // case. The value is in the preset's own units, whatever the manifest says
@@ -679,6 +723,42 @@ function staticValueOf(
   // than assumed because a hand-edited project can reach here.
   const value = any.params?.[fxParamKeyOf(property)];
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * Put a keyframe on the curve at `tMs` without changing its shape.
+ *
+ * The document-level half of `keyframes.ts#plantKeyframe`, exported because the
+ * timeline's level rubber band needs exactly what `toggleKeyframe` does when it
+ * plants, on one lane, at a time that is not the playhead's.
+ *
+ * **Planted, not added**, and the distinction is the whole point.
+ * `addKeyframe` seats fresh handles, which re-shapes the curve on both sides of
+ * the new point; `plantKeyframe` subdivides the existing segment exactly (de
+ * Casteljau), so the curve is bit-for-bit the one that was there and the user
+ * simply gains a point to grab. That is what adding a point to a rubber band
+ * means in every editor that has one.
+ *
+ * Declines by identity on a lane with no curve to subdivide: the caller wants
+ * `setTrackActive`'s seed there, which plants the static value instead.
+ */
+export function plantKeyframeAt(
+  doc: TimelineDocument,
+  elementId: string,
+  property: AnimatableProperty,
+  lane: Lane,
+  tMs: number,
+  bakeHz: number = BAKE_HZ,
+): TimelineDocument {
+  const found = resolve(doc, elementId, property, lane);
+  if (found == null || found.list.length === 0) {
+    return doc;
+  }
+  const planted = plantKeyframe(found.list, tMs);
+  if (planted === found.list) {
+    return doc;
+  }
+  return withLane(doc, elementId, property, lane, planted, bakeHz);
 }
 
 /**
@@ -921,6 +1001,13 @@ function withStaticValue(
 
     case "revealProgress":
       return setClipTextRevealFields(doc, elementId, { progress: value });
+
+    // Same rule again: `setVolumeDb` clamps into -60..+12, refuses a filetype
+    // that makes no sound, and declines by identity against `volumeDbOf` so
+    // removing the last keyframe of an envelope that ended at 0 dB does not
+    // stamp a redundant `volumeDb: 0` onto a clip that had none.
+    case "volumeDb":
+      return setVolumeDb(doc, elementId, value);
   }
   // `fx:<key>`. `setEffectParams` merges one key and leaves the rest alone, so
   // this never has to read the other parameters first.
@@ -986,11 +1073,11 @@ export function setTrackActive(
     return doc;
   }
 
-  // Switching an effect's track off when there is no curve on it leaves nothing
+  // Switching a mintable track off when there is no curve on it leaves nothing
   // worth storing, so the key goes rather than being written back empty. See
-  // `withoutEffectTrack`.
-  if (!active && isEffectTrack(property) && !hasAnyKeyframe(nextTrack, lanes)) {
-    return withoutEffectTrack(doc, elementId, property);
+  // `withoutMintedTrack`.
+  if (!active && isMintableTrack(property) && !hasAnyKeyframe(nextTrack, lanes)) {
+    return withoutMintedTrack(doc, elementId, property);
   }
 
   return {

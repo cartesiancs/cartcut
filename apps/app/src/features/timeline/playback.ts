@@ -24,7 +24,7 @@
 
 import type { Timeline, TimelineElement } from "../../@types/timeline";
 import { isTimeInRange } from "../../utils/time";
-import { gainOf, isAudibleElement } from "./audio";
+import { gainAt, isAudibleElement } from "./audio";
 import {
   isDynamicElement,
   sourceDurationOf,
@@ -49,13 +49,47 @@ export interface MediaHandle {
   muted: boolean;
   /**
    * Linear gain, 0..1 — the unit the DOM uses, **not** the element's
-   * `volumeDb`. Convert with `audio.ts#gainOf`.
+   * `volumeDb`. Convert with `audio.ts#gainAt`, or `gainOf` where there is
+   * no cursor in hand.
    */
   volume: number;
   playbackRate: number;
   readonly paused: boolean;
   play(): void;
   pause(): void;
+}
+
+/**
+ * Where a handle's linear gain is written.
+ *
+ * A port rather than a direct assignment, and the reason is the ceiling. A
+ * level may now exceed unity, `HTMLMediaElement.volume` may not, and the extra
+ * is carried by a WebAudio `GainNode` that this module must not know about:
+ * `playback.ts` is pure and DOM-free, which is what makes it testable under
+ * `environment: "node"`, and a `new AudioContext()` reachable from here would
+ * end that.
+ *
+ * `writeVolume` below is the default and is exactly the old behaviour, capped
+ * at 1. The preview passes `features/asset/audioGraph.ts#gainSink` instead.
+ */
+export type GainSink = (handle: MediaHandle, gain: number) => void;
+
+/**
+ * The plain `handle.volume` write, capped at unity.
+ *
+ * The cap is not a rounding convenience: assigning 4 to `volume` throws in
+ * Chromium. Capping rather than throwing means a caller with no graph plays a
+ * boosted clip at unity, which is quieter than asked for and never silent.
+ * Never silent is the rule that outranks the boost.
+ */
+export function writeVolume(handle: MediaHandle, gain: number): void {
+  const capped = gain > 1 ? 1 : gain;
+  // Only write when the value actually changes: this runs on every animation
+  // frame for every loaded clip, and a media element treats each assignment as
+  // a real state change however redundant it is.
+  if (handle.volume !== capped) {
+    handle.volume = capped;
+  }
 }
 
 /**
@@ -252,12 +286,19 @@ export function intentFor(
     // pausing it would freeze the frame the moment its audio was detached.
     muted: !inWindow || !isAudibleElement(element),
     // Deliberately independent of `inWindow`, and orthogonal to `muted`.
-    // `muted` is positional — am I being heard yet — and flips as the playhead
+    // `muted` is positional (am I being heard yet) and flips as the playhead
     // moves; the level is document state and changes only when the user edits
     // it. Keeping them apart means crossing a clip boundary writes no volume
     // at all, and it is why mute is not implemented as `volume = 0`: there
     // would be nowhere to keep the level the user actually chose.
-    volume: gainOf(element),
+    //
+    // `gainAt` rather than `gainOf`, so a level envelope is heard. It is still
+    // document state: what changes with the playhead is which part of the
+    // curve the document is being read at, not the curve. For a clip with no
+    // envelope the two functions are the same number, and `applyIntent`'s
+    // write-only-on-change guard means such a clip still writes `volume` once
+    // and then never again.
+    volume: gainAt(element, cursorMs),
     playing: isPlaying && inWindow,
     rate: speedOf(element),
     inWindow,
@@ -296,6 +337,11 @@ export function applyIntent(
    * rolling one moves on its own and the generous tolerance governs it.
    */
   lastRequestedSec?: number,
+  /**
+   * Where the gain goes. Defaults to the plain `handle.volume` write, so every
+   * existing caller and every suite behaves exactly as before.
+   */
+  gain: GainSink = writeVolume,
 ): boolean {
   // Only write when the value actually changes. This runs on every animation
   // frame for every loaded clip, and a media element treats each assignment as
@@ -306,11 +352,11 @@ export function applyIntent(
   if (handle.muted !== intent.muted) {
     handle.muted = intent.muted;
   }
-  // `gainOf` is deterministic and pre-rounded, so at steady state this compares
-  // two identical doubles and never fires — which is the point of rounding it.
-  if (handle.volume !== intent.volume) {
-    handle.volume = intent.volume;
-  }
+  // `gainAt` is deterministic and pre-rounded, so at steady state the sink
+  // compares two identical doubles and never writes, which is the point of
+  // rounding it. A clip with a live level envelope is the one case that does
+  // write every frame, and that is the envelope being played rather than churn.
+  gain(handle, intent.volume);
 
   // A handle already rolling gets the generous window; one that is parked,
   // scrubbing, or about to enter its clip is placed exactly.
@@ -408,6 +454,14 @@ export function syncPlayback(
    * actually issued.
    */
   lastRequests?: Map<string, number>,
+  /**
+   * Where the gain goes, threaded straight through to `applyIntent`.
+   *
+   * Optional for the reason `lastRequests` is: every existing caller compiles
+   * unchanged and behaves as it did. The preview supplies the WebAudio-backed
+   * sink, which is the only thing that can play a clip above unity.
+   */
+  gain: GainSink = writeVolume,
 ): SeekRequest[] {
   const seeks: SeekRequest[] = [];
 
@@ -435,6 +489,7 @@ export function syncPlayback(
         intent,
         playingToleranceSec,
         lastRequests?.get(elementId),
+        gain,
       )
     ) {
       lastRequests?.set(elementId, intent.sourceTimeSec);

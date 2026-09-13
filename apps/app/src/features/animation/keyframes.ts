@@ -23,6 +23,7 @@
 
 import {
   fxParamKeyOf,
+  isAudibleElement,
   isFxParamTrack,
   type CubicKeyframeType,
   type TimelineElement,
@@ -1029,7 +1030,9 @@ export function emptyAnimation(filetype: string): any {
       size: vector(),
     };
   }
-  // gif and audio carry no animation block at all.
+  // A gif carries no animation block at all, and neither does an audio clip
+  // until its level is keyed: `volumeDb` is conditional and minted on demand
+  // by `keyframeOps.trackOrEmpty`, so there is nothing to seed here.
   return undefined;
 }
 
@@ -1087,6 +1090,19 @@ export function isEffectIntensityTrack(property: string): boolean {
 }
 
 /**
+ * Whether a track name is an audible clip's level envelope.
+ *
+ * Conditional on audibility rather than on the filetype, and that is what makes
+ * "detach audio" tidy up after itself: the moment the video is silenced its
+ * `volumeDb` track is an orphan, so the curve cannot go on riding along in a
+ * clip nothing will ever read it from. `audioTwinOf` carries it to the clip
+ * that now owns the sound in the same edit.
+ */
+export function isLevelTrack(property: string): boolean {
+  return property === "volumeDb";
+}
+
+/**
  * The tracks that exist only while the element carries the thing they describe,
  * and how to ask whether it does.
  *
@@ -1132,6 +1148,17 @@ const CONDITIONAL_TRACKS: Array<{
     present: (element, property) =>
       element?.filetype === "effect" &&
       typeof element?.params?.[fxParamKeyOf(property)] === "number",
+    foreign: false,
+  },
+  // `foreign: false`, for the reason the effect's two families are: a level
+  // envelope is not somebody else's curve riding on this clip, it *is* the
+  // clip's own movement, and it is the only movement an audio clip has.
+  // Calling it foreign would make `hasAnimation` answer "no" about a clip the
+  // user can hear fading, and the animation grid's "None" tile would refuse to
+  // clear the one thing it can see.
+  {
+    match: isLevelTrack,
+    present: (element) => isAudibleElement(element),
     foreign: false,
   },
 ];
@@ -1316,7 +1343,25 @@ export function normalizeAnimation<T extends TimelineElement>(element: T): T {
     }
   }
 
-  return changed ? { ...(element as any), animation: next } : element;
+  if (!changed) {
+    return element;
+  }
+
+  // An emptied block is deleted, not left as `{}`.
+  //
+  // Only reachable for a filetype `emptyAnimation` has nothing to seed, which
+  // today means audio: its block holds one conditional track, so collecting
+  // that orphan empties it. Leaving `animation: {}` behind would put a key in
+  // the saved project that nothing reads and, worse, would mean an audio clip
+  // whose envelope was added and then removed no longer saves byte-identically
+  // to one that never had one. That equality is the whole reason the track is
+  // conditional. `keyframeOps.withoutMintedTrack` keeps the same rule for the
+  // other direction, where the last track is removed by an edit rather than by
+  // ingress.
+  const { animation: _dropped, ...rest } = element as any;
+  return Object.keys(next).length === 0
+    ? (rest as T)
+    : { ...(element as any), animation: next };
 }
 
 /**

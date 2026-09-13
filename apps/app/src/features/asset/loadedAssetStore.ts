@@ -22,6 +22,7 @@ import {
   type MediaHandle,
   type SeekRequest,
 } from "../timeline/playback";
+import { gainSink, releaseGain } from "./audioGraph";
 import { runAssetBatch, type AssetLoadTask } from "./assetBatch";
 import {
   activeVideoScope,
@@ -582,6 +583,10 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
       handles,
       undefined,
       get()._lastSeekRequests,
+      // The preview is the one caller that can play a clip above unity. Every
+      // other caller of `syncPlayback` takes the default sink and writes
+      // `handle.volume` exactly as it always did.
+      gainSink,
     );
 
     // The two numbers that say whether the media layer is healthy: how many
@@ -611,6 +616,10 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
       }
       audio.pause();
       audio.muted = true;
+      // Before `removeAttribute`, so the graph lets go of an element that is
+      // still whole. A source node left connected keeps the released clip's
+      // decoder alive and, being downstream of `muted`, audible.
+      releaseGain(audio);
       audio.removeAttribute("src");
       delete loadedAudio[elementId];
       get()._loadingElementAudio.delete(elementId);
@@ -747,6 +756,7 @@ async function seekHandles(
 function releaseHandle(video: HTMLVideoElement): void {
   video.pause();
   video.muted = true;
+  releaseGain(video);
   video.removeAttribute("src");
   video.load();
 }

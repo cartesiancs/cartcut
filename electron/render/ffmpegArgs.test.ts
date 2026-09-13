@@ -22,6 +22,10 @@ import {
 } from "../../apps/app/src/features/timeline/audio";
 import { detachAudioFrom } from "../../apps/app/src/features/timeline/audioOps";
 import {
+  addKeyframe,
+  setTrackActive,
+} from "../../apps/app/src/features/animation/keyframeOps";
+import {
   SCHEMA_VERSION,
   createTrack,
   normalizeDocument,
@@ -151,6 +155,13 @@ describe("gainOf", () => {
       audioElement({ volumeDb: -60 }),
       audioElement({ volumeDb: -200 }),
       audioElement({ volumeDb: 12 }),
+      audioElement({ volumeDb: 6 }),
+      audioElement({ volumeDb: 0.5 }),
+      // Above the ceiling on both sides, so the clamp is compared too. This
+      // used to be the ceiling case: +12 was out of range and both sides
+      // answered exactly 1, which would have gone on passing after the ceiling
+      // rose while the two disagreed about every level in between.
+      audioElement({ volumeDb: 40 }),
       audioElement({ volumeDb: NaN }),
       videoElement({ isExistAudio: true, volumeDb: -3 }),
       videoElement({ isExistAudio: true }),
@@ -300,6 +311,73 @@ describe("atempoChain", () => {
   });
 });
 
+describe("an envelope, all the way to the command", () => {
+  it("reaches buildFFmpegArgs from a document that carries one", () => {
+    // The seam the unit tests either side of it cannot see: that
+    // `collectAudioInputs` reads the baked lane off a real element and that the
+    // stage survives into the assembled `-filter_complex`.
+    let doc = normalizeDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: [createTrack("a1", "audio", 0)],
+      elements: {
+        a: audioElement({
+          trackId: "a1",
+          startTime: 0,
+          duration: 4000,
+          trim: { startTime: 0, endTime: 4000 },
+          sourceDuration: 4000,
+        }),
+      },
+    });
+    doc = setTrackActive(doc, "a", "volumeDb", true, { atMs: 0 }, 60);
+    doc = addKeyframe(doc, "a", "volumeDb", "x", 0, 0, 0, 60);
+    doc = addKeyframe(doc, "a", "volumeDb", "x", 4000, -40, 0, 60);
+
+    const args = buildFFmpegArgs(
+      {
+        videoDuration: 4,
+        videoDestination: "/out.mp4",
+        previewRatio: 1,
+        fps: 30,
+        previewSize: { w: 1920, h: 1080 },
+      } as any,
+      doc.elements as any,
+    );
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    expect(graph).toContain("volume=eval=frame");
+    expect(graph).toContain("pow(10,");
+  });
+
+  it("leaves a project with no envelope byte-identical", () => {
+    // The rule the whole feature is built to keep. `volume=` appears nowhere
+    // at unity, envelope or no envelope.
+    const doc = normalizeDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: [createTrack("a1", "audio", 0)],
+      elements: {
+        a: audioElement({
+          trackId: "a1",
+          startTime: 0,
+          duration: 4000,
+          trim: { startTime: 0, endTime: 4000 },
+          sourceDuration: 4000,
+        }),
+      },
+    });
+    const args = buildFFmpegArgs(
+      {
+        videoDuration: 4,
+        videoDestination: "/out.mp4",
+        previewRatio: 1,
+        fps: 30,
+        previewSize: { w: 1920, h: 1080 },
+      } as any,
+      doc.elements as any,
+    );
+    expect(args.join(" ")).not.toContain("volume=");
+  });
+});
+
 describe("audioFilterFor", () => {
   it("delays without touching tempo at natural speed", () => {
     const filter = audioFilterFor(
@@ -308,6 +386,40 @@ describe("audioFilterFor", () => {
       "audio0",
     );
     expect(filter).toBe("[1:a]adelay=2000|2000[audio0]");
+  });
+
+  it("puts an envelope after the tempo, and drops the static stage", () => {
+    // After `atempo` because that is the only position where `t` is already
+    // clip-local timeline seconds, so a baked sample's time is the breakpoint
+    // with no speed term. Before `adelay` so it never scales the padding.
+    //
+    // The static `volume=` goes: the curve is authored in absolute dB, so it
+    // already carries the level and multiplying by the static gain as well
+    // would apply it twice.
+    const filter = audioFilterFor(
+      {
+        localpath: "/a.mp3",
+        ssSec: 0,
+        tSec: 4,
+        delayMs: 1000,
+        speed: 2,
+        gain: 0.5,
+        envelope: [
+          { tMs: 0, db: 0 },
+          { tMs: 2000, db: -20 },
+        ],
+      },
+      2,
+      "audio1",
+    );
+    expect(filter.indexOf("atempo=2")).toBeLessThan(
+      filter.indexOf("volume=eval=frame"),
+    );
+    expect(filter.indexOf("volume=eval=frame")).toBeLessThan(
+      filter.indexOf("adelay="),
+    );
+    expect(filter).toContain("asetnsamples=n=256:p=0");
+    expect(filter).not.toContain("volume=0.5");
   });
 
   it("applies tempo before placement", () => {

@@ -29,7 +29,9 @@ import {
   audioElement,
   shapeElement,
   effectElement,
+  gifElement,
 } from "../../renderer/testing";
+import { volumeDbAt } from "../../timeline/audio";
 import { getCommand } from "../registry";
 import type { MediaProber } from "../../element/mediaProbe";
 
@@ -1234,6 +1236,9 @@ describe("animation commands", () => {
   });
 
   it("says what a clip can animate when asked for something it cannot", async () => {
+    // An audio clip animates its level and nothing else, so the refusal names
+    // what it does support rather than claiming it supports nothing. The flat
+    // "carries no animation" branch is a gif's, below.
     seed({ a: audioElement({ trackId: "a1" }) }, [["a1", "audio"]]);
     await expect(
       run("add_keyframes", {
@@ -1241,7 +1246,39 @@ describe("animation commands", () => {
         property: "opacity",
         keyframes: [{ atMs: 0, value: 1 }],
       }),
+    ).rejects.toThrow(/cannot animate "opacity".*volumeDb/);
+  });
+
+  it("refuses outright on a clip with nothing to animate at all", async () => {
+    seed({ g: gifElement({ trackId: "v1" }) }, [["v1", "video"]]);
+    await expect(
+      run("add_keyframes", {
+        elementId: "g",
+        property: "opacity",
+        keyframes: [{ atMs: 0, value: 1 }],
+      }),
     ).rejects.toThrow(/carries no animation/);
+  });
+
+  it("keyframes an audio clip's level in dB", async () => {
+    seed({ a: audioElement({ trackId: "a1", duration: 2_000 }) }, [
+      ["a1", "audio"],
+    ]);
+    await run("add_keyframes", {
+      elementId: "a",
+      property: "volumeDb",
+      keyframes: [
+        { atMs: 0, value: 0 },
+        { atMs: 1_000, value: -60 },
+      ],
+    });
+
+    const element: any = doc().elements.a;
+    expect(element.animation.volumeDb.isActivate).toBe(true);
+    expect(element.animation.volumeDb.x).toHaveLength(2);
+    // The level is heard through the same sampler the preview uses.
+    expect(volumeDbAt(element, 0)).toBeCloseTo(0, 5);
+    expect(volumeDbAt(element, 1_000)).toBeCloseTo(-60, 5);
   });
 
   it("removes keyframes by time", async () => {

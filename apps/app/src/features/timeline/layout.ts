@@ -19,6 +19,9 @@ import {
   spanOf,
 } from "./geometry";
 import { cutPointsOn } from "./transitionOps";
+import type { Timeline } from "../../@types/timeline";
+import { KEYFRAME_LANE_PX, keyframeLane } from "./keyframeMarkers";
+import { hitLevelLine, levelBandOf } from "./levelLine";
 import { freezeMs } from "./transitionGeometry";
 import { clipsOnTrack, type TimelineDocument, type TimelineTrack } from "./tracks";
 
@@ -174,7 +177,15 @@ export type Hit =
       kind: "clip";
       elementId: string;
       trackId: string;
-      zone: "body" | "trimStart" | "trimEnd";
+      /**
+       * `level` and `levelPoint` are the gain rubber band, and they are the
+       * only zones decided by anything other than x. They are reported only
+       * when the caller supplies `elements`, because the line's y depends on
+       * the envelope and a layout does not carry one.
+       */
+      zone: "body" | "trimStart" | "trimEnd" | "level" | "levelPoint";
+      /** Which keyframe, for `levelPoint`. Index into the `volumeDb` x lane. */
+      levelIndex?: number;
     }
   | {
       kind: "transition";
@@ -451,6 +462,17 @@ export function hitTest(
   layout: TimelineLayout,
   x: number,
   y: number,
+  /**
+   * The document, so a press can land on a clip's level line.
+   *
+   * Optional because every existing caller and every existing test passes
+   * three arguments, and without it the answer is exactly what it was: the
+   * rubber band is simply not a target. `intentFor` took its document the same
+   * way and for the same reason.
+   */
+  elements?: Timeline,
+  /** The project frame duration, needed to place the keyframe lane. */
+  range?: number,
 ): Hit {
   for (let i = layout.transitions.length - 1; i >= 0; i--) {
     const badge = layout.transitions[i];
@@ -517,6 +539,35 @@ export function hitTest(
         : handle > 0 && x >= clip.x + clip.w - handle
           ? "trimEnd"
           : "body";
+
+    // The level line runs the full width of the clip, under both trim handles
+    // included, so it is asked **after** the handles have had their say. The
+    // alternative loses trimming on any clip whose line happens to cross an
+    // edge at the height the pointer is at, which is most of them.
+    if (zone === "body" && elements != null && range != null) {
+      const element = elements[clip.elementId];
+      const band = element == null ? null : levelBandOf(clip, element);
+      if (element != null && band != null) {
+        const level = hitLevelLine(clip, element, band, range, x, y);
+        if (level?.kind === "point") {
+          return {
+            kind: "clip",
+            elementId: clip.elementId,
+            trackId: clip.trackId,
+            zone: "levelPoint",
+            levelIndex: level.index,
+          };
+        }
+        if (level?.kind === "line") {
+          return {
+            kind: "clip",
+            elementId: clip.elementId,
+            trackId: clip.trackId,
+            zone: "level",
+          };
+        }
+      }
+    }
 
     return { kind: "clip", elementId: clip.elementId, trackId: clip.trackId, zone };
   }

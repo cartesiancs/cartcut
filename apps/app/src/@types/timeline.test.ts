@@ -53,11 +53,18 @@ describe("canAnimate / animatableProperties", () => {
     expect(canAnimate(shapeElement({}))).toBe(true);
   });
 
-  it("excludes GIF and audio, which have no animation field", () => {
-    // The old gate was "static and not text", which let GIF in — it has no
-    // `animation` at all — and kept video out, which does.
+  it("excludes GIF, which has no animation field", () => {
+    // The old gate was "static and not text", which let GIF in (it has no
+    // `animation` at all) and kept video out, which does.
     expect(canAnimate(gifElement({}))).toBe(false);
-    expect(canAnimate(audioElement({}))).toBe(false);
+  });
+
+  it("includes audio, which carries a level envelope and nothing else", () => {
+    // Audio was excluded here until its level became keyframable. The
+    // predicate means no more than "may carry an `animation` block"; what it
+    // may put in one is `animatableProperties`' answer, and for audio that is
+    // one track.
+    expect(canAnimate(audioElement({}))).toBe(true);
   });
 
   it("offers all five properties where the type supports them", () => {
@@ -122,6 +129,29 @@ describe("canAnimate / animatableProperties", () => {
 
   it("offers nothing for an element that cannot animate", () => {
     expect(animatableProperties(gifElement({}))).toEqual([]);
-    expect(animatableProperties(audioElement({}))).toEqual([]);
+  });
+
+  it("offers an audio clip its level and nothing else", () => {
+    // Not the transform five. An audio clip has no box, no opacity and no
+    // rotation, so offering them would put five tracks in the curve editor
+    // that nothing reads.
+    expect(animatableProperties(audioElement({}))).toEqual(["volumeDb"]);
+  });
+
+  it("offers a video its level, and takes it away when the audio is detached", () => {
+    // Gated on audibility rather than on the filetype, which is the same
+    // condition the waveform is drawn under. A video with no audio stream at
+    // all never had a level to animate either.
+    expect(animatableProperties(videoElement({ isExistAudio: true }))).toContain(
+      "volumeDb",
+    );
+    expect(
+      animatableProperties(
+        videoElement({ isExistAudio: true, audioDetached: true }),
+      ),
+    ).not.toContain("volumeDb");
+    expect(
+      animatableProperties(videoElement({ isExistAudio: false })),
+    ).not.toContain("volumeDb");
   });
 });

@@ -543,11 +543,15 @@ describe("a detached pair drawn together", () => {
 
   it("still draws both clips", () => {
     // The cheapest guard against the change blanking a row outright.
+    //
+    // Sampled at y+32 rather than y+20 because both of these clips are
+    // audible, so both carry a level line, and on a 40px row an untouched
+    // clip's line sits at about y+21. The probe wants the clip's own fill.
     const { canvas } = paint(detachedDoc(), {
       peaks: { get: () => null, request: vi.fn() },
     });
-    expect(pixel(canvas, 50, 20)).toMatchObject({ r: 0, g: 0, b: 0x80 });
-    expect(pixel(canvas, 50, TRACK_PITCH + 20)).toMatchObject({
+    expect(pixel(canvas, 50, 32)).toMatchObject({ r: 0, g: 0, b: 0x80 });
+    expect(pixel(canvas, 50, TRACK_PITCH + 32)).toMatchObject({
       r: 0,
       g: 0x80,
       b: 0,

@@ -14,7 +14,18 @@
  * detached, it is just drawn on another row.
  */
 
-import type { TimelineElement } from "../../@types/timeline";
+import {
+  animatableProperties,
+  type TimelineElement,
+} from "../../@types/timeline";
+import {
+  moveKeyframe,
+  plantKeyframeAt,
+  removeKeyframe,
+  setTrackActive,
+} from "../animation/keyframeOps";
+import { spanLength } from "./geometry";
+import { isTrackLive } from "./keyframeMarkers";
 import { setIn } from "../../utils/immutable";
 import { audioTwinOf, canDetachAudio, clampVolumeDb, volumeDbOf } from "./audio";
 import { placeNewElement } from "./placement";
@@ -52,17 +63,43 @@ export function detachAudio(
     newTrackId,
   );
 
-  // Silencing the source is not a follow-up edit — it is the other half of
-  // this one. `amix` normalises by its input count, so a document where both
-  // the video and its twin are audible is not merely loud, it is quieter
+  // Silencing the source is not a follow-up edit, it is the other half of this
+  // one. `amix` normalises by its input count, so a document where both the
+  // video and its twin are audible is not merely loud, it is quieter
   // everywhere else.
+  //
+  // The level envelope goes with the sound, and stripping it here is the other
+  // half again. `audioTwinOf` has already copied it onto the new clip; leaving
+  // the original behind would make it an orphan, because a silenced video fails
+  // `isAudibleElement` and `keyframes.ts#CONDITIONAL_TRACKS` says the track
+  // only exists while that is true. It would then be invisible to the curve
+  // editor and to `rebakeElement` while still riding along in every save, until
+  // the next ingress deleted it without telling anyone.
   return normalizeDocument({
     ...placed,
     elements: {
       ...placed.elements,
-      [elementId]: { ...video, audioDetached: true },
+      [elementId]: silenced(video),
     },
   });
+}
+
+/**
+ * The video, minus its sound and minus the curve that shaped it.
+ *
+ * The `animation` block is rebuilt rather than spread-and-deleted so a video
+ * that never had a level envelope comes back with the block it arrived with, by
+ * identity where possible. A video always carries unconditional tracks, so
+ * unlike an audio clip its block is never emptied by this.
+ */
+function silenced(video: TimelineElement): TimelineElement {
+  const next: any = { ...(video as any), audioDetached: true };
+  const animation = next.animation;
+  if (animation != null && "volumeDb" in animation) {
+    const { volumeDb: _dropped, ...rest } = animation;
+    next.animation = rest;
+  }
+  return next as TimelineElement;
 }
 
 /**
@@ -104,6 +141,13 @@ export function detachAudioFrom(
  * a redundant `volumeDb: 0` onto every clip the user clicks — which would grow
  * the saved project and make "untouched" unrepresentable.
  *
+ * A clip whose level is **keyframed** still has this static field, and setting
+ * it still means something: it is the value the envelope falls back to before
+ * the track's first sample and wherever the track is switched off. It is not
+ * what the clip plays at a cursor while the track is live, which is
+ * `audio.ts#volumeDbAt`. `withStaticValue` calls through here for exactly that
+ * reason, when the last keyframe of an envelope is removed.
+ *
  * The clamp lives here rather than in the panel because `number-input` ignores
  * `min`/`max` entirely — the `max="100"` on the opacity field has never done
  * anything — so clamping at the one place every caller passes through is what
@@ -140,4 +184,169 @@ export function setVolumeDb(
       [elementId]: setIn(element, ["volumeDb"], next),
     },
   };
+}
+
+/**
+ * Shift a clip's whole level envelope by `deltaDb`.
+ *
+ * What dragging the rubber band does on a clip that already has keyframes: the
+ * shape the user drew is theirs, and a drag on the line means "all of it,
+ * louder", not "flatten it to here". Premiere, Resolve and Final Cut all read
+ * it that way.
+ *
+ * On a clip with **no** envelope this declines, by identity. The caller wants
+ * `setVolumeDb` there, and quietly arming a track instead would turn a drag on
+ * an ordinary clip into a keyframe nobody asked for.
+ *
+ * Each keyframe is clamped on its own, so a curve dragged into the ceiling
+ * flattens against it rather than being refused. That is what a fader does and
+ * it is recoverable: dragging back down restores the shape of everything that
+ * did not hit the stop, which is the part the user can still see.
+ */
+export function offsetLevelEnvelope(
+  doc: TimelineDocument,
+  elementId: string,
+  deltaDb: number,
+  bakeHz?: number,
+): TimelineDocument {
+  const element = doc.elements[elementId];
+  if (element == null || !Number.isFinite(deltaDb) || deltaDb === 0) {
+    return doc;
+  }
+  const track = (element as any).animation?.volumeDb;
+  if (track == null || track.isActivate !== true || !Array.isArray(track.x)) {
+    return doc;
+  }
+
+  let next = doc;
+  for (let index = 0; index < track.x.length; index++) {
+    const keyframe = track.x[index];
+    const tMs = keyframe?.p?.[0];
+    const db = keyframe?.p?.[1];
+    if (typeof tMs !== "number" || typeof db !== "number") {
+      continue;
+    }
+    const moved = clampVolumeDb(db + deltaDb);
+    if (moved === db) {
+      continue;
+    }
+    // Through `moveKeyframe` rather than by rewriting `p`, so the baked lane is
+    // re-baked in the same transform. The API this replaced left baking to the
+    // caller and the delete path forgot it.
+    next = moveKeyframe(next, elementId, "volumeDb", "x", index, tMs, moved, bakeHz)
+      .doc;
+  }
+  return next;
+}
+
+/**
+ * Move one level keyframe to a new time and level.
+ *
+ * Times are element-local timeline ms and are **not** snapped to the frame
+ * grid. `frames.ts#isFrameLocked` exempts audio from it because frame alignment
+ * is a picture constraint: an edge between two frame instants shows one frame
+ * of whatever is behind it, and sound has no frames. A gain change is heard at
+ * the instant it happens, so quantizing it would move the fade off the word it
+ * was drawn against. The curve editor's `dragKeyframe.ts` does not know the
+ * frame rate either, so both ways in agree.
+ */
+export function moveLevelKeyframe(
+  doc: TimelineDocument,
+  elementId: string,
+  index: number,
+  tMs: number,
+  db: number,
+  bakeHz?: number,
+): TimelineDocument {
+  const element = doc.elements[elementId];
+  if (element == null || !Number.isFinite(tMs) || !Number.isFinite(db)) {
+    return doc;
+  }
+  // Inside the clip, for the reason `toggleKeyframe` clamps: a keyframe past
+  // the end never plays, so letting a drag put one there reports success for an
+  // edit with no audible effect.
+  const span = spanLength(element);
+  const at = Math.min(Math.max(tMs, 0), span);
+  return moveKeyframe(
+    doc,
+    elementId,
+    "volumeDb",
+    "x",
+    index,
+    at,
+    clampVolumeDb(db),
+    bakeHz,
+  ).doc;
+}
+
+/**
+ * Put a level keyframe on the curve at `tMs`, arming the track if need be.
+ *
+ * **Planted, not added**, when the track is already live: `plantKeyframe`
+ * subdivides the curve exactly, so dropping a point into the middle of a fade
+ * cannot re-shape the parts either side of it. That is what an editor means by
+ * adding a point to a rubber band, and it is what `toggleKeyframe` does for
+ * every other property.
+ *
+ * On a track that is off, arming seeds a keyframe at `tMs` from the static
+ * level and there is nothing to preserve, so the seed *is* the new point.
+ */
+export function addLevelKeyframe(
+  doc: TimelineDocument,
+  elementId: string,
+  tMs: number,
+  bakeHz?: number,
+): TimelineDocument {
+  const element = doc.elements[elementId];
+  if (element == null || !Number.isFinite(tMs)) {
+    return doc;
+  }
+  if (!animatableProperties(element).includes("volumeDb")) {
+    return doc;
+  }
+
+  const span = spanLength(element);
+  const at = Math.min(Math.max(tMs, 0), span);
+  const track = (element as any).animation?.volumeDb;
+  const live = track != null && track.isActivate === true;
+
+  if (!live) {
+    return setTrackActive(doc, elementId, "volumeDb", true, { atMs: at }, bakeHz);
+  }
+  return plantKeyframeAt(doc, elementId, "volumeDb", "x", at, bakeHz);
+}
+
+/**
+ * Remove one level keyframe, and disarm the track when it was the last.
+ *
+ * Disarming writes the removed value back as the static level, which is
+ * `toggleKeyframe`'s rule: without it the clip jumps to whatever `volumeDb`
+ * happened to hold before the envelope was drawn, which for a clip that was
+ * only ever keyframed is 0 dB, so deleting the last point of a fade-out would
+ * make it suddenly loud.
+ */
+export function removeLevelKeyframe(
+  doc: TimelineDocument,
+  elementId: string,
+  index: number,
+  bakeHz?: number,
+): TimelineDocument {
+  const element = doc.elements[elementId];
+  const track = (element as any)?.animation?.volumeDb;
+  if (track == null || !Array.isArray(track.x) || track.x[index] == null) {
+    return doc;
+  }
+  const held = track.x[index]?.p?.[1];
+  const next = removeKeyframe(doc, elementId, "volumeDb", "x", index, bakeHz);
+  if (next === doc) {
+    return doc;
+  }
+  if (isTrackLive(next.elements[elementId], "volumeDb")) {
+    return next;
+  }
+  const settled =
+    typeof held === "number"
+      ? setVolumeDb(next, elementId, clampVolumeDb(held))
+      : next;
+  return setTrackActive(settled, elementId, "volumeDb", false, undefined, bakeHz);
 }
