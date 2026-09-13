@@ -27,6 +27,7 @@
     "build:speech": "node scripts/buildSpeech.mjs",
     "build:osx": "npm run build:main && npm run bundle:prod:src && npm run build:overlay && node scripts/buildSpeech.mjs --all && electron-builder build --mac --arm64 --x64 -p always",
     "build:win": "npm run build:main && npm run bundle:prod:src && npm run build:overlay && electron-builder build --win --x64 -p always",
+    "build:linux": "npm run build:main && npm run bundle:prod:src && npm run build:overlay && electron-builder build --linux --x64",
     "build": "npm run build:osx && npm run build:win"
   },
   "repository": {
@@ -37,6 +38,11 @@
     "productName": "Cartcut",
     "appId": "com.cartesiancs.cartcut",
     "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "**/*.so",
+      "**/*.so.*"
+    ],
     "extraResources": [
       {
         "from": "./assets",
@@ -104,6 +110,22 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ],
+      "executableName": "cartcut",
+      "category": "AudioVideo;Video;AudioVideoEditing;",
+      "icon": "assets/icons/png",
+      "maintainer": "cartesiancs <jun@cartesiancs.com>",
+      "synopsis": "AI video editor",
+      "desktop": {
+        "MimeType": "x-scheme-handler/cartcutapp;",
+        "StartupWMClass": "Cartcut"
+      },
+      "publish": null
     },
     "directories": {
       "buildResources": "./assets/",
