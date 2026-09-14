@@ -32,13 +32,15 @@
   position: absolute;
   display: flex;
   flex-direction: column;
-  // Read by `caption-window.spec.ts` rather than hardcoded there, so the pixel
-  // check cannot drift from the design it is checking.
+  // Inherited by the title bar's rule and by the splitter's line. Read by
+  // `caption-window.spec.ts` rather than hardcoded there, so the pixel check
+  // cannot drift from the design it is checking.
   --app-window-border: #{$background-border-color};
   background-color: #111315;
-  // Square, not rounded: a docked window meets its splitter edge to edge, and a
-  // radius there leaves four notches of the region showing through.
-  border: 1px solid var(--app-window-border);
+  // No outline around the window, and no radius. A docked window meets its
+  // splitter on one side and the region's own edges on the other three, so a
+  // border would be a second line beside the splitter and a box drawn around
+  // the column. The title bar's rule and the footer's are what give it shape.
   overflow: hidden;
 }
 
@@ -50,7 +52,7 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0 0.35rem;
-  border-bottom: 1px solid var(--app-window-border);
+  border-bottom: 0.05rem solid var(--app-window-border);
   // A title bar is a handle, and a handle that selects its own text on a
   // double click reads as broken.
   user-select: none;
@@ -109,6 +111,17 @@
   height: 100%;
 }
 
+// Two numbers, and they are never the same pixels.
+//
+// The **strip** is the area the pointer has to hit. It is SPLITTER_PX wide and
+// is never painted, in any state: no background, no hover fill, no drag fill.
+// `.split-col-bar` makes the same trade one level up with 0.5rem of hit strip
+// that is fully transparent.
+//
+// The **line** is the divider, drawn in the strip's `::after` at 0.05rem, the
+// hairline weight `preview-top-bar` and the title bar use. It is always there
+// rather than appearing on hover, because it is the boundary between two panes
+// and not feedback about a gesture. The cursor is the affordance.
 .window-splitter {
   position: absolute;
   background-color: transparent;
@@ -123,7 +136,24 @@
   cursor: row-resize;
 }
 
-.window-splitter:hover,
-.window-splitter.is-dragging {
+.window-splitter::after {
+  content: "";
+  position: absolute;
   background-color: #{$background-border-color};
+}
+
+// Centred in the strip rather than against either edge, so it reads as the line
+// between the two panes rather than as an edge belonging to one of them.
+.window-splitter.is-vertical::after {
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 0.025rem);
+  width: 0.05rem;
+}
+
+.window-splitter.is-horizontal::after {
+  left: 0;
+  right: 0;
+  top: calc(50% - 0.025rem);
+  height: 0.05rem;
 }

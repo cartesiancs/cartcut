@@ -199,7 +199,10 @@ describe("layoutHost", () => {
   });
 
   it("drops the splitter rather than letting it outgrow the space it divides", () => {
-    const layout = expectInsideHost({ width: 4, height: 200 }, [
+    // Sized from the constant, not from a literal: the first draft hardcoded a
+    // host of 4 against a 6px splitter, and silently stopped testing anything
+    // the day the strip got narrower than that.
+    const layout = expectInsideHost({ width: SPLITTER_PX, height: 200 }, [
       docked("w", "right", 50, { minSize: { width: 1, height: 1 } }),
     ]);
     expect(layout.windows[0].splitter).toBeNull();

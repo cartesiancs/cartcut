@@ -1155,6 +1155,21 @@ change to a template.
 - **A declining action returns `state` itself.** zustand skips the notification
   only when the updater returns the same object, so `return {}` would wake every
   subscriber for a write that changed nothing.
+- **The window has no border of its own**, and a pixel check must not assume
+  one. A docked window meets its splitter on one side and the region's edges on
+  the other three, so an outline would be a second line beside the splitter and
+  a box drawn around the column. The trap underneath: `borderTopColor` resolves
+  to Bootstrap's default `#212529` on an element with **no border at all**, and
+  that grey is within any useful tolerance of the window's own `#111315` body.
+  A first draft of the spec read it, found "the border" everywhere inside the
+  window, and reported all four edges 100% present while looking at nothing.
+  Assert the *width* before trusting the colour.
+- **The splitter is two numbers, and they are not the same number.**
+  `SPLITTER_PX` is 3 and is the area the pointer has to hit; what is drawn is
+  `0.05rem` in the strip's `::after`, the hairline every other divider in the
+  app uses. Filling the whole strip on hover puts a solid bar on screen where a
+  hairline belongs. `.split-col-bar` makes the same trade one level up, with
+  0.5rem of hit strip that is never painted at all.
 - **`element-control` is told about a resize with `?.`,** unlike `Control` and
   `Timeline` which call `resizeEvent()` outright. It is only mounted while the
   preview tab is the one on screen, so in a docking world it can be absent.
@@ -1178,14 +1193,23 @@ window nobody can see passes every layout assertion.
 
 `tests/e2e/specs/caption-window.spec.ts` is the half that looks. It drives the
 real tile, measures containment at three column widths and after resizing the
-app, drags the splitter to both of its limits, and then **reads the pixels**:
-the window's own 1px chrome border has to be present along all four of its
-edges in a screenshot, which requires `decodePng` in `harness/artifacts.ts`, the
-mirror of the `encodePng` that was already there. Two controls keep it honest. A
-rect 12px inside the window, where there is no border, must come back under
-half, and the spec was verified against a deliberate break: `clip-path` on the
-host cuts the paint without moving a single rect, every containment assertion
-goes on passing, and the border check fails on the right edge alone.
+app, drags the splitter to both of its limits, and then **reads the pixels**,
+which requires `decodePng` in `harness/artifacts.ts`, the mirror of the
+`encodePng` that was already there.
+
+What it reads is the two horizontal rules the window is built from, the title
+bar's bottom edge and the footer's top edge, and what it measures is **the
+longest unbroken run of each**. That single number catches all four sides: cut
+off on the right and a rule stops early, on the left and it starts late, off the
+top or the bottom and the rule is not there at all. Both have to run the window's
+full width and begin and end within 2px of its edges.
+
+Two things keep it honest. A row four pixels lower, inside the body's padding
+where no rule is drawn, has to come back short, and it comes back at **0px**.
+And the check was verified against a deliberate break: `clip-path` on the host
+cuts the paint without moving a single rect, so every containment assertion goes
+on passing, and the rule check fails with "the title bar's rule is only 279px of
+the window's 320px".
 
 ## The auto-caption panel
 

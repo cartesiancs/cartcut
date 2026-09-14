@@ -89,60 +89,63 @@ const near = (a: number[], b: number[], tolerance: number) =>
   a.every((channel, i) => Math.abs(channel - b[i]) <= tolerance);
 
 /**
- * The fraction of each of a rect's four edges that is actually the given colour.
+ * The longest unbroken run of pixels matching `colour` along one row.
  *
- * `rect` is in the screenshot's own coordinates. The outermost row and column
- * are sampled, and the ends are skipped: a corner is two edges at once and,
- * whatever the radius, is not a clean sample of either.
+ * This is the instrument the whole pixel check is built on, and it measures
+ * **how much of a horizontal rule actually got painted**. A window clipped on
+ * the right has its rules cut short; one clipped on the left has them start
+ * late; one clipped off the top or bottom loses a rule entirely. All four cases
+ * come out as a run whose ends are not the window's ends.
  *
- * An edge clipped away by an ancestor is not "a slightly different colour", it
- * is whatever was behind the window, so a coarse tolerance is enough and a hard
- * threshold is honest.
+ * What counts as a hit is a predicate rather than a colour, and the call site
+ * passes "this pixel is not the window's own background". Matching the rule's
+ * authored colour was the first draft and it does not survive contact with the
+ * real thing: the app's dividers are `0.05rem`, which is 0.8px, and a 0.8px
+ * line downsampled from a 2x display is a blend whose value depends on where
+ * the boundary fell. Measured, the title bar's rule matched 2px of 320 that
+ * way. "Not the background" is the claim that actually matters anyway, and it
+ * is one the renderer cannot round away.
+ *
+ * The scan is bounded to the window's own columns, and that is not tidiness
+ * either: `preview-top-bar` carries its own `0.05rem` rule at exactly the
+ * height the title bar's sits at, so an unbounded row reads as one unbroken
+ * line across the whole column. Measured, 786px of a 320px window.
  */
-function borderCoverage(
+function longestRun(
   frame: FrameBuffer,
-  rect: Box,
-  colour: [number, number, number],
-  tolerance = 26,
-): { top: number; bottom: number; left: number; right: number } {
-  const x0 = Math.max(0, Math.round(rect.x));
-  const y0 = Math.max(0, Math.round(rect.y));
-  // Clamped into the image. A rect that ends exactly on the last row rounds to
-  // one past it, and an index nobody sampled reads as an edge that is missing:
-  // a first draft reported the bottom border 0% present on a window that was
-  // entirely on screen.
-  const x1 = Math.min(frame.width - 1, Math.round(rect.x + rect.width) - 1);
-  const y1 = Math.min(frame.height - 1, Math.round(rect.y + rect.height) - 1);
-  const inset = 6;
+  y: number,
+  matches: (channels: [number, number, number]) => boolean,
+  bounds: { from: number; to: number },
+): { start: number; end: number; length: number } {
+  let best = { start: -1, end: -1, length: 0 };
+  let runStart = -1;
+  const from = Math.max(0, Math.round(bounds.from));
+  const to = Math.min(frame.width - 1, Math.round(bounds.to));
 
-  const run = (points: Array<[number, number]>) => {
-    const inside = points.filter(
-      ([x, y]) => x >= 0 && y >= 0 && x < frame.width && y < frame.height,
-    );
-    if (inside.length === 0) {
-      return 0;
-    }
-    const hits = inside.filter(([x, y]) => {
+  for (let x = from; x <= to + 1; x++) {
+    let hit = false;
+    if (x <= to && y >= 0 && y < frame.height) {
       const p = pixel(frame, x, y);
-      return near([p.r, p.g, p.b], colour, tolerance);
-    });
-    return hits.length / inside.length;
-  };
+      hit = matches([p.r, p.g, p.b]);
+    }
 
-  const xs: Array<[number, number]> = [];
-  const xsBottom: Array<[number, number]> = [];
-  for (let x = x0 + inset; x <= x1 - inset; x++) {
-    xs.push([x, y0]);
-    xsBottom.push([x, y1]);
-  }
-  const ys: Array<[number, number]> = [];
-  const ysRight: Array<[number, number]> = [];
-  for (let y = y0 + inset; y <= y1 - inset; y++) {
-    ys.push([x0, y]);
-    ysRight.push([x1, y]);
+    if (hit) {
+      if (runStart < 0) {
+        runStart = x;
+      }
+      continue;
+    }
+
+    if (runStart >= 0) {
+      const length = x - runStart;
+      if (length > best.length) {
+        best = { start: runStart, end: x - 1, length };
+      }
+      runStart = -1;
+    }
   }
 
-  return { top: run(xs), bottom: run(xsBottom), left: run(ys), right: run(ysRight) };
+  return best;
 }
 
 test("the caption window docks beside the preview and is never clipped", async ({
@@ -252,6 +255,12 @@ test("the caption window docks beside the preview and is never clipped", async (
       // at `right: -0.2rem` on purpose, so asking the column would be measuring
       // a splitter that has been there all along.
       const region = document.querySelector("window-host") as HTMLElement | null;
+      const titlebarEl = document.querySelector(
+        "app-window .app-window-titlebar",
+      ) as HTMLElement | null;
+      const footerEl = document.querySelector(
+        "app-window .caption-panel-footer",
+      ) as HTMLElement | null;
 
       return {
         host: box("#split_col_2"),
@@ -279,7 +288,25 @@ test("the caption window docks beside the preview and is never clipped", async (
         // already resolved to `rgb(...)`. A first draft read the property and
         // parsed three numbers out of the hex digits, which made the check look
         // for a colour that is nowhere on screen and report every edge missing.
-        borderColour: win == null ? null : getComputedStyle(win).borderTopColor,
+        footer: box("app-window .caption-panel-footer"),
+        windowBackground: win == null ? null : getComputedStyle(win).backgroundColor,
+        // The two horizontal rules the window is actually built from. There is
+        // no border around `app-window` itself, by design: a docked window
+        // meets its splitter on one side and the region's edges on the other
+        // three, so an outline would draw a box around the whole column.
+        rules:
+          titlebarEl == null || footerEl == null
+            ? null
+            : {
+                titlebar: {
+                  colour: getComputedStyle(titlebarEl).borderBottomColor,
+                  width: getComputedStyle(titlebarEl).borderBottomWidth,
+                },
+                footer: {
+                  colour: getComputedStyle(footerEl).borderTopColor,
+                  width: getComputedStyle(footerEl).borderTopWidth,
+                },
+              },
         // Every control the user could reach inside the window.
         controls: [
           ...document.querySelectorAll(
@@ -505,6 +532,16 @@ test("the caption window docks beside the preview and is never clipped", async (
     await dragWindowSplitter(-4000);
 
     const wide = await expectNothingClipped("two columns");
+    writeJson(path.join(artifactDir, "two-column-step.json"), {
+      innerWidth,
+      host: wide.host,
+      region: wide.region,
+      window: wide.window,
+      splitter: wide.splitter,
+      placement: (await openState()).placement,
+      hostSizes: (await openState()).hostSizes,
+      columns: await editorColumns(),
+    });
     expect(wide.window!.width).toBeGreaterThan(540);
     expect(await editorColumns()).toBe("two");
     // Side by side means the canvas and the list share a row.
@@ -525,84 +562,149 @@ test("the caption window docks beside the preview and is never clipped", async (
     expect(await editorColumns()).toBe("one");
   });
 
-  await test.step("all four of the window's borders are on screen", async () => {
+  await test.step("the splitter draws one pixel, not a bar", async () => {
+    const line = await page.evaluate(() => {
+      const el = document.querySelector(".window-splitter") as HTMLElement;
+      const drawn = getComputedStyle(el, "::after");
+      const titlebar = document.querySelector(
+        "app-window .app-window-titlebar",
+      ) as HTMLElement;
+      return {
+        stripWidth: el.getBoundingClientRect().width,
+        stripBackground: getComputedStyle(el).backgroundColor,
+        lineWidth: drawn.width,
+        lineColour: drawn.backgroundColor,
+        ruleColour: getComputedStyle(titlebar).borderBottomColor,
+        ruleWidth: getComputedStyle(titlebar).borderBottomWidth,
+      };
+    });
+
+    // The strip is a hit area and has to stay invisible. Filling it on hover
+    // put a six pixel bar on screen where a border belongs, next to the
+    // window's own 1px rules, and it read as the layout having broken.
+    expect(line.stripBackground).toBe("rgba(0, 0, 0, 0)");
+    // A hairline, the same weight and colour as every other divider in the app.
+    // Asserted as a property rather than as a number: all of them are authored
+    // `0.05rem`, but Chromium resolves that to 0.5px for a border and
+    // 0.796875px for a box width, so comparing the two computed strings would
+    // be testing the engine's rounding rather than the design.
+    expect(parseFloat(line.lineWidth)).toBeGreaterThan(0);
+    expect(parseFloat(line.lineWidth)).toBeLessThan(1);
+    expect(parseFloat(line.ruleWidth)).toBeLessThan(1);
+    // The area the pointer has to hit is several times the line, or the
+    // splitter cannot be grabbed. A relation rather than a number, so changing
+    // SPLITTER_PX does not make this go stale.
+    expect(line.stripWidth).toBeGreaterThan(parseFloat(line.lineWidth) * 2);
+    expect(line.lineColour).toBe(line.ruleColour);
+  });
+
+  await test.step("the window's rules are painted across its whole width", async () => {
     await dragMainSplitter(Math.round((await page.evaluate(() => window.innerWidth)) * 0.86));
     const m = await measure();
-    const host = m.host!;
     const win = m.window!;
-    const colour = parseRgb(m.borderColour!);
-    expect(colour.some((channel) => channel > 0), "no border colour to look for").toBe(true);
+    const rules = m.rules!;
 
-    // The whole viewport, not a clip of the host. `scale: "css"` is what makes
-    // the image's pixels the page's own CSS pixels, so a `getBoundingClientRect`
-    // reading indexes it directly; the default "device" would return a 2x image
-    // on this display and put every index out by a factor of two. Not clipping
-    // removes the other rounding: a clip's width is rounded to whole pixels, so
-    // a region 500.515625 tall becomes a 500-row image whose last row is half a
-    // pixel short of where the window's bottom border actually is.
+    // There is no border around `app-window`, so the two horizontal rules are
+    // what is drawn at the window's own extents: the title bar's bottom edge
+    // and the footer's top edge, each spanning the full width. Asserting the
+    // *width they reach* is what catches a clip, and it catches all four sides
+    // at once. Cut off on the right and a rule stops early; on the left and it
+    // starts late; off the top or the bottom and the rule is not there at all.
+    // Greater than zero, not at least one. The app's dividers are authored as
+    // `0.05rem`, which computes to 0.8px, and the point of this assertion is
+    // only that there is a rule at all: `borderBottomColor` resolves to
+    // Bootstrap's default on an element with no border, and that grey is within
+    // any useful tolerance of the window's own body.
+    expect(parseFloat(rules.titlebar.width), "the title bar has no rule to find").toBeGreaterThan(0);
+    expect(parseFloat(rules.footer.width), "the footer has no rule to find").toBeGreaterThan(0);
+
     const shot = await page.screenshot({ scale: "css" });
     const frame = decodePng(shot);
 
-    // The page does not scroll, so viewport coordinates are the image's.
-    const rect = { x: win.x, y: win.y, width: win.width, height: win.height };
-
-    writePng(path.join(artifactDir, "caption-window.png"), frame);
-    writePng(
-      path.join(artifactDir, "caption-window-cropped.png"),
-      crop(frame, {
-        x: Math.round(rect.x),
-        y: Math.round(rect.y),
-        w: Math.round(rect.width),
-        h: Math.round(rect.height),
-      }),
-    );
-
-    const drawn = inkBounds(frame, {
-      x: Math.round(rect.x),
-      y: Math.round(rect.y),
-      w: Math.round(rect.width),
-      h: Math.round(rect.height),
-    });
-    expect(drawn.count, "the window region is blank").toBeGreaterThan(0);
-
-    const coverage = borderCoverage(frame, rect, colour);
-    writeJson(path.join(artifactDir, "border-coverage.json"), {
-      colour,
-      host: { x: host.x, y: host.y, width: host.width, height: host.height },
-      frame: { width: frame.width, height: frame.height },
-      windowRectInShot: rect,
-      coverage,
-      ink: drawn,
-    });
-
-    // If this is out, every index below is out with it.
+    // If this is out, every index below is out with it. The page does not
+    // scroll, so viewport coordinates are the image's.
     const viewport = await page.evaluate(() => ({
       width: window.innerWidth,
       height: window.innerHeight,
     }));
     expect(frame.width).toBe(viewport.width);
     expect(frame.height).toBe(viewport.height);
-    for (const [side, fraction] of Object.entries(coverage)) {
+
+    const region = {
+      x: Math.round(win.x),
+      y: Math.round(win.y),
+      w: Math.round(win.width),
+      h: Math.round(win.height),
+    };
+    writePng(path.join(artifactDir, "caption-window.png"), frame);
+    writePng(path.join(artifactDir, "caption-window-cropped.png"), crop(frame, region));
+
+    const drawn = inkBounds(frame, region);
+    expect(drawn.count, "the window region is blank").toBeGreaterThan(0);
+
+    // Anything that is not the window's own background. Six steps is well clear
+    // of PNG-exact flat fill and well under the 21 the fainter of the two rules
+    // sits at.
+    const within = { from: win.x, to: win.x + win.width - 1 };
+    const background = parseRgb(m.windowBackground!);
+    const notBackground = (channels: [number, number, number]) =>
+      Math.max(...channels.map((c, i) => Math.abs(c - background[i]))) >= 6;
+
+    const measured = [
+      {
+        name: "the title bar's rule",
+        y: Math.round(m.titlebar!.y + m.titlebar!.height) - 1,
+      },
+      {
+        name: "the footer's rule",
+        y: Math.round(m.footer!.y),
+      },
+    ].map((rule) => {
+      // A 0.8px rule straddles two device rows and, downsampled to CSS pixels,
+      // can end up on either side of the boundary. Take whichever row carries
+      // more of it rather than guessing which way the rounding went.
+      const here = longestRun(frame, rule.y, notBackground, within);
+      const below = longestRun(frame, rule.y + 1, notBackground, within);
+      return { ...rule, run: here.length >= below.length ? here : below };
+    });
+
+    // A row inside the body's own padding, where there is no rule at all. The
+    // check has to be able to come back short, or it is measuring nothing.
+    const control = longestRun(
+      frame,
+      Math.round(m.titlebar!.y + m.titlebar!.height) + 4,
+      notBackground,
+      within,
+    );
+
+    writeJson(path.join(artifactDir, "window-rules.json"), {
+      window: win,
+      frame: { width: frame.width, height: frame.height },
+      background,
+      rules: measured,
+      control,
+      ink: drawn,
+    });
+
+    for (const rule of measured) {
       expect(
-        fraction,
-        `the window's ${side} border is only ${(fraction * 100).toFixed(0)}% on screen, so it is clipped there`,
-      ).toBeGreaterThan(0.8);
+        rule.run.length,
+        `${rule.name} is only ${rule.run.length}px of the window's ${Math.round(win.width)}px, so the window is cut off`,
+      ).toBeGreaterThan(win.width * 0.9);
+      expect(
+        Math.abs(rule.run.start - win.x),
+        `${rule.name} starts at ${rule.run.start}, ${Math.abs(rule.run.start - win.x)}px from the window's left edge`,
+      ).toBeLessThanOrEqual(2);
+      expect(
+        Math.abs(rule.run.end - (win.x + win.width - 1)),
+        `${rule.name} ends at ${rule.run.end}, ${Math.abs(rule.run.end - (win.x + win.width - 1))}px from the window's right edge`,
+      ).toBeLessThanOrEqual(2);
     }
 
-    // The check has to be able to fail, or it is measuring nothing. 12px inside
-    // the window there is no border, only the body, so at least one edge of
-    // that rect must come back well under the threshold.
-    const inset = {
-      x: rect.x + 12,
-      y: rect.y + 12,
-      width: rect.width - 24,
-      height: rect.height - 24,
-    };
-    const control = borderCoverage(frame, inset, colour);
     expect(
-      Math.min(...Object.values(control)),
-      `the border check passes on a rect with no border on it: ${JSON.stringify(control)}`,
-    ).toBeLessThan(0.5);
+      control.length,
+      `a row with no rule on it matched ${control.length}px, so the scan is not reading the rules`,
+    ).toBeLessThan(win.width * 0.5);
   });
 
   await test.step("the title bar close gives the column back to the preview", async () => {

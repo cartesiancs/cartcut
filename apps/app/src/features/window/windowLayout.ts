@@ -76,8 +76,15 @@ export type WindowState = {
   z: number;
 };
 
-/** The draggable strip between the content region and a docked window, in px. */
-export const SPLITTER_PX = 6;
+/**
+ * The draggable strip between the content region and a docked window, in px.
+ *
+ * This is the area the pointer has to hit, and nothing else. What is *drawn* is
+ * `0.05rem`, the weight every other divider in the app uses, and `_window.scss`
+ * puts it in the strip's `::after`. The two are separate numbers because a
+ * hairline is the right thing to see and the wrong thing to have to aim at.
+ */
+export const SPLITTER_PX = 3;
 
 /**
  * What the content region keeps for itself, in px.
@@ -188,7 +195,11 @@ export function layoutHost(host: Size, windows: WindowState[]): HostLayout {
     );
 
     const carved = carve(free, side, size, splitterSpan);
-    out.push({ id: win.id, rect: sane(carved.window), splitter: carved.splitter });
+    out.push({
+      id: win.id,
+      rect: sane(carved.window),
+      splitter: carved.splitter,
+    });
     free = carved.rest;
   }
 
@@ -219,8 +230,12 @@ function carve(
   size: number,
   splitterSpan: number,
 ): { window: Rect; splitter: Rect | null; rest: Rect } {
-  const splitterAt = (x: number, y: number, w: number, h: number): Rect | null =>
-    splitterSpan > 0 ? { x, y, width: w, height: h } : null;
+  const splitterAt = (
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ): Rect | null => (splitterSpan > 0 ? { x, y, width: w, height: h } : null);
 
   if (side === "left") {
     return {
