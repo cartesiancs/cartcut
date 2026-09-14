@@ -5,6 +5,7 @@
   },
   "setting": {
     "select_project_folder": "Select Folder",
+    "change_project_folder": "Change Folder",
     "video_duration": "Duration",
     "seconds": "Seconds",
     "seconds_unit": "s",

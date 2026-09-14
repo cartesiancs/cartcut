@@ -23,6 +23,11 @@ type LoadStatus = "idle" | "loading" | "loaded" | "error";
  * Lives here rather than in `functions/directory.ts` so that everything which
  * decides "what is the asset panel showing" sits in one file. `ControlSetting`
  * imports it for its own "select project folder" button.
+ *
+ * The same function serves the empty state and the toolbar button, so changing
+ * folder later is the identical action to picking the first one. Nothing on the
+ * timeline moves: a clip holds an absolute `localpath`, and `projectFolder` is
+ * only where renders are written.
  */
 export async function selectProjectFolder(): Promise<void> {
   if (getLocationEnv() == "demo") {
@@ -36,13 +41,21 @@ export async function selectProjectFolder(): Promise<void> {
 
   const picked = await window.electronAPI.req.dialog.openDirectory();
 
-  let dir = "/";
+  let dir = "";
   if (getLocationEnv() == "web") {
     // The web shim has no real picker, so the last visited folder is the only
     // thing worth reopening.
     dir = localStorage.getItem("targetDirectory") || "/";
   } else {
-    dir = String(picked || "/");
+    // Cancelling the dialog answers `undefined`. Leave the panel exactly where
+    // it was: this is offered from an already open folder now, and the old
+    // `picked || "/"` threw the user out to the filesystem root for pressing
+    // Escape.
+    if (!picked) {
+      return;
+    }
+
+    dir = String(picked);
   }
 
   projectStore.getState().updateProjectFolder(dir);
@@ -154,6 +167,16 @@ export class AssetBrowser extends LitElement {
           .value=${this.nowDirectory}
           disabled
         />
+
+        <button
+          class="btn btn-transparent btn-sm ${getLocationEnv() == "demo"
+            ? "d-none"
+            : ""}"
+          title=${this.lc.t("setting.change_project_folder")}
+          @click=${this.handleClickSelectFolder}
+        >
+          <span class="material-symbols-outlined icon-sm"> folder_open </span>
+        </button>
 
         <switch-showtype></switch-showtype>
       </div>

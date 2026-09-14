@@ -5,6 +5,7 @@
   },
   "setting": {
     "select_project_folder": "프로젝트 폴더 지정",
+    "change_project_folder": "프로젝트 폴더 변경",
     "video_duration": "영상 길이",
     "seconds": "초단위",
     "seconds_unit": "초",
