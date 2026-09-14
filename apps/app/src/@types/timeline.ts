@@ -436,6 +436,29 @@ type Visual = {
   ratio: number;
   opacity: number;
   rotation: number;
+  /**
+   * Uniform magnification, in **tenths**: 10 is unscaled, 12 is 120%.
+   *
+   * Tenths because that is what the `scale` track already stores, and the two
+   * have to share a unit: the track's fallback is this field, `staticValueOf`
+   * seeds a new track from it, and `withStaticValue` writes the last keyframe's
+   * value back into it. A conversion at any of those three would sit in the
+   * middle of the contract they exist to keep, which is that a keyframed
+   * property behaves exactly like the static field it keyframes. The sidebar
+   * and the curve editor's ruler show percent instead, and they are the only
+   * two places the factor of ten lives; see `animation/propertyUnits.ts`.
+   *
+   * **Not a second `size`.** This multiplies the matrix about the element's
+   * centre and never touches the box, so `width`/`height` go on meaning the
+   * clip's own pixels; the `size` track above states the other half.
+   *
+   * Absent means unscaled, and returning to unscaled deletes the key rather
+   * than storing 10, so a project nobody has scaled saves byte-identically to
+   * one written before the feature and `SCHEMA_VERSION` did not move. The rule
+   * `blend`, `lut`, `mask` and `reveal` all follow.
+   * `features/timeline/scaleOps.ts#scaleTenthsOf` owns the reading of it.
+   */
+  scale?: number;
 };
 
 /**

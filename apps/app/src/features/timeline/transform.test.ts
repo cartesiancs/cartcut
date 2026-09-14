@@ -312,6 +312,62 @@ describe("localSampleAt", () => {
     expect(localSampleAt(element, 0).scale).toBe(2.5);
   });
 
+  it("reads the static scale field, also as tenths", () => {
+    expect(localSampleAt(imageElement({ scale: 15 } as any), 0).scale).toBe(1.5);
+  });
+
+  it("treats an absent scale field as unscaled", () => {
+    expect(localSampleAt(imageElement({}), 0).scale).toBe(1);
+  });
+
+  it("lets a live track outrank the static field", () => {
+    // The contract every other property keeps: the track replaces the field,
+    // and the field is only what the track falls back to.
+    const list = keys([0, 25]);
+    const element = imageElement({
+      scale: 15,
+      animation: {
+        ...imageElement().animation,
+        scale: { isActivate: true, x: list, ax: bakeTrack(list) },
+      },
+    } as any);
+    expect(localSampleAt(element, 0).scale).toBe(2.5);
+  });
+
+  it("falls back to the static field before the element starts", () => {
+    // `track` refuses a cursor left of `startTime`, so the fallback is what
+    // draws there, and it has to be the clip's own scale, not neutral.
+    const list = keys([0, 25]);
+    const element = imageElement({
+      startTime: 1000,
+      scale: 15,
+      animation: {
+        ...imageElement().animation,
+        scale: { isActivate: true, x: list, ax: bakeTrack(list) },
+      },
+    } as any);
+    expect(localSampleAt(element, 0).scale).toBe(1.5);
+  });
+
+  // A read guard on the paint loop: a hand-edited project must still draw.
+  it.each([
+    ["NaN", NaN],
+    ["a string", "15"],
+    ["null", null],
+  ])("reads %s in the scale field as unscaled", (_label, value) => {
+    expect(localSampleAt(imageElement({ scale: value } as any), 0).scale).toBe(
+      1,
+    );
+  });
+
+  it("floors a negative scale field instead of mirroring", () => {
+    // Zero from `scaleTenthsOf`, then `MIN_SAMPLED_SCALE` so the matrix stays
+    // invertible. A negative would flip it, which is a different picture.
+    const sampled = localSampleAt(imageElement({ scale: -15 } as any), 0).scale;
+    expect(sampled).toBeGreaterThan(0);
+    expect(sampled).toBeLessThan(0.01);
+  });
+
   it("treats a missing element as neutral", () => {
     expect(localSampleAt(undefined, 0)).toEqual({
       x: 0,

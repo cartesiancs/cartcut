@@ -278,4 +278,60 @@ describe("rulerTicks", () => {
       expect(tick.label).not.toBe("-0.00");
     }
   });
+
+  describe("displayFactor", () => {
+    // `scale` is stored in tenths and read in percent. The ruler has to say
+    // what the sidebar says, and the drag arithmetic has to go on working in
+    // the unit the keyframes are actually in.
+    it("changes the label and leaves the geometry in track units", () => {
+      const v = view({ verticalRange: 0.05 });
+      const plain = rulerTicks(v, 600, RULER_MIN_SPACING, 1);
+      const shown = rulerTicks(v, 600, RULER_MIN_SPACING, 10);
+
+      expect(shown.map((t) => t.value)).toEqual(plain.map((t) => t.value));
+      expect(shown.map((t) => t.y)).toEqual(plain.map((t) => t.y));
+      for (const tick of shown) {
+        expect(Number(tick.label)).toBeCloseTo(tick.value * 10, 9);
+      }
+    });
+
+    it("defaults to one, so every other property is untouched", () => {
+      const v = view({ verticalRange: 0.05 });
+      expect(rulerTicks(v, 600)).toEqual(
+        rulerTicks(v, 600, RULER_MIN_SPACING, 1),
+      );
+    });
+
+    it("takes its precision from the shown step, not the track step", () => {
+      // A track step of 0.2 is a shown step of 2. Reading the precision off the
+      // track step would print "102.0" on a ruler whose numbers are all whole.
+      const ticks = rulerTicks(
+        view({ verticalRange: 0.00625 }),
+        600,
+        RULER_MIN_SPACING,
+        10,
+      );
+      expect(ticks.length).toBeGreaterThan(1);
+      for (const tick of ticks) {
+        expect(tick.label).toMatch(/^-?\d+$/);
+      }
+    });
+
+    it("keeps the shown numbers round at every zoom", () => {
+      // Multiplying a 1-2-5 ladder by ten leaves a 1-2-5 ladder, which is what
+      // lets `niceStep` go on choosing in track units.
+      for (const verticalRange of RANGES) {
+        const ticks = rulerTicks(
+          view({ verticalRange }),
+          600,
+          RULER_MIN_SPACING,
+          10,
+        );
+        for (const tick of ticks) {
+          expect(tick.label).toMatch(/^-?\d+(\.\d+)?$/);
+          expect(tick.label).not.toMatch(/^-0(\.0+)?$/);
+        }
+      }
+    });
+  });
 });

@@ -123,14 +123,30 @@ function niceStep(min: number): number {
  * apart, and only visible values are produced — the fixed loop this replaces
  * ran out of ticks once the curve was panned far enough. Positions go through
  * `toScreen`, so a tick labelled 100 sits exactly where a keyframe at 100 does.
+ *
+ * `displayFactor` scales the **label and nothing else**. `scale` is stored in
+ * tenths, so a ruler reading 10 to 12 beside a sidebar reading 100 to 120 would
+ * be the same clip described two ways. `value` and `y` stay in track units, so
+ * the drag arithmetic, the hit test and the grid all go on working in the unit
+ * the keyframes are actually in. Multiplying a `1/2/5 × 10ⁿ` step by ten leaves
+ * a `1/2/5 × 10ⁿ` step, which is why `niceStep` can keep choosing in track
+ * units and the labels stay round.
  */
 export function rulerTicks(
   v: Viewport,
   heightPx: number,
   minSpacing: number = RULER_MIN_SPACING,
+  displayFactor: number = 1,
 ): RulerTick[] {
   const step = niceStep(minSpacing * v.verticalRange);
   const decimals = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
+  // Taken from the step the label is written in, not from the step the tick is
+  // spaced by. At a factor of ten a track step of 0.2 is a shown step of 2, and
+  // the track-unit precision would print it "2.0".
+  const shownDecimals = Math.max(
+    0,
+    -Math.floor(Math.log10(step * displayFactor) + 1e-9),
+  );
   const top = toTrack(v, 0, 0).value;
   const bottom = toTrack(v, 0, Math.max(0, heightPx)).value;
 
@@ -142,7 +158,7 @@ export function rulerTicks(
     ticks.push({
       value,
       y: toScreen(v, 0, value).y,
-      label: value.toFixed(decimals),
+      label: (value * displayFactor + 0).toFixed(shownDecimals),
     });
   }
   return ticks;

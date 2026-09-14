@@ -164,6 +164,52 @@ describe("applyPreset", () => {
   });
 });
 
+/**
+ * Scale stops are relative to the clip's own scale, the way position stops are
+ * relative to `location` and rotation stops to `rotation`. They could be
+ * absolute while no clip could carry a static scale; now that `Visual.scale`
+ * exists, an absolute stop would snap a scaled clip back to 100% on its first
+ * keyframe.
+ */
+describe("a preset on a clip that is already scaled", () => {
+  it("leaves an unscaled clip exactly as it was", () => {
+    const after = applyPreset(doc({ a: clip() }), "a", "zoom_in", 250);
+    expect(laneOf(after, "a", "scale").map(([, v]: any) => v)).toEqual([10, 12]);
+  });
+
+  it("multiplies rather than adds", () => {
+    // A stop of 12 means "1.2 times whatever the clip is at". Adding in tenths
+    // would give 17, which is 170% and not the 180% the preset asks for.
+    const after = applyPreset(
+      doc({ a: clip({ scale: 15 }) }),
+      "a",
+      "zoom_in",
+      250,
+    );
+    expect(laneOf(after, "a", "scale").map(([, v]: any) => v)).toEqual([15, 18]);
+  });
+
+  it("starts where the clip stands, so nothing snaps", () => {
+    const after = applyPreset(
+      doc({ a: clip({ scale: 15 }) }),
+      "a",
+      "pop",
+      250,
+    );
+    const values = laneOf(after, "a", "scale").map(([, v]: any) => v);
+    // `pop` runs 6, 11, 10 against neutral: 60%, 110%, back to where it was.
+    expect(values[0]).toBeCloseTo(9, 9);
+    expect(values[values.length - 1]).toBeCloseTo(15, 9);
+  });
+
+  it("leaves rotation and opacity presets alone", () => {
+    const scaled = doc({ a: clip({ scale: 15 }) });
+    expect(laneOf(applyPreset(scaled, "a", "fade_in", 250), "a", "opacity")).toEqual(
+      laneOf(applyPreset(doc({ a: clip() }), "a", "fade_in", 250), "a", "opacity"),
+    );
+  });
+});
+
 describe("the preset table", () => {
   it("names at least one property for every preset it offers", () => {
     for (const name of presetNames()) {
@@ -319,6 +365,41 @@ describe("focus", () => {
       const moved = at(scale);
       expect(moved.x).toBeCloseTo(unscaled.x, 9);
       expect(moved.y).toBeCloseTo(unscaled.y, 9);
+    }
+  });
+
+  it("holds the focus point on a clip that is already scaled", () => {
+    // The same arithmetic as above, but starting from the clip's own scale
+    // rather than from 1. `location` is where the clip sits at `base`, so an
+    // offset measured from 1 would slide the focus point by `(base - 1)` times
+    // the distance from the centre.
+    const width = 1920;
+    const height = 1080;
+    const focus = { x: 25, y: 75 };
+    const base = 15;
+    const px = (focus.x / 100) * width;
+    const py = (focus.y / 100) * height;
+    const cx = width / 2;
+    const cy = height / 2;
+
+    const at = (scaleTenths: number) => {
+      const s = scaleTenths / 10;
+      const offset = focusOffset(focus, scaleTenths, width, height, base);
+      return {
+        x: offset.x + cx + s * (px - cx),
+        y: offset.y + cy + s * (py - cy),
+      };
+    };
+
+    const resting = at(base);
+    expect(focusOffset(focus, base, width, height, base)).toEqual({
+      x: 0,
+      y: 0,
+    });
+    for (const scale of [18, 22.5, 30, 12]) {
+      const moved = at(scale);
+      expect(moved.x).toBeCloseTo(resting.x, 9);
+      expect(moved.y).toBeCloseTo(resting.y, 9);
     }
   });
 

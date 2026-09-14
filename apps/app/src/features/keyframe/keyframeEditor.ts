@@ -11,9 +11,11 @@ import { lanesOf, type Keyframe, type Lane } from "../animation/keyframes";
 import type { TimelineDocument } from "../timeline/tracks";
 import { isTypingEvent } from "../../utils/typingTarget";
 import { count as perfCount } from "../debug/frameStats";
+import { displayFactorOf } from "../animation/propertyUnits";
 import {
   clampToClip,
   hitTest,
+  RULER_MIN_SPACING,
   rulerTicks,
   toScreen,
   toTrack,
@@ -308,7 +310,16 @@ export class KeyframeEditor extends LitElement {
     ctx.textAlign = "center";
     ctx.font = "9px Arial";
 
-    for (const tick of rulerTicks(this.viewport(), this.surface.height)) {
+    // The only place the display factor is needed: `drawGrid` below draws the
+    // same ticks as lines and reads `tick.value`, which stays in track units.
+    // A `scale` track is stored in tenths and read in percent, so a ruler left
+    // alone would say 10 beside a sidebar saying 100.
+    for (const tick of rulerTicks(
+      this.viewport(),
+      this.surface.height,
+      RULER_MIN_SPACING,
+      displayFactorOf(this.animationType),
+    )) {
       ctx.fillText(tick.label, width / 2, tick.y);
       ctx.fillRect(10, tick.y, 30, 0.5);
     }

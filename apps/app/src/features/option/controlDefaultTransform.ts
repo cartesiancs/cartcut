@@ -8,10 +8,13 @@ import {
   sampleTrackXY,
 } from "../animation/keyframes";
 import { addKeyframe } from "../animation/keyframeOps";
+import { fromDisplay, toDisplay } from "../animation/propertyUnits";
 import { projectBakeHz } from "../editor/frameRate";
 import { setIn } from "../../utils/immutable";
 import { GestureCommit } from "./gestureCommit";
 import { withFittedTextHeights } from "../element/textFit";
+import { scaleTenthsOf, setClipScale } from "../timeline/scaleOps";
+import type { TimelineDocument } from "../timeline/tracks";
 import type { AnimatableProperty } from "../../@types/timeline";
 import "./controlKeyframeNav";
 import "../filter/backgroundRemove";
@@ -185,6 +188,44 @@ export class OptionImage extends LitElement {
         </div>
       </div>
 
+      <!--
+        Next to Size, because the two are the pair most easily mistaken for one
+        another and reading them together is what makes the difference legible:
+        Size is the clip's own pixels, Scale magnifies whatever those are about
+        the centre. The context menu's Animate submenu already treats them as
+        that pair, which is why it gives them deliberately different icons.
+
+        Shown in percent, stored in tenths. The number input knows nothing of
+        either; getScale and handleScale are the whole conversion, and both go
+        through animation/propertyUnits.ts so this row and the curve editor's
+        ruler cannot drift apart.
+
+        No max, the way Rotation has none. The floor is zero because a negative
+        factor mirrors rather than shrinks, which timeline/mirrorOps.ts owns.
+
+        No backticks in here, for the reason the comment above Position gives.
+      -->
+      <label class="form-label text-light">Scale</label>
+      <div class="d-flex flex-row justify-content-between bd-highlight mb-2">
+        <div class="d-flex flex-row gap-2 justify-content-start">
+          <number-input
+            aria-event="scale"
+            @onChange=${this.handleScale}
+            value="100"
+            min="0"
+            step="1"
+            sensitivity="0.5"
+          ></number-input>
+        </div>
+        <div class="d-flex flex-row gap-2 justify-content-end">
+          <control-keyframe-nav
+            .elementId=${this.targetId}
+            .property=${"scale"}
+            .label=${"scale"}
+          ></control-keyframe-nav>
+        </div>
+      </div>
+
       <label class="form-label text-light"
         >${this.lc.t("setting.opacity")}</label
       >
@@ -251,6 +292,7 @@ export class OptionImage extends LitElement {
     );
     const width: any = this.querySelector("number-input[aria-event='width'");
     const height: any = this.querySelector("number-input[aria-event='height'");
+    const scaleDom: any = this.querySelector("number-input[aria-event='scale'");
 
     const position = this.getPosition();
     const opacity = this.getOpacity();
@@ -263,6 +305,7 @@ export class OptionImage extends LitElement {
     const size = this.getSize();
     width.value = size.x;
     height.value = size.y;
+    scaleDom.value = this.getScale().x;
   }
 
   /**
@@ -313,6 +356,29 @@ export class OptionImage extends LitElement {
     };
   }
 
+  /**
+   * The magnification the box shows, in percent.
+   *
+   * The stored unit is tenths and the shown unit is not, so this is the one
+   * getter that converts. It converts *after* sampling, not before: the track
+   * and the static field are both in tenths, so mixing the two in display units
+   * would need the fallback converted too and would put the factor of ten in
+   * two places instead of one.
+   */
+  getScale() {
+    const element = this.timeline[this.targetId];
+    const fallback = scaleTenthsOf(element);
+    const tenths = this.isAnimated("scale")
+      ? sampleTrack(
+          this.track("scale"),
+          element.startTime,
+          this.timelineCursor,
+          fallback,
+        )
+      : fallback;
+    return { x: toDisplay("scale", tenths) };
+  }
+
   getPosition() {
     const location = this.timeline[this.targetId].location ?? { x: 0, y: 0 };
     if (!this.isAnimated("position")) {
@@ -358,10 +424,19 @@ export class OptionImage extends LitElement {
    * the store snapshot and called `patchTimeline`, which records no history at
    * all and, because history entries share their nested objects, rewrote the
    * past as well.
+   *
+   * `ops` is the third way to write, for a field `setIn` cannot express. It
+   * runs last, after the statics, and it is how `scale` reaches the document:
+   * unscaled deletes the key rather than storing 10, which needs the element
+   * rebuilt rather than a path assigned. Routing it through the pure op also
+   * keeps the clamp and the decline-by-identity in one place rather than
+   * restating them here, the same argument `keyframeOps.withStaticValue` makes
+   * for the mask and the reveal.
    */
   private commitValue(
     statics: Array<{ path: string[]; value: any }>,
     keyframes: Array<{ animationType: AnimatableProperty; lane: 0 | 1; value: number }> = [],
+    ops: Array<(doc: TimelineDocument) => TimelineDocument> = [],
   ) {
     const elementId = this.targetId;
     const element = this.timeline?.[elementId];
@@ -408,6 +483,10 @@ export class OptionImage extends LitElement {
         };
       }
 
+      for (const op of ops) {
+        next = op(next);
+      }
+
       return next;
     });
   }
@@ -448,6 +527,28 @@ export class OptionImage extends LitElement {
     this.commitValue(
       [{ path: ["opacity"], value: opacity }],
       [{ animationType: "opacity", lane: 0, value: opacity }],
+    );
+  }
+
+  handleScale() {
+    const dom: any = this.querySelector("number-input[aria-event='scale'");
+    // Rounded in the unit the user is looking at, then converted: the other
+    // order rounds tenths to two places and throws away the third decimal the
+    // percent box can show.
+    const percent = parseFloat(parseFloat(dom.value).toFixed(2));
+    if (!Number.isFinite(percent)) {
+      return;
+    }
+    const tenths = fromDisplay("scale", percent);
+    const elementId = this.targetId;
+    // No static entry: `scale` is written by the op, not by `setIn`. And no
+    // `withFittedTextHeights` either, unlike `handleSize`: a scale does not
+    // touch the box, so a text clip's wrapping width is unchanged and there is
+    // nothing to re-fit.
+    this.commitValue(
+      [],
+      [{ animationType: "scale", lane: 0, value: tenths }],
+      [(doc) => setClipScale(doc, elementId, tenths)],
     );
   }
 

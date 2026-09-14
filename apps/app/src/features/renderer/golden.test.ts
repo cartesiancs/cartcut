@@ -263,3 +263,61 @@ describe("golden frames — adjusted", () => {
     }
   });
 });
+
+/**
+ * The same scene with a static `scale` on two clips, kept apart from the plain
+ * one for the reason the blended and adjusted scenes are: the plain digests are
+ * the proof that a project nobody has scaled renders exactly as it did before
+ * `Visual.scale` existed.
+ *
+ * What it pins that no unit test can: the field reaches the picture at all. It
+ * does so through `localMatrixOf`, which is why it needed no change in any
+ * renderer, and which is also why a mistake here would be invisible until
+ * someone looked at a frame.
+ */
+function scaledTimeline(): Timeline {
+  const base = timeline();
+  return {
+    ...base,
+    flyer: { ...base.flyer, scale: 15 },
+    badge: { ...base.badge, scale: 6 },
+  } as Timeline;
+}
+
+describe("golden frames, scaled", () => {
+  it("composites a stable frame at each sampled timecode", () => {
+    const frames = Object.fromEntries(
+      [0, 1000, 2000, 3000, 3999].map((t) => [
+        t,
+        frameDigest(t, scaledTimeline()),
+      ]),
+    );
+    expect(frames).toMatchSnapshot();
+  });
+
+  it("is deterministic: the same timecode digests identically", () => {
+    expect(frameDigest(2000, scaledTimeline())).toBe(
+      frameDigest(2000, scaledTimeline()),
+    );
+  });
+
+  it("differs from the same scene composited unscaled", () => {
+    for (const t of [0, 1000, 2000, 3000]) {
+      expect(frameDigest(t, scaledTimeline())).not.toBe(frameDigest(t));
+    }
+  });
+
+  // Absent and 10 have to be the same picture as well as the same bytes on
+  // disk, or `scaleOps` deleting the key at neutral would be a visible change.
+  it("renders a neutral scale identically to no scale at all", () => {
+    const base = timeline();
+    const explicit = {
+      ...base,
+      flyer: { ...base.flyer, scale: 10 },
+      badge: { ...base.badge, scale: 10 },
+    } as Timeline;
+    for (const t of [0, 1000, 2000, 3000]) {
+      expect(frameDigest(t, explicit)).toBe(frameDigest(t));
+    }
+  });
+});

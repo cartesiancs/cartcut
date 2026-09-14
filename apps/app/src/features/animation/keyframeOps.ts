@@ -36,6 +36,7 @@ import { DEFAULT_REVEAL_PROGRESS, revealOf } from "../text/reveal";
 import { volumeDbOf } from "../timeline/audio";
 import { setVolumeDb } from "../timeline/audioOps";
 import { setClipMaskFields } from "../timeline/maskOps";
+import { scaleTenthsOf, setClipScale } from "../timeline/scaleOps";
 import { setClipTextRevealFields } from "../timeline/textRevealOps";
 import { isTrackLive } from "../timeline/keyframeMarkers";
 import { keyframeNavAt } from "./keyframeNav";
@@ -646,8 +647,11 @@ export function removeKeyframePaired(
  * The element's own static value for a property, used to seed a track.
  *
  * Scale is stored in tenths — `renderElement` divides by 10 — so an unscaled
- * element seeds at 10, not 1. That constant is otherwise only visible as a bare
- * `interpolate(10, ...)` in the renderer.
+ * element seeds at 10, not 1, and a clip at 150% seeds at 15. Reading it
+ * through `scaleTenthsOf` rather than off the field is what makes the second
+ * true: the field is optional, and seeding the neutral value on a clip the user
+ * had already scaled would snap the picture the instant the stopwatch was
+ * clicked, which is the one thing this function exists to prevent.
  *
  * The mask's five read through `maskOf` rather than off `element.mask`
  * directly, and that is not defensiveness for its own sake: this value is
@@ -674,7 +678,7 @@ function staticValueOf(
     case "rotation":
       return any.rotation ?? 0;
     case "scale":
-      return 10;
+      return scaleTenthsOf(element);
     // Pixels, straight off the box — `size` is the sidebar's two Size fields
     // animated, so seeding from anything else would move the clip the instant
     // the stopwatch was clicked. Unlike `scale` there is no unit conversion:
@@ -929,12 +933,13 @@ export function toggleKeyframe(
  * "the first thing the user does after enabling animation is not 'watch the
  * element jump'". Disabling it deserves the same.
  *
- * Mask and reveal go through their own ops rather than `setIn`, so the write
- * passes the validation `coerceMask` does — the read/write split those modules
- * are built around. `scale` is the one property with no static field at all
- * (an unscaled element is one whose scale track is off), so it declines; no
- * panel offers a scale diamond, so that branch is unreachable today and says so
- * rather than inventing a field.
+ * Mask, reveal and scale go through their own ops rather than `setIn`, so the
+ * write passes the validation `coerceMask` does: the read/write split those
+ * modules are built around. `scale` is there for a second reason as well:
+ * unscaled deletes the key rather than storing 10, and `setIn` has no way to
+ * remove one. Returning a clip to 100% by dragging its last keyframe off has to
+ * leave the same element a clip that was never scaled has, or the byte-identity
+ * `Visual.scale` claims is not true.
  */
 function withStaticValue(
   doc: TimelineDocument,
@@ -971,7 +976,7 @@ function withStaticValue(
     case "size":
       return put([lane === "x" ? "width" : "height"]);
     case "scale":
-      return doc;
+      return setClipScale(doc, elementId, value);
 
     case "maskPosition": {
       const at = maskOf(element)?.location ?? DEFAULT_MASK_LOCATION;

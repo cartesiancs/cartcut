@@ -563,6 +563,54 @@ describe("ungroup", () => {
     expectUnmoved(d, ungroup(d, "grp", 0), ["a"]);
   });
 
+  /**
+   * The assumption `Visual.scale` rests on: `reframe` folds the group's scale
+   * into the child's `width`/`height`, and the child's own static scale is a
+   * separate factor that multiplies the box. So adopting a group's transform
+   * needs no scale branch at all, and adding one would apply the group's
+   * magnification twice.
+   *
+   * Worth pinning rather than reasoning about, because nothing about the code
+   * says it out loud: `reframe` has no `scale` case, and an absent case reads
+   * the same whether it is deliberate or forgotten.
+   */
+  it("keeps a statically scaled child where it appeared", () => {
+    const scaled = keys([0, 20]); // the group at 2x
+    const d = doc({
+      grp: groupElement({
+        location: { x: 40, y: 10 },
+        width: 0,
+        height: 0,
+        animation: {
+          ...groupElement().animation,
+          scale: { isActivate: true, x: scaled, ax: bakeTrack(scaled) },
+        },
+      }),
+      a: imageElement({
+        parentId: "grp",
+        location: { x: 12, y: 8 },
+        width: 30,
+        height: 14,
+        scale: 15,
+      } as any),
+    });
+    expectUnmoved(d, ungroup(d, "grp", 0), ["a"]);
+  });
+
+  it("leaves a child's own scale field alone", () => {
+    const d = doc({
+      grp: groupElement({ location: { x: 0, y: 0 }, width: 100, height: 100 }),
+      a: imageElement({
+        parentId: "grp",
+        location: { x: 12, y: 8 },
+        width: 30,
+        height: 14,
+        scale: 15,
+      } as any),
+    });
+    expect((ungroup(d, "grp", 0).elements.a as any).scale).toBe(15);
+  });
+
   it("keeps a rotated group's children where they appeared", () => {
     const d = doc({
       grp: groupElement({

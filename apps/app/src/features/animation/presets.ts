@@ -11,10 +11,12 @@
  * Units differ per property and are easy to get wrong, which is most of the
  * reason to have presets at all:
  *
- *  - `opacity` is 0-100.
+ *  - `opacity` is 0-100, and absolute: `fade_in` ends at 100 whatever the clip
+ *    was at.
  *  - `scale` is **tenths** — 10 is unscaled, 12 is 120%. `transform.ts` divides
- *    the track value by 10.
- *  - `rotation` is degrees.
+ *    the track value by 10. Relative, and *multiplicatively* so: a stop of 12
+ *    on a clip already at 150% writes 18.
+ *  - `rotation` is degrees, and relative: added to the clip's own.
  *
  * ## Why there are more than four now
  *
@@ -35,6 +37,7 @@ import type { AnimatableProperty, TimelineElement } from "../../@types/timeline"
 import { animatableProperties } from "../../@types/timeline";
 import type { TimelineDocument } from "../timeline/tracks";
 import { spanLength, spanOf } from "../timeline/geometry";
+import { SCALE_NEUTRAL_TENTHS, scaleTenthsOf } from "../timeline/scaleOps";
 import { addKeyframe, setHandles, setTrackActive } from "./keyframeOps";
 import { BAKE_HZ } from "./keyframes";
 import { projectEasing, resolveEasing, type EasingName } from "./easing";
@@ -60,8 +63,15 @@ export type PresetName =
   | "slide_out_left"
   | "slide_out_right";
 
-/** Unscaled, in the tenths the scale track stores. */
-const SCALE_NEUTRAL = 10;
+/**
+ * Unscaled, in the tenths the scale track stores.
+ *
+ * The table's scale stops are *relative* to the clip's own scale, the way its
+ * position and rotation stops are relative to `location` and `rotation`. So
+ * these are ratios against this constant: a stop of 12 means "1.2 times
+ * whatever the clip is at", and on an unscaled clip that is 120% exactly.
+ */
+const SCALE_NEUTRAL = SCALE_NEUTRAL_TENTHS;
 const SCALE_ZOOMED = 12;
 
 /**
@@ -525,9 +535,16 @@ export type Focus = { x: number; y: number };
  * converges on the middle, so "punch in on the face" needs the clip pushed the
  * other way as it grows.
  *
- * Holding `p = F` still means `x_s = x_1 + (1 - s)·(F - c)`, and that is this
+ * Holding `p = F` still means `x_s = x_b + (b - s) * (F - c)`, and that is this
  * function. At `focus = {50, 50}` the term vanishes, so the centre costs
  * nothing and needs no special case.
+ *
+ * `b` is `baseTenths`, the scale the clip is *already* at, because `x_b` is the
+ * clip's current `location` and that is where it sits at its own scale rather
+ * than at 1. On an unscaled clip `b` is 1 and the expression is the plain
+ * `(1 - s)` it was written as; a clip the user has scaled to 150% would
+ * otherwise be counter-moved as though it were at 100% and the focus point
+ * would slide.
  *
  * Rotation is not accounted for. A rotated clip's focus would need the offset
  * turned through the same angle, and a preset that both rotates and zooms
@@ -538,15 +555,17 @@ export function focusOffset(
   scale: number,
   width: number,
   height: number,
+  baseTenths: number = SCALE_NEUTRAL,
 ): { x: number; y: number } {
   const s = scale / 10;
+  const b = baseTenths / 10;
   // `+ 0` normalises the negative zero a centred focus produces. It is the same
   // number, and it would be invisible in JSON — but it survives into stored
   // keyframe values, where an equality check later fails for a reason nobody
   // can see in the file.
   return {
-    x: (1 - s) * width * (focus.x / 100 - 0.5) + 0,
-    y: (1 - s) * height * (focus.y / 100 - 0.5) + 0,
+    x: (b - s) * width * (focus.x / 100 - 0.5) + 0,
+    y: (b - s) * height * (focus.y / 100 - 0.5) + 0,
   };
 }
 
@@ -745,11 +764,24 @@ export function applyPreset(
   }
 
   if (shape.scale) {
+    // Relative to the clip's own scale, the way `rotation` below is relative to
+    // `element.rotation` and `position` to `element.location`. Multiplicative
+    // rather than additive, because that is what "twice as big" means: a `pop`
+    // reading 6, 11, 10 on a clip at 150% has to run 90%, 165%, 150% and not
+    // 110%, 160%, 150%. On an unscaled clip `base` is 10 and the stop is
+    // written through unchanged.
+    //
+    // Without this a preset would snap a scaled clip back to 100% on its first
+    // keyframe, which is the whole reason the stops could be absolute before
+    // `Visual.scale` existed: no clip could be at anything else.
+    const base = scaleTenthsOf(element);
+    const scaled = shape.scale.map((s) => (base * s.value) / SCALE_NEUTRAL);
+
     next = writeTrack(
       next,
       elementId,
       "scale",
-      [{ lane: "x", values: shape.scale.map((s) => s.value) }],
+      [{ lane: "x", values: scaled }],
       shape.scale.map((s) => timeOf(s, startAt, length)),
       shape.scale.map((s) => s.easing),
       bakeHz,
@@ -764,8 +796,11 @@ export function applyPreset(
       const baseX = element.location?.x ?? 0;
       const baseY = element.location?.y ?? 0;
 
-      const offsets = shape.scale.map((s) =>
-        focusOffset(options.focus as Focus, s.value, width, height),
+      // The scaled stops, not the table's: the counter-move has to answer the
+      // magnification actually written. `base` goes in as well, because the
+      // clip's `location` is where it sits at `base` rather than at 1.
+      const offsets = scaled.map((value) =>
+        focusOffset(options.focus as Focus, value, width, height, base),
       );
 
       next = writeTrack(

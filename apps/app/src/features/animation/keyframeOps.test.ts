@@ -261,6 +261,17 @@ describe("setTrackActive", () => {
     expect((next.elements.a as any).animation.scale.x[0].p).toEqual([0, 10]);
   });
 
+  it("seeds scale from the clip's own scale, not from neutral", () => {
+    // The whole point of seeding: the picture must not move when the stopwatch
+    // is clicked. A clip at 150% seeded at 10 would snap to 100% on its first
+    // keyframe, which is the defect this half of `Visual.scale` fixes.
+    const scaled = doc({
+      a: { ...inactive().elements.a, scale: 15 },
+    });
+    const next = setTrackActive(scaled, "a", "scale", true, { atMs: 250 });
+    expect((next.elements.a as any).animation.scale.x[0].p).toEqual([250, 15]);
+  });
+
   /**
    * A shape takes exactly the same path as an image now that its type carries
    * the four-track block. This is the gate, not the draw: `localMatrixOf` was
@@ -1328,5 +1339,62 @@ describe("an effect's intensity and parameter tracks", () => {
       const cleared = clearAnimation(armed, "a");
       expect(hasAnimation(cleared.elements.a)).toBe(false);
     });
+  });
+});
+
+/**
+ * The two halves of `scale`'s static field, which is the one property that had
+ * none until `Visual.scale` existed.
+ *
+ * Seeding is covered above beside the other four. This is the way out, and it
+ * is the half that was a live defect: `withStaticValue` declined for `scale`,
+ * so dragging the last keyframe off a clip the user had zoomed threw the value
+ * away and snapped the picture back to 100%.
+ */
+describe("scale's static field", () => {
+  const FPS = 30;
+
+  const scalable = (over: Record<string, any> = {}) =>
+    doc({ a: imageElement({ trackId: "v1", startTime: 0, ...over }) });
+
+  it("adopts the curve's last value on the way out", () => {
+    let next = setTrackActive(scalable(), "a", "scale", true, { atMs: 0 });
+    next = addKeyframe(next, "a", "scale", "x", 0, 17);
+    next = toggleKeyframe(next, "a", "scale", 0, FPS);
+
+    expect((next.elements.a as any).animation.scale.isActivate).toBe(false);
+    expect((next.elements.a as any).scale).toBe(17);
+  });
+
+  it("clamps on the way out, because it goes through the op", () => {
+    // A curve may overshoot between its keyframes and the authored shape is
+    // left alone; only what reaches the document is bounded. A negative scale
+    // mirrors rather than shrinks, so zero is the floor.
+    let next = setTrackActive(scalable(), "a", "scale", true, { atMs: 0 });
+    next = addKeyframe(next, "a", "scale", "x", 0, -5);
+    next = toggleKeyframe(next, "a", "scale", 0, FPS);
+
+    expect((next.elements.a as any).scale).toBe(0);
+  });
+
+  it("deletes the key when the curve ends unscaled", () => {
+    // Not `scale: 10`. A clip keyed and then unkeyed back to 100% has to save
+    // the way one that was never keyed does, which is the whole reason the
+    // field is optional.
+    const before = scalable();
+    let next = setTrackActive(before, "a", "scale", true, { atMs: 0 });
+    next = addKeyframe(next, "a", "scale", "x", 0, 10);
+    next = toggleKeyframe(next, "a", "scale", 0, FPS);
+
+    expect("scale" in (next.elements.a as any)).toBe(false);
+  });
+
+  it("round-trips a scaled clip through arming and disarming", () => {
+    const before = scalable({ scale: 15 });
+    const armed = toggleKeyframe(before, "a", "scale", 0, FPS);
+    expect((armed.elements.a as any).animation.scale.x[0].p).toEqual([0, 15]);
+
+    const after = toggleKeyframe(armed, "a", "scale", 0, FPS);
+    expect((after.elements.a as any).scale).toBe(15);
   });
 });

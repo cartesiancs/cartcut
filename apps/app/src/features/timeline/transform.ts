@@ -23,6 +23,7 @@ import type { Timeline, TimelineElement } from "../../@types/timeline";
 import { sampleBaked } from "../animation/keyframes";
 import { toRadian } from "../math/geom";
 import { MAX_GROUP_DEPTH, parentOf } from "./hierarchy";
+import { scaleTenthsOf } from "./scaleOps";
 
 /**
  * A 2D affine transform, in the canvas `transform(a, b, c, d, e, f)` order:
@@ -199,10 +200,12 @@ const MIN_SAMPLED_SCALE = 0.001;
 /**
  * The element's own transform at `cursor`, before any parent is applied.
  *
- * `scale` seeds at 10 rather than 1 because there is no static scale field on
- * the element type — an unscaled element is one whose scale track is off, and
- * the track itself stores tenths. `keyframeOps.staticValueOf` encodes the same
- * constant for the same reason.
+ * `scale` falls back to `scaleTenthsOf` rather than to `element.scale` directly
+ * because the field is optional and absent means unscaled; the division by ten
+ * is here because the field and the track both store tenths.
+ * `keyframeOps.staticValueOf` reads through the same guard, and it has to: it
+ * is what a new track is seeded from, so a mismatch would make the clip jump
+ * the instant the stopwatch was clicked.
  */
 export function localSampleAt(
   element: TimelineElement | null | undefined,
@@ -230,7 +233,7 @@ export function localSampleAt(
     rotationDeg: track(any, "rotation", "ax", any.rotation ?? 0, cursor),
     scale: Math.max(
       MIN_SAMPLED_SCALE,
-      track(any, "scale", "ax", 10, cursor) / 10,
+      track(any, "scale", "ax", scaleTenthsOf(any), cursor) / 10,
     ),
     opacity: track(any, "opacity", "ax", any.opacity ?? 100, cursor),
     // Floored at zero rather than above it, which is the one way this differs
