@@ -12,6 +12,7 @@ import "../../features/preview/previewBottomBar";
 import "../../features/record/screenRecord";
 import "../../features/record/audioRecord";
 import "../../features/track/autoTrackPanel";
+import "../../features/window/windowHost";
 
 import "../../../../automatic-caption/src/automaticCaption";
 
@@ -32,6 +33,8 @@ import { clipsAcrossCuts } from "../../features/timeline/rippleMap";
 import { snapMsToFrame } from "../../features/timeline/frames";
 import { commit } from "../../features/agent/commit";
 import { LocaleController } from "../../controllers/locale";
+import { windowStore } from "../../features/window/windowStore";
+import type { WindowPanel } from "../../features/window/windowHost";
 
 @customElement("control-ui")
 export class Control extends LitElement {
@@ -227,6 +230,60 @@ export class Control extends LitElement {
     this.timelineState.setCursorType(type);
   }
 
+  /**
+   * What the preview column is able to dock beside itself.
+   *
+   * Declared here rather than in the window system because only this component
+   * can build the content and name it in the user's language. A panel listed
+   * here is not open: opening one is a write to `windowStore`, which is what
+   * `ControlUtilities` does.
+   */
+  private _windowPanels(): WindowPanel[] {
+    return [
+      {
+        id: "automaticCaption",
+        label: this.lc.t("window.automatic_caption") || "Automatic Caption",
+        icon: "subtitles",
+        content: html`<automatic-caption
+          .timeline=${this.timeline}
+          .previewSize=${this.previewSize}
+          .backgroundColor=${this.backgroundColor}
+          .isDev=${false}
+          @editComplate=${this._handleComplateAutoCaption}
+          @changeCursorType=${this._handleChangeCursorType}
+        ></automatic-caption>`,
+      },
+    ];
+  }
+
+  /**
+   * Finishing an edit puts the window away.
+   *
+   * Apply and the title bar's close both reach `closeEditor`, so both end with
+   * the preview holding the whole column again. Leaving the window open on the
+   * "Load video" screen after an Apply would read as the edit not having been
+   * taken.
+   */
+  private _handleCaptionEditorClose() {
+    windowStore.getState().close("automaticCaption");
+  }
+
+  /**
+   * Give the keyboard back when the caption window is closed from its title bar.
+   *
+   * The panel scopes its own `lockKeyboard` to focus and releases it on
+   * `focusout`, but closing the window unmounts the panel, and an event
+   * dispatched from a detached element reaches nobody. So the release is done
+   * here, where the element that is going away cannot be the one responsible
+   * for the last word about it.
+   */
+  private _handleWindowClose(event: CustomEvent) {
+    if (event.detail?.id !== "automaticCaption") {
+      return;
+    }
+    this.timelineState.setCursorType("pointer");
+  }
+
   render() {
     return html`
       <div
@@ -391,6 +448,18 @@ export class Control extends LitElement {
           @mousedown=${this._handleClickResizePreview}
         ></div>
 
+        <!--
+          The column is a window host. Everything that used to sit here
+          directly is its content, so the preview keeps the whole column until
+          something is docked beside it and gives up exactly that much when one
+          is. The rects come from features/window/windowLayout.ts.
+        -->
+        <window-host
+          .hostId=${"preview"}
+          .panels=${this._windowPanels()}
+          @captionEditorClose=${this._handleCaptionEditorClose}
+          @windowClose=${this._handleWindowClose}
+          .content=${html`
         <preview-top-bar></preview-top-bar>
 
         <!--
@@ -454,23 +523,8 @@ export class Control extends LitElement {
         >
           <auto-track-panel></auto-track-panel>
         </div>
-
-        <div
-          style="height: calc(100% - 2rem);"
-          class="position-relative d-flex align-items-center justify-content-center ${this
-            .nowActivePanel == "automaticCaption"
-            ? ""
-            : "d-none"}"
-        >
-          <automatic-caption
-            .timeline=${this.timeline}
-            .previewSize=${this.previewSize}
-            .backgroundColor=${this.backgroundColor}
-            .isDev=${false}
-            @editComplate=${this._handleComplateAutoCaption}
-            @changeCursorType=${this._handleChangeCursorType}
-          ></automatic-caption>
-        </div>
+          `}
+        ></window-host>
       </div>
 
       <!-- OPTION-->

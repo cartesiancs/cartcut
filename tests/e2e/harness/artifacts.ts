@@ -83,6 +83,141 @@ export function writePng(file: string, frame: FrameBuffer): void {
   fs.writeFileSync(file, encodePng(frame));
 }
 
+// ------------------------------------------------------------- PNG decoding
+
+/** Channels per pixel, by PNG colour type. */
+const CHANNELS: Record<number, number> = { 0: 1, 2: 3, 4: 2, 6: 4 };
+
+/**
+ * Minimal PNG reader, for `page.screenshot()`.
+ *
+ * The mirror of `encodePng` above, and hand-rolled for the reason its comment
+ * already gives: a PNG codec is zlib plus a CRC, and adding a package so a test
+ * can look at a screenshot is a poor trade. `node:zlib` does the only hard part.
+ *
+ * It exists because **`getBoundingClientRect()` cannot see clipping**. An
+ * element cut off by an ancestor's `overflow: hidden` reports exactly the rect
+ * it would have had, so a layout assertion passes while the thing is invisible.
+ * The only instrument that disagrees is the pixels, and until now the suite had
+ * no way to read a DOM screenshot back: `decode.ts` is ffmpeg and video,
+ * `reference.ts` goes through `getImageData` and so only works for a canvas.
+ *
+ * Deliberately narrow. Chromium writes 8-bit non-interlaced RGB or RGBA, so
+ * that is what this reads, and anything else throws by name rather than
+ * producing a plausible wrong picture. Palette and 16-bit would both need real
+ * work and neither can arrive here.
+ */
+export function decodePng(png: Buffer): FrameBuffer {
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  for (let i = 0; i < signature.length; i++) {
+    if (png[i] !== signature[i]) {
+      throw new Error("decodePng: not a PNG");
+    }
+  }
+
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colourType = 0;
+  const idat: Buffer[] = [];
+
+  let at = 8;
+  while (at + 8 <= png.length) {
+    const length = png.readUInt32BE(at);
+    const type = png.toString("ascii", at + 4, at + 8);
+    const body = png.subarray(at + 8, at + 8 + length);
+
+    if (type === "IHDR") {
+      width = body.readUInt32BE(0);
+      height = body.readUInt32BE(4);
+      bitDepth = body[8];
+      colourType = body[9];
+      if (body[12] !== 0) {
+        throw new Error("decodePng: interlaced PNGs are not supported");
+      }
+    } else if (type === "IDAT") {
+      idat.push(body);
+    } else if (type === "IEND") {
+      break;
+    }
+
+    // 4 length + 4 type + body + 4 CRC.
+    at += 12 + length;
+  }
+
+  if (bitDepth !== 8) {
+    throw new Error(`decodePng: bit depth ${bitDepth} is not supported, only 8`);
+  }
+  const channels = CHANNELS[colourType];
+  if (channels == null || colourType === 0 || colourType === 4) {
+    throw new Error(`decodePng: colour type ${colourType} is not supported, only 2 and 6`);
+  }
+
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = width * channels;
+  const out = Buffer.alloc(width * height * 4);
+  // The previous *unfiltered* scanline, which is what Up and Paeth refer to.
+  let previous = Buffer.alloc(stride);
+
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    const line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+    unfilter(line, previous, filter, channels);
+
+    for (let x = 0; x < width; x++) {
+      const from = x * channels;
+      const to = (y * width + x) * 4;
+      out[to] = line[from];
+      out[to + 1] = line[from + 1];
+      out[to + 2] = line[from + 2];
+      out[to + 3] = channels === 4 ? line[from + 3] : 255;
+    }
+
+    previous = line;
+  }
+
+  return { data: out, width, height };
+}
+
+/** Undo one scanline's filter, in place. Spec section 9.2. */
+function unfilter(line: Buffer, previous: Buffer, filter: number, bpp: number): void {
+  const left = (i: number) => (i >= bpp ? line[i - bpp] : 0);
+  const up = (i: number) => previous[i];
+  const upLeft = (i: number) => (i >= bpp ? previous[i - bpp] : 0);
+
+  for (let i = 0; i < line.length; i++) {
+    switch (filter) {
+      case 0:
+        break;
+      case 1:
+        line[i] = (line[i] + left(i)) & 0xff;
+        break;
+      case 2:
+        line[i] = (line[i] + up(i)) & 0xff;
+        break;
+      case 3:
+        line[i] = (line[i] + ((left(i) + up(i)) >> 1)) & 0xff;
+        break;
+      case 4:
+        line[i] = (line[i] + paeth(left(i), up(i), upLeft(i))) & 0xff;
+        break;
+      default:
+        throw new Error(`decodePng: unknown filter ${filter}`);
+    }
+  }
+}
+
+function paeth(a: number, b: number, c: number): number {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) {
+    return a;
+  }
+  return pb <= pc ? b : c;
+}
+
 // ---------------------------------------------------------------- heat map
 
 /**

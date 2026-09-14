@@ -1,4 +1,4 @@
-import { LitElement, html } from "lit";
+import { LitElement, html, nothing } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import { v4 as uuidv4 } from "uuid";
 import {
@@ -22,6 +22,8 @@ import {
   type CaptionKeyIntent,
 } from "../../app/src/features/caption/editor";
 import { captionRows } from "../../app/src/features/caption/rows";
+import { captionEditorLayout } from "../../app/src/features/caption/editorLayout";
+import { silenceButtonState } from "../../app/src/features/caption/silenceButton";
 import {
   DEFAULT_SILENCE_OPTIONS,
   silenceCuts,
@@ -65,7 +67,14 @@ export class AutomaticCaption extends LitElement {
   selectVideoModal: any;
   videoRows: any;
   hasUpdatedOnce: boolean;
-  panelVideoModal: any;
+  /**
+   * Whether the caption editor is showing.
+   *
+   * This was `panelVideoModal.show()` on a `modal-fullscreen`. It is a plain
+   * field now, because the editor is a region inside a window rather than a
+   * dialog over the app, and Bootstrap owned its visibility before.
+   */
+  isEditing: boolean;
   isPlay: boolean;
   /** The two animation-frame handles. See `caption/previewLoop.ts`. */
   private readonly _loop = new PreviewLoop(windowScheduler());
@@ -108,6 +117,19 @@ export class AutomaticCaption extends LitElement {
   /** What the template last showed, so a 60Hz loop does not re-render it. */
   private readonly _chrome = new ChromeGate();
 
+  /**
+   * The panel's own box, in px, and what decides the two-column layout.
+   *
+   * Measured rather than queried in CSS because `captionEditorLayout` has to
+   * answer with a number as well as a class: the preview canvas takes a pixel
+   * height cap, and a `@media` query could not supply one. It is the *panel's*
+   * width and not the viewport's, which is the only one that moves when the
+   * window's splitter does.
+   */
+  private _panelSize = { width: 0, height: 0 };
+
+  private _panelResizeObserver: ResizeObserver | null = null;
+
   /** Languages this Mac can transcribe, and whether it can at all. */
   locales: { id: string; name: string; installed: boolean }[];
   selectedLocale: string;
@@ -122,6 +144,7 @@ export class AutomaticCaption extends LitElement {
     super();
 
     this.isLoadVideo = false;
+    this.isEditing = false;
     this.videoPath = "";
     this.mediaType = "";
     this.lines = [];
@@ -191,7 +214,19 @@ export class AutomaticCaption extends LitElement {
     // full-resolution frame every 16ms against a canvas nobody could see.
     this._stopLoop();
     this.mediaElement()?.pause();
+    this._panelResizeObserver?.disconnect();
+    this._panelResizeObserver = null;
+
+    // All three of these are new obligations, and they are new because the
+    // panel can now be unmounted at all: as a tab pane it was built once and
+    // stayed in the DOM for the life of the app, so nothing it held had to be
+    // given back. Closing the window destroys it, and reopening builds a fresh
+    // one, so anything left behind accumulates once per open.
     this.analyzingVideoModal?.dispose();
+    this.selectVideoModal?.dispose?.();
+    // A transcription nobody is waiting for. `requestCancel` is a no-op with no
+    // job in flight, so this needs no guard of its own.
+    this._session?.requestCancel();
   }
 
   private _stopLoop() {
@@ -378,14 +413,107 @@ export class AutomaticCaption extends LitElement {
     this.lines = outcome.lines;
     this._undo = [];
 
-    // Close the progress dialog, *then* show the editor — two Bootstrap modals
-    // transitioning in one tick over shared `body.modal-open` state, which is
-    // the family of bug `TransientModal` exists for. Do not reorder, and do not
-    // await `updateComplete` in between: the first paint is deferred to the
-    // panel's own `shown.bs.modal`.
+    // The editor is a region rather than a second modal now, so the ordering
+    // hazard this used to carry is gone: there is no shared `body.modal-open`
+    // for two dialogs to fight over in one tick. The progress dialog still has
+    // to be closed, and `openEditor` still has to defer the first paint, but
+    // for the plainer reason that a canvas has no box until it is in the DOM.
     this.analyzingVideoModal?.close();
+    this.openEditor();
+  }
+
+  /**
+   * Show the caption editor.
+   *
+   * The first paint is deferred to the render after this one, because the
+   * canvas has no layout box until the editor region is in the DOM. As a modal
+   * that was hung off `shown.bs.modal`, and before that hook existed the
+   * preview stayed blank until the user pressed play, reset, or clicked a word.
+   */
+  openEditor() {
+    if (this.isEditing) {
+      return;
+    }
+    this.isEditing = true;
     this.requestUpdate();
-    this.panelVideoModal.show();
+
+    this.dispatchEvent(
+      new CustomEvent("captionEditorOpen", { bubbles: true, composed: true }),
+    );
+
+    void this.updateComplete
+      .then(() => {
+        this._measurePanel();
+        return fontsSettled();
+      })
+      .then(() => this.schedulePaint());
+  }
+
+  /**
+   * Put the editor away.
+   *
+   * The one way out, reached from the window's title bar close as well as from
+   * finishing an edit. It was two: `hidden.bs.modal` stopped the loop and the
+   * footer's own Close button reset `isLoadVideo`, so whichever one a user did
+   * not use left the other half undone.
+   */
+  closeEditor() {
+    if (!this.isEditing) {
+      return;
+    }
+    this.isEditing = false;
+    this.isLoadVideo = false;
+    this.isPlay = false;
+    this.mediaElement()?.pause();
+    this._stopLoop();
+    this.analyzingVideoModal?.close();
+    this.applyCursorEvent("pointer");
+    this.requestUpdate();
+
+    this.dispatchEvent(
+      new CustomEvent("captionEditorClose", { bubbles: true, composed: true }),
+    );
+  }
+
+  /**
+   * Take the editor's keyboard while the caret is inside it, and give it back
+   * when it leaves.
+   *
+   * The panel used to lock the editor's keyboard for as long as it was open,
+   * which was right while it was a modal covering the app and is wrong now: the
+   * window sits beside the preview and the user is expected to go on cutting on
+   * the timeline with it open. Backspace and Delete mean the caption text while
+   * the caret is in a caption field, and mean the selected clip everywhere else.
+   */
+  private _handlePanelFocusIn() {
+    if (this.isEditing) {
+      this.applyCursorEvent("lockKeyboard");
+    }
+  }
+
+  private _handlePanelFocusOut(event: FocusEvent) {
+    // A move between two fields inside the panel is not a departure. Without
+    // this check, tabbing from one caption to the next gives the keyboard back
+    // to the timeline for a frame, and a Backspace landing in that gap deletes
+    // the clip instead of a character.
+    const next = event.relatedTarget as Node | null;
+    if (next != null && this.contains(next)) {
+      return;
+    }
+    this.applyCursorEvent("pointer");
+  }
+
+  private _measurePanel() {
+    const box = this.getBoundingClientRect();
+    if (box.width === this._panelSize.width && box.height === this._panelSize.height) {
+      return;
+    }
+    this._panelSize = { width: box.width, height: box.height };
+    this.requestUpdate();
+    // The canvas is a fixed backing store scaled by CSS, so a resize alone does
+    // not need new pixels. It does when the layout crosses the breakpoint and
+    // the canvas is handed a different height cap.
+    this.schedulePaint();
   }
 
   /** Give the keyboard back and close the progress modal. */
@@ -421,8 +549,8 @@ export class AutomaticCaption extends LitElement {
   }
 
   async handleClickSelectVideo() {
-    this.applyCursorEvent("lockKeyboard");
-
+    // No `lockKeyboard` here any more. The lock follows the caret instead, in
+    // `_handlePanelFocusIn`, because the editor no longer covers the app.
     this.selectVideoModal.hide();
     this.isLoadVideo = true;
     // `videoPath` is set by `handleRowSelection`, from the row's `localpath`.
@@ -441,10 +569,6 @@ export class AutomaticCaption extends LitElement {
   }
 
   handleClickComplate() {
-    this.applyCursorEvent("pointer");
-    this._stopLoop();
-    this.mediaElement()?.pause();
-    this.analyzingVideoModal?.close();
 
     // `captionRows` drops a line the user emptied, guarantees a positive
     // duration, and applies the same `captionStyle` the preview drew with — so
@@ -476,8 +600,9 @@ export class AutomaticCaption extends LitElement {
 
     this._silenceCuts = [];
     this._silenceError = null;
-    this.isLoadVideo = false;
-    this.requestUpdate();
+    // Closing is the same path the title bar's close takes, so a finished edit
+    // and an abandoned one leave the panel in exactly one state.
+    this.closeEditor();
   }
 
   /**
@@ -508,22 +633,13 @@ export class AutomaticCaption extends LitElement {
         analyzing!,
       );
 
-      const panel = document.getElementById("VideoPanel");
-      this.panelVideoModal = new bootstrap.Modal(panel, {
-        keyboard: false,
-      });
-
-      // The canvas has no layout box until the modal is shown, and nothing
-      // painted on open before — the preview stayed blank until the user
-      // pressed play, reset, or clicked a word.
-      panel?.addEventListener("shown.bs.modal", () => {
-        void fontsSettled().then(() => this.schedulePaint());
-      });
-      panel?.addEventListener("hidden.bs.modal", () => {
-        this.mediaElement()?.pause();
-        this._stopLoop();
-        this.isPlay = false;
-      });
+      // The editor's own size decides its layout, so the panel watches itself.
+      // As a `modal-fullscreen` it had exactly one width and needed none of
+      // this; docked beside the preview it is a few hundred pixels wide and
+      // both the column split and the canvas cap follow from the measurement.
+      this._panelResizeObserver = new ResizeObserver(() => this._measurePanel());
+      this._panelResizeObserver.observe(this);
+      this._measurePanel();
 
       // `renderer/text.ts` clears its wrap cache when a face lands, but a
       // cleared cache does not repaint a canvas. The first caption drawn is the
@@ -876,84 +992,6 @@ export class AutomaticCaption extends LitElement {
   }
 
   render() {
-    // The same pair `syncChrome` gates on, from the same function — these were
-    // two independent copies of the same three lines.
-    const { lineIndex: activeLine, wordIndex: activeWord } = activeAt(
-      this.lines,
-      this.progress,
-    );
-
-    const analyzedTextMap = this.lines.map(
-      (line, index) => html`<div
-        class="text-light caption ${line.removed === true ? "caption-cut" : ""}"
-      >
-        <div class="caption-ribbon">
-          ${line.words.map(
-            (word, wordIndex) => html`<span
-              @click=${() => this.clickCaptionText(word.start)}
-              class="${activeLine === index && activeWord === wordIndex
-                ? "caption-part active"
-                : "caption-part"}"
-              >${word.word}</span
-            >`,
-          )}
-        </div>
-
-        <div class="d-flex gap-1 mt-2 align-items-center">
-          <button
-            class="btn btn-sm btn-secondary caption-merge"
-            ?disabled=${index === 0 || line.removed === true}
-            title="Merge into the line above (Backspace at the start of the line)"
-            @click=${() => this.mergeLine(index)}
-          >
-            <span class="material-symbols-outlined icon-white">merge</span>
-          </button>
-          <button
-            class="btn btn-sm btn-secondary caption-merge"
-            title=${line.removed === true
-              ? "Keep this line, and its footage"
-              : "Delete this line and cut its footage out of the video"}
-            @click=${() =>
-              this.toggleLineRemoved(index, line.removed !== true)}
-          >
-            <span class="material-symbols-outlined icon-white"
-              >${line.removed === true ? "undo" : "content_cut"}</span
-            >
-          </button>
-          <input
-            @input=${(e: Event) => this._handleChangeInput(e, index)}
-            @keydown=${(e: KeyboardEvent) =>
-              this._handleCaptionKeydown(e, index)}
-            class="form-control bg-dark text-light"
-            type="text"
-            id="analyzedEditCaption_${index}"
-            ?disabled=${line.removed === true}
-            .value=${line.text}
-          />
-        </div>
-      </div>`,
-    );
-
-    // Said before the button is pressed, not discovered afterwards. A Complate
-    // that silently shortens the timeline is the version of this feature nobody
-    // could trust.
-    const pending = this.pendingCuts();
-    const pendingMs = pending.reduce(
-      (total, cut) => total + Math.max(0, cut.endMs - cut.startMs),
-      0,
-    );
-    const cutSummary =
-      this._silenceError != null
-        ? html`<div class="caption-summary text-warning">
-            ${this._silenceError}
-          </div>`
-        : pending.length === 0
-          ? ""
-          : html`<div class="caption-summary text-light">
-              ${pending.length} cut${pending.length === 1 ? "" : "s"},
-              ${(pendingMs / 1000).toFixed(1)}s removed when you finish.
-            </div>`;
-
     return html`
       <style>
         .caption {
@@ -1031,69 +1069,164 @@ export class AutomaticCaption extends LitElement {
           font-size: 1rem;
           vertical-align: middle;
         }
+        /* ---------------------------------------------- the window's shape */
+
+        /*
+         * The panel fills the window body and pins its own footer. The body
+         * above it is overflow:hidden, so the scrolling has to happen here:
+         * scrolling there instead would put Apply at the bottom of the caption
+         * list rather than at the bottom of the window, which is exactly the
+         * failure this panel had as a full-screen modal, where the footer sat
+         * below a transcript nobody could reach the end of.
+         */
+        .caption-panel {
+          display: flex;
+          flex-direction: column;
+          width: 100%;
+          height: 100%;
+          min-height: 0;
+        }
+
+        .caption-panel-body {
+          flex: 1 1 auto;
+          /* Without this a flex item refuses to shrink below its content and
+             the footer is pushed out of the window entirely. */
+          min-height: 0;
+          overflow-y: auto;
+          overflow-x: hidden;
+        }
+
+        .caption-panel-footer {
+          flex: 0 0 auto;
+          display: flex;
+          flex-direction: row;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 0.5rem;
+          padding: 0.5rem 0.75rem;
+          border-top: 1px solid #26262b;
+        }
+
+        /* Pushed left so it fills the bar rather than crowding the buttons.
+           It is the only text saying what the icon beside Apply just did. */
+        .caption-panel-footer .caption-summary {
+          margin-right: auto;
+          border: none;
+          background: transparent;
+          padding: 0;
+        }
+
+        .caption-silence {
+          display: flex;
+          align-items: center;
+          line-height: 1;
+          padding: 0.25rem 0.5rem;
+        }
+
+        .caption-silence .material-symbols-outlined {
+          font-size: 1.1rem;
+        }
+
+        .caption-spin {
+          animation: caption-spin 1s linear infinite;
+        }
+
+        @keyframes caption-spin {
+          to {
+            transform: rotate(360deg);
+          }
+        }
+
+        /* ------------------------------------------------ the two columns */
+
+        .caption-editor {
+          display: flex;
+          flex-direction: row;
+          align-items: flex-start;
+          gap: 1rem;
+          padding: 0.75rem;
+        }
+
+        .caption-editor-preview {
+          /* Sticky so the frame stays in view while the transcript scrolls
+             past it, which is the whole reason the two are side by side. */
+          position: sticky;
+          top: 0;
+          align-self: flex-start;
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+        }
+
+        .caption-editor-lines {
+          flex: 1 1 0;
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+        }
+
+        /*
+         * Stacked. The switch is decided by caption/editorLayout.ts and
+         * applied as this class, not by a media query: a media query answers
+         * about the screen, and the screen is the one measurement that does not
+         * change when the window's splitter moves.
+         */
+        .caption-editor.is-stacked {
+          flex-direction: column;
+        }
+
+        .caption-editor.is-stacked .caption-editor-preview {
+          position: static;
+          width: 100%;
+        }
+
+        .caption-editor-canvas {
+          display: block;
+          max-width: 100%;
+          /* width:auto and height:auto under both maxima is what stops a
+             vertical project being stretched. The height cap is an inline
+             style, from captionEditorLayout. */
+          width: auto;
+          height: auto;
+          background: #000;
+        }
+
+        .caption-setup {
+          display: flex;
+          flex-direction: column;
+          padding: 1rem;
+          justify-content: center;
+          align-items: center;
+          gap: 1rem;
+          min-height: 100%;
+        }
+
+        /* Nothing in the setup screen grows. Each row is its own height, and
+           capped so a wide window leaves a sentence-length control rather than
+           a text field the width of the region. */
+        .caption-setup > * {
+          flex: 0 0 auto;
+          width: 100%;
+          max-width: 22rem;
+        }
       </style>
+      <!--
+        focusin and focusout rather than a lock held for as long as the editor
+        is open. The editor is a window beside the preview now, not a modal over
+        it, so taking the timeline's keyboard for the whole session would stop
+        the user cutting with the transcript in front of them.
+      -->
       <div
-        class="d-flex"
-        style="flex-direction: column;
-    padding: 1rem;     justify-content: center;
-    align-items: center;
-    gap: 1rem;"
+        class="caption-panel"
+        @focusin=${this._handlePanelFocusIn}
+        @focusout=${this._handlePanelFocusOut}
       >
-        <div class="d-flex gap-2 col">
-          <button
-            @click=${() => this.setSttMethod("apple")}
-            ?disabled=${!this.speechAvailable}
-            class="btn btn-sm ${this.sttMethod == "apple"
-              ? "btn-primary"
-              : "btn-default"} text-light"
-          >
-            On-device
-          </button>
-          <button
-            @click=${() => this.setSttMethod("openai")}
-            class="btn btn-sm ${this.sttMethod == "openai"
-              ? "btn-primary"
-              : "btn-default"} text-light"
-          >
-            OpenAI
-          </button>
+        <div class="caption-panel-body">
+          ${this.isEditing ? this.renderEditor() : this.renderSetup()}
         </div>
-
-        ${this.speechAvailable
-          ? html``
-          : html`<span class="text-secondary" style="font-size: 0.75rem;"
-              >${this.speechReason}</span
-            >`}
-
-        <div class="input-group ${this.sttMethod == "apple" ? "" : "d-none"}">
-          <span class="input-group-text bg-dark text-light">Language</span>
-          <select
-            id="CartcutSttLocale"
-            class="form-select form-control bg-default bg-dark text-light"
-            @change=${(e) => {
-              this.selectedLocale = e.target.value;
-              this.requestUpdate();
-            }}
-          >
-            ${this.locales.map(
-              (locale) => html`<option
-                value=${locale.id}
-                ?selected=${locale.id === this.selectedLocale}
-              >
-                ${localeLabel(locale)}
-              </option>`,
-            )}
-          </select>
-        </div>
-
-        <button
-          class="btn btn-sm btn-default text-light mt-1 ${this.isLoadVideo
-            ? "d-none"
-            : ""}"
-          @click=${this.handleClickLoadVideo}
-        >
-          Load video
-        </button>
+        ${this.isEditing ? this.renderFooter() : nothing}
       </div>
 
       <div
@@ -1187,173 +1320,305 @@ export class AutomaticCaption extends LitElement {
           </div>
         </div>
       </div>
-
-      <div
-        class="modal fade"
-        id="VideoPanel"
-        data-bs-keyboard="false"
-        data-bs-backdrop="static"
-        tabindex="-1"
-      >
-        <div class="modal-dialog modal-dialog-dark modal-fullscreen">
-          <div class="modal-content modal-dark modal-darker">
-            <div class="modal-body">
-              <div class="d-flex gap-3 mt-4 align-items-start">
-                <div
-                  class="d-flex flex-column gap-2 caption-preview-column"
-                  style="position: sticky; top: 0; align-self: flex-start; flex: 0 0 42%; min-width: 0;"
-                >
-                  <canvas
-                    id="previewCanvasCaption"
-                    width=${this.previewSize.w}
-                    height=${this.previewSize.h}
-                    style="display: block; max-width: 100%; max-height: 55vh; width: auto; height: auto; background: #000;"
-                  ></canvas>
-
-                  <video
-                    class="d-none"
-                    id="captionPreviewVideo"
-                    src=${this.isDev ? "/test.MOV" : this.videoPath}
-                  ></video>
-
-                  <audio
-                    class="d-none"
-                    id="captionPreviewAudio"
-                    src=${this.videoPath}
-                  ></audio>
-
-                  <span class="text-light font-monospace"
-                    >${playheadLabel(this.progress, this.durationSec())}</span
-                  >
-
-                  <progress-bar
-                    percent="${playbackFraction(
-                      this.progress,
-                      this.durationSec(),
-                    ) * 100}"
-                  ></progress-bar>
-
-                  <div class="d-flex col gap-2">
-                    <button
-                      class=" btn btn-sm btn-secondary"
-                      @click=${this.resetVideo}
-                    >
-                      <span
-                        class="material-symbols-outlined icon-white icon-md"
-                      >
-                        restart_alt
-                      </span>
-                    </button>
-                    <button
-                      class="${this.isPlay
-                        ? "d-none"
-                        : ""} btn btn-sm btn-secondary"
-                      @click=${this.playVideo}
-                    >
-                      <span
-                        class="material-symbols-outlined icon-white icon-md"
-                      >
-                        play_circle
-                      </span>
-                    </button>
-
-                    <button
-                      class="${!this.isPlay
-                        ? "d-none"
-                        : ""}  btn btn-sm btn-danger"
-                      @click=${this.stopVideo}
-                    >
-                      <span
-                        class="material-symbols-outlined icon-white icon-md"
-                      >
-                        stop_circle
-                      </span>
-                    </button>
-                  </div>
-                  <div class="d-flex col gap-2">
-                    <button
-                      class="btn btn-sm ${this._verticalPlacement == "center"
-                        ? "btn-primary"
-                        : "btn-secondary"}"
-                      @click=${() =>
-                        this.handleClickAlignCaptionButton("center")}
-                    >
-                      align center
-                    </button>
-                    <button
-                      class="btn btn-sm ${this._verticalPlacement == "lowerThird"
-                        ? "btn-primary"
-                        : "btn-secondary"}"
-                      @click=${() =>
-                        this.handleClickAlignCaptionButton("lowerThird")}
-                    >
-                      align bottom
-                    </button>
-                  </div>
-
-                  ${this._analyzeApi() == null
-                    ? ""
-                    : html`<div class="d-flex col gap-2">
-                        <button
-                          class="btn btn-sm ${this._silenceCuts.length > 0
-                            ? "btn-primary"
-                            : "btn-secondary"}"
-                          ?disabled=${this._silenceBusy ||
-                          this.lines.length === 0}
-                          title="Find the gaps that are both silent and wordless, and cut them"
-                          @click=${() => void this.handleClickRemoveSilence()}
-                        >
-                          ${this._silenceBusy
-                            ? "finding silence…"
-                            : "remove silence"}
-                        </button>
-                        ${this._silenceCuts.length > 0
-                          ? html`<button
-                              class="btn btn-sm btn-secondary"
-                              @click=${() => this.clearSilenceCuts()}
-                            >
-                              clear
-                            </button>`
-                          : ""}
-                      </div>`}
-                  ${cutSummary}
-                </div>
-
-                <div style="flex: 1 1 0; min-width: 0;">
-                  <div class="d-flex flex-column gap-2">${analyzedTextMap}</div>
-                </div>
-              </div>
-            </div>
-            <div class="modal-footer modal-footer-dark ">
-              <div class="flex row gap-2">
-                <button
-                  type="button"
-                  class="col btn btn-sm btn-secondary btn-nowarp"
-                  data-bs-dismiss="modal"
-                  @click=${() => {
-                    this.isLoadVideo = false;
-                    this.analyzingVideoModal?.close();
-                    this.requestUpdate();
-                  }}
-                >
-                  Close
-                </button>
-                <button
-                  type="button"
-                  class="col btn btn-sm btn-primary btn-nowarp"
-                  data-bs-dismiss="modal"
-                  @click=${this.handleClickComplate}
-                >
-                  Complate Edit
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
     `;
   }
+
+  /** Pick a method, pick a language, pick a clip. What the window opens on. */
+  renderSetup() {
+    return html`<div class="caption-setup">
+        <!--
+          No Bootstrap col here. In a column flex, col is flex: 1 0 0%, so this
+          row grew to fill the whole panel and stretched both buttons the full
+          height of the window. Survivable in a full-screen modal that had more
+          height than content; obvious the moment the panel is docked.
+        -->
+        <div class="d-flex gap-2 justify-content-center">
+          <button
+            @click=${() => this.setSttMethod("apple")}
+            ?disabled=${!this.speechAvailable}
+            class="btn btn-sm ${this.sttMethod == "apple"
+              ? "btn-primary"
+              : "btn-default"} text-light"
+          >
+            On-device
+          </button>
+          <button
+            @click=${() => this.setSttMethod("openai")}
+            class="btn btn-sm ${this.sttMethod == "openai"
+              ? "btn-primary"
+              : "btn-default"} text-light"
+          >
+            OpenAI
+          </button>
+        </div>
+
+        ${this.speechAvailable
+          ? html``
+          : html`<span class="text-secondary" style="font-size: 0.75rem;"
+              >${this.speechReason}</span
+            >`}
+
+        <div class="input-group ${this.sttMethod == "apple" ? "" : "d-none"}">
+          <span class="input-group-text bg-dark text-light">Language</span>
+          <select
+            id="CartcutSttLocale"
+            class="form-select form-control bg-default bg-dark text-light"
+            @change=${(e) => {
+              this.selectedLocale = e.target.value;
+              this.requestUpdate();
+            }}
+          >
+            ${this.locales.map(
+              (locale) => html`<option
+                value=${locale.id}
+                ?selected=${locale.id === this.selectedLocale}
+              >
+                ${localeLabel(locale)}
+              </option>`,
+            )}
+          </select>
+        </div>
+
+        <button
+          class="btn btn-sm btn-default text-light mt-1 ${this.isLoadVideo
+            ? "d-none"
+            : ""}"
+          @click=${this.handleClickLoadVideo}
+        >
+          Load video
+        </button>
+    </div>`;
+  }
+
+  /**
+   * The transcript, and the frame it will be drawn on.
+   *
+   * The column split and the canvas height cap both come from
+   * `caption/editorLayout.ts`, which is a pure function with a suite. The panel
+   * only applies what it is told.
+   */
+  renderEditor() {
+    // The same pair `syncChrome` gates on, from the same function: these were
+    // two independent copies of the same three lines.
+    const { lineIndex: activeLine, wordIndex: activeWord } = activeAt(
+      this.lines,
+      this.progress,
+    );
+
+    const layout = captionEditorLayout(this._panelSize);
+
+    const analyzedTextMap = this.lines.map(
+      (line, index) => html`<div
+        class="text-light caption ${line.removed === true ? "caption-cut" : ""}"
+      >
+        <div class="caption-ribbon">
+          ${line.words.map(
+            (word, wordIndex) => html`<span
+              @click=${() => this.clickCaptionText(word.start)}
+              class="${activeLine === index && activeWord === wordIndex
+                ? "caption-part active"
+                : "caption-part"}"
+              >${word.word}</span
+            >`,
+          )}
+        </div>
+
+        <div class="d-flex gap-1 mt-2 align-items-center">
+          <button
+            class="btn btn-sm btn-secondary caption-merge"
+            ?disabled=${index === 0 || line.removed === true}
+            title="Merge into the line above (Backspace at the start of the line)"
+            @click=${() => this.mergeLine(index)}
+          >
+            <span class="material-symbols-outlined icon-white">merge</span>
+          </button>
+          <button
+            class="btn btn-sm btn-secondary caption-merge"
+            title=${line.removed === true
+              ? "Keep this line, and its footage"
+              : "Delete this line and cut its footage out of the video"}
+            @click=${() => this.toggleLineRemoved(index, line.removed !== true)}
+          >
+            <span class="material-symbols-outlined icon-white"
+              >${line.removed === true ? "undo" : "content_cut"}</span
+            >
+          </button>
+          <input
+            @input=${(e: Event) => this._handleChangeInput(e, index)}
+            @keydown=${(e: KeyboardEvent) => this._handleCaptionKeydown(e, index)}
+            class="form-control bg-dark text-light"
+            type="text"
+            id="analyzedEditCaption_${index}"
+            ?disabled=${line.removed === true}
+            .value=${line.text}
+          />
+        </div>
+      </div>`,
+    );
+
+    return html`
+      <div
+        class="caption-editor ${layout.columns === "one" ? "is-stacked" : ""}"
+      >
+        <div
+          class="caption-editor-preview"
+          style=${layout.columns === "two"
+            ? `flex: 0 0 ${Math.round(layout.previewShare * 100)}%;`
+            : "flex: 0 0 auto;"}
+        >
+          <canvas
+            id="previewCanvasCaption"
+            class="caption-editor-canvas"
+            width=${this.previewSize.w}
+            height=${this.previewSize.h}
+            style="max-height: ${layout.canvasMaxHeightPx}px;"
+          ></canvas>
+
+          <video
+            class="d-none"
+            id="captionPreviewVideo"
+            src=${this.isDev ? "/test.MOV" : this.videoPath}
+          ></video>
+
+          <audio
+            class="d-none"
+            id="captionPreviewAudio"
+            src=${this.videoPath}
+          ></audio>
+
+          <span class="text-light font-monospace"
+            >${playheadLabel(this.progress, this.durationSec())}</span
+          >
+
+          <progress-bar
+            percent="${playbackFraction(this.progress, this.durationSec()) * 100}"
+          ></progress-bar>
+
+          <!--
+            Two flex rows, not Bootstrap's col. A grid class has no business on
+            a flex child outside a .row, which is
+            the same trap the panel's two columns were in before this.
+          -->
+          <div class="d-flex gap-2 flex-wrap">
+            <button class="btn btn-sm btn-secondary" @click=${this.resetVideo}>
+              <span class="material-symbols-outlined icon-white icon-md">
+                restart_alt
+              </span>
+            </button>
+            <button
+              class="${this.isPlay ? "d-none" : ""} btn btn-sm btn-secondary"
+              @click=${this.playVideo}
+            >
+              <span class="material-symbols-outlined icon-white icon-md">
+                play_circle
+              </span>
+            </button>
+            <button
+              class="${!this.isPlay ? "d-none" : ""} btn btn-sm btn-danger"
+              @click=${this.stopVideo}
+            >
+              <span class="material-symbols-outlined icon-white icon-md">
+                stop_circle
+              </span>
+            </button>
+          </div>
+
+          <div class="d-flex gap-2 flex-wrap">
+            <button
+              class="btn btn-sm ${this._verticalPlacement == "center"
+                ? "btn-primary"
+                : "btn-secondary"}"
+              @click=${() => this.handleClickAlignCaptionButton("center")}
+            >
+              align center
+            </button>
+            <button
+              class="btn btn-sm ${this._verticalPlacement == "lowerThird"
+                ? "btn-primary"
+                : "btn-secondary"}"
+              @click=${() => this.handleClickAlignCaptionButton("lowerThird")}
+            >
+              align bottom
+            </button>
+          </div>
+        </div>
+
+        <div class="caption-editor-lines">${analyzedTextMap}</div>
+      </div>
+    `;
+  }
+
+  /**
+   * What the edit will cost, and the two buttons that act on it.
+   *
+   * Said before Apply is pressed rather than discovered afterwards. An Apply
+   * that silently shortens the timeline is the version of this feature nobody
+   * could trust.
+   *
+   * There is no Close button. The window's title bar carries the only one, so
+   * there is one way out and it cannot get out of step with the other.
+   */
+  renderFooter() {
+    const pending = this.pendingCuts();
+    const pendingMs = pending.reduce(
+      (total, cut) => total + Math.max(0, cut.endMs - cut.startMs),
+      0,
+    );
+
+    // The sweep is an icon and nothing else, so everything it means has to come
+    // out of `caption/silenceButton.ts`, where a test can see it.
+    const silence = silenceButtonState({
+      available: this._analyzeApi() != null,
+      busy: this._silenceBusy,
+      cutCount: this._silenceCuts.length,
+      lineCount: this.lines.length,
+    });
+
+    return html`
+      <div class="caption-panel-footer">
+        ${this._silenceError != null
+          ? html`<span class="caption-summary text-warning"
+              >${this._silenceError}</span
+            >`
+          : pending.length === 0
+            ? nothing
+            : html`<span class="caption-summary text-light">
+                ${pending.length} cut${pending.length === 1 ? "" : "s"},
+                ${(pendingMs / 1000).toFixed(1)}s removed when you finish.
+              </span>`}
+
+        ${silence == null
+          ? nothing
+          : html`<button
+              type="button"
+              class="btn btn-sm btn-${silence.variant} caption-silence"
+              ?disabled=${silence.disabled}
+              title=${silence.label}
+              aria-label=${silence.label}
+              @click=${() =>
+                silence.action === "clear"
+                  ? this.clearSilenceCuts()
+                  : void this.handleClickRemoveSilence()}
+            >
+              <span
+                class="material-symbols-outlined icon-white ${silence.busy
+                  ? "caption-spin"
+                  : ""}"
+                >${silence.icon}</span
+              >
+            </button>`}
+
+        <button
+          type="button"
+          class="btn btn-sm btn-primary caption-apply"
+          @click=${this.handleClickComplate}
+        >
+          Apply
+        </button>
+      </div>
+    `;
+  }
+
 
   renderRows() {
     if (!Array.isArray(this.videoRows)) {

@@ -93,5 +93,8 @@
     "reset": "초기화",
     "reset_all": "전체 초기화",
     "reset_hint": "이름을 더블클릭하면 값이 초기화됩니다."
+  },
+  "window": {
+    "automatic_caption": "자동 자막"
   }
 }

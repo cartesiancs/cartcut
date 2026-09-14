@@ -1,0 +1,129 @@
+@import "../var";
+
+// The docking window system. See `features/window/windowLayout.ts` for the
+// arithmetic these rules only have to draw.
+//
+// Geometry is never in here. Every rect comes from `layoutHost` and is written
+// as an inline `style` by the component, so there is exactly one place a size
+// is decided and a stylesheet cannot disagree with a test.
+
+.window-host {
+  // `display: block` is load-bearing, not tidiness. A custom element with no
+  // styles is `display: inline`, where `width` and `height` do nothing at all,
+  // so without this the host measures 0x0, every rect below it is 0x0, and the
+  // preview canvas comes up 1x1 with no error anywhere. Same trap
+  // `autoTrackPanel.connectedCallback` documents, and it was paid for twice.
+  display: block;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  // The host is the clip boundary on purpose. `#split_col_2` already clips on
+  // both axes, so anything that escaped here would be cut off by an ancestor
+  // instead, with no border left to show where it went.
+  overflow: hidden;
+}
+
+.window-host-content {
+  position: absolute;
+  overflow: hidden;
+}
+
+.app-window {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  // Read by `caption-window.spec.ts` rather than hardcoded there, so the pixel
+  // check cannot drift from the design it is checking.
+  --app-window-border: #{$background-border-color};
+  background-color: #111315;
+  // Square, not rounded: a docked window meets its splitter edge to edge, and a
+  // radius there leaves four notches of the region showing through.
+  border: 1px solid var(--app-window-border);
+  overflow: hidden;
+}
+
+.app-window-titlebar {
+  flex: 0 0 auto;
+  height: 2rem;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.35rem;
+  border-bottom: 1px solid var(--app-window-border);
+  // A title bar is a handle, and a handle that selects its own text on a
+  // double click reads as broken.
+  user-select: none;
+}
+
+.app-window-title {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 12px;
+  font-weight: bolder;
+  white-space: nowrap;
+  // Ellipsis rather than wrap: the bar is exactly 2rem and a wrapped title
+  // would push the close button out of the window it belongs to.
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-window-close {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: #adb5bd;
+  padding: 0.1rem;
+  cursor: pointer;
+}
+
+.app-window-close:hover {
+  color: #ffffff;
+}
+
+.app-window-body {
+  flex: 1 1 auto;
+  // Without this a flex item refuses to shrink below its content, and a long
+  // caption list pushes the window's own bottom border off the host.
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  // The panel inside scrolls its own middle and pins its own footer, which is
+  // what `autoTrackPanel` already does. Naming the container lets that panel
+  // ask how wide *the window* is without a viewport media query, which would
+  // answer about the screen and be wrong in every docked position.
+  container: appwindow / inline-size;
+}
+
+// A custom element with no styles is `display: inline` and collapses to its
+// content, which is the trap `autoTrackPanel.connectedCallback` documents.
+// Giving every direct child a box here means a panel dropped into a window
+// does not have to know it was.
+.app-window-body > * {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.window-splitter {
+  position: absolute;
+  background-color: transparent;
+  z-index: 10;
+}
+
+.window-splitter.is-vertical {
+  cursor: col-resize;
+}
+
+.window-splitter.is-horizontal {
+  cursor: row-resize;
+}
+
+.window-splitter:hover,
+.window-splitter.is-dragging {
+  background-color: #{$background-border-color};
+}

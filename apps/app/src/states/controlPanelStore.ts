@@ -1,12 +1,18 @@
 import { createStore } from "zustand/vanilla";
 
-type ActiveStringType =
-  | "record"
-  | ""
-  | "audioRecord"
-  | "automaticCaption"
-  | "proxy"
-  | "autoTrack";
+/**
+ * The panels that take the whole preview area, as tabs.
+ *
+ * `automaticCaption` used to be one and is a docked window now
+ * (`features/window/`), so it is deliberately absent: captioning is work you do
+ * while watching the footage, and a tab that replaces the preview cannot be.
+ *
+ * The other four stay here on purpose rather than by oversight. The window
+ * system can hold any of them, but each needs its own pass at surviving a few
+ * hundred pixels of width, and none of them has had it. Two mechanisms is the
+ * intended state until they do.
+ */
+type ActiveStringType = "record" | "" | "audioRecord" | "proxy" | "autoTrack";
 
 export interface IControlPanelStore {
   /** Panels with a tab in the preview top bar, in the order they were opened. */

@@ -1062,6 +1062,131 @@ and two copies of "where does a caption break" is two answers to the one
 judgement in that file. `segmentWords` is now `groupWords(...).map(toSegment)`
 and its suite did not change.
 
+## The window system
+
+A region of the editor that can hold panels **docked beside its own content**,
+with a draggable splitter between them. The preview column is the first host and
+the auto-caption editor is the first window; the module is deliberately not
+about either.
+
+```
+apps/app/src/features/window/windowLayout.ts   the rects. "Not clipped" is defined here
+apps/app/src/features/window/windowDrag.ts     pointer delta -> a new placement
+apps/app/src/features/window/windowOps.ts      open / close / focus / place, pure
+apps/app/src/features/window/windowStore.ts    the vanilla zustand over those
+apps/app/src/features/window/windowHost.ts     <window-host>: measures, lays out, owns the splitter
+apps/app/src/features/window/appWindow.ts      <app-window>: title bar, close, body
+apps/app/src/sass/style/_window.scss           every .window-* rule
+```
+
+### The precedence that decides every clamp
+
+Three claims compete for one axis, and they are ranked:
+
+> **host > window min > content min**
+
+The host always wins. A rect outside it is not smaller than somebody wanted, it
+is *invisible*: `#split_col_2` carries `overflow: hidden` on both axes, so a
+window that overruns is silently cut off rather than scrolled to. A window
+pinned under its own minimum looks cramped; one past the host's edge looks
+broken, and looks broken in a way **no `getBoundingClientRect` check can see**.
+`uiStore`'s own `clamp` makes the same choice one level up, where it writes
+`Math.max(min, max)`.
+
+Below the host, the window's minimum beats the content's, because a window
+shrunk past its minimum has controls stacked on top of each other while the
+content region is usually a canvas that simply gets smaller.
+
+`layoutHost` carves the free rect one window at a time in `z` order, and every
+rect it returns is inside `{0, 0, host.width, host.height}`. That single
+sentence is the contract, and `windowLayout.test.ts` asserts it over a sweep of
+2,000-odd host sizes and placements rather than over chosen cases, because the
+ways to leave a host are arithmetic accidents and not scenarios anyone sits down
+and writes.
+
+### Docked is a percentage, floating is pixels
+
+A docked window's share has to survive the host changing size: dragging the main
+preview splitter must not make the caption window a different fraction of what
+is left. That is why `uiStore` holds its three columns as percentages too.
+
+A floating window is the opposite. It was put somewhere, and somewhere is an
+absolute position; re-deriving it from a fraction would make the window crawl
+across the region every time a splitter moved on the other side of the app.
+
+**Floating is in the model and not in the chrome.** `WindowPlacement`,
+`layoutHost`, `clampRect`, `resolveWindowDrag` and `windowOps` all handle it and
+all have suites for it; there is no title-bar drag, no eight resize handles and
+no stacking UI, because nothing needs one yet. The generality that was worth
+paying for up front is the one that would otherwise mean re-designing a type.
+
+### Content arrives as a template, not through a slot
+
+A light-DOM Lit component's `render()` **replaces its children**, so the usual
+way to wrap arbitrary content is a shadow root with a `<slot>`. This app does
+not do that, and the reason is written at `option/controlAudioVolume.ts`: the
+global stylesheet does not cross a shadow boundary, so chrome rendered into a
+shadow root comes out unstyled and fails in a way that looks like a CSS problem.
+70 of the 70 components that override `createRenderRoot` return `this`.
+
+So `<window-host>` takes `.content` and `.panels`, both carrying Lit
+`TemplateResult`s. It is the light-DOM equivalent of a slot: Lit keeps the
+element instances inside stable across re-renders, so the `<automatic-caption>`
+in a window is built once. A panel listed in `.panels` but not open in the store
+draws nothing, which is what makes opening a window a store write and never a
+change to a template.
+
+### Five things that are easy to get wrong
+
+- **`display: block` on the host is load-bearing.** A custom element with no
+  styles is `display: inline`, where `width` and `height` do nothing, so without
+  it `<window-host>` measures 0x0, every rect under it is 0x0, and the preview
+  canvas comes up 1x1 with no error anywhere. The same trap
+  `autoTrackPanel.connectedCallback` documents, and it was paid for twice.
+- **The measured host size is rounded to whole pixels.** A percentage-width
+  column has a fractional box (measured: 500.515625 tall) and every derived rect
+  inherits the fraction, which draws a 1px border as two half-intensity rows.
+- **The splitter's arithmetic is not in the component.** `resolveWindowDrag`
+  owns it, and it clamps through the same `fitSpan` the layout uses. Two copies
+  would disagree at exactly the edges, where a splitter spends most of its life:
+  the drag would keep reporting a change while the layout answered the same
+  number, so a splitter held against its limit would write to the store once per
+  mouse move forever.
+- **A declining action returns `state` itself.** zustand skips the notification
+  only when the updater returns the same object, so `return {}` would wake every
+  subscriber for a write that changed nothing.
+- **`element-control` is told about a resize with `?.`,** unlike `Control` and
+  `Timeline` which call `resizeEvent()` outright. It is only mounted while the
+  preview tab is the one on screen, so in a docking world it can be absent.
+  `preview-canvas` needs nothing; it observes its own canvas.
+
+### What is a window and what is still a tab
+
+Only the auto-caption panel. Record, Audio Record, Proxy and Auto Track are
+still `controlPanelStore` tabs that take the whole preview area. The window
+system can hold any of them, but each needs its own pass at surviving a few
+hundred pixels of width and none has had it. Two mechanisms is the intended
+state until they do, and `controlPanelStore` says so at the top.
+
+### How it is known to be right
+
+The four pure suites cover the geometry, the gesture and the state. What they
+cannot see is whether any of those numbers reach the screen, and that is the
+whole risk here: **`getBoundingClientRect()` reports the rect an element would
+have had even when an ancestor's `overflow: hidden` has cut it off**, so a
+window nobody can see passes every layout assertion.
+
+`tests/e2e/specs/caption-window.spec.ts` is the half that looks. It drives the
+real tile, measures containment at three column widths and after resizing the
+app, drags the splitter to both of its limits, and then **reads the pixels**:
+the window's own 1px chrome border has to be present along all four of its
+edges in a screenshot, which requires `decodePng` in `harness/artifacts.ts`, the
+mirror of the `encodePng` that was already there. Two controls keep it honest. A
+rect 12px inside the window, where there is no border, must come back under
+half, and the spec was verified against a deliberate break: `clip-path` on the
+host cuts the paint without moving a single rect, every containment assertion
+goes on passing, and the border check fails on the right edge alone.
+
 ## The auto-caption panel
 
 `apps/automatic-caption/` is not a separate build despite having its own
@@ -1084,10 +1209,61 @@ apps/app/src/features/caption/rows.ts     the `editComplate` payload
 apps/app/src/features/caption/editor.ts   the keymap AND the undo stack
 apps/app/src/features/caption/preview.ts  the canvas paint
 apps/app/src/features/caption/previewLoop.ts  the two rAF handles, the 60Hz gate
+apps/app/src/features/caption/editorLayout.ts  two columns or one, and the canvas cap
+apps/app/src/features/caption/silenceButton.ts what the icon-only sweep button means
 apps/app/src/features/caption/transcribeSession.ts  the job, over a port
 apps/app/src/features/caption/timing.ts   source ms -> timeline ms
 apps/app/src/features/media/seek.ts       seek, and know when the frame arrived
 ```
+
+### It is a window now, not a full-screen modal
+
+The editor opened as a `modal-fullscreen` (`#VideoPanel`) until it was moved into
+a docked window. See "The window system" above for the container. What that
+changed about the panel itself:
+
+- **Its visibility is a field, not Bootstrap.** `isEditing` gates the editor
+  region, `openEditor` and `closeEditor` are the two transitions, and they tell
+  `Control` by event because `apps/automatic-caption/` resolves its packages from
+  its own `node_modules` and cannot reach zustand. The `shown.bs.modal` hook that
+  used to defer the first paint is now the deferral inside `openEditor`, for the
+  plainer reason that a canvas has no box until it is in the DOM.
+- **Closing is one path.** The footer's Close button is gone and the window's
+  title bar carries the only close, so an abandoned edit and a finished one leave
+  the panel in exactly one state. It was two, and whichever one a user did not
+  take left the other half undone.
+- **The keyboard lock follows the caret, not the session.** The panel used to
+  hold `lockKeyboard` for as long as it was open, which was right for a modal
+  covering the app and is wrong for a window beside the preview: the user is
+  meant to go on cutting on the timeline. `focusin` takes it and `focusout`
+  gives it back, and a move between two fields inside the panel is not a
+  departure. The release on close cannot come from the panel, because closing
+  unmounts it and an event from a detached element reaches nobody, so `Control`
+  does it.
+- **Unmounting is new, and so are the obligations.** As a tab pane the panel was
+  built once and lived for the life of the app. It is destroyed and rebuilt per
+  open now, so `disconnectedCallback` has to dispose both Bootstrap modals and
+  cancel a transcription nobody is waiting for. Anything left behind accumulates
+  once per open.
+- **It has more than one width.** `editorLayout.ts` decides two columns or one
+  and caps the preview canvas in pixels, from a `ResizeObserver` on the panel
+  rather than a media query: a media query answers about the screen, and the
+  screen is the one measurement that does not change when the splitter moves.
+
+### The footer
+
+`[silence] [Apply]`, right-aligned, with the pending-cut summary pushed left
+beside them. "Complate Edit" is "Apply"; the event is still `editComplate`,
+which is a contract with `Control`.
+
+The sweep is **one icon and nothing else**, which replaced a labelled "remove
+silence" button and a "clear" button that only existed some of the time and
+shifted Apply sideways when it appeared. Pressing it with a sweep already staged
+puts the gaps back, so one control covers both. Everything the words used to
+carry now has to come out of `silenceButton.ts`, where a test can see it: the
+glyph, the variant, whether it is disabled, and the `title` that doubles as the
+accessible name. There is no bridge behind it in the web build, and it renders
+nothing at all there rather than offering a control that can only fail.
 
 The keymap and the undo reducer share `editor.ts` deliberately — the keymap's
 output is the reducer's input, so the behaviour worth testing is the chain, which
@@ -1144,7 +1320,12 @@ Five things that are easy to get wrong:
   made. A split picks a cut *time* then partitions the words by it; a caret
   inside a word snaps to that word's edge rather than halving its second,
   because a caption boundary mid-word is a time nothing audible happens at.
-- **The two columns are explicit flex, not Bootstrap grid.** `.row` carries
+- **Bootstrap grid classes keep getting onto flex children, and they keep
+  costing a layout.** Twice now. The two columns are explicit flex, and so is
+  the method row on the setup screen: `col` is `flex: 1 0 0%`, so on a column
+  flex it grew to fill the panel and stretched On-device and OpenAI to the full
+  height of the window. Survivable in a modal with more height than content, and
+  obvious the moment the panel was docked. The original: `.row` carries
   negative gutters (`margin: 0 -12px`) and forces `width: 100%` on its children,
   and it was being used on a flex child purely to stack things vertically — so
   the preview column sat 12px outside its parent on each side and overlapped the

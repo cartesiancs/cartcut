@@ -1,4 +1,6 @@
 import { LitElement, html } from "lit";
+import { windowStore } from "../../features/window/windowStore";
+import { DEFAULT_DOCK_PCT } from "../../features/window/windowOps";
 import { customElement, property } from "lit/decorators.js";
 import { LocaleController } from "../../controllers/locale";
 import {
@@ -29,6 +31,27 @@ export class ControlText extends LitElement {
    */
   _handleClickPanel(name) {
     this.controlPanel.openPanel(name);
+  }
+
+  /**
+   * Open the caption editor as a window docked beside the preview.
+   *
+   * The other four tiles still call `openPanel`, which swaps the whole preview
+   * area for a tab. This one does not, because captioning is work you do while
+   * watching the footage, and the panel it replaces covered it.
+   *
+   * `windowStore.open` focuses an existing window rather than opening a second,
+   * so pressing the tile twice does what pressing a tab twice does.
+   */
+  _handleClickCaptionWindow() {
+    windowStore.getState().open({
+      id: "automaticCaption",
+      hostId: "preview",
+      placement: { mode: "docked", side: "right", sizePct: DEFAULT_DOCK_PCT },
+      // Under this the caption row's two icon buttons and its text input stop
+      // fitting on one line. `caption/editorLayout.ts` states the derivation.
+      minSize: { width: 320, height: 240 },
+    });
   }
 
   _handleClickOverlayRecord() {
@@ -117,7 +140,7 @@ export class ControlText extends LitElement {
 
         <div
           class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
-          @click=${() => this._handleClickPanel("automaticCaption")}
+          @click=${() => this._handleClickCaptionWindow()}
         >
           <span class="material-symbols-outlined icon-lg align-self-center">
             subtitles

@@ -93,5 +93,8 @@
     "reset": "Reset",
     "reset_all": "Reset all",
     "reset_hint": "Double-click a name to reset it."
+  },
+  "window": {
+    "automatic_caption": "Automatic Caption"
   }
 }

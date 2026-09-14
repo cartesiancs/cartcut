@@ -150,6 +150,7 @@ export { useTimelineStore } from "./states/timelineStore";
 export { renderOptionStore } from "./states/renderOptionStore";
 export { selectionStore } from "./states/selectionStore";
 export { previewViewportStore } from "./states/previewViewportStore";
+export { windowStore } from "./features/window/windowStore";
 export { proxyStore } from "./states/proxyStore";
 // How far along an export is, and whether one is running at all. `harness/
 // export.ts` reads this instead of scraping a progress dialog that no longer
