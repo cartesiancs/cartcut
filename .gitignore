@@ -3,7 +3,6 @@
 /bin/darwin-arm64
 /bin/darwin-x64
 /bin/win32-x64
-/bin/yt-dlp
 /main
 /temp
 /apps/app/dist

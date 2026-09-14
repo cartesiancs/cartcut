@@ -5,7 +5,6 @@ type ActiveStringType =
   | ""
   | "audioRecord"
   | "automaticCaption"
-  | "ytDownload"
   | "proxy"
   | "autoTrack";
 

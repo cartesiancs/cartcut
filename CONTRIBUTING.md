@@ -46,7 +46,6 @@ bin/
   darwin-arm64/{ffmpeg,ffprobe}       Apple Silicon
   darwin-x64/{ffmpeg,ffprobe}         Intel Mac
   win32-x64/{ffmpeg.exe,ffprobe.exe}
-  yt-dlp                              universal, at the root
 ```
 
 `electron/lib/ffmpeg.ts` picks the directory from `process.arch`, so only the

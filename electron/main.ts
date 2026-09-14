@@ -42,7 +42,6 @@ import { runServer } from "./webServer.js";
 import { ipcSelfhosted } from "./ipc/ipcSelfhosted.js";
 import { httpFFmpegRenderV2 } from "./server/controllers/render.js";
 import { ipcAi } from "./ipc/ipcAi.js";
-import { ipcYtdlp } from "./ipc/ipcYtdlp.js";
 import { attachBridge } from "./mcp/bridge.js";
 import { initAutosave, onAutosaveChange, setMenuOpen } from "./lib/autosave.js";
 import { installMenu } from "./lib/menu.js";
@@ -254,8 +253,6 @@ ipcMain.handle("ai:setKey", ipcAi.setKey);
 ipcMain.handle("ai:getKey", ipcAi.getKey);
 ipcMain.handle("ai:runMcpServer", ipcAi.runMcpServer);
 ipcMain.handle("agent:getStatus", ipcAi.mcpStatus);
-
-ipcMain.handle("ytdlp:downloadVideo", ipcYtdlp.downloadVideo);
 
 // `handle`, not `on`: `start` has to resolve after the spawn so frame 0 cannot
 // race it, and `sendFrame` resolves only once the pipe has room, which is what

@@ -171,18 +171,6 @@ export class ControlText extends LitElement {
           </span>
           <b class="align-self-center text-light text-center">Auto Track</b>
         </div>
-
-        <div
-          class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
-          @click=${() => this._handleClickPanel("ytDownload")}
-        >
-          <span class="material-symbols-outlined icon-lg align-self-center">
-            youtube_activity
-          </span>
-          <b class="align-self-center text-light text-center"
-            >Youtube Download</b
-          >
-        </div>
       </div>
     `;
   }

@@ -81,7 +81,6 @@ bin/
   darwin-arm64/{ffmpeg,ffprobe}     Apple Silicon
   darwin-x64/{ffmpeg,ffprobe}       Intel Mac
   win32-x64/{ffmpeg.exe,ffprobe.exe}
-  yt-dlp
 ```
 
 호환되는 바이너리는 아래에서 다운로드할 수 있습니다.

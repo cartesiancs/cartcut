@@ -57,14 +57,6 @@
         "filter": [
           "**/*"
         ]
-      },
-      {
-        "from": "./bin",
-        "to": "bin",
-        "filter": [
-          "yt-dlp",
-          "yt-dlp.exe"
-        ]
       }
     ],
     "protocols": {

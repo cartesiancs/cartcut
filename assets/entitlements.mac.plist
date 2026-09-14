@@ -14,8 +14,8 @@
     - cs.allow-jit: V8. Electron does not run under the hardened runtime
       without it.
     - cs.allow-unsigned-executable-memory and cs.disable-library-validation:
-      the bundled FFmpeg and yt-dlp binaries in `resources/bin`, which are
-      signed by us rather than by Apple and are spawned as separate processes.
+      the bundled FFmpeg binaries in `resources/bin`, which are signed by us
+      rather than by Apple and are spawned as separate processes.
 -->
 <plist version="1.0">
   <dict>

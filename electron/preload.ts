@@ -237,10 +237,6 @@ const request = {
     saveBufferToTempFile: (arrayBuffer, ext) =>
       ipcRenderer.invoke("stream:saveBufferToTempFile", arrayBuffer, ext),
   },
-  ytdlp: {
-    downloadVideo: (url, options) =>
-      ipcRenderer.invoke("ytdlp:downloadVideo", url, options),
-  },
   extension: {
     openDir: (dir) => ipcRenderer.invoke("extension:open:dir", dir),
     openFile: (file) => ipcRenderer.invoke("extension:open:file", file),
@@ -388,9 +384,6 @@ const response = {
       ipcRenderer.on("ffmpeg:extractAudioFromVideo:progress", callback),
     extractAudioFromVideoFinish: (callback) =>
       ipcRenderer.on("ffmpeg:extractAudioFromVideo:finish", callback),
-  },
-  ytdlp: {
-    finish: (callback) => ipcRenderer.on("ytdlp:finish", callback),
   },
   /**
    * The application menu, as one channel carrying a command id.

@@ -80,8 +80,7 @@ See "On-device speech-to-text".
 FFmpeg and ffprobe binaries live in `./bin/<platform>-<arch>/` — `darwin-arm64`,
 `darwin-x64`, `win32-x64` — and `electron/lib/ffmpeg.ts` picks the directory from
 `process.arch`. electron-builder flattens the matching one into `resources/bin`,
-so a packaged app sees them directly under `bin/`. `yt-dlp` sits at `bin/` root;
-it is already a universal binary. See the README.
+so a packaged app sees them directly under `bin/`. See the README.
 
 The macOS builds must be **native**. An x86_64 FFmpeg runs on Apple Silicon
 under Rosetta at roughly half speed and says nothing about it — measured through
@@ -997,7 +996,7 @@ app to Electron's ABI and an `electron-rebuild` step this repo has never needed 
 it has zero first-party native modules. Speech.framework also wants a Swift
 concurrency runtime and an async result stream, which is natural in a process
 and awkward across that boundary, and a framework crash cannot take the editor
-with it. Same shape as `ffmpeg`, `ffprobe` and `yt-dlp`.
+with it. Same shape as `ffmpeg` and `ffprobe`.
 
 **`"apple"`, never `"native"` and never folded into `"local"`.** The WhisperX
 server is *also* local, so the useful distinction is whose engine it is:

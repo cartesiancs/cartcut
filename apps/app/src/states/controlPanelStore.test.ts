@@ -47,11 +47,11 @@ describe("controlPanelStore", () => {
 
   it("leaves the focus alone when a background panel closes", () => {
     open("record");
-    open("ytDownload");
+    open("proxy");
     close("record");
 
-    expect(state().active).toEqual(["ytDownload"]);
-    expect(state().nowActive).toBe("ytDownload");
+    expect(state().active).toEqual(["proxy"]);
+    expect(state().nowActive).toBe("proxy");
   });
 
   it("ignores closing a panel that is not open", () => {
