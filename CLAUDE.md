@@ -4,62 +4,49 @@ An Electron video editor (`cartcut-app`, formerly "nugget"). Lit web components
 and vanilla zustand in the renderer, plain TypeScript in the main process,
 FFmpeg for export.
 
+This file is a map and a list of invariants. It is loaded into every session, so
+keep it short: record what a reader cannot get from the code in a minute, and
+nothing else. Design history, changelogs and "how we know it works" belong in
+commit messages and in the tests.
+
 ## Writing rules
 
-**Never use an em-dash (`—`) or a middle dot (`·`). Not in code
-comments, not in documentation, not in commit messages, not in UI strings, not
-in this file, not anywhere.** Both characters are strong markers of
-machine-written prose, and the comments here are meant to read as though a
-person wrote them down for the next person.
+**Never use an em-dash (`—`) or a middle dot (`·`).** Not in code comments, not
+in documentation, not in commit messages, not in UI strings, not here. Write
+what the dash was standing in for: a comma or brackets for an aside, a colon for
+a consequence, a semicolon or two sentences for two joined thoughts, `1 to 10`
+for a range, `a * b` for multiplication, a real list for a list. An en-dash
+(`–`) is fine in a numeric range and nowhere else; a hyphen is always fine.
 
-Write what you meant instead. An em-dash is always standing in for something
-with an actual meaning, so pick it:
-
-| Instead of | Write |
-| --- | --- |
-| an aside | a comma, or brackets |
-| a consequence, a restatement, an expansion | a colon |
-| two joined thoughts | a semicolon, or two sentences |
-| a range (`1—10`) | `1 to 10`, or an en-dash in a table |
-| multiplication (`a · b`) | `a * b`, or `a × b` |
-| a list bullet inside prose | a real list |
-
-An en-dash (`–`) is acceptable in a numeric range and nowhere else. A hyphen
-is a hyphen and is always fine. Naming either banned character inside backticks,
-as this section does, is the one exception; a grep for them should expect the
-handful of hits above and no others.
-
-Two related habits, for the same reason:
-
-- **No "It's not X, it's Y" constructions.** Say what it is.
-- **No rhetorical flourish where a fact belongs.** The comments here earn their
-  length by naming a specific failure that a specific line prevents. "This is
-  load-bearing" is worth writing only next to the thing it bears.
-
-The rest of this file predates the rule and still holds hundreds of em-dashes;
-they are being removed as files are touched. New and edited prose has no excuse.
+Two habits for the same reason: no "It's not X, it's Y" constructions, and no
+rhetorical flourish where a fact belongs. A comment earns its length by naming
+the specific failure the line below it prevents.
 
 ## Build layout: read this first
 
-`electron/` is **source**; `main/` is the **compiled output** of it, and
-`package.json` points `"main"` at `main/main.js`. Edit `electron/`, never
-`main/`.
+`electron/` is **source**; `main/` is its **compiled output**, and `package.json`
+points `"main"` at `main/main.js`. Edit `electron/`, never `main/`.
 
-`.tsconfig/tsconfig.json` pins `rootDir: ../electron` deliberately. If any file
-under `electron/` imports from `apps/app/src`, `rootDir` widens, the whole build
-relocates from `main/` to `main/electron/`, and the app stops finding its entry
-point. This is why the MCP tools talk to the renderer over IPC instead of
-calling the editing functions directly.
+**`electron/` may not import from `apps/app/src`.** `.tsconfig/tsconfig.json`
+pins `rootDir: ../electron`; one such import widens it, the build relocates from
+`main/` to `main/electron/`, and the app stops finding its entry point. This is
+why the MCP tools talk to the renderer over IPC instead of calling the editing
+functions directly, and why the recorder tray crosses the boundary as data.
 
-`apps/app` has no `package.json` — the root webpack config builds it. The three
-folders under `apps/` and `packages/` that *do* have one are standalone Vite
-apps with their own lockfiles; this is not an npm workspace.
+`apps/app` has no `package.json`; the root webpack config builds it. The folders
+under `apps/` and `packages/` that *do* have one are standalone Vite apps with
+their own lockfiles. This is not an npm workspace.
+
+FFmpeg and ffprobe live in `./bin/<platform>-<arch>/` (`darwin-arm64`,
+`darwin-x64`, `win32-x64`); `electron/lib/ffmpeg.ts` picks by `process.arch`.
+The macOS binaries must be **native**: an x86_64 ffmpeg runs under Rosetta at
+roughly half speed and says nothing. `lipo -archs bin/darwin-arm64/ffmpeg`.
 
 ## Commands
 
 ```
-npm run dev      # tsc --watch (main) + webpack --watch (renderer), concurrently
-npm run start    # electron .   — run in a second terminal
+npm run dev      # tsc --watch (main) + webpack --watch (renderer)
+npm run start    # electron .   (run in a second terminal)
 npm test         # vitest run
 npx tsc --noEmit -p ./.tsconfig    # typecheck the main process
 npx webpack --mode=development     # build the renderer once
@@ -67,26 +54,10 @@ npm run build:overlay              # the screen recorder's own Vite app
 npm run build:speech               # the native STT sidecar (Swift, macOS only)
 ```
 
-`npm run dev` does **not** build `apps/overlay-record`; it has its own lockfile
-and its own `tsc`. Build it after changing anything under it, or the recorder
-windows load a stale bundle. The release scripts do run it.
-
-It **does** build `native/cartcut-stt`, the Swift speech sidecar — that one is a
-staleness check and two `swiftc` calls, so it costs nothing after the first run,
-and a checkout with no binary would otherwise silently lose on-device
-transcription. It skips itself, loudly, on Windows or without the macOS 26 SDK.
-See "On-device speech-to-text".
-
-FFmpeg and ffprobe binaries live in `./bin/<platform>-<arch>/` — `darwin-arm64`,
-`darwin-x64`, `win32-x64` — and `electron/lib/ffmpeg.ts` picks the directory from
-`process.arch`. electron-builder flattens the matching one into `resources/bin`,
-so a packaged app sees them directly under `bin/`. See the README.
-
-The macOS builds must be **native**. An x86_64 FFmpeg runs on Apple Silicon
-under Rosetta at roughly half speed and says nothing about it — measured through
-the app's own pipeline at 1080p60, H.264 goes 112 → 240 fps and H.265 32 → 102
-fps just by being the right architecture. `lipo -archs bin/darwin-arm64/ffmpeg`
-is the check.
+`npm run dev` does **not** build `apps/overlay-record`; build it yourself after
+touching it or the recorder windows load a stale bundle. It does build
+`native/cartcut-stt` (a staleness check plus two `swiftc` calls) and skips
+itself loudly on Windows or without the macOS 26 SDK.
 
 ## How editing works
 
@@ -94,18 +65,19 @@ The most important convention in the codebase. Every edit is a **pure function
 `(TimelineDocument) => TimelineDocument`**, applied through
 `useTimelineStore.withCheckpoint(fn)`, which records one undo step.
 
-A pure op that declines an edit returns **its input, by identity**.
-`withCheckpoint` reads that as "nothing happened" and records no step. This is
-load-bearing: it is what makes a split off the end of a clip, or a drag into an
-occupied slot, cost the user nothing. Preserve it in any new op.
+**A pure op that declines returns its input, by identity.** `withCheckpoint`
+reads that as "nothing happened" and records no step, which is what makes a
+split off the end of a clip or a drag into an occupied slot cost the user
+nothing. Preserve it in any new op, and give every new op a co-located suite
+that covers the decline path as well as the happy one.
 
 ```
-apps/app/src/@types/timeline.ts          element shapes
-apps/app/src/features/timeline/tracks.ts TimelineDocument, tracks, z-order
+apps/app/src/@types/timeline.ts          element shapes, FILETYPES, animatable properties
+apps/app/src/features/timeline/tracks.ts     TimelineDocument, tracks, z-order
 apps/app/src/features/timeline/geometry.ts   trim/duration/speed invariants
 apps/app/src/features/timeline/clipOps.ts    split, trim, move, delete, removeRanges
 apps/app/src/features/timeline/placement.ts  where a new element lands
-apps/app/src/states/timelineStore.ts     the store, undo history
+apps/app/src/states/timelineStore.ts         the store, undo history
 ```
 
 Two things about time that are easy to get wrong:
@@ -113,2051 +85,73 @@ Two things about time that are easy to get wrong:
 - `trim` is a window into the **source file**, in source ms.
   `duration === trim.endTime - trim.startTime`.
 - The clip occupies `[startTime, startTime + duration/speed)` on the
-  **timeline**. Use `spanOf`/`spanLength`, and `timelineTimeAt`/`sourceTimeAt`
-  to convert between the two. Never open-code the arithmetic.
+  **timeline**. Use `spanOf`/`spanLength` and `timelineTimeAt`/`sourceTimeAt`;
+  never open-code the arithmetic.
 
-`priority` is derived from track order, never authored.
+`priority` is derived from track order, never authored. Layering is track order:
+index 0 is the top row and the front of the composite.
 
-## The project file
+## Conventions that repeat across every feature
 
-A `.ngt` is a zip of five JSON entries, written and read entirely in the
-renderer by `functions/project.ts`: `project.json` (`{ schemaVersion }`),
-`timeline.json` (the element map), `tracks.json`, `renderOptions.json`
-(`features/project/renderOptionsFile.ts`) and `assetPaths.json`
-(`features/project/assetsFile.ts`).
+Learn these five once and most of the codebase stops needing explanation.
 
-Load **refuses to open** on a `schemaVersion` mismatch — it is a compatibility
-check, not a migrator. So **a new field never moves the version**: absent means
-default, answered on the way in. Both file modules state this at the top.
+**A new feature is an optional field, and `SCHEMA_VERSION` does not move.**
+Project load *refuses* on a version mismatch; it is a compatibility check, not a
+migrator. So absent means default, answered on the way in, and setting a field
+back to its default **deletes the key** rather than storing it. A project nobody
+has used the feature on saves byte-identically to one written before it existed.
+`blend`, `lut`, `adjust`, `mask`, `reveal`, `geometry`, `reversed`, `mirror`,
+`replaceable` and the conditional keyframe tracks all follow this.
 
-Media is referenced by absolute path, *and* — for anything sitting inside the
-`.ngt`'s own folder — by a relative one recorded alongside it in
-`assetPaths.json`. That is what makes a project folder portable: hand someone
-the folder and the relative paths still name the files. The absolute paths stay
-in `timeline.json` as the fallback for a `.ngt` moved on its own, away from its
-media, so relinking is a *preference* and never a *replacement*.
+**`normalizeX` guards reads, `coerceX` validates writes.** The first runs on
+every draw and must never throw; the second runs once, where a value is stored,
+and makes an unusable value unrepresentable from then on. `normalizeFps` /
+`coerceFps`, `blendOf` / `coerceBlend`, `maskOf` / `coerceMask`, `adjustOf` /
+`coerceAdjustPatch`.
 
-One invariant carries the whole feature:
+**Anything animatable is an ordinary keyframe track in `element.animation`.**
+Never a bespoke field. Everything that rewrites keyframes walks
+`Object.keys(animation)` or `animatableProperties(element)`, so split, trim,
+move, paste and a frame-rate change carry any track for free. A field of its own
+means reimplementing `cloneAnimation`, `rebaseAnimation`, `sliceAnimation` and
+`rebakeElement`, and the one anybody forgets fails silently on one edit.
+Unconditional tracks are seeded in `emptyAnimation`; conditional ones (the
+mask's five, `revealProgress`, `volumeDb`, `intensity`, `fx:<key>`) are minted
+by `keyframeOps.trackOrEmpty` when the stopwatch is armed and deleted when the
+last curve goes. `keyframes.ts#carriesTrack` is the table of which is which.
 
-> **The in-memory `TimelineDocument` is always absolute.** A relative path
-> exists only inside the archive.
+**Pure ops never read a store.** `features/timeline/` and `features/animation/`
+take `fps` (or `bakeHz`) as an argument, which is what keeps them DOM-free and
+node-testable. Only UI components and the agent commands read
+`renderOptionStore`.
 
-`loadedAssetStore`, `ffmpegArgs`, the MCP tools, the preview and the export all
-read `localpath` directly and all needed no changes because of it. Conversion
-happens at the two file boundaries and nowhere else. A relative path must not
-become a field on the element: it would enter `normalizeDocument`, every undo
-snapshot and the agent serializer, and go stale the moment `localpath` changes.
+**DOM logic goes behind a narrow port.** There is no DOM test environment here,
+so a rule kept inside a Lit class is a rule nothing can check. Bootstrap, IPC
+bridges and `requestAnimationFrame` are each reached through a plain-record port
+(`ModalLike`, `TranscribePort`, `FrameScheduler`, `GainSink`, `ProjectPathPort`)
+so the behaviour runs under `environment: "node"` against a fake.
 
-Two things that make the path arithmetic (`features/project/assetPaths.ts`)
-fussier than it looks, both pinned by tests:
+Two Lit specifics: **components render into the light DOM** (70 of 70 override
+`createRenderRoot` to return `this`), because the global stylesheet does not
+cross a shadow boundary. So arbitrary content arrives as a `TemplateResult`
+property, never through a `<slot>`. And a custom element with no styles is
+`display: inline`, where width and height do nothing; a host that must be
+measured needs `display: block` or it measures 0x0 with no error anywhere.
 
-- **`localpath` is not percent-encoded**, despite usually being a `file://`
-  URL. `functions/path.ts#encode` escapes `#` and nothing else, so
-  `decodeURIComponent` throws on a file named `100%.mp4` and `new URL` truncates
-  `a?b.mp4` at the `?`. The exact inverse is `%23` → `#`.
-- **On Windows the URL is malformed** — `toLocalPath` concatenates, so it mints
-  `file://C:\Users\me\a.mp4`, drive letter where a URL host goes. Chromium
-  accepts it, which is why it survives. Anything reading these must tolerate it,
-  and anything writing one must reproduce it: minting the tidy form instead
-  would give one file two spellings, and `mergeOps` compares these strings to
-  decide two clips share a source.
-
-`assetPaths.ts` has **no imports at all**. `node:path` only ever answers for the
-host platform, which is the wrong one half the time here, and webpack has no
-`resolve.fallback` so it would not resolve anyway. Path flavour is an explicit
-`"posix" | "win32"` parameter, the same rule `utils/platform.ts` states for
-`isMac` and for the same reason: both branches have to be covered on one CI host.
-
-## Auto Save
-
-Every change to the timeline lands in a per-project cache within seconds. A
-`.ngt` is written **only** by ⌘S, and a successful ⌘S drops that project's
-cache entirely — so
-
-> **"File ▸ Auto Save ▸" being empty means nothing, anywhere, is unsaved.**
-
-Recovery is explicit and refuses rather than overwrites. There is no button, no
-keystroke and no offer on launch: the File menu is the only way back in.
-
-```
-apps/app/src/features/project/projectDigest.ts    the fingerprint
-apps/app/src/features/project/projectDirty.ts     the one owner of "is it dirty"
-apps/app/src/features/project/projectEntries.ts   the five entries, and the anchor
-apps/app/src/features/project/projectDocument.ts  the one load order
-apps/app/src/features/project/projectArchive.ts   the zip half
-apps/app/src/features/project/autosaveIdentity.ts what a ring is keyed by
-apps/app/src/features/project/autosaveSession.ts  the state machine, over ports
-apps/app/src/features/project/autosaveBridge.ts   the stores, the DOM, the IPC
-apps/app/src/features/project/recoverAutosave.ts  the guard and the load
-electron/lib/autosaveCache.ts   the directory. Plain fs, `root` a parameter
-electron/lib/autosaveMenu.ts    the submenu, type-only Electron import
-electron/lib/autosave.ts        userData, the cached list, the rebuild gate
-```
-
-### The decision the feature turns on
-
-**The cache holds the divergence, and the anchor is path arithmetic — never an
-identity.**
-
-An autosave of `Film.ngt` lives in `userData/autosave/f-<digest>-Film/`, but its
-`assetPaths.json` is built against `/…/Film.ngt` — the SSOT path, not where the
-file actually sits. That one string has exactly two uses and no third:
-
-- **At write** it decides which absolute paths are inside the project folder.
-  Anchor on the autosave's real location instead and `relativizeInside` emits
-  *nothing*, because no asset is under `userData/autosave/` — silently
-  discarding the portability half of `assetsFile.ts`.
-- **At recovery** `relinkAssets` resolves those same relative paths against the
-  same anchor.
-- **It is never adopted as the project's path.** Recovery leaves `#projectFile`
-  empty, so ⌘S opens Save As and the original `.ngt` is never touched.
-
-The way this goes wrong is a later edit reasoning "we already have the path,
-let's set `#projectFile`" — which makes the next ⌘S overwrite the user's file
-with recovered older state. So `recoverAutosave` holds a `ProjectPathPort` it
-**never calls**, and the port throws if called, which makes "the session stays
-detached" a node assertion rather than a hope.
-
-### On disk
-
-```
-userData/autosave/
-  f-3a9c1e77b2d40915-Film/        a project saved as Film.ngt
-    meta.json                     { v, label, anchor }
-    20260913T142631-088Z-7f3e.ngt the newest, and the only one
-  s-9d41c0a2fe8b5613/             a project never saved — this is the only copy
-```
-
-**One recovery point per project, not a history.** A ring is one project's
-unsaved divergence, and only its newest state is that; every earlier write is
-superseded the moment the next lands and is deleted then. The order inside
-`writeEntry` is what makes a cap of one safe — write the `.part`, rename it into
-place, *then* unlink the superseded one — so there is no instant at which a
-project has no recovery point because the replacement had not arrived yet.
-`RING_SIZE` is still a parameter and the code does not care whether it is 1 or
-10; what ships is 1.
-
-The menu is therefore **one flat row per project**, naming the project and the
-time together — `Film.ngt — Today 14:25:30`. A second level would be a submenu
-of one item every time. The project name is never dropped: a flat list of bare
-times is Premiere's arrangement, and not being able to tell which project a time
-belongs to is the most confusing thing about its recovery.
-
-- **The filename carries the time**, fixed-width and UTC, so a lexicographic
-  sort is chronological and the menu opens no zips. `filesystem:getDirectory`
-  reports no mtime, so the name is the only place it can live. No colons —
-  illegal on Windows, shown as `/` by Finder. Four hex characters break a
-  same-millisecond collision between two launches.
-- **`.part` then rename**, the `reverse.ts` idiom. A truncated autosave the menu
-  offers is worse than none: it looks like a recovery point and restores nothing.
-- **A ring with an unreadable `meta.json` is still listed**, labelled from its
-  directory. Never hide a recovery point because its label could not be read.
-- **Six zip entries, not five.** An autosave carries `autosave.json`
-  (`{v, anchor, writtenAtMs, sessionId}`) so each archive is self-sufficient and
-  a lost `meta.json` cannot make a ring unrecoverable. `project.load` reads five
-  *named* entries and ignores the rest, so **`SCHEMA_VERSION` did not move**.
-- **Main owns the directory.** `autosave:write` takes bytes and main mints the
-  filename; `autosave:dropRings` takes a *key* that `isValidAutosaveKey` must
-  accept. There is no call shape in which the renderer can name a path to
-  delete.
-
-### Two timers, and they are not the same timer
-
-5s idle debounce, 60s ceiling. The **idle** timer is re-armed by every change,
-so a burst costs one write. The **ceiling** is armed on the `idle → armed`
-transition and **never re-armed by a later change** — that is the whole point of
-a max-wait, because a user dragging continuously for ten minutes re-arms the
-idle timer forever and would otherwise never be written at all.
-
-The invariant is **armed implies a ceiling is pending**, which is why
-`ensureCeiling` is idempotent and is called from the deferral paths too. Without
-that, a deferral (unreadable document, or a running export) cleared the ceiling
-and continuous editing reached the same unbounded failure by a second route.
-`autosaveSession.test.ts` pins both, and the 120-second case — *exactly two
-writes* — is the one whose absence makes the feature fail silently.
-
-### Four more things that are easy to get wrong
-
-- **Failure never clears dirt.** A write that rejects *or* answers
-  `{ ok: false }` leaves the session armed and backs off 5/15/45/60s. Treating a
-  failed write as done is the defect `writeFileEnsured` exists to fix, one layer
-  up, and here it deletes the user's only unsaved copy on the next save. After
-  three consecutive failures it raises a `backgroundTaskStore` row — not a
-  toast, because a toast every five seconds on a full disk is worse than the
-  failure.
-- **The digest takes the store's `RenderOptions`, not `RenderOptionsFile`.** The
-  file shape carries `videoDestination` and `previewRatio`, which are save
-  *context* and differ between the `.ngt`'s path and an autosave's. Hashing them
-  would make every autosave read as diverged from the save baseline forever, and
-  the ring would never drop. Taking the store shape makes those fields absent
-  *by construction*.
-- **The subscription gate is two reference compares.** `useTimelineStore` has no
-  `subscribeWithSelector`, so every listener fires on every write including
-  `setCursor` at the display rate. `autosave.noteChange` is counted beside
-  `store.notify`, so the ratio is visible from `__cartcutPerf`.
-- **A recovery is read-only on the cache.** It leaves the ring alone, and a
-  ring dies only on a successful save. With a cap of one that mostly means "the
-  entry survives being recovered from", which matters because a recovered
-  session is detached — nothing else would put those bytes back.
-- **An autosave is not a save, and the quit guard must agree.** Nothing on the
-  autosave path touches `projectDirty`'s baseline, so a project whose only copy
-  is a recovery point stays dirty and still raises the close warning. The
-  baseline is seeded eagerly at startup by `initProjectBaseline`, and an
-  *unestablished* baseline reads as **dirty**. Both halves are needed: the first
-  draft seeded lazily inside `isProjectDirty`, and since nothing else
-  establishes one for a never-saved project, the first ask *was* the quit guard —
-  which seeded from the already-edited timeline and answered "clean". The window
-  closed on unsaved work with no warning.
-
-### The guard is stricter for recovery than for Open
-
-Recovery refuses on **non-empty OR dirty**; File → Open refuses on **dirty
-only**. Not an inconsistency: a clean project is on disk, so opening another
-loses nothing, and refusing Open on non-empty would mean never being able to
-open a second project. A recovery has no such out — it overwrites whatever is
-loaded, saved or not. `tracks.length` counts on its own, because three added
-rows is work, and it is exactly what the detector this replaced read as
-unmodified.
-
-### What this replaced, and what it cost
-
-The old change detector lived on `features/element/elementTimeline.ts` — marked
-`조만간 deprecated` — and was a 32-bit DJB2 hash of `JSON.stringify(timeline)`
-in an unbounded table keyed by `Date.now()`. It **hashed elements only**, so a
-track rename or reorder read as unmodified and File → Open would
-`clearTimeline()` straight over it. It is gone; `projectDirty.ts` is the one
-owner now, and the quit guard, Open and Auto Save all read it.
-
-Two live data-loss defects were fixed on the way, both prerequisites rather than
-tidying:
-
-- **`saveProjectFile` could not tell a failed save from a successful one.** It
-  wrote through `filesystem.writeFile`, which calls the *callback* form of
-  `fs.writeFile` and returns before it runs — so it resolved `undefined` always
-  and the toast, the clean baseline and the retitled window fired regardless.
-  Survivable until a save deletes the recovery copy. It uses `writeFileEnsured`
-  and returns a `SaveOutcome` now.
-- **A cancelled File → Open wiped the timeline**, because `clearTimeline()` ran
-  before the `undefined` path was checked.
-
-One behaviour change to know about: the digest covers `renderOptions`, so
-changing the frame rate, frame size or background colour now counts as an
-unsaved change — which it is, and which the old elements-only hash missed.
-File → Open therefore refuses after a settings-only change until it is saved.
-
-### How it is known to be right
-
-`tests/e2e/specs/autosave.spec.ts` is the load-bearing half. One test drives the
-close warning with a real `BrowserWindow.close()` and requires the modal rather
-than a quit — verified against the bug by restoring the lazy seeding, which
-turns it red. Another is the whole feature in one: save a project, edit it, **kill the app with
-`app.exit(0)`** — no graceful close, which is the disaster this exists for —
-relaunch into the same `userData`, read the real `File ▸ Auto Save` submenu
-through `Menu.getApplicationMenu()`, click the entry, and then require that the
-work came back, that `#projectFile` is **empty**, that the original `.ngt` is
-**byte-identical** to what was saved, and that the ring it came from survives.
-
-The unit suites are worth two notes about measuring rather than asserting.
-`projectDigest.test.ts`'s collision case took two wrong drafts: a 20k sweep
-passed against the 32-bit DJB2 it replaces (expected collisions there are ~0.05),
-and so did a 300k sweep over *sequential* payloads, because DJB2 maps short
-distinct numeric suffixes near-injectively and the birthday bound does not apply
-to structured input. Only 300k *pseudo-random* payloads separate the two — 12
-collisions against 0. And `autosaveCache.test.ts` runs against a real
-filesystem in a real temporary directory, because the failures this module can
-have are filesystem failures.
-
-`electron/mcp/contactSheet.ts` states a policy *against* sweeping, and the ring
-prune is the repo's first, so it owes an answer: **every file it deletes is one
-this module wrote, in a directory this module created, named by a pattern this
-module mints, and matched against that pattern before it is unlinked.** A ring
-is never dropped because its `.ngt` has gone — that is precisely when the ring
-is the only copy.
-
-## Compositing and blend modes
+## Rendering and export
 
 Everything visual is composited in the **renderer, on a 2D canvas**, by one
 function: `renderTimelineAtTime` -> `paint` -> `renderElement`. The preview, the
 in-app export, the offscreen export window, the agent's contact sheet and the
-e2e reference render all call it, which is why parity between preview and
-export is structural rather than something anyone maintains.
-
-FFmpeg does **no** video compositing on the v2 path. `renderTimeline.ts` hands
-it finished frames as raw RGBA over a pipe and the video half of the filter
-graph is `[0:v]null[vout]` — a pass-through, not a discard. So a new visual
-property is a change to `renderElement` and to nothing in `electron/render/`.
-
-A clip carries an optional `blend`
-(`@types/timeline.ts#BLEND_MODES`, seventeen values, Canvas2D vocabulary), on
-video, image, gif, shape and text. Absent means `"source-over"`, resolved by
-`renderer/blend.ts#blendOf` on every read; `coerceBlend` validates writes. The
-same `normalizeFps`/`coerceFps` split, for the same reason. **A blend of
-`"source-over"` deletes the key** rather than storing it, so a project nobody
-has blended saves byte-identically to one written before the feature — and
-`SCHEMA_VERSION` did not move.
-
-Three things about it that are easy to get wrong:
-
-- **A blended clip is drawn in isolation.** `renderElement` paints it whole onto
-  a scratch layer and composites that once. Not tidiness: `renderText` issues up
-  to five overlapping draws per line — background box, glow, shadow, outline
-  stroke, fill — and with the mode set on the shared context those blend against
-  *each other*. The layer comes from an injected factory
-  (`renderer/surface.ts`), because the node suites have no `document`; omit the
-  factory and it degrades to setting `globalCompositeOperation` directly, which
-  is still exact for the single-draw element types.
-- **Blend is suspended inside a transition.** `fx/compositor.ts#renderClip`
-  draws each half into a cleared *transparent* buffer, so there is nothing to
-  blend against and `multiply` would erase the clip. `paint` marks that context
-  `isolated`. A transition is an operation on a pair, not a property of one clip.
-- **The backdrop is the whole stack, including the project background.** A
-  `multiply` clip on the bottom track multiplies with the background colour, so
-  on black it goes black. That is correct and matches every NLE; it is also the
-  first thing anyone reports as a bug.
-
-`tests/e2e/specs/blend.spec.ts` checks the modes against the blend arithmetic
-restated independently in that file, through a real export — not against a
-reference render, which would use the same code and prove nothing.
-
-## Audio levels and the envelope
-
-How loud a clip plays, and how that changes across it. A clip carries
-`Leveled.volumeDb`, **-60 to +12 dB**, absent meaning 0; `audio.ts#gainFromDb`
-turns it into the linear multiplier the DOM and FFmpeg both want. -60 is a hard
-zero rather than `10 ** (-60/20)`, because a fader at the bottom means off.
-
-```
-apps/app/src/features/timeline/audio.ts       what a level is, and sampling one
-apps/app/src/features/timeline/audioOps.ts    setVolumeDb, detach, the envelope ops
-apps/app/src/features/timeline/levelLine.ts   the rubber band: scale, geometry, hit test
-apps/app/src/features/asset/audioGraph.ts     the only way past unity
-apps/app/src/features/asset/audioContext.ts   the one AudioContext
-apps/app/src/features/timeline/audioLevel.ts  the meter, derived rather than tapped
-electron/render/audioEnvelope.ts              the curve as an FFmpeg expression
-electron/render/ffmpegArgs.ts                 isAudible / gainOf, the hand-copied twins
-```
-
-### The decision the feature turns on
-
-> **`volumeDb` is an ordinary keyframe track, and an audio clip grows an
-> `animation` block only when one is actually written.**
-
-Exactly the arrangement `revealProgress` and an effect's `intensity` already
-have: conditional, unseeded, minted by `keyframeOps.trackOrEmpty` when the
-stopwatch is armed, and deleted outright when the last curve goes. So a clip
-nobody has touched saves byte-identically to one written before the feature and
-**`SCHEMA_VERSION` did not move**.
-
-And the contract `size` states applies unchanged: **a keyframed level behaves
-exactly like the static field it keyframes.** `volumeDbAt` samples the track and
-falls back to `volumeDbOf`, so `playback.ts`, the meter and the exporter each
-read one number and none of them has to learn that envelopes exist.
-
-Everything that rewrites keyframes walks `Object.keys(animation)` or
-`animatableProperties(element)`, with **no gate at any call site** (verified,
-not assumed), so split, trim, move, paste and a frame-rate change carry an
-envelope for free. A `gainEnvelope` field of its own would have meant
-reimplementing `cloneAnimation`, `rebaseAnimation`, `sliceAnimation` and
-`rebakeElement`, with the one anybody forgot failing silently on one edit.
-
-### Audio is animatable now, and it is the only thing it can animate
-
-`canAnimate` admits `audio`, and `AudioElementType.animation` is **optional**,
-so narrowing to `AnimatableTimelineElement` no longer promises the field is
-there. Nothing may write `canAnimate(x) && x.animation.position`. The real gate
-is `animatableProperties`, which every consumer already asks, and for audio it
-answers `["volumeDb"]` and nothing else: an audio clip has no box, no opacity
-and no rotation, and offering the transform five would put tracks in the curve
-editor that nothing reads.
-
-The gate is **audibility**, not filetype, so `isAudibleElement` moved into
-`@types/timeline.ts` (where `animatableProperties` can reach it) and
-`features/timeline/audio.ts` re-exports it. That is the same condition
-`draw.ts#canShowWaveform` asks, which is what makes the waveform and the rubber
-band appear and disappear together. `detachAudio` therefore has to **carry the
-envelope to the twin and strip it from the video**: the silenced video fails the
-gate, so the track becomes an orphan and the next ingress deletes it.
-
-**An emptied `animation` block is deleted, not left as `{}`.** Both in
-`normalizeAnimation` and in `keyframeOps.withoutMintedTrack`. Audio is the first
-filetype with no unconditional tracks, so it is the first that can reach an
-empty block, and `animation: {}` would mean a clip keyed and then unkeyed no
-longer saves the way one that was never keyed does. That equality is the whole
-reason the track is conditional.
-
-### Getting past unity
-
-The ceiling was 0 dB because `HTMLMediaElement.volume` caps at 1.0, and lifting
-it needed a WebAudio `GainNode`. `audioGraph.ts` is that, under one rule:
-
-> **A handle gets a gain node the first time it is asked for more than unity,
-> and keeps it for the rest of its life.**
-
-Lazy rather than universal, because `createMediaElementSource` is a one-way
-door: once per element, never undone, and from that moment the sound reaches the
-speakers only through the graph, so a graph that is wrong or unconnected
-silences the clip. `audioLevel.ts` refused to build a master bus for exactly
-that reason. Attaching only where a boost was asked for keeps the risk inside
-the clips whose level the user just raised.
-
-Four things this rests on, all measured in this Electron build rather than
-assumed:
-
-- **A `file://` media element on a `file://` page is not CORS-tainted here**, so
-  the graph carries sound rather than silence. This was the thing most likely to
-  sink the whole approach.
-- **`handle.volume` multiplies before the node**, which is why the level moves
-  wholesale onto the node instead of being split across the two.
-- **The crossover is free.** At the moment a rising envelope passes 0 dB both
-  paths are the same number, so there is no step to hear.
-- **A suspended context passes nothing**, so the graph is not attached until the
-  context is `running` and a boosted clip plays at unity until then. Never
-  silent outranks the boost. `elementControl.play()` resumes it, the gesture
-  `record/audioRecord.ts` already relies on.
-
-`playback.ts` stays pure: the write goes through an injected `GainSink`, whose
-default is the plain `handle.volume` write capped at 1. Assigning 4 to `volume`
-throws, so the cap is not a rounding convenience.
-
-### The export, and three things ffmpeg made us find out
-
-The renderer plays a curve by sampling it every frame. FFmpeg has no such loop,
-so the curve is handed to it as an expression, from the **baked lane**:
-`keyframeOps.withLane` re-bakes inside the transform that writes a keyframe, so
-`ax` is always current and reading it needs no bezier solver in `electron/`.
-`audioEnvelope.ts` simplifies it (Douglas-Peucker, measured in dB, 0.1 dB
-tolerance) and formats it.
-
-The stage sits **after `atempo` and before `adelay`**:
-
-```
-[i:a] atempo=… , asetnsamples=n=256:p=0 , volume=eval=frame:volume='…' , adelay=d|d [audioN]
-```
-
-- **`atempo` rewrites the timestamps**, so past it `t` is clip-local *timeline*
-  seconds and a baked sample's `tMs / 1000` is the breakpoint directly. Measured:
-  `gte(t,1)` after `atempo=2` switches at output 1.0s, not 0.5s. First in the
-  chain would mean multiplying every breakpoint by `speed`; after `adelay`,
-  adding the clip's offset to every one.
-- **Interpolate in dB, then convert.** The curve is authored over dB values, so
-  a segment is `pow(10,(d0+k*(t-a))/20)`. A first draft interpolated the gain
-  and played a straight 0 to -40 dB fade **3.9 dB loud at its quarter point**.
-  The parity test caught it; nothing else would have.
-- **A flat `a+b+c+…` breaks at about a hundred terms.** FFmpeg parses by
-  recursive descent: 96 terms evaluate, 100 fail, 512 fails at allocation. The
-  same terms folded into a **balanced tree** are `log2(n)` deep and were measured
-  good to 2048. It costs brackets and removes a cliff, so the expression is
-  always emitted folded.
-
-A clip with no envelope emits **the chain it always emitted**, `volume=` stage
-and all omitted at unity. That is also why `gainFromDb`'s unity shortcut had to
-narrow from `db >= MAX_VOLUME_DB` to `db === 0` when the ceiling rose: left
-alone it would have played every level from 0 dB up at 1.0 and thrown the boost
-away in silence.
-
-`MAX_ENVELOPE_SEGMENTS` is 96, and the binding constraint is **Windows' 32,767
-character command line**, not the parser. `-/filter_complex <file>` is the
-escape hatch if a graph ever outgrows it.
-
-### The rubber band
-
-The line across the clip, dragged directly, the way Premiere and Resolve do it.
-`levelLine.ts` is its geometry and is **deliberately the opposite of
-`keyframeMarkers.ts`**: that module stays out of `TimelineLayout` so a press can
-never land on a diamond, and this one has to be grabbed, so `layout.ts` imports
-it and `hitTest` asks it. `ClipRect` crosses as a *type*, so there is no runtime
-cycle.
-
-- **Trim handles win at the edges.** The line runs the full width of the clip,
-  handles included, so `hitTest` asks about it only after the handles have had
-  their say. The other order loses trimming on any clip whose line crosses an
-  edge at the pointer's height, which is most of them.
-- **The scale is tapered, and the measurement is why.** A 40px row leaves 23px
-  for 72 dB; straight, -18 dB lands six pixels below unity, and on a rendered
-  strip that is not a difference anyone can see. Three quarters of the band now
-  carries +12 to -18 and the last quarter carries -18 to -60, which is how every
-  physical fader is laid out. `dbPerPx` is therefore the **local** rate: one
-  average would make the line lag the pointer at the top and outrun it at the
-  bottom.
-- **A drag is relative, not absolute**, and Shift is 0.1 dB per pixel. Together
-  they make the whole range reachable from a band this short. The sidebar fader
-  stays the way to type an exact number.
-- **Dragging the line on a keyed clip shifts the whole envelope.** The shape the
-  user drew is theirs; flattening it to the pointer is not what the gesture
-  means. `offsetLevelEnvelope` declines by identity on an unkeyed clip, where
-  the caller wants `setVolumeDb`.
-- **Alt-click adds or removes a point**, and adding **plants** rather than
-  appends, so dropping a point into a fade cannot re-shape the fade either side
-  of it. Removing the last point writes the level it held back as the static
-  value, or a fade-out would end loud.
-- **Level keyframes are never frame-quantized.** `frames.ts#isFrameLocked`
-  exempts audio from the grid because frame alignment is a picture constraint,
-  and a gain change is heard at the instant it happens. The curve editor's
-  `dragKeyframe.ts` does not know the frame rate either, so both ways in agree.
-- **The diamond lane skips `volumeDb`.** Its keyframes are already drawn as the
-  points of the line, so a diamond each would be the same thing twice. It also
-  means a bare audio clip gets no lane, keeping its waveform on the full row.
-
-### How it is known to be right
-
-`electron/render/audioEnvelope.parity.test.ts` is the load-bearing half, and it
-is the LUT parity argument applied to sound: every other check compares this
-code to itself. It builds a curve through the real `keyframeOps`, asks for the
-expression the exporter would emit, runs the **bundled ffmpeg**, and measures
-the delivered level with `volumedetect` against what the **renderer's own
-sampler** says. The two sides share no code. Worst disagreement **0.3 dB**,
-most of them 0.10, which is `volumedetect`'s own resolution; the dB-versus-gain
-defect above fails it by an order of magnitude. A last case hands the two sides
-different curves and requires them to disagree, so the harness cannot pass by
-measuring nothing.
-
-`ffmpegArgs.test.ts` pins the hand copies, and its `gainOf` table now carries
-levels **above** unity: the old table's highest case was +12, which was out of
-range on both sides and answered exactly 1, so it would have gone on passing
-after the ceiling rose while the two disagreed about everything in between.
-
-## The frame rate
-
-A project setting, sitting on `renderOptionStore.options` next to `previewSize`
-and `duration` — not in `TimelineDocument`, and not in `ExportSettings`. It
-decides the snap grid, the ruler, the frame grid, the zoom ceiling, the rate
-animation is baked at, which frame the preview shows, and the rate FFmpeg is
-clocked at, all of which happen long before anything is exported.
-
-Whole frames per second, 1..240, presets at 24/25/30/50/60/120. **Integers
-only** — the NTSC family is `30000/1001` and its relatives, which a `number`
-cannot name exactly, and admitting them means carrying a rational through every
-conversion in `frames.ts` and through the exporter that has to agree with it bit
-for bit.
-
-Two rules keep this straight:
-
-- **Pure ops never read the store.** `features/timeline/` and
-  `features/animation/` take `fps` (or `bakeHz`) as an argument, which is what
-  keeps them DOM-free and node-testable. Only UI components and the agent
-  commands read `renderOptionStore`.
-- **`normalizeFps` guards reads; `coerceFps` validates writes.** The first runs
-  on every draw and must never throw. The second runs once, where a value is
-  stored, and makes an unusable rate unrepresentable from then on.
-
-Changing the rate goes through `features/editor/frameRate.ts#setProjectFps`,
-which is also the only place the three consequences are sequenced: re-clamp the
-zoom (the ceiling is `zoom.ts#maxRangeForFps`), re-snap the playhead, and re-bake
-animation through `withCheckpoint`. **Clips do not move.** A rate change is a
-change of grid, not a re-cut; off-grid clips are pulled onto the new grid the
-next time they are dragged, which is what every NLE does and the only choice
-that cannot lose work.
-
-**The grid does not apply to audio.** Frame alignment is a picture constraint —
-an edge between two frame instants shows one frame of whatever is behind it — and
-sound has no frames, so `frames.ts#isFrameLocked` lets an audio clip drag freely,
-to the millisecond. This is drag only (`resolveMove`); trims, drops and the MCP
-`move_clips` still quantize everything. Two consequences are easy to get wrong
-and both are pinned by `dragResolve.test.ts`:
-
-- **One gesture is one delta**, so the grid is all-or-nothing across a selection:
-  one picture clip in the drag keeps it on, which is what stops a video and its
-  detached audio drifting apart.
-- **With audio under the pointer and picture along for the ride, the *distance*
-  is quantized rather than the destination** — the anchor cannot be corrected onto
-  a grid it is exempt from, so whole-frame travel is what leaves the picture as
-  aligned as it started. That path outranks the edge snap, the only place in the
-  module where anything does, and it suppresses the snap guide when it rounds
-  away from the line.
-
-The baked animation lanes (`ax`/`ay`) are a *cache* read by nearest-sample
-lookup, so their rate has to be at least the project's — `keyframes.ts#bakeRateFor`
-is `max(BAKE_HZ, fps)`, keeping a 60Hz floor so nothing at or below 60 changes.
-Rebaking happens at exactly two moments, ingress (`patchDocument({ bakeHz })`)
-and a rate change; never on a checkpoint.
-
-## What a clip can animate
-
-Five properties, listed by `@types/timeline.ts#OWN_ANIMATABLE_PROPERTIES` and
-offered per element by `animatableProperties`: `position`, `opacity`, `scale`,
-`rotation` and `size`. Plus the mask's five, which exist only while the clip
-has a mask — see "Masks". An effect has `opacity` alone; gif and audio have no
-`animation` block at all.
-
-`position`, `size`, `maskPosition` and `maskSize` are the two-lane ones,
-registered in `keyframes.ts#VECTOR_PROPERTIES` and asked of `lanesOf`. Nothing
-hardcodes a property name: the curve editor takes its lane count from `lanesOf`,
-the diamond lane and the context menu walk `animatableProperties`, and
-`cloneAnimation`/`rebaseAnimation`/`sliceAnimation`/`rebakeElement` walk
-`Object.keys(animation)`. So split, trim, duplicate, paste and a frame-rate
-change carry any property for free.
-
-**`size` and `scale` are different things, and the difference is the point.**
-`scale` is uniform, stored in *tenths*, and multiplies the matrix about the
-element's centre; it never touches the box. `size` is the clip's own `width`
-and `height`, in **pixels** — the two numbers the sidebar's Size row shows —
-and the sampled value **replaces** those fields on the way to the renderer.
-
-That replacement is the whole contract:
-
-> **A keyframed property behaves exactly like the static field it keyframes.**
-
-`renderer/element.ts#drawDirect` substitutes the sampled box into the element it
-hands each renderer, so `image.ts`, `video.ts`, `shape.ts` and `text.ts` needed
-no changes — they go on reading `element.width`. Animating to 500 therefore
-draws precisely what typing 500 into the sidebar draws, including on text, where
-`width` is the *wrapping* width and re-wraps, and `height` is a consequence of
-layout that the renderer never reads. A non-uniform matrix scale would have been
-fewer lines and would have given those two numbers a second meaning.
-
-Four things that are easy to get wrong:
-
-- **`timeline/transform.ts#sampledBoxOf` is the only way to ask how big a clip
-  is** at a cursor. The renderer, the mask's element-space mapping
-  (`renderer/mask.ts`), the selection outline, the eight grips, the hit test and
-  the resize origin all go through it. One of them left reading `element.width`
-  is the `previewCanvas.collisionCheck` bug over again — the picture in one
-  place and the pointer's idea of it in another.
-- **`localMatrixOf` pivots on the sampled box, not the stored one.** Getting
-  this wrong is invisible until someone rotates a clip whose size is animated,
-  and then it swings about a point it has no corner on.
-- **The track is unconditional, so it has to be seeded.** Unlike the mask's
-  five it is in `emptyAnimation`, and `normalizeAnimation` adds it on ingress to
-  any element missing it — the symmetric half of the orphan-mask drop, in the
-  same loop. Without that, the stopwatch on a project written before the feature
-  clicks and does nothing: `resolve` and `setTrackActive` both decline by
-  identity on an absent track, silently.
-- **`withFittedTextHeights` declines while the track is on.** A keyframed height
-  is authored, and the fit would be invisible anyway (the sampled height wins)
-  while still dirtying the document once per width scrub.
-
-`SCHEMA_VERSION` did not move. A project written by an older build simply lacks
-the track and gains one on load.
-
-### Animation presets
-
-Nineteen ready-made moves, in `features/animation/presets.ts` as **plain
-TypeScript data** — deliberately not in the `assets/presets/` registry, which
-exists to load untrusted, user-installable data-plus-GLSL and has nothing an
-animation preset needs. Adding one is a diff to one object literal, plus the
-hand-copied `PRESETS` in `electron/mcp/tools/define.ts` that `tools.test.ts`
-pins by set equality.
-
-```
-apps/app/src/features/animation/presets.ts        the table, applyPreset, playheadAnchor
-apps/app/src/features/animation/presetPreview.ts  what a tile draws — pure, node-tested
-apps/app/src/features/option/animationPresetBrowser.ts   the grid, in the Animation tab
-apps/app/src/features/animation/keyframeOps.ts    clearAnimation / hasAnimation
-```
-
-Reached three ways, all through the same `applyPreset`: the **Animation tab**
-in the text, image, video and shape inspectors; the `apply_animation_preset`
-MCP tool; and `apply_edit_plan`.
-
-Four things that are easy to get wrong:
-
-- **`startAtMs` is element-local, and it outranks `fromEnd`.** Anchored, *every*
-  preset starts there and runs forward — a `fade_out` dropped mid-clip runs from
-  the playhead, not from the tail. The conversion from the playhead is
-  `playheadAnchor`, which answers `undefined` when the cursor is off the clip so
-  the preset falls back to its own anchor. The panel takes that fallback; the
-  agent command throws instead (`localTime`), because an agent naming a time
-  meant that time and a silently relocated keyframe looks like the request.
-- **Near the clip's end the preset is compressed, not moved back.** Sliding the
-  anchor to make room starts the move somewhere nobody clicked, which is the one
-  thing an anchor is for.
-- **The tiles run the real thing.** `previewSamples` applies the actual
-  `applyPreset` to a throwaway clip and reads it back through the actual
-  `localSampleAt`, so nothing restates what a preset does and nothing can drift
-  from it — the argument `fxPreviewProvider` makes for its own thumbnails. The
-  one place the tile is *not* faithful is scale: it is a diagram, so one box
-  length is drawn as `TILE_TRAVEL` of the tile. At 1:1 a slide's start pose is
-  exactly off the tile's edge and Move Up renders empty.
-- **"None" is `clearAnimation`, not `setTrackActive(false)` in a loop.**
-  Switching a track off *keeps* its keyframes, which is right for a stopwatch
-  and wrong for a tile claiming the clip has no animation. It empties authored
-  and baked lanes together and leaves the mask's five alone — those belong to
-  the mask, and clearing exactly what the grid can write is what keeps the tile
-  honest. `hasAnimation` is the same condition, written once, and is what
-  lights the tile up.
-
-`SCHEMA_VERSION` did not move: a preset writes ordinary keyframes, and nothing
-records that a preset was what wrote them. That is also why no tile but "None"
-shows an applied state — a highlight on Fade In would be a guess presented as a
-fact.
-
-## What an effect can animate
-
-An effect's `intensity`, and every preset parameter the manifest declares as
-`type: "number"`. So a vignette closes in, a bloom swells on a beat, a blur
-racks off over half a second. `add_effect`'s tool description used to tell the
-agent to butt several short effect clips together instead; that was the only way
-there was.
-
-```
-apps/app/src/@types/timeline.ts          the names, and who may carry them
-apps/app/src/features/animation/keyframes.ts     the conditional-track table
-apps/app/src/features/animation/keyframeOps.ts   minting, and the two switches
-apps/app/src/features/renderer/fx/effectSample.ts  the values at a cursor
-apps/app/src/features/renderer/fx/planFrame.ts     where they are sampled
-apps/app/src/features/fx/fxParamControls.ts        the diamond on a number row
-apps/app/src/features/option/optionEffect.ts       the panel
-```
-
-**A parameter's curve is an ordinary keyframe track, named `fx:` plus the
-parameter's key.** Everything that rewrites keyframes walks
-`Object.keys(animation)` or `animatableProperties(element)`, so split, trim,
-duplicate, paste and a frame-rate change carry an effect's curves for free. That
-is the argument the mask's five and text's `revealProgress` make for living
-there, and a `paramAnimation` field of its own would have meant reimplementing
-`cloneAnimation`, `rebaseAnimation`, `sliceAnimation` and `rebakeElement`, with
-the one anybody forgot failing silently on one edit.
-
-The price is that **`AnimatableProperty` is no longer a closed union**. It gains
-one literal, `"intensity"`, and one open member, `` `fx:${string}` ``: parameter
-keys come from a manifest on disk, so there is no list to close over. The two
-exhaustive switches in `keyframeOps.ts` gained a branch each rather than a case
-each, and the MCP schema gained an alternative rather than an entry.
-
-**The pure layer decides from the value's shape; the UI decides from the
-manifest.** `@types/timeline.ts` cannot read the preset registry, which reads
-disk, so `animatableProperties` answers from `element.params`: a key whose
-stored value is a finite number can carry a track. That admits a `select`, whose
-values are numbers too, and `optionEffect` and the context menu, which do hold
-the registry, offer a diamond only for `type: "number"`. Answering from the
-element is what makes a project written before this feature animate the moment
-it is opened, and what keeps an effect whose preset is missing showing the
-curves its author drew.
-
-**A track exists exactly while the parameter is animated.** Nothing seeds one:
-`keyframeOps.trackOrEmpty` mints it when the stopwatch is clicked, disarming an
-empty one deletes the key, and `setEffectPreset` drops the ones whose parameter
-has gone. So an effect nobody has animated saves byte-identically to one written
-before the feature and **`SCHEMA_VERSION` did not move**: the rule `blend`,
-`lut`, `adjust` and `reveal` follow, applied to a track instead of a field.
-
-### The opacity track this replaced
-
-An effect has carried `animation.opacity` since the element type existed, and
-**nothing has ever read it**: `isVisualTimelineElement` excludes an effect from
-the paint loop, so it never reaches `renderElement` where opacity is applied,
-and the compositor reads `intensity`. Keying it produced a curve, a row of
-diamonds and no change to any pixel. It is no longer offered; the key stays in
-`emptyAnimation("effect")` so no existing file changes shape.
-
-`applyPreset` follows: on an effect, a preset's `opacity` stops are written to
-`intensity` instead (`presets.ts#trackFor`). `fade_in` on an effect now fades.
-Nothing else in the table needs a mapping, because an effect offers no transform
-at all, so a `slide` or a `pop` still fails the every-property-or-none check.
-
-### Five things that are easy to get wrong
-
-- **Split the prefix on the FIRST colon.** `presetValidate.ts` requires
-  `param.uniform` to be a GLSL identifier but asks of `param.key` only that it
-  be a non-empty string, so a key may contain a colon, a dot or a space.
-  `slice`, never `split(":")`.
-- **The compositor reads the plan, not the element.** `planFrame` resolves every
-  live track and `ActiveEffect` carries the result, which is what makes one
-  change cover all three modes: the shader's `intensity` uniform, an overlay's
-  `globalAlpha` and a LUT's `amount`. It returns the element's own `params` **by
-  identity** when nothing is animated, so the common path allocates nothing.
-- **Sampled on the frame grid**, at the instant `effectTimeOf` snaps to. A baked
-  lane is read by nearest sample, so an unsnapped preview cursor and a snapped
-  export time can otherwise land on different samples and show different
-  pictures of one frame. `progressOf` snaps for the same reason.
-- **`isForeignTrack`, not `isConditionalTrack`.** The word "conditional" was
-  doing two jobs that have now come apart. A mask's curves are conditional *and*
-  somebody else's, which is why `clearAnimation` leaves them alone. An effect's
-  two families are conditional and its *own* movement, so counting them as
-  somebody else's would make `hasAnimation` answer "no" about a clip visibly
-  fading.
-- **The manifest's range is applied at the uniform**, in
-  `glslWrap.ts#uniformValueOf`. A curve is supposed to overshoot between its
-  keyframes the way every other curve in the app does, so clamping there rather
-  than in the curve keeps the authored shape readable in the editor. It bounds
-  `set_effect` over MCP too, which had never been bounded.
-
-### How it is known to be right
-
-The unit suites cover the ops and the plan; what they cannot see is the shader.
-Driven in the running app over CDP, a vignette with `fx:amount` keyed 0 to 1
-across its clip and rendered through **`createExportFxRuntime`**, the exporter's
-own runtime: corner luminance 255, 191, 128, 64, 2 across five cursors with the
-centre fixed at 255. The same ramp on `intensity` gives 255, 128, 2. A curve
-running -5 to 5 on a 0..1 parameter renders byte-identically to the static
-values at both ends, which is the clamp. The panel offers exactly three diamonds
-on a vignette (Intensity, Amount, Radius) and none on its colour, and a
-seven-step slider drag records exactly one undo step.
-
-One behaviour worth knowing, and it is `GestureCommit`'s rather than this
-feature's: a drag that ends where it began still records a step, because `flush`
-commits whenever *any* step of the gesture changed the document. Every slider
-panel in the app behaves that way.
-
-## Revealing text
-
-Showing a text clip's lettering a piece at a time — the typewriter, and every
-other cadence built from the same scalar. CapCut has a one-click preset for it;
-Premiere makes you keyframe the Source Text once per glyph.
-
-```
-apps/app/src/features/text/reveal.ts        the plan: units -> character offsets
-apps/app/src/features/text/typewriter.ts    applyTypewriter, built on the ops
-apps/app/src/features/timeline/textRevealOps.ts  setClipTextReveal / …Fields
-apps/app/src/features/renderer/text.ts      paintLettering, paintRevealHead
-apps/app/src/features/option/optionTextRevealSection.ts  the Animation-tab panel
-```
-
-**A reveal is one continuous scalar, and `unit` says what it counts.** That
-split is the whole design, and it puts the two halves in different places:
-
-- **Meaning** is `element.reveal` — `{ unit, progress, fade? }`, an optional
-  field on text alone. It holds **no time at all**, so nothing in `clipOps` has
-  to rebase it.
-- **Timing** is `element.animation.revealProgress`, an ordinary keyframe track
-  over the static `progress`. `rebaseAnimation`, `sliceAnimation` and
-  `rebakeElement` all walk `Object.keys(animation)`, so split, trim, duplicate,
-  paste and a frame-rate change carry a typewriter's timing for free — the same
-  argument the mask's five make for living there. Storing `startMs`/`durationMs`
-  on the field would have meant reimplementing every one of those, and the one
-  anyone forgot would fail silently on one edit.
-
-Absent means the whole text is shown, clearing deletes the key, and
-**`SCHEMA_VERSION` did not move**. `revealProgress` is kept out of
-`emptyAnimation` and gated in `animatableProperties` on `element.reveal != null`
-— the mask's arrangement exactly, and `normalizeAnimation` collects the orphans
-through `keyframes.ts#carriesTrack`, which is now a table rather than the two
-hard-coded conditions it was becoming.
-
-Keyframing the *string*, as Premiere does, is the alternative and is wrong here:
-`HistoryEntry` keeps fifty snapshots of the element map, so the undo stack would
-grow by the whole body times its glyph count; easing and handles would mean
-nothing; and correcting one typo would invalidate every keyframe. A progress
-scalar is independent of the wording, so the timing survives an edit to the text.
-
-Five things that are easy to get wrong:
-
-- **The reveal is applied *after* layout, never before.** `layoutFor`'s
-  `wrapCache` is keyed on the whole string, so wrapping a growing prefix would
-  miss that cache every frame *and* re-flow the text as each word arrived. It
-  also means the box never changes size, which is why nothing about a reveal
-  belongs in `textFit.ts#RE_FITTING_PATHS`.
-- **The lettering is drawn left-anchored while revealing.** `backgroundX + pad`
-  is already the full line's left edge under all three alignments, so the prefix
-  is drawn there with `textAlign: "left"`. Drawing it at a centre or right
-  anchor re-centres it every frame and the text creeps sideways as it types —
-  the defect Premiere's Source Text keyframing has, and invisible in any
-  left-aligned test.
-- **The background band is drawn at the full line's width.** A band is a layout
-  element, not something that types; one that grew would redraw at a new size
-  every frame and, centred, grow both ways at once. It appears whole with the
-  line's first unit, and a line that has not started gets no band.
-- **A cut never lands inside a grapheme.** `Intl.Segmenter` decides, pinned to
-  one locale so the same sentence does not segment differently on CI than on a
-  Korean machine. It is also the only thing that makes `word` mean anything in
-  Japanese or Chinese, where there is no space to split on.
-- **`fade` is bounded to one unit.** At most one unit is ever part-drawn, so the
-  cost is one extra clipped pass per line rather than one per unit in flight.
-  That pass draws the *whole* prefix and clips it, because `measureText` on a
-  substring loses the kerning against the glyph before it.
-
-`applyTypewriter` writes exactly what a user could place by hand —
-`setClipTextReveal`, `setTrackActive`, two `addKeyframe`s, one linear easing —
-so the stopwatch, the curve editor and undo all work on its result without
-knowing a button made it. It is deliberately **not** in
-`features/animation/presets.ts`: a `PresetShape` is transform and opacity stops
-and `applyPreset` writes keyframes only, while a reveal preset must also write
-`element.reveal`. The linear default is load-bearing — `addKeyframe` gives every
-anchor a 100ms handle, so two bare keyframes describe an ease-in-out, and typing
-that starts slow, races and then dawdles reads as a stutter.
-
-There is no dedicated MCP tool yet, but `revealProgress` **is** in
-`define.ts#ANIMATABLE`, so the existing animation tools reach the curve on a
-clip that has a reveal. That list is now pinned against
-`@types/timeline.ts#ALL_ANIMATABLE_PROPERTIES` rather than against the families
-spelled out in the test — which is the third time that guard would otherwise
-have gone stale at the same moment as the copy it guards.
-
-## On-device speech-to-text
-
-Transcription with **per-word timings**, from macOS's own recogniser. No key, no
-network, no server. It is what the auto-caption panel's word chips and
-split-at-a-word are built on, and the reason the panel's "Local" method is
-finally local: it used to ask for a `CartcutAutoServer` URL, read it out of a DOM
-input by id, and POST the wav to a WhisperX server the user had to run.
-
-```
-native/cartcut-stt/Sources/     the Swift CLI — main.swift, Transcribe.swift, Emitter.swift
-scripts/buildSpeech.mjs         two swiftc calls into bin/<platform>-<arch>/
-electron/lib/speechBin.ts       where the binary is, and whether this Mac can use it
-electron/lib/speechStt.ts       spawn + NDJSON parse + abort. No Electron, so it is tested
-electron/mcp/transcribe.ts      the three back ends and the disk cache
-electron/ipc/ipcTranscribe.ts   the renderer's job queue, progress and cancel
-apps/app/src/features/caption/locale.ts   which language to offer first
-```
-
-**A sidecar process, not a native Node addon.** A N-API module would couple the
-app to Electron's ABI and an `electron-rebuild` step this repo has never needed —
-it has zero first-party native modules. Speech.framework also wants a Swift
-concurrency runtime and an async result stream, which is natural in a process
-and awkward across that boundary, and a framework crash cannot take the editor
-with it. Same shape as `ffmpeg` and `ffprobe`.
-
-**`"apple"`, never `"native"` and never folded into `"local"`.** The WhisperX
-server is *also* local, so the useful distinction is whose engine it is:
-`local` is a server you run, `openai` is an API you pay for, `apple` is the OS.
-The panel's button says **On-device**.
-
-Five things that are easy to get wrong:
-
-- **Word timings live on the runs of the `AttributedString`, not on
-  `Result.range`.** `Result.range` is the whole segment, so reading it gives one
-  pseudo-word per sentence — which is exactly the defect the OpenAI path has and
-  the reason this exists. The attribute is
-  `AttributeScopes.SpeechAttributes.TimeRangeAttribute`, and it is only populated
-  because the transcriber was built with `attributeOptions: [.audioTimeRange]`.
-- **A finish call is mandatory.** Ending the input does not end the session, so
-  omitting `finalizeAndFinish*` leaves the results stream open and the process
-  **hangs** instead of failing.
-- **Built at a macOS 12 deployment target, though everything it uses is
-  macOS 26.** At 12.0 the Speech symbols are weak imports, `if #available` never
-  touches them, and the binary launches on an old system and reports
-  `requires_macos_26` in the same NDJSON as everything else. Built at
-  `-target …macos26.0` it fails at `exec` with a dyld diagnostic on stderr, which
-  a caller cannot tell from a missing binary. 12.0 is also where Swift
-  concurrency is in the OS, so no back-deployment dylib has to be found a home.
-- **`assetInstallationRequest` is not nil for an installed locale.** It hands
-  back a request that completes at once, so acting on it alone flashed
-  "Downloading language model" on every single run. `AssetInventory.status` is
-  the separate question, and the one to ask first.
-- **Availability is decided in JS before anything is spawned**
-  (`speechBin.ts#isNativeSpeechAvailable`), from `process.getSystemVersion()` and
-  the binary's existence. The Swift `if #available` is the second line of
-  defence, not the first.
-
-Nothing signs the binary here. electron-builder signs every Mach-O under
-`Contents/`, deepest-first with the `.app` last — verified against the 0.5.4
-build, where an entirely unsigned `bin/darwin-x64/ffmpeg` came out carrying
-Developer ID, the hardened runtime and this repo's `entitlementsInherit`. So
-`extraResources` needed no change, and an `afterSign` hook would be actively
-wrong: it would invalidate the outer signature that seals `Contents/Resources`
-and fail notarization. **No new entitlement either** — the macOS 26 Speech API
-has no authorization call at all (`grep -i authoriz` over its `.swiftinterface`
-finds nothing), so there is no TCC prompt for on-device file transcription;
-`NSSpeechRecognitionUsageDescription` belongs to the legacy `SFSpeechRecognizer`
-and is in `extendInfo` only as belt-and-braces.
-
-**The panel and the agent call one function.** Both go through
-`transcribeFile`, which already owned ffmpeg extraction (16 kHz mono, exactly
-what the recogniser wants) and the disk cache — so a clip the agent has read
-opens instantly in the panel, and there is one ffmpeg pass per clip rather than
-two. The locale is folded into the cache key's `method` component
-(`apple:ko-KR`), because the same file read as Korean and as English gives
-different words; `method` was already part of the hash, so `CACHE_VERSION` did
-not move and every transcript cached before this stays valid.
-
-Measured on the machine this was built on, at 11s of Korean speech: a cold run
-8.7s — essentially all of it the one-off model download — and a warm run 0.44s,
-about 25x real time. That ratio is why the progress UI names the stage: the
-download is the only wait worth a bar, and it happens once per language.
-
-`analysis/segments.ts` gained `groupWords` so the break rule is written once.
-The panel needs the *words* of each caption line and an agent needs the *text*,
-and two copies of "where does a caption break" is two answers to the one
-judgement in that file. `segmentWords` is now `groupWords(...).map(toSegment)`
-and its suite did not change.
-
-## The window system
-
-A region of the editor that can hold panels **docked beside its own content**,
-with a draggable splitter between them. The preview column is the first host and
-the auto-caption editor is the first window; the module is deliberately not
-about either.
-
-```
-apps/app/src/features/window/windowLayout.ts   the rects. "Not clipped" is defined here
-apps/app/src/features/window/windowDrag.ts     pointer delta -> a new placement
-apps/app/src/features/window/windowOps.ts      open / close / focus / place, pure
-apps/app/src/features/window/windowStore.ts    the vanilla zustand over those
-apps/app/src/features/window/windowHost.ts     <window-host>: measures, lays out, owns the splitter
-apps/app/src/features/window/appWindow.ts      <app-window>: title bar, close, body
-apps/app/src/sass/style/_window.scss           every .window-* rule
-```
-
-### The precedence that decides every clamp
-
-Three claims compete for one axis, and they are ranked:
-
-> **host > window min > content min**
-
-The host always wins. A rect outside it is not smaller than somebody wanted, it
-is *invisible*: `#split_col_2` carries `overflow: hidden` on both axes, so a
-window that overruns is silently cut off rather than scrolled to. A window
-pinned under its own minimum looks cramped; one past the host's edge looks
-broken, and looks broken in a way **no `getBoundingClientRect` check can see**.
-`uiStore`'s own `clamp` makes the same choice one level up, where it writes
-`Math.max(min, max)`.
-
-Below the host, the window's minimum beats the content's, because a window
-shrunk past its minimum has controls stacked on top of each other while the
-content region is usually a canvas that simply gets smaller.
-
-`layoutHost` carves the free rect one window at a time in `z` order, and every
-rect it returns is inside `{0, 0, host.width, host.height}`. That single
-sentence is the contract, and `windowLayout.test.ts` asserts it over a sweep of
-2,000-odd host sizes and placements rather than over chosen cases, because the
-ways to leave a host are arithmetic accidents and not scenarios anyone sits down
-and writes.
-
-### Docked is a percentage, floating is pixels
-
-A docked window's share has to survive the host changing size: dragging the main
-preview splitter must not make the caption window a different fraction of what
-is left. That is why `uiStore` holds its three columns as percentages too.
-
-A floating window is the opposite. It was put somewhere, and somewhere is an
-absolute position; re-deriving it from a fraction would make the window crawl
-across the region every time a splitter moved on the other side of the app.
-
-**Floating is in the model and not in the chrome.** `WindowPlacement`,
-`layoutHost`, `clampRect`, `resolveWindowDrag` and `windowOps` all handle it and
-all have suites for it; there is no title-bar drag, no eight resize handles and
-no stacking UI, because nothing needs one yet. The generality that was worth
-paying for up front is the one that would otherwise mean re-designing a type.
-
-### Content arrives as a template, not through a slot
-
-A light-DOM Lit component's `render()` **replaces its children**, so the usual
-way to wrap arbitrary content is a shadow root with a `<slot>`. This app does
-not do that, and the reason is written at `option/controlAudioVolume.ts`: the
-global stylesheet does not cross a shadow boundary, so chrome rendered into a
-shadow root comes out unstyled and fails in a way that looks like a CSS problem.
-70 of the 70 components that override `createRenderRoot` return `this`.
-
-So `<window-host>` takes `.content` and `.panels`, both carrying Lit
-`TemplateResult`s. It is the light-DOM equivalent of a slot: Lit keeps the
-element instances inside stable across re-renders, so the `<automatic-caption>`
-in a window is built once. A panel listed in `.panels` but not open in the store
-draws nothing, which is what makes opening a window a store write and never a
-change to a template.
-
-### Five things that are easy to get wrong
-
-- **`display: block` on the host is load-bearing.** A custom element with no
-  styles is `display: inline`, where `width` and `height` do nothing, so without
-  it `<window-host>` measures 0x0, every rect under it is 0x0, and the preview
-  canvas comes up 1x1 with no error anywhere. The same trap
-  `autoTrackPanel.connectedCallback` documents, and it was paid for twice.
-- **The measured host size is rounded to whole pixels.** A percentage-width
-  column has a fractional box (measured: 500.515625 tall) and every derived rect
-  inherits the fraction, which draws a 1px border as two half-intensity rows.
-- **The splitter's arithmetic is not in the component.** `resolveWindowDrag`
-  owns it, and it clamps through the same `fitSpan` the layout uses. Two copies
-  would disagree at exactly the edges, where a splitter spends most of its life:
-  the drag would keep reporting a change while the layout answered the same
-  number, so a splitter held against its limit would write to the store once per
-  mouse move forever.
-- **A declining action returns `state` itself.** zustand skips the notification
-  only when the updater returns the same object, so `return {}` would wake every
-  subscriber for a write that changed nothing.
-- **The window has no border of its own**, and a pixel check must not assume
-  one. A docked window meets its splitter on one side and the region's edges on
-  the other three, so an outline would be a second line beside the splitter and
-  a box drawn around the column. The trap underneath: `borderTopColor` resolves
-  to Bootstrap's default `#212529` on an element with **no border at all**, and
-  that grey is within any useful tolerance of the window's own `#111315` body.
-  A first draft of the spec read it, found "the border" everywhere inside the
-  window, and reported all four edges 100% present while looking at nothing.
-  Assert the *width* before trusting the colour.
-- **The splitter is two numbers, and they are not the same number.**
-  `SPLITTER_PX` is 3 and is the area the pointer has to hit; what is drawn is
-  `0.05rem` in the strip's `::after`, the hairline every other divider in the
-  app uses. Filling the whole strip on hover puts a solid bar on screen where a
-  hairline belongs. `.split-col-bar` makes the same trade one level up, with
-  0.5rem of hit strip that is never painted at all.
-- **`element-control` is told about a resize with `?.`,** unlike `Control` and
-  `Timeline` which call `resizeEvent()` outright. It is only mounted while the
-  preview tab is the one on screen, so in a docking world it can be absent.
-  `preview-canvas` needs nothing; it observes its own canvas.
-
-### What is a window and what is still a tab
-
-Only the auto-caption panel. Record, Audio Record, Proxy and Auto Track are
-still `controlPanelStore` tabs that take the whole preview area. The window
-system can hold any of them, but each needs its own pass at surviving a few
-hundred pixels of width and none has had it. Two mechanisms is the intended
-state until they do, and `controlPanelStore` says so at the top.
-
-### How it is known to be right
-
-The four pure suites cover the geometry, the gesture and the state. What they
-cannot see is whether any of those numbers reach the screen, and that is the
-whole risk here: **`getBoundingClientRect()` reports the rect an element would
-have had even when an ancestor's `overflow: hidden` has cut it off**, so a
-window nobody can see passes every layout assertion.
-
-`tests/e2e/specs/caption-window.spec.ts` is the half that looks. It drives the
-real tile, measures containment at three column widths and after resizing the
-app, drags the splitter to both of its limits, and then **reads the pixels**,
-which requires `decodePng` in `harness/artifacts.ts`, the mirror of the
-`encodePng` that was already there.
-
-What it reads is the two horizontal rules the window is built from, the title
-bar's bottom edge and the footer's top edge, and what it measures is **the
-longest unbroken run of each**. That single number catches all four sides: cut
-off on the right and a rule stops early, on the left and it starts late, off the
-top or the bottom and the rule is not there at all. Both have to run the window's
-full width and begin and end within 2px of its edges.
-
-Two things keep it honest. A row four pixels lower, inside the body's padding
-where no rule is drawn, has to come back short, and it comes back at **0px**.
-And the check was verified against a deliberate break: `clip-path` on the host
-cuts the paint without moving a single rect, so every containment assertion goes
-on passing, and the rule check fails with "the title bar's rule is only 279px of
-the window's 320px".
-
-## The auto-caption panel
-
-`apps/automatic-caption/` is not a separate build despite having its own
-`package.json` — `apps/app/src/ui/control/Control.ts` imports its source, so root
-webpack compiles it and the root `tsconfig.json` typechecks it. It is a leaf that
-`Control` mounts; nothing in `apps/app` imports back.
-
-**Every decision it makes lives in `apps/app/src/features/caption/`**, not in the
-component. `apps/automatic-caption/` is outside every vitest include pattern, and
-this repo has no DOM test environment — so a rule kept inside the Lit class is a
-rule nothing can check. The class is a dispatcher over these:
-
-```
-apps/app/src/features/caption/lines.ts    the caption model: split, merge, edit,
-                                          linesFromTranscript (ms -> s), activeAt
-apps/app/src/features/caption/layout.ts   captionLayout / captionStyle — where a
-                                          caption sits, and what one *is*
-apps/app/src/features/caption/locale.ts   which language to offer first
-apps/app/src/features/caption/rows.ts     the `editComplate` payload
-apps/app/src/features/caption/editor.ts   the keymap AND the undo stack
-apps/app/src/features/caption/preview.ts  the canvas paint
-apps/app/src/features/caption/previewLoop.ts  the two rAF handles, the 60Hz gate
-apps/app/src/features/caption/editorLayout.ts  two columns or one, and the canvas cap
-apps/app/src/features/caption/silenceButton.ts what the icon-only sweep button means
-apps/app/src/features/caption/transcribeSession.ts  the job, over a port
-apps/app/src/features/caption/timing.ts   source ms -> timeline ms
-apps/app/src/features/media/seek.ts       seek, and know when the frame arrived
-```
-
-### It is a window now, not a full-screen modal
-
-The editor opened as a `modal-fullscreen` (`#VideoPanel`) until it was moved into
-a docked window. See "The window system" above for the container. What that
-changed about the panel itself:
-
-- **Its visibility is a field, not Bootstrap.** `isEditing` gates the editor
-  region, `openEditor` and `closeEditor` are the two transitions, and they tell
-  `Control` by event because `apps/automatic-caption/` resolves its packages from
-  its own `node_modules` and cannot reach zustand. The `shown.bs.modal` hook that
-  used to defer the first paint is now the deferral inside `openEditor`, for the
-  plainer reason that a canvas has no box until it is in the DOM.
-- **Closing is one path.** The footer's Close button is gone and the window's
-  title bar carries the only close, so an abandoned edit and a finished one leave
-  the panel in exactly one state. It was two, and whichever one a user did not
-  take left the other half undone.
-- **The keyboard lock follows the caret, not the session.** The panel used to
-  hold `lockKeyboard` for as long as it was open, which was right for a modal
-  covering the app and is wrong for a window beside the preview: the user is
-  meant to go on cutting on the timeline. `focusin` takes it and `focusout`
-  gives it back, and a move between two fields inside the panel is not a
-  departure. The release on close cannot come from the panel, because closing
-  unmounts it and an event from a detached element reaches nobody, so `Control`
-  does it.
-- **Unmounting is new, and so are the obligations.** As a tab pane the panel was
-  built once and lived for the life of the app. It is destroyed and rebuilt per
-  open now, so `disconnectedCallback` has to dispose both Bootstrap modals and
-  cancel a transcription nobody is waiting for. Anything left behind accumulates
-  once per open.
-- **It has more than one width.** `editorLayout.ts` decides two columns or one
-  and caps the preview canvas in pixels, from a `ResizeObserver` on the panel
-  rather than a media query: a media query answers about the screen, and the
-  screen is the one measurement that does not change when the splitter moves.
-
-### The footer
-
-`[silence] [Apply]`, right-aligned, with the pending-cut summary pushed left
-beside them. "Complate Edit" is "Apply"; the event is still `editComplate`,
-which is a contract with `Control`.
-
-The sweep is **one icon and nothing else**, which replaced a labelled "remove
-silence" button and a "clear" button that only existed some of the time and
-shifted Apply sideways when it appeared. Pressing it with a sweep already staged
-puts the gaps back, so one control covers both. Everything the words used to
-carry now has to come out of `silenceButton.ts`, where a test can see it: the
-glyph, the variant, whether it is disabled, and the `title` that doubles as the
-accessible name. There is no bridge behind it in the web build, and it renders
-nothing at all there rather than offering a control that can only fail.
-
-The keymap and the undo reducer share `editor.ts` deliberately — the keymap's
-output is the reducer's input, so the behaviour worth testing is the chain, which
-is the arrangement `mask/penSession.ts` makes for `penKey`. Bootstrap, the
-transcription bridge and `requestAnimationFrame` are each reached only through a
-narrow port (`ModalLike`, `TranscribePort`, `FrameScheduler`), which is what lets
-all of it run under `environment: "node"` against a fake.
-
-**The preview draws the element it will place.** `layout.ts#captionStyle` is one
-factory: `preview.ts` feeds it to `createTextElement` and paints with
-`renderElement`, and `rows.ts` emits it for `Control` → `addText` to hand to the
-*same* `createTextElement`. Parity is therefore structural rather than
-maintained, and `caption/preview.parity.test.ts` now asserts it on every run
-rather than once by hand — one side `paintCaptionPreview`, the other
-`renderTimelineAtTime`: **0 differing pixels of 2,073,600**.
-
-Two things about that suite. It asserts the *difference* between two renders in
-one process, which is why it is host-independent even though `golden.test.ts`
-keeps text out of its digests for the opposite reason. And **it asserts ink
-before asserting equality** — `paint` filters on `isElementVisibleAtTime` and the
-preview does not, so a caption whose span misses the cursor is drawn by one side
-and skipped by the other, and two blank frames differ in zero pixels too. A first
-draft passed that way.
-
-The one known exception is pinned in the same file: `captionsFrom` trims a line's
-text and the preview does not, so **a trailing space moves a centred caption**
-between the preview and the placed clip.
-
-It replaced a hand-rolled `drawCaption`/`drawTextBackground` that was out by a
-font size vertically, used a line advance of 52 against the renderer's 62.4, and
-padded the background band on one side only. Worse, it mixed **three coordinate
-spaces** — `width` from the source clip's native size, `locationY` from a literal
-1080, and the element landing on a canvas sized by `previewSize`. What you
-positioned was not what you got, and on a vertical project it was not close.
-
-Five things that are easy to get wrong:
-
-- **`renderElement` with `context` omitted is the right call**, not `renderText`
-  after a translate. For today's caption the two are identical — no blend, no
-  mask, no parent, so the fast path in `element.ts` fires and nothing is
-  allocated — but the identity has to be structural. The moment a caption gains a
-  rotation, an opacity or a group parent, the translate diverges silently, which
-  is the class of bug this replaced. `drawTextToCanvas` is for *baking*: it
-  allocates a canvas per call and passes no backdrop, so a frosted band bakes as
-  flat tint.
-- **The canvas backing store is the project frame; CSS does the downscale.** The
-  `templateThumbnail`/`contactSheet` family, and not the DPR-aware one. Scaling
-  the context instead leaves wrap width, band padding and outline geometrically
-  right but no longer bit-identical to the export.
-- **The line owns its span.** `CaptionLine.start`/`end` are the line's, not
-  `words[0].start`. That is what lets an edited line, a line split inside a word,
-  and a line whose words were all deleted still have valid timing — reading the
-  span off the words is what used to throw on an empty line the split had just
-  made. A split picks a cut *time* then partitions the words by it; a caret
-  inside a word snaps to that word's edge rather than halving its second,
-  because a caption boundary mid-word is a time nothing audible happens at.
-- **Bootstrap grid classes keep getting onto flex children, and they keep
-  costing a layout.** Twice now. The two columns are explicit flex, and so is
-  the method row on the setup screen: `col` is `flex: 1 0 0%`, so on a column
-  flex it grew to fill the panel and stretched On-device and OpenAI to the full
-  height of the window. Survivable in a modal with more height than content, and
-  obvious the moment the panel was docked. The original: `.row` carries
-  negative gutters (`margin: 0 -12px`) and forces `width: 100%` on its children,
-  and it was being used on a flex child purely to stack things vertically — so
-  the preview column sat 12px outside its parent on each side and overlapped the
-  caption column by 4px, while the captions themselves ran 12px past the row's
-  right edge. `col-*` outside a `.row` is the same trap. Measured across
-  1600→800px, the replacement holds a constant 16px gutter with zero overlap.
-- **Enter is handled on the input, guarded on `isComposing`.** A Korean IME fires
-  Enter to commit a composition, so an unguarded handler cuts the line in half
-  every time someone finishes a word — which is why this is an `<input>` and not
-  a `contenteditable`. The old `window`-level listener split on *any* Enter in
-  the editor, including one inside a caption field, and could never be removed
-  because it was registered with `.bind(this)`. The guard is
-  `editor.ts#captionKeyIntent` now, and it short-circuits **every** key — Cmd+Z
-  included. Two more things that rule decides, both pinned: the comparison is
-  `key === "z"`, lower case only, so there is no redo and **Caps Lock disables
-  undo**; and the handler must name the event's fields rather than spread it, because
-  a DOM event's properties are prototype getters and `{ ...event }` is `{}`.
-
-`splitCaption` used to rebuild every line's text from the raw words, so one Enter
-discarded every correction typed so far; the line that would have restored it was
-in the source, commented out. The operations are pure now and **decline by
-returning their input by identity**, which is also what lets the panel's Cmd+Z
-skip a gesture that did nothing. Undo covers split and merge only — a snapshot
-per keystroke would bury them under hundreds of character states.
-
-## Cutting from the transcript
-
-Two gestures in the auto-caption panel that change the **picture**, not just the
-words: striking a caption line out cuts its footage, and a sweep cuts the
-silences. Descript's arrangement, and the reason the panel exists at all. Before
-this it could only add text, so a user found the dead weight in the transcript,
-closed the panel, and went hunting for the same moment on the timeline by eye.
-
-```
-apps/app/src/features/timeline/rippleMap.ts   where a time goes after a cut
-apps/app/src/features/caption/cuts.ts         intent -> one list of timeline ranges
-apps/app/src/features/caption/silence.ts      what counts as a silence
-apps/app/src/features/caption/applyCaptions.ts  cut and place, one transform
-electron/mcp/analyze.ts#analyzeSilences       the measurement, at a chosen threshold
-electron/ipc/ipcAnalyze.ts                    the renderer's way to it
-```
-
-Nothing reaches the timeline until **Complate Edit**. Until then a struck-out
-line is `removed: true` on the line and a swept silence is a panel field, and the
-whole edit is one `commit`, so one Cmd+Z takes back the cuts *and* the captions.
-The loop of `elementControl.addText` that used to place captions is gone: one
-store commit per caption was survivable while the panel only added text, and is
-not now that the same press also removes footage.
-
-### The decision the feature turns on
-
-> **Where a caption lands after the cut is computed from the cut list, not read
-> back from the document.**
-
-`removeRanges` leaves the clip as N pieces with new ids, so the single
-`sourceKey` the panel started with no longer names the footage most captions sit
-on. Re-finding the piece per caption is possible; it is also unnecessary,
-because a rippled lane leaves the surviving footage contiguous:
-
-```
-t' = t - (everything cut before t)
-d' = d - (everything cut inside [t, t+d))
-```
-
-`rippleMap.ts` is that, and nothing else. The claim is about `removeRanges`
-rather than about arithmetic, so `rippleMap.parity.test.ts` performs the real
-edit and checks the prediction against where the footage measurably landed:
-three speeds, six shapes of cut, probing the source window every 97ms. Breaking
-`shiftPoint` turns it red, which is how it is known to measure something.
-
-**One list feeds both consumers, and that is what makes it exact.** `onFrame`
-can pull a short range's two edges onto the same frame, and `removeRanges` skips
-a range whose clamped width is zero, so a caller that snapped *after* predicting
-would predict a cut that never happened and place every later caption early.
-`planCuts` clamps to the trim window, converts, snaps, merges and drops the
-collapsed ranges once, before either side sees the array.
-
-### Five things that are easy to get wrong
-
-- **Resolve the clip before cutting it.** A cut flush to the left edge makes the
-  head the deleted middle, so the original id is **gone** and the survivor
-  carries a new one with a different `trim.startTime`. Reading
-  `doc.elements[sourceKey]` afterwards gets `undefined` for an entirely ordinary
-  case, and `captionToTimeline` then quietly treats source times as timeline
-  times. Pinned by a test that asserts `elements.clip` is undefined and the
-  captions are still right.
-- **A struck-out line declines split and merge.** Both build fresh object
-  literals rather than spreading, so before the guards a split un-deleted the
-  line and both halves came back. Refusing is one line each and is what a test
-  can see; spreading would break again the moment `CaptionLine` gains a field.
-- **The silence rule is an intersection, and neither half is optional.** The
-  signal alone cuts a word quiet enough to dip under the threshold, and keeps
-  laughter or a music sting because they are not quiet. The words alone call
-  every wordless gap dead air, sting included. `signal.ts` already says the
-  transcript cannot see a silence that is not between words; this is the other
-  direction of the same point.
-- **A pause is trimmed *to* `keepMs`, never to nothing.** The rule
-  `style.ts#cutting.maxSilenceMs` already states. Two sentences butted hard
-  together read as a mistake rather than as tightening.
-- **The ripple is lane-local, so say so.** A music bed, a detached audio twin or
-  a caption from an earlier pass keeps its old timing while the picture under it
-  gets shorter, and nothing repairs that. `rippleMap.ts#clipsAcrossCuts` names
-  them and the panel warns before committing. **Text tracks are included**: an
-  earlier caption is the likeliest thing sitting over the cuts, and excluding it
-  would leave the warning silent in the commonest case.
-
-Cuts that would remove the whole clip are refused, and the captions are placed
-anyway: that half is recoverable by hand, while an emptied track is not.
-
-### The measurement
-
-`analyzeSilences` re-runs `silentRanges` over the **cached** envelope rather than
-returning `AudioAnalysis.silences`, which is baked at the defaults. The decode is
-the expensive half and it is already cached by file identity, so a threshold
-control costs one pass over an array. The envelope never crosses IPC: at a 10ms
-hop it is six thousand numbers a minute.
-
-`analyzeFile` also gained an in-flight map keyed the way its cache is. The cache
-is written only *after* the decode, so two callers arriving during one both
-missed and both decoded. Harmless while the only caller was an agent asking
-once; with a button behind it, a double-click was two full decodes of the same
-take.
-
-### Two things fixed on the way past
-
-- **`plan.ts` minted one split id per range, and `removeRanges` mints two.** A
-  range in the middle of a clip splits twice, so the pool drained and fell
-  through to `?? uuidv4()`. `commit` runs its transform twice, so the probe and
-  the committed run then minted *different* ids, which is precisely what the
-  pool exists to prevent. `applyCaptionCommit` throws rather than falling back.
-- **The preview drew struck-out lines.** `captionsFrom` drops them, so the
-  panel's "the preview draws the element it will place" claim was false for
-  exactly the lines the user had just acted on.
-
-`SCHEMA_VERSION` did not move. `removed` is an optional field that restoring
-deletes, and it never reaches the timeline: it is panel state that becomes a cut.
-
-## The application menu
-
-The macOS menu bar is a second surface onto the editor's commands, and it obeys
-the rule `features/editor/actions.ts` states for the toolbar: the menu item, the
-button and the keystroke are one code path.
-
-```
-electron/lib/menuCommands.ts          what the menu offers — pure data, no Electron
-electron/lib/menu.ts                  the menus, built from that table
-electron/ipc/ipcEditing.ts            webContents undo/cut/copy/paste, allowlisted
-apps/app/src/features/editor/menuCommands.ts  the ids, run in the renderer
-apps/app/src/features/editor/textEditing.ts   ⌘C/⌘V/⌘Z *inside a text field*
-```
-
-One channel, `menu:command`, carrying an id — not a channel per item, which is
-what the two `SHORTCUT_CONTROL_*` channels it replaced would have needed. The
-renderer's table is a `Record<MenuCommandId, …>`, so an item with no handler is
-a webpack type error rather than a click that does nothing.
-
-Three things about it are easy to get wrong, and all three were paid for once:
-
-- **A menu accelerator fires whatever the page does with the same keystroke.** A
-  renderer `preventDefault` does not cancel it. So for a combination the
-  renderer already binds on `keydown` — ⌘Z, ⌘X, ⌘C, ⌘V, ⌘D, ⌘0, ⌘+, ⌘- — the
-  item carries the accelerator (that is what draws the shortcut beside the
-  label) but declines to send it: `rendererOwnsKey`, tested against
-  `event.triggeredByAccelerator`, which distinguishes the keystroke from the
-  click. Without it one ⌘Z is two undo steps. Verified in the running app:
-  ⌘Z moves `historyNow` by exactly one, and Edit → Undo by exactly one.
-- **A menu accelerator is global to the window with no per-focus escape.** So
-  Space, the arrows, Backspace and Delete are *not* registered — they would
-  toggle playback and delete clips while someone typed a caption. Those stay in
-  `elementTimelineCanvas._handleKeydown` and `Timeline._handleKeydown`, which
-  can see the focus, and their menu items are offered without a shortcut.
-  `menuCommands.test.ts` pins that every registered accelerator has a modifier.
-- **Replacing the `undo`/`cut`/`copy`/`paste` roles takes their job with it.** A
-  role acts on the focused editable and nothing else, which is why Edit → Copy
-  with three clips selected copied nothing. The items are the editor's own
-  commands now, and `textEditing.ts` is the half that would otherwise have gone
-  missing: the same keys, meaning the text, while the caret is in a field. It
-  cancels the keystroke *only* once the command has somewhere to go, because the
-  web build has no main process behind the bridge.
-
-`features/editor/shortcuts.ts` still lists every binding the user can press,
-menu-owned and renderer-owned alike — the help modal that leaves one out is
-wrong whichever half implements it.
-
-## The Claude Code bridge
-
-`electron/mcp/` runs a Streamable HTTP MCP server on `127.0.0.1:9826/mcp`,
-bearer-token authenticated, started with the app. Its tools validate with zod
-and forward to `apps/app/src/features/agent/`, which runs the real commands
-against the store — so an AI edit takes the same code path, and the same undo
-step, as the user's own mouse.
-
-```
-electron/mcp/server.ts      transport, sessions, auth
-electron/mcp/tools.ts       barrel: assembles the 56 tools Claude Code sees
-electron/mcp/tools/define.ts  the erased Registrar, shared zod fragments
-electron/mcp/tools/*.ts     one module per family (read, cut, media, tracks, …)
-electron/mcp/bridge.ts      main -> renderer request/response
-electron/mcp/transcribe.ts  speech-to-text, cached on disk
-apps/app/src/features/agent/commit.ts      run a pure op, record one undo step
-apps/app/src/features/agent/context.ts     document/element/frame-grid lookups
-apps/app/src/features/agent/serialize.ts   whitelist projections
-apps/app/src/features/agent/commands/      the commands themselves
-apps/app/src/features/caption/timing.ts    source ms -> timeline ms for captions
-```
-
-`tools.ts` must stay a barrel — do **not** turn it into `tools/index.ts`. Both
-resolve for `import … from "./tools"`, and nothing cleans `main/`, so a stale
-`main/mcp/tools.js` would shadow `main/mcp/tools/index.js` and silently ship an
-old tool list.
-
-Every mutating command goes through `commit(fn, declineReason)`, which probes
-the pure op first and records no history at all when it declines by identity.
-`electron/mcp/tools/tools.test.ts` pins the tool names, so adding one is a
-one-line diff a reviewer sees.
-
-Two constraints shape every tool:
-
-- **Tool output is capped** — Claude Code warns at 10k tokens and truncates at
-  25k. Never return a raw element: `animation.ax` holds up to 36,000 baked
-  samples per lane. Add fields to `serialize.ts`'s whitelist deliberately.
-- **`registerTool`'s generics must stay erased.** `electron/mcp/tools.ts` calls
-  it through a hand-written `Registrar` type. Letting TypeScript infer handler
-  arguments from the zod shapes costs ~10s per tool and exhausts the compiler's
-  heap across the file. There is a comment at the call site; do not "clean it
-  up".
-
-Connect with the command shown under the ⚡ icon at the bottom right of the app,
-or set `CARTCUT_MCP_TOKEN` and use the committed `.mcp.json`.
-
-## Groups and null objects
-
-**They are the same thing.** `GroupElementType` *is* After Effects' null object:
-a `TimelinePlaced & Visual & Animatable` element that draws nothing and exists
-only to hold a transform for its children. There is no `filetype: "null"`, and
-adding one would be a mistake — the two rules that make the feature work are
-keyed on the single string `"group"`. `hierarchy.ts#parentOf` admits **only** a
-group as a parent, and `isVisualTimelineElement` excludes **only** a group from
-the paint loop. Missing the first detaches every child in silence; missing the
-second crashes the renderer on an undefined call.
-
-```
-apps/app/src/features/timeline/hierarchy.ts     the parent graph, repairHierarchy
-apps/app/src/features/timeline/transform.ts     localMatrixOf / worldMatrixOf
-apps/app/src/features/timeline/groupOps.ts      createGroup, ungroup, setParent
-apps/app/src/features/timeline/parentOptions.ts what a parent picker may offer
-apps/app/src/features/element/nullElement.ts    createNullElement — the empty one
-apps/app/src/features/option/controlParent.ts   <parent-select>, the pick-whip
-```
-
-**One type, two ways of being born**, and the difference is only the pivot:
-
-- **`createGroup`** wraps a selection, from the timeline's "Group selected".
-  Its pivot is the selection's bounding box, and that is not a preference: it
-  makes the compensation each child owes exactly `−bbox.topLeft`, a pure
-  translation, which is the only transform that is *exact* for a bezier
-  keyframe's handles as well as its anchor.
-- **`createNullElement`** starts empty, from the preview's create menu or the
-  `create_null` tool. It has nothing to keep still, so its pivot is a plain
-  100×100 square on a point the caller chooses, and clips are attached
-  afterwards through `setParent`.
-
-`name` — "Group" or "Null" — is the only thing that tells them apart, and it is
-shown on the bar. No schema change; `SCHEMA_VERSION` did not move.
-
-Four things that are easy to get wrong:
-
-- **"Parenting does not touch the child's keyframes" is true and false
-  depending on which moment you mean**, and conflating the two is the way to
-  misunderstand the whole feature. *At the instant of parenting*, `setParent`
-  rewrites the child's numbers once, by the change of basis between its old
-  space and its new one — that is what keeps the picture still while the space
-  underneath it changes, and it is what AE's pick-whip does too. *Every moment
-  after that*, moving the parent changes nothing on the child at all: the
-  matrix is composed at draw time by `applyParentTransform`, so the child's
-  curves are read and never written. `nullParenting.test.ts` pins exactly that
-  pair, in that order, and says so at the top.
-- **A null starts at 0, not at the playhead.** `localSampleAt` falls back to the
-  static value for a cursor before an element's `startTime`, so a null seated at
-  the playhead would have its own keyframes quietly ignored everywhere to the
-  left of it. Its `duration` gates nothing — `renderer/timeline.ts` states that
-  a group's span does not gate its children — so the bar's length is only how
-  much there is to aim at when setting a keyframe.
-- **`width`/`height` are the pivot, not a size to draw.** `localMatrixOf`
-  rotates and scales about `w/2, h/2`, so seating a null on a point means
-  offsetting its `location` by half the box. Getting this wrong is invisible
-  until someone rotates it, and then everything swings about the wrong place.
-- **The picker and the op must not drift.** `parentOptions.ts` re-derives
-  `setParent`'s refusals so the dropdown never offers a choice the op would
-  decline — the same rule `groupMenuTemplate` already keeps. It is held by a
-  contract test that asserts, across a table of documents, that every enabled
-  choice is one `setParent` accepts and every disabled one is one it declines.
-
-Opacity is the one deliberate divergence from AE: parenting there does not pass
-opacity down, and `inheritedOpacityOf` does, so that fading a group fades what
-is in it. The reasoning is at the function.
-
-## Templates
-
-A **template** is a whole edit standing in for one clip: one bar on a video
-track, one name, its contents invisible to the timeline and its length fixed.
-Its author marks some clips **replaceable**, and whoever uses it swaps their own
-footage and words into those slots. CapCut's arrangement, and the vocabulary is
-deliberately theirs.
-
-```
-apps/app/src/features/template/archive.ts     what makes a .cttpl a template
-apps/app/src/features/template/slots.ts       slotsOf — the slot list, derived
-apps/app/src/features/template/compose.ts     composeTemplate / expandTemplates
-apps/app/src/features/template/templateDocument.ts  reading an installed .ngt
-apps/app/src/features/template/templateRegistry.ts  lazy load, the resolver
-apps/app/src/features/template/exportPlan.ts  staging, pure
-apps/app/src/features/template/templateExport.ts / templateInstall.ts  the IO
-apps/app/src/features/timeline/templateOps.ts fills, marks, and the factory
-apps/app/src/features/renderer/template.ts    the nested render
-electron/lib/templateScan.ts                  the folder walk, no Electron
-```
-
-### The decision the whole feature turns on
-
-**A template element stores a reference, not a copy.** It holds a `templateId`
-and the user's `fills`; the document behind it is resolved at draw time from
-`templateRegistry.ts`, exactly as `element.lut.presetId` resolves through
-`lutRegistry.ts`.
-
-Inlining the document was the alternative and is wrong three times over:
-`HistoryEntry` keeps fifty snapshots of the element map and a baked animation
-lane runs to 36,000 samples; `normalizeDocument` would have to recurse; and
-`agent/serialize.ts` would have to whitelist a nested tree past a 25k output
-cap.
-
-The registry brings its contract with it: **a template that is not installed
-draws nothing and reports nothing.** The consequence is stated rather than
-hidden — a project that uses a template needs that template installed, the same
-as a LUT preset. `name` lives on the element, not in the registry, so the bar
-still says what is missing.
-
-`template` is the one filetype that takes `isVisualTimelineElement`'s *negative*
-default on purpose: it paints itself onto whatever is there, so it fits
-`ElementRenderFunction` exactly and inherits transform, opacity, keyframes,
-group parenting and the control outline without any of them knowing it exists.
-
-### The archive
-
-```
-name.cttpl                 (a zip)
-├── template.ngt           REQUIRED, at the root — a real .ngt
-├── template.json          optional  { name, author?, thumbnail? }
-├── thumbnail.png          optional
-└── assets/…               media, at any subdirectory depth
-```
-
-**No `template.ngt` at the root → not a template → refuse.** One level down does
-not count; that is what zipping the folder rather than its contents produces.
-
-Inside the `.ngt`, media is referenced the way a portable project already
-references it — absolute in `timeline.json`, relative in `assetPaths.json` — so
-installing is: extract, then hand the extracted `template.ngt` to the existing
-`relinkAssets`. **The format needed almost no new path code**, and the
-subdirectory rule comes free: `relativizeInside` emits multi-segment POSIX
-relatives and `resolveInside` splits them at any depth.
-
-Slot definitions are **not** in `template.json`. They are an optional
-`replaceable` field on the inner elements, and `slotsOf` derives the list by
-walking the document — one source of truth, and a slot cannot outlive the clip
-it names. `template.json` carries presentation only.
-
-### Four things that are easy to get wrong
-
-- **Every composed key is namespaced** `outerId::innerKey`. `loadedAssetStore`
-  caches video and audio decoders by element id, so two copies of one template
-  would otherwise share one decoder and seek each other backwards.
-- **`expandTemplates` is for the asset layer, never the renderer.** It flattens
-  each template's contents onto the real timeline so `loadAssetsNeededAtTime`,
-  `syncPlayback`, `seek` and the export's audio planner work unchanged — and
-  handing it to `renderTimelineAtTime` would draw every inner clip twice, once
-  nested and once loose. `template/assetTimeline.ts` is the seam.
-- **The nested render must not paint a background.** `renderTimelineAtTime`
-  fills its frame before drawing, so the template's layer gets a transparent
-  one. Get it wrong and everything beneath the template is blanked — which
-  looks exactly like a template that is simply full-bleed.
-- **A fill moves the trim window, never the duration.** A slot's span is the
-  author's; the user chooses which part of their own footage lands in it. That
-  keeps `duration === trim.endTime - trim.startTime` satisfied and is the
-  difference between a template and a project.
-
-### The length belongs to the author
-
-`geometry.ts#isDurationLocked` is the single predicate, and it lives there
-because it is a statement about the duration invariants. Split, trim, speed and
-merge all decline on it, and `layout.ts#hitTest` reads it so the trim handles
-are never drawn — the rule the context menu already keeps, that an affordance
-which could only decline is not offered.
-
-Two of those were real hazards rather than tidiness, and both were silent.
-`clipEdit.ts#splitAt` takes its non-dynamic branch for anything without a
-`trim`, so it cut a template into two halves that each rendered the whole thing.
-And `mergeOps.ts#canJoin` decides two clips share a source by comparing
-`localpath` — every template carries the same `"TEMPLATE"` sentinel, so two
-*different* templates sitting edge to edge looked like two halves of one cut.
-`templateLock.test.ts` pins both.
-
-### Known limits, stated rather than discovered
-
-- **Effects and transitions inside a template do not render.** The nested render
-  passes `fx = null`: `FxRuntime`'s compositor holds one shared scratch surface
-  and entering it from inside a nested render would clear the frame it is
-  composing. `paint` skips both silently, so `templateExport.ts` **warns at
-  export**, where someone can still act on it. Making the compositor re-entrant
-  is the phase-2 work.
-- **Nesting is capped at one level.** `composeTemplate` strips a nested template
-  silently — by then there is nobody to tell — and `planTemplateExport` refuses
-  outright, which is the half someone can act on.
-- **A project needs its templates installed.** The LUT contract, above.
-
-`SCHEMA_VERSION` did not move. `replaceable` is an optional field that clearing
-deletes, so a project nobody has marked up saves byte-identically to one written
-before the feature.
-
-### Two things this feature fixed on its way past
-
-- **`FILETYPES` is now pinned.** `@types/timeline.ts` exports it as a runtime
-  list and `tools.test.ts` compares `define.ts`'s hand-copy against it. The
-  "Known rough edges" note below records that entry having been wrong twice in
-  opposite directions; it was checked by eye until now.
-- **`ipcFilesystem.writeFileEnsured`.** The existing `writeFile` calls the
-  *callback* form of `fs.writeFile` and returns before it runs, so a failure is
-  indistinguishable from success — and it does not create parent directories,
-  which every template install needs for `assets/`. The first version of the
-  export reported a `.cttpl` it had not written. Anything that must know whether
-  its bytes landed should use the new one.
-
-## Parametric shapes
-
-A shape clip's outline, generated from a recipe rather than stored as a list of
-points: a rectangle with rounded corners, a polygon with a vertex count, a star
-with a waist, an ellipse cut into a pie or a ring. Figma's Shape options, and
-the vocabulary is deliberately theirs.
-
-```
-apps/app/src/features/shape/shapeOutline.ts    the generators, and flattenOutline
-apps/app/src/features/shape/shapeGeometry.ts   shapeGeometryOf / coerceShapeGeometry
-apps/app/src/features/timeline/shapeOps.ts     setClipShapeGeometry, and the declines
-apps/app/src/features/renderer/shape.ts        the one branch that reads a recipe
-apps/app/src/features/option/optionShapeSection.ts  the Shape section, in the Media pane
-apps/app/src/features/mask/round.ts            roundCornersEach, shared with the mask
-electron/mcp/tools/shape.ts                    set_shape
-```
-
-### The decision the feature turns on
-
-> **`geometry` is the recipe and `shape` is its outer boundary, flattened and
-> un-rounded.**
-
-An optional `geometry` on the element. Present, it is the definition and
-`renderShape` builds bezier nodes from it; absent, the stored point list is
-drawn exactly as it always was. Clearing deletes the key, so a project nobody
-has parameterised saves byte-identically to one written before the feature and
-**`SCHEMA_VERSION` did not move**, the rule `blend`, `lut`, `mask` and `adjust`
-all follow.
-
-The point list is kept alongside, and not because of old builds: **three
-readers want the cheap form** and none of them has to learn recipes exist. The
-polygon tool's vertex overlay, `serialize.ts#shapePointCount`, and
-`renderShape`'s own no-recipe branch. `shapeOps.ts` is the only writer of the
-pair, which is what keeps them from disagreeing. `shape` is also a required
-field, so `[]` would be a landmine: it is already the "draw nothing" case.
-
-What the mirror leaves out is the point of it. **The rounding**, so dragging the
-radius slider does not rewrite the point list once a frame and the overlay marks
-the corners the shape actually turns at. **The hole**, because this is the outer
-boundary. Nothing else, so the three kinds that existed before come out as the
-lists `shapePoints` has always produced: a rectangle's four points, a triangle's
-three, an ellipse's fifty.
-
-The ellipse is the same **array**, down to the floating-point association: a
-closed ring has no start, so it is flattened from 3 o'clock with the legacy
-loop's own arithmetic, and a circle that gains a recipe stays byte-identical to
-the one in every saved project. The two polygons are the same **points** in the
-opposite order, because the generators wind clockwise and `shapePoints` does
-not. `fill()` cannot tell, so that claim is pinned on pixels rather than on
-arrays.
-
-Two more rules:
-
-- **A recipe is normalised per kind.** `normalizeShapeGeometry` drops a key the
-  kind does not read and a value already at its default, the way
-  `normalizeAdjustments` drops a slider at zero. Remembering a star's point
-  count across a switch to rectangle is the panel's job, not the document's.
-- **A recipe is given only to a shape made by naming a kind.** The create menu
-  and `add_shape` mint one; the polygon tool does not, because no recipe
-  describes a path clicked out by hand. The panel offers such a shape a kind,
-  and says that choosing one replaces its outline.
-
-### The geometry is the mask's, unchanged
-
-`mask/geometry.ts`, `round.ts` and `draw.ts` are unitless arithmetic over closed
-cubic paths with no mask-specific concept in them, so `features/shape/` imports
-them rather than growing a second copy. `MaskNode` was renamed `PathNode` with
-the old name kept as an alias: the type's own comment already claimed one
-vocabulary for "an anchor and its two handles", and a shape built out of mask
-nodes would be the "two things called a filter" problem again.
-
-Three changes were needed and no more. `roundCornersEach` takes a radius per
-node index, which `roundCorners` is now a constant application of, because Figma
-gives a rectangle four independent radii. `appendSubpath` adds a loop to an open
-path instead of beginning one, because a donut is two loops filled together.
-`normalized` became exported.
-
-Five things that are easy to get wrong:
-
-- **Round after scaling, never before.** The order `mask/place.ts` states: the
-  outline is generated at the size it will be drawn, so a 400 by 50 rectangle
-  gets circular corners rather than elliptical ones. That is also why the radius
-  is in **drawn pixels**, which is what makes resizing leave it alone and the
-  scale tool carry it, exactly as Figma behaves.
-- **Every generator winds clockwise.** Two things rest on it and neither is
-  obvious: a hole is the loop wound the other way, so the default nonzero fill
-  rule makes it a hole with nobody asking for `"evenodd"`; and a per-corner
-  radius is addressed by index, so "the top left corner" is only answerable if
-  the winding is a rule rather than a coincidence of each kind.
-- **A ring's vertices are mirrored, not computed one by one.** `Math.sin(30°)`
-  and `Math.sin(150°)` differ in the last place, so a triangle's two base
-  corners came out at different heights and its base sat 4e-14 off the bottom of
-  its box. The vertices on the axis are written rather than computed for the
-  same reason: `Math.cos(-π/2)` is 6.1e-17. Both are a fraction of a pixel of
-  antialiasing along one edge, which is exactly enough to stop a generated
-  triangle rendering as the hand-written list of the same triangle.
-- **An ellipse's frame does not move when its sweep does.** The wedge is carved
-  inside the full ellipse rather than refitted to its own extent, or the shape
-  would resize every time the sweep slider moved.
-- **A pie has one corner, the centre.** The ends of its arc carry one handle
-  each, so they are cusps, and rounding needs a straight edge on both sides
-  anyway. An ellipse has no corners at all, so a radius on one correctly does
-  nothing rather than being special-cased away.
-
-### Static values only
-
-There are no shape keyframes yet, the position Color adjustments takes, and
-nothing in the design stands in the way: `animatableProperties` would gain a
-conditional track the way an effect's parameters did.
-
-### How it is known to be right
-
-The generators, the read/write split, the ops and the renderer each have a
-co-located suite. Three of them carry the load.
-
-`golden.test.ts`'s **plain digests did not move**, which is the proof that a
-project nobody has parameterised renders exactly as it did. A separate block
-pins that a recipe reaches the picture, and that a default recipe draws what its
-own point list draws, held to **no channel moving by more than half**. It cannot
-be a digest match: every edge in the recipe path is a cubic, including a
-straight one, and Skia shades a degenerate cubic a fraction differently from a
-line. Measured against a triangle pointing the other way that count is over
-three thousand, which is how the bound is known to measure something.
-
-`renderer/shape.test.ts` drives the shipping renderer onto a real Skia surface:
-a default rectangle recipe is byte-identical to the legacy point list, a
-rounded corner is circular on a stretched clip, each of the four corner radii
-cuts its own corner, a donut's centre is empty and an arc fills one quadrant.
-
-`tests/e2e/specs/shape.spec.ts` is the half no node suite can see: the panel
-mounts and offers the rows each kind has, a drag across the radius slider is
-**one** undo step, and a rounded corner survives the pipe to FFmpeg into the
-delivered `.mp4`.
-
-## Masks
-
-**One mask per clip**, cutting its picture to a shape: `rectangle`, `star`,
-`heart`, or `pen` — a bezier path drawn on the preview. `feather` softens the
-edge, `roundness` rounds the corners, `invert` cuts a hole instead. It is an
-optional `mask` field over the same five types `Blendable` and `Gradable` cover,
-absent means unmasked, clearing deletes the key, and **`SCHEMA_VERSION` did not
-move** — the rule `blend` and `lut` both follow.
-
-```
-apps/app/src/features/mask/maskShape.ts   maskOf / coerceMask — the read/write split
-apps/app/src/features/mask/geometry.ts    nodes, segments, true curve bounds, affine mapping
-apps/app/src/features/mask/templates.ts   the three built-ins, normalised onto the unit square
-apps/app/src/features/mask/round.ts       corner rounding, as a rewrite of the node list
-apps/app/src/features/mask/place.ts       unit square -> element-local pixels
-apps/app/src/features/mask/sample.ts      the five animatable values at a cursor
-apps/app/src/features/mask/penSession.ts  the pen tool's state machine, DOM-free
-apps/app/src/features/renderer/mask.ts    device-space resolve, then one destination-in
-apps/app/src/features/timeline/maskOps.ts setClipMask / …Fields / …Path, and their declines
-```
-
-**One mask per clip is a consequence, not a preference.** Mask keyframes live in
-`element.animation` under `maskPosition`, `maskSize`, `maskRotation`,
-`maskFeather` and `maskRoundness`, and that record addresses a track by a single
-name. A second mask would have nowhere to put its curves without teaching every
-consumer of `animation[property]` about indices.
-
-Putting them in that same record is what makes them animate at all:
-`normalizeAnimation`, `cloneAnimation`, `rebaseAnimation`, `sliceAnimation` and
-`rebakeElement` all walk `Object.keys(animation)` or
-`animatableProperties(element)`, so split, trim, duplicate, paste and a
-frame-rate change carry mask curves for free. The tracks exist **only while the
-clip has a mask** — `animatableProperties` became a function of the element's
-state, not just its filetype — so `maskOps` seeds and removes them with the mask
-in one transform, and `normalizeAnimation` collects any orphans on ingress.
-
-Five things about it that are easy to get wrong:
-
-- **The mask matrix is not `worldMatrixOf`.** It is the destination's own
-  transform, read from `ctx` *before* the layer is allocated, composed with the
-  parent chain and the element's local transform — the same three
-  `renderElement` and `drawDirect` apply between them. `worldMatrixOf` maps into
-  *project* space, and the preview's context carries zoom and DPR on top of it.
-  A mask built the wrong way is exact in every node suite, which all draw at
-  identity, and misplaced in the app at any zoom but 100% on any display but 1×.
-- **The stencil is filled under an identity transform**, with the path already
-  mapped to device pixels. `ctx.filter = "blur(Npx)"` is scaled by the current
-  transform in Skia and `shadowBlur` is not, in either engine — and the preview
-  is Chromium while every renderer suite is Skia, so a divergence there would be
-  invisible in the suite and wrong in the app. Mapping the path ourselves means
-  neither engine is asked to scale anything. An affine matrix maps a cubic's
-  control points exactly, so nothing is approximated by doing it.
-- **Everything is a cubic, including a straight edge and a rounded corner.**
-  Corners become quarter-arc beziers (`4/3 * tan(θ/4)` generalises the 0.5523
-  constant to any angle), never `arcTo` or `roundRect`, because those survive
-  only a similarity transform and a stretched mask must give an elliptical
-  corner.
-- **Roundness applies to nodes with no handles.** That one rule is why a
-  rectangle rounds completely, a heart never rounds, and a pen path rounds
-  exactly the vertices the user clicked rather than dragged — with no shape name
-  appearing in `round.ts` at all.
-- **A `pen` mask with fewer than three nodes renders as no mask**, not as a
-  hole. Same contract a LUT that is not installed has, and it is also what stops
-  the clip vanishing between the first click of a stroke and the third.
-
-The mask is applied on the blend-isolation layer, after the grade — the order is
-unobservable, since a LUT does not touch alpha, so it sits next to the blit it
-belongs to. It is **not** suspended by `isolated`: like a grade and unlike a
-blend, it is a property of the clip, so a masked clip stays masked through a
-transition. The no-layer fallback degrades to `ctx.clip()`, which loses the
-feather and drops an inverted mask rather than applying it backwards.
-
-**The pen tool is the one thing that fights the rest of the editor**, and the
-whole conflict matrix is in `penSession.test.ts`. Two guards are load-bearing
-and neither is obvious: `elementTimelineCanvas._handleKeydown` yields explicitly
-on `penCapturesKey`, because a capture-phase listener only beats a bubble one
-when the event's target is *below* `window` — for one dispatched at `window`
-both fire in AT_TARGET order and the timeline, mounting first, would delete the
-clip being masked. And `moveSelectionByTrack` gained the `cursorType` guard
-`stepCursor` already had. The session holds element-local pixels and writes
-nothing until the path closes, so zooming, scrubbing and undo cannot reach it,
-and one drawn mask is one undo step.
-
-The word **pen** means the mask tool and nothing else: the create menu's entry
-that click-appends segments to a new `shape` element was called "Pen Tool" and
-is now "Polygon", for the reason the LUT section gives about "filter".
-
-## LUTs
-
-**Called a LUT, never a "filter".** `VideoElementType.filter` and
-`set_video_filters` already own that word for the chroma key and the two blurs,
-and this feature is a different thing that would sit next to it in the same
-sidebar and the same tool list. Two things called a filter is a UI nobody can
-describe and a tool surface an agent will pick wrongly from. The sidebar tab
-says "LUTs", the MCP tools are `list_luts` and `set_lut`, and the word "filter"
-appears in this feature's code only where it means texture filtering or
-`Array.prototype.filter`.
-
-A **LUT is a third preset kind**, alongside `effect` and `transition`, living in
-the same registry and scanned by the same `presetScan.ts`. It ships data rather
-than GLSL: every LUT preset runs one shader, and eighty copies of that shader
-would have defeated `catalogue.test.ts`'s "no two presets run the same
-pipeline" rule outright.
-
-```
-assets/presets/luts/<slug>/{manifest.json,lut.cube}   80 built-ins, 17³, ~11 MB
-apps/app/src/features/lut/cube.ts        the .cube reader — the compatibility promise
-apps/app/src/features/lut/sample.ts      tetrahedral + trilinear. The reference oracle
-apps/app/src/features/lut/glsl.ts        the same maths in GLSL, for both GPU call sites
-apps/app/src/features/lut/atlas.ts       cube -> tiled 2D texture (WebGL 1 has no TEXTURE_3D)
-apps/app/src/features/lut/colorMath.ts   the operations the built-ins are composed from
-apps/app/src/features/lut/recipes.ts     the eighty, as formulas
-apps/app/src/features/lut/lutRegistry.ts lazy load, and the renderer's resolver
-apps/app/src/features/lut/sampleImage.ts the fixed picture every tile shows
-apps/app/src/features/lut/ffmpegParity.test.ts  us against ffmpeg's own lut3d
-apps/app/src/features/timeline/lutOps.ts setClipLut / setClipLutIntensity
-apps/app/src/features/renderer/lut/      apply.ts (injection), gpu.ts, cpu.ts
-scripts/generateLuts.ts                  npx vite-node scripts/generateLuts.ts
-```
-
-A LUT reaches the picture **two ways**, which is the Premiere/Final Cut
-arrangement and not two implementations of one thing:
-
-- **On a clip**, as `element.lut = { presetId, intensity }` — a `Gradable`
-  mixin over the same five types `Blendable` covers. Applied in
-  `renderElement`, on the blend-isolation layer, *before* the blend: grade the
-  clip, then combine it with the scene.
-- **On an adjustment layer**, as an ordinary `EffectElementType` whose
-  `presetId` names a LUT. No new element type, no new MCP tool — `add_effect`
-  already does it, and track order already decides what it covers.
-
-Absent means ungraded and **`SCHEMA_VERSION` did not move**; clearing deletes
-the key, so an ungraded project saves byte-identically to one written before
-the feature. Same rule `blend` follows.
-
-Four things about it that are easy to get wrong:
-
-- **`.cube` is red-fastest; `.3dl` is blue-fastest.** Reading one as the other
-  produces a *plausible* wrong grade, not a broken picture. Both are pinned by
-  hand-built 2³ tables.
-- **A missing LUT grades nothing and reports nothing.** `lutFor` answers `null`
-  for "not installed", "not read yet" and "unreadable" alike, and all three
-  render as a pass-through — the contract `planFrame.ts` already gives a
-  missing shader preset. The one consequence: `renderTimeline.ts` must
-  `preloadLutsForDocument` before the first frame, because an export's loop
-  cannot wait for the next repaint the way the preview does.
-- **The grade is applied to straight, not premultiplied, colour.** Both GPU
-  call sites rely on `premultipliedAlpha: false` and the default
-  `UNPACK_PREMULTIPLY_ALPHA_WEBGL`; flipping either silently darkens every
-  soft edge. `getImageData` is already straight, so the CPU applier needs
-  nothing.
-- **Interpolation is tetrahedral**, as in Resolve, Lumetri and `ffmpeg -vf
-  lut3d`. Trilinear is implemented only as the cross-check: the two agree
-  exactly at grid nodes and differ between them, which is what catches an
-  off-by-one in the index arithmetic.
-- **The LUT panel's thumbnails never change.** They grade one fixed sample
-  (`sampleImage.ts`), not the project at the playhead. A grid of eighty tiles is
-  a *comparison*, and a thumbnail sourced from the timeline moves under the user
-  every time the playhead does — so two LUTs looked at a few seconds apart
-  would have been judged against different pictures, with nothing on screen
-  saying so. Drawn in code, so it cannot go missing and a screenshot of the
-  panel stays comparable across builds.
-
-### How it is known to be right
-
-Every check above is ultimately a check against *ourselves*, and a LUT that is
-subtly wrong does not look broken — it looks like a slightly different grade,
-which is what a LUT is. So the load-bearing verification is external:
-
-**`lut/ffmpegParity.test.ts` runs the bundled ffmpeg's own `lut3d` filter over
-4,096 colours and compares it to `sampleLut` on the same `.cube`.** Raw `rgb24`
-in and out, no codec. It agrees to within **one 8-bit step** on the shipped
-tables and on hand-written spec corners, under *both* tetrahedral and trilinear
-— two separate code paths in both implementations, which is what rules out an
-axis transposition that one scheme could hide by coincidence. The suite also
-proves it is measuring something: hand the two sides different tables and it
-must diverge by >200.
-
-`tests/e2e/specs/lut.spec.ts` closes the last gap, tying the **shader that
-actually ships** to ffmpeg: it renders patches on the GPU with no codec in the
-way and compares them to `lut3d` on the same files. Currently within 1/255 on
-every case.
-
-Between them the chain is: ffmpeg ↔ `sample.ts` ↔ (`glsl.test.ts` parses the
-GLSL and evaluates its six tetrahedra) ↔ the GPU ↔ ffmpeg again. Nothing in it
-rests on our own idea of what a LUT means.
-
-Add to that: `lutComposite.test.ts` drives the real `renderElement` with the CPU
-applier and asserts bytes, and the e2e spec checks the delivered `.mp4` after a
-real Render.
-
-The built-ins are generated, never traced. `recipes.ts` composes them from
-published colour science, and `lutCatalogue.test.ts` regenerates them and
-compares byte for byte, so the files and the recipes cannot drift. Its other
-rules are the LUT translation of the catalogue rules: no two tables closer than
-eight 8-bit steps, every category at least six deep, and every table smooth
-enough that a 17-node grid reconstructs it — that last one is a real constraint
-on the recipes, and it is why `hueBand` has no plateau and `vibrance` measures
-chroma as an RMS distance rather than as `max - min`. **The `log-convert` six
-apply the published transfer function and a neutral Rec.709 render only**: no
-camera primaries matrix and no manufacturer look, so they are a correct base
-grade and not a substitute for a vendor conversion LUT.
-
-## Color adjustments
-
-A clip's manual colour controls — CapCut's Adjust panel, which is also
-Lightroom's and Lumetri's basic set. Fifteen sliders in three groups, on the
-same five types a LUT covers:
-
-- **Color**: temperature, tint, saturation
-- **Lightness**: exposure, contrast, highlights, shadows, whites, blacks, brilliance
-- **Effects**: sharpen, clarity, particles (grain), fade, vignette
-
-```
-apps/app/src/features/adjust/spec.ts         the table: group, range, every physical scale
-apps/app/src/features/adjust/tone.ts         colour + lightness as one pure pixel function
-apps/app/src/features/adjust/bake.ts         that function baked into a 33³ LUT, cached by key
-apps/app/src/features/adjust/finishMath.ts   effects: the CPU oracle the GLSL is generated from
-apps/app/src/features/renderer/adjust.ts     adjustOf / coerceAdjustPatch — the read/write split
-apps/app/src/features/renderer/adjust/       apply.ts (injection), glsl.ts, gpu.ts, cpu.ts
-apps/app/src/features/timeline/adjustOps.ts  setClipAdjust / resetClipAdjust, and their declines
-apps/app/src/features/option/optionAdjustSection.ts   the Adjust tab
-```
-
-`element.adjust` is a **sparse** map of slider values: a slider at zero has no
-key, a clip with every slider at zero has no field, so an unadjusted project
-saves byte-identically to one written before the feature and
-**`SCHEMA_VERSION` did not move**. Bipolar sliders run −100..100, the four
-effects with no meaningful negative run 0..100; vignette is bipolar (+ darkens
-the edges, − lightens). Static values only — there are no adjustment keyframes
-yet, and nothing in the design stands in their way.
-
-**The two groups are applied in two different places, and that split is the
-design.** Every colour and lightness control is a pure function of the pixel's
-own colour, so `bake.ts` evaluates the whole chain at the nodes of a cube and
-hands it to the *existing* clip-LUT applier. No new shader: the tone half
-inherits a GLSL path already pinned to ffmpeg's `lut3d`, the half-float atlas,
-the CPU fallback and export blocking. What is left to prove is that the table
-matches the function, and `bake.test.ts` holds it to one 8-bit step for every
-slider at both ends of its travel. The effects need a pixel's neighbours or its
-position, so they run in a separate **finish** pass with its own GPU and CPU
-appliers, injected the way `lut/apply.ts` injects its own.
+e2e reference render all call it, so preview/export parity is structural rather
+than maintained.
+
+**FFmpeg does no video compositing on the v2 path.** `renderTimeline.ts` hands
+it finished frames as raw RGBA over a pipe and the video branch is
+`[0:v]null[vout]`, a pass-through of already-drawn frames. A new visual property
+is a change to `renderElement` and to nothing in `electron/render/`. Audio is
+the exception: the filter graph does real work there (`atempo`, the volume
+envelope expression, `adelay`, in that order).
 
 The order inside `renderElement`'s isolation layer:
 
@@ -2165,486 +159,256 @@ The order inside `renderElement`'s isolation layer:
 drawDirect → tone (baked LUT) → clip LUT → finish → mask → blend
 ```
 
-Tone before the LUT is Lumetri's Basic-then-Creative: correct the shot, then
-apply the look. Finish after it because fade has to see the graded blacks to
-lift them. Finish before the mask for the reason the grade is — the GPU applier
-blits back with `copy`. Neither half is suspended by `isolated`. An unadjusted
-clip, or one whose sliders are all zero, keeps the fast path; `golden.test.ts`'s
-plain digests are the proof, and there is a separate adjusted block beside the
-blended one.
+Things that bite:
 
-Six things that are easy to get wrong, most of them paid for once:
+- **A blended clip is drawn in isolation**, onto a scratch layer from the
+  injected factory in `renderer/surface.ts`, because `renderText` issues up to
+  five overlapping draws per line that would otherwise blend against each other.
+  Blend is suspended inside a transition (`ctx` marked `isolated`); the mask and
+  the grade are not, because they are properties of the clip.
+- **Device space is not project space.** A mask, a vignette and any other
+  geometry resolved against the canvas must go through
+  `renderer/mask.ts#elementDeviceMatrix`, not `worldMatrixOf`: the preview's
+  context carries zoom and DPR on top of the project transform, so the wrong one
+  is exact in every node suite (all at identity) and misplaced in the app.
+- **`timeline/transform.ts#sampledBoxOf` is the only way to ask how big a clip
+  is** at a cursor. Renderer, mask, selection outline, grips, hit test and resize
+  origin all go through it; one left reading `element.width` puts the picture in
+  one place and the pointer's idea of it in another.
+- **An export owns its decoders.** `features/asset/videoScope.ts` holds a named
+  handle set and `withVideoScope` makes it answer `getElementVideo` for one
+  composite, so editing during a render cannot tear a handle out from under the
+  frame loop. This is only safe because every renderer is synchronous; the moment
+  one gains an `await` the scope leaks into whatever runs next. No fallback to
+  the shared map inside a scope.
+- **`export/snapshot.ts` copies the element map and each element, one level
+  deep and no further.** The document is immutable by convention, so `animation`
+  (36,000 baked samples per lane) is safe to share and a deep clone would not be.
 
-- **The table is baked unclamped.** The final clamp is a crease wherever
-  exposure or saturation pushes a channel through 0 or 1, and a crease inside a
-  cube cell does not shrink usefully with the table (+2 EV was 2.7 steps out at
-  33³ and still 1.6 at 65³). `LutData` stores out-of-range nodes on purpose, and
-  both appliers clamp *after* the lookup, which is exactly where `toneStep`
-  clamps. The tone curve is continued linearly past its ends for the same reason.
-- **White balance and exposure go through a pure 2.2 power, not piecewise
-  sRGB.** Under a power law a gain on light is a gain on the signal,
-  `x * g^(1/2.2)`, so all three fold into one per-channel multiply, which a LUT
-  reproduces exactly. Through the sRGB toe, +2 EV with warm white balance was
-  5.2 steps out near black at 33³. The two curves differ only below ~4% signal,
-  and `tone.test.ts` checks 18% grey against sRGB to within 1%.
-- **Highlights, shadows, whites, blacks and brilliance are one monotone curve**,
-  not five in a row, with a minimum rise between control points. Five composed
-  curves can fight; one curve that must rise cannot invert.
-- **Highlights and shadows are global**, a curve and not Lightroom's
-  edge-aware local tone mapping. Deliberate: a global curve bakes exactly, so the
-  preview and the export are structurally the same picture.
-- **Every finish distance is the clip's, not the layer's.** The layer is in
-  device pixels — the preview carries zoom × DPR — so sharpen's tap spacing and
-  the grain cell are clip pixels × the device scale, clarity's radius is a share
-  of the clip's shorter side, and the vignette maps device → clip space through
-  `mask.ts#elementDeviceMatrix`, the chain the mask already used. That is why the
-  vignette follows a rotated clip and why `adjustComposite.test.ts` can require
-  the same picture at 1× and 2×.
-- **The blurs average premultiplied colour.** The layer holds one clip against
-  transparency; averaging straight colour across its edge reads the empty
-  surroundings as black picture and sharpens a rim onto the border. The GPU
-  uploads the layer a second time with `UNPACK_PREMULTIPLY_ALPHA_WEBGL` for the
-  taps; the centre pixel still comes from the straight upload.
+## The project file, and Auto Save
 
-Two more that are about the tests rather than the feature:
+A `.ngt` is a zip of five JSON entries, read and written entirely in the renderer
+by `functions/project.ts`: `project.json`, `timeline.json`, `tracks.json`,
+`renderOptions.json`, `assetPaths.json`.
 
-- **`@napi-rs/canvas` applies the current transform to `putImageData`**, which
-  the spec says must be ignored and Chromium does ignore. Both CPU appliers
-  (`adjust/cpu.ts` and `lut/cpu.ts`) now write back under an explicit identity.
-  Before that, any node suite drawing at a scale other than 1 read a magnified
-  layer back — invisible in every LUT suite, all of which draw at identity.
-- **Grain uses Hoskins' sine-free hash**, because GPUs disagree about `sin` at
-  large arguments. It is still not bit-exact between float32 on the GPU and
-  float64 on the CPU, so grain is checked statistically everywhere, and the
-  adjusted golden block leaves it out.
+> **The in-memory `TimelineDocument` is always absolute.** A relative path
+> exists only inside the archive.
 
-The GLSL is **generated** from `finishMath.ts`'s constants (`glsl.ts`), so a
-tap weight or a scale cannot drift between the two; `glsl.test.ts` checks the
-text carries them and runs the stages in `finishPixel`'s order.
-`tests/e2e/specs/adjust.spec.ts` is what ties the shader that ships to the CPU
-oracle on real pixels.
+Media is referenced by absolute path in `timeline.json` *and*, for anything
+inside the project's own folder, by a relative one in `assetPaths.json`. That is
+what makes a project folder portable; the absolute path is the fallback for a
+`.ngt` moved away from its media, so relinking is a preference and never a
+replacement. Conversion happens at the two file boundaries and nowhere else.
 
-Reached three ways, all through `adjustOps.ts`: the **Adjust tab** in the
-video, image, shape and text inspectors (gif still has no inspector at all);
-the `set_color_adjustments` MCP tool, whose strict schema is built from
-`define.ts#COLOR_ADJUSTMENTS` and pinned against `COLOR_ADJUSTMENT_KEYS`; and
-nothing else. A reset and a patch in one tool call are one undo step, and a
-slider drag is one undo step through `GestureCommit`.
+`features/project/assetPaths.ts` has **no imports at all**, and path flavour is
+an explicit `"posix" | "win32"` parameter: `node:path` only answers for the host
+platform, which is the wrong one half the time, and both branches have to be
+covered on one CI host. Two facts it exists to survive: `localpath` is **not
+percent-encoded** despite usually being a `file://` URL (`functions/path.ts#encode`
+escapes `#` and nothing else), and **on Windows the URL is malformed**
+(`file://C:\Users\me\a.mp4`, drive letter where a host goes). Anything writing
+one must reproduce it, because `mergeOps` compares these strings to decide two
+clips share a source.
 
-## Reverse and mirror
-
-Two per-clip operations that sit next to each other in the UI — the timeline's
-context menu and the option panel's `<clip-orientation>` row both call the
-same functions — and are opposite in every other way. Mirror is a render
-property: instant, no file. Reverse makes a new media file and points the clip
-at it.
+Auto Save lands every timeline change in a per-project cache within seconds. A
+`.ngt` is written **only** by ⌘S, and a successful ⌘S drops that project's cache,
+so an empty "File ▸ Auto Save ▸" means nothing anywhere is unsaved. Recovery is
+explicit: the File menu is the only way in, and it refuses rather than
+overwrites.
 
 ```
-apps/app/src/features/timeline/mirrorOps.ts    flipH / flipV — video and image only
-apps/app/src/features/renderer/mirror.ts       applyMirror, called from drawDirect
-apps/app/src/features/timeline/reverseOps.ts   applyReverse / unreverse
-apps/app/src/features/reverse/reverseSession.ts  start a job, apply on landing
-apps/app/src/states/backgroundTaskStore.ts     the bottom-left tray's list
-electron/lib/reverseRecipe.ts                  args + chunk sizing, pure
-electron/lib/reversePipeline.ts                the run, no Electron — tested for real
-electron/lib/reverse.ts / ipc/ipcReverse.ts    cache in userData/reversed, serial queue
+apps/app/src/features/project/projectDirty.ts    the one owner of "is it dirty"
+apps/app/src/features/project/projectDigest.ts   the fingerprint
+apps/app/src/features/project/autosaveSession.ts the state machine, over ports
+apps/app/src/features/project/recoverAutosave.ts the guard and the load
+electron/lib/autosaveCache.ts                    the directory, plain fs
 ```
 
-**Mirror flips the picture inside its box, not the element.** `applyMirror`
-runs in `drawDirect` after the transform and just before the per-type
-renderer, so the box — and with it the hit test, the grips, the outline,
-resize, the pen tool, tracking and group children — does not move.
-`transform.ts` deliberately refuses a negative scale, and `rotationOf` would
-read a mirrored matrix as a half turn. The consequence to know: **a mask stays
-where it was drawn** and the picture turns over beneath it. `true` or absent;
-off deletes the key.
+Five rules carry it:
 
-**Reverse swaps `localpath` for a reversed copy of the trim window.** That is
-why the preview, the export's audio (`-i localpath`), the filmstrip, the
-waveform and `loadedAssetStore` needed no changes. The clip becomes
-`trim = [0, duration]` over the new file, so its span does not move. The
-original is kept in `element.reversed`, and source time `r` in the reversed
-file is `to − r` in the original, which is what makes `unreverse` instant and
-exact after a split or an inner trim. Keyframes, speed, blend, grade, mask and
-mirror are untouched.
+- **The anchor is path arithmetic, never an identity.** An autosave's
+  `assetPaths.json` is built against the project's SSOT path, not where the
+  autosave sits, or `relativizeInside` emits nothing. **It is never adopted as
+  the project's path**: recovery leaves `#projectFile` empty so ⌘S opens Save As
+  and the original is never touched. `recoverAutosave` holds a `ProjectPathPort`
+  it never calls and that throws if called, to keep that a node assertion.
+- **One recovery point per project, not a history.** Write the `.part`, rename
+  it into place, *then* unlink the superseded one, so there is no instant with no
+  recovery point. The filename carries the time, fixed-width and UTC, so a
+  lexicographic sort is chronological and the menu opens no zips.
+- **Two timers, and they are not the same timer.** 5s idle debounce re-armed by
+  every change; 60s ceiling armed on `idle → armed` and **never re-armed**, or a
+  ten-minute drag is never written at all. Armed implies a ceiling is pending, so
+  `ensureCeiling` is idempotent and the deferral paths call it too.
+- **Failure never clears dirt.** A write that rejects or answers `{ ok: false }`
+  leaves the session armed and backs off 5/15/45/60s. An autosave is not a save:
+  nothing on that path touches `projectDirty`'s baseline, and an *unestablished*
+  baseline reads as dirty, so the quit guard still fires.
+- **Main owns the directory.** `autosave:write` takes bytes and main mints the
+  filename; `autosave:dropRings` takes a key `isValidAutosaveKey` must accept.
+  There is no call shape in which the renderer names a path to delete.
 
-Four things that are easy to get wrong:
+Use `ipcFilesystem.writeFileEnsured`, never `writeFile`: the older one calls the
+callback form of `fs.writeFile` and returns before it runs, so a failure is
+indistinguishable from success, and it does not create parent directories.
 
-- **FFmpeg's `reverse` buffers its whole input.** At 3600×2338@120 that is
-  1.5GB a second, so the window is cut into chunks sized to a 512MB budget
-  (`chunkSecondsFor`), each reversed alone and joined last-first. The cut is
-  one decode through the `segment` muxer with forced keyframes, not one seek
-  per chunk — N independent seeks can duplicate or drop a boundary frame.
-- **`applyReverse` declines if the clip changed while the file was made.** It
-  takes minutes on heavy footage and editing continues; a clip trimmed in the
-  meantime covers a different window. The session toasts rather than applying.
-- **`reversePipeline.test.ts` is the real check**, against the bundled ffmpeg:
-  output frame `i` must be closest to source frame `N−1−i` across four chunk
-  boundaries. Its fixture is flat greys at `16 + 3N`, and it was wrong twice
-  first — `testsrc2` at 64×48 changes by less than encode noise, and levels
-  outside 16..235 clip to 0/255 and collide. Both failed while the pipeline
-  was right. Change the fixture carefully.
-- **The reversed file lives in `userData/reversed`, like proxies.** A project
-  moved to another machine shows a reversed clip as missing media, and
-  `reversed.localpath` is not an `AssetField`, so `relinkAssets` does not
-  rewrite it. A sound detached *before* reversing stays forward — it is a
-  separate clip. There is no MCP write tool for either yet; the serializer
-  reports `mirror` and `reversed`.
+## Where the features live
 
-`SCHEMA_VERSION` did not move.
-
-## The screen recorder
-
-A separate application inside the app: two windows and a tray icon, opened from
-Utilities → Screen Recorder and reached by the editor exactly once, at the end,
-with a path to a finished MP4. Nothing about a recording touches the editor's
-renderer — that is the requirement the whole shape follows from.
+One line each. The code and its co-located suite are the documentation; this is
+the index.
 
 ```
-apps/overlay-record/                 a standalone Vite app, two entry points
-  overlay.html  src/overlay/         the camera bubble, transparent + click-through
-  engine.html   src/engine/          capture, encode, the whole state machine
-apps/app/src/features/record/        the pure logic, so vitest can reach it
-  recordSettings.ts   the schema, normalize/apply read-write split
-  captureSettings.ts  native size, bitrate, H.264 level, the size ladder
-  bubbleLayout.ts     where the bubble goes and what it shows
-  zoomPlan.ts         cursor track -> zoom moves  (planned, not yet wired)
-  strokeRender.ts     pen strokes and click ripples  (planned, not yet wired)
-  trayModel.ts        the menu, as data
-electron/lib/recordSession.ts        disk, the cursor track, delivery
-electron/lib/recorder.ts             the two windows and the routing
-electron/lib/recordTray.ts           Tray lifecycle;  recordTrayMenu.ts renders a model
-electron/lib/recordMux.ts            the one ffmpeg call
-electron/lib/displayMedia.ts         one-shot getDisplayMedia, for system audio
+features/timeline/     clipOps, geometry, placement, mergeOps, frames, rippleMap
+features/animation/    keyframes (bake), keyframeOps (mint/arm), presets (19 moves)
+features/renderer/     element, video, image, text, shape, template, mask, blend,
+                       fx/ (compositor, planFrame), lut/, adjust/
+features/project/      the .ngt, autosave, asset paths
+features/export/       exportSession, phases, snapshot, the ETA singleton
+features/agent/        commit, context, serialize, commands/, what MCP forwards to
+features/caption/      the auto-caption panel's every decision, outside the Lit class
+features/window/       docked panels beside a host's content, splitter, pure layout
+features/mask/         one mask per clip: templates, bezier geometry, the pen session
+features/shape/        parametric outlines, over mask/geometry.ts unchanged
+features/lut/          .cube reading, tetrahedral sampling, atlas, 80 built-ins
+features/adjust/       15 sliders: tone bakes into a LUT, effects run a finish pass
+features/template/     a whole edit standing in for one clip (.cttpl)
+features/record/       the screen recorder's pure logic; the windows are apps/overlay-record
+features/reverse/      reversed media files, made by electron/lib/reversePipeline.ts
+features/editor/       actions, menuCommands, shortcuts, frameRate
+electron/mcp/          the MCP server, the tools, the bridge to the renderer
+electron/render/       ffmpegArgs, the frame pipe, the audio envelope expression
+electron/lib/          ffmpeg, menus, autosave cache, recorder, speech, templates
 ```
 
-**The encoder is driven by a fixed-rate clock, not by the capturer.** This is
-the decision everything else falls out of. A desktop capturer is variable-rate —
-it produces a frame when something changed and nothing while a page of text sits
-still — so encoding frames as they arrive gives a stream whose timing lives only
-in its timestamps, which needs a container, which needs a muxer in the renderer.
-Encoding on a metronome instead, taking the newest frame each tick and
-re-encoding the previous one when nothing changed, makes frame `n` *be* at
-`n / fps`. The bytes then need no timestamps at all: a bare Annex-B elementary
-stream that FFmpeg reads with `-r` and copies into an MP4 with `-c:v copy`.
+The handful of facts inside those that are worth stating up front:
 
-It costs almost nothing — a duplicate frame is a P-frame with no residual — and
-it produces what the editor wants anyway, since the timeline is CFR and
-`features/export/renderTimeline.ts` samples at `frame / fps * 1000`. There is no
-muxer dependency and no second encode generation. Verified: a measured 10.001s
-take gives 301 frames and a 10.033s container.
+- **The frame rate is a project setting on `renderOptionStore`**, whole integers
+  1 to 240, not in `TimelineDocument` and not in `ExportSettings`. NTSC rates are
+  rational and admitting them means carrying a rational through `frames.ts` and
+  the exporter. `features/editor/frameRate.ts#setProjectFps` is the only writer
+  and sequences the three consequences (re-clamp zoom, re-snap playhead, re-bake
+  animation). **Clips do not move**: a rate change is a change of grid, not a
+  re-cut. **The grid does not apply to audio** (`frames.ts#isFrameLocked`), on
+  drag only, and one gesture is one delta so a picture clip in the selection
+  keeps the grid on for everything.
+- **`size` and `scale` are different things.** `scale` is uniform, in tenths,
+  about the centre, and never touches the box. `size` replaces the clip's own
+  `width`/`height` in pixels on the way to the renderer, so a keyframed property
+  behaves exactly like the static field it keyframes.
+- **A group element *is* After Effects' null object.** There is no
+  `filetype: "null"` and adding one would break two rules keyed on the string
+  `"group"`: `hierarchy.ts#parentOf` admits only a group as a parent, and
+  `isVisualTimelineElement` excludes only a group from the paint loop. `setParent`
+  rewrites the child's numbers once, at the instant of parenting; after that the
+  matrix is composed at draw time and the child's curves are never written again.
+- **A template stores a reference, not a copy** (`templateId` + `fills`),
+  resolved at draw time from `templateRegistry`, exactly as `lut.presetId`
+  resolves. A template that is not installed draws nothing and reports nothing.
+  Composed keys are namespaced `outerId::innerKey` or two copies share one
+  decoder. `expandTemplates` is for the asset layer, never the renderer.
+- **A missing preset, LUT or template renders as a pass-through**, silently.
+  That is the contract; do not make one of them throw.
+- **Called a LUT, never a "filter".** `VideoElementType.filter` already owns that
+  word for the chroma key and the blurs. Likewise **pen** means the mask tool; the
+  create menu's click-to-append tool is "Polygon".
+- **`speechBin.ts` decides availability in JS before anything is spawned.** The
+  STT sidecar is a process, not a N-API module, built at a macOS 12 deployment
+  target so its macOS 26 Speech symbols stay weak imports and it can report
+  `requires_macos_26` instead of failing at `exec`. Word timings live on the runs
+  of the `AttributedString`, not on `Result.range`.
+- **The window system's clamp precedence is `host > window min > content min`.**
+  A rect outside the host is invisible rather than small, and invisible in a way
+  no `getBoundingClientRect` check can see, because the column carries
+  `overflow: hidden`.
+- **The screen recorder encodes on a fixed-rate clock**, not as frames arrive,
+  so frame `n` *is* at `n / fps` and the bytes need no container: a bare Annex-B
+  stream that ffmpeg copies with `-r` and `-c:v copy`. The overlay window is
+  `setContentProtection(true)` so the compositor leaves it out of the capture.
+- **A menu accelerator fires whatever the page does with the same keystroke**,
+  and a renderer `preventDefault` does not cancel it. For a combination the
+  renderer already binds, the item carries the accelerator but declines to send
+  it (`rendererOwnsKey`, tested against `event.triggeredByAccelerator`), or one
+  ⌘Z is two undo steps. Space, the arrows and Delete are not registered at all:
+  an accelerator is global to the window and would fire while someone types.
 
-Four more things that are easy to get wrong:
+## The Claude Code bridge
 
-- **Capture at the display's own pixels.** `size × scaleFactor`, pinned with
-  `min` *and* `max` constraints. The in-panel `screen-record-panel` caps at
-  1920×1080 unconditionally, which throws away 64% of a Retina panel before the
-  encoder sees the picture. `videoTrack.contentHint = "detail"` goes with it —
-  spatial detail over temporal smoothness, which is the right trade for a screen
-  and precisely wrong for the camera, which gets `"motion"`.
-- **A hardware encoder's limits are not the codec's, so ask.** VideoToolbox
-  refuses this machine's own 3600×2338 whatever the level tables say.
-  `negotiateEncode` walks `captureSizeLadder` through
-  `VideoEncoder.isConfigSupported` and takes the first size accepted — measured
-  here, that is 3324×2160 at `avc1.640033`. Guessing the limit would be wrong on
-  the next machine.
-- **The overlay window is `setContentProtection(true)`.** `NSWindowSharingNone`
-  on macOS, `WDA_EXCLUDEFROMCAPTURE` on Windows: the compositor leaves it out of
-  every screen capture including ours. Without it the bubble the user is looking
-  at is captured into the recording and the compositor draws a second one on
-  top. It is also what lets the bubble be positioned live — the preview and the
-  file are two renderings of one layout, from one `bubbleLayout.ts`, not a
-  recording of each other. Pinned by a sentinel check: put the overlay's bubble
-  in one corner and the composite's in another, and only the composite's appears
-  in the file.
-- **`electron/` may not import `apps/app/src`**, so the tray menu crosses the
-  boundary as *data*. The engine builds a model, main renders it with
-  `Menu.buildFromTemplate`, and menu item ids are opaque to main. What is
-  duplicated is the vocabulary of a menu — label, checkbox, radio, submenu —
-  which does not change when a setting is added. `lib/preset.ts` makes the same
-  call for the same reason.
+`electron/mcp/` runs a Streamable HTTP MCP server on `127.0.0.1:9826/mcp`,
+bearer-token authenticated, started with the app. Its tools validate with zod and
+forward to `apps/app/src/features/agent/`, which runs the real commands against
+the store, so an AI edit takes the same code path and the same undo step as the
+user's mouse. Every mutating command goes through `commit(fn, declineReason)`.
 
-Audio is uncompressed PCM to a headerless `.pcm` file, converted to AAC once at
-mux time: a WAV header states a length that is not known until the recording
-stops, and a header patch that fails leaves a file that looks valid and plays as
-noise. `captureMicrophone` turns off `echoCancellation`, `noiseSuppression` and
-`autoGainControl` — all three default to on because the default caller is a
-video call, and all three are wrong for a recording.
+Four constraints:
 
-**macOS cannot capture system audio.** Electron 33's `Streams.audio` documents
-`loopback` as Windows-only (`node_modules/electron/electron.d.ts`). The tray
-greys the item and says why rather than hiding it. macOS support needs Electron
-35+.
+- **`tools.ts` must stay a barrel**, not `tools/index.ts`. Both resolve for
+  `import … from "./tools"` and nothing cleans `main/`, so a stale
+  `main/mcp/tools.js` would shadow the directory and ship an old tool list.
+- **`registerTool`'s generics must stay erased**, through the hand-written
+  `Registrar`. Inferring handler arguments from the zod shapes costs about 10s
+  per tool and exhausts the compiler's heap. Do not "clean it up".
+- **Tool output is capped** (Claude Code warns at 10k tokens, truncates at 25k).
+  Never return a raw element; add fields to `serialize.ts`'s whitelist
+  deliberately.
+- **Hand copies are pinned by `tools/tools.test.ts`**, including `FILETYPES`,
+  `ANIMATABLE` and the preset lists against their `@types/timeline.ts` originals.
+  Adding a tool is a one-line diff a reviewer sees.
 
-### Drawing mode has to carry its own exit
-
-Turning drawing on means `setIgnoreMouseEvents(false)` on a window covering the
-whole display, and from that moment **every click on the screen lands in the
-overlay**. `pointer-events: none` does not help — it governs dispatch inside the
-page, not whether the OS window receives the click at all. That is inherent; it
-is what a drawing surface *is*. What is not inherent is being unable to leave,
-and the first version managed to be unleavable three ways at once: the window
-sat at `"screen-saver"` level over the menu bar so the tray was unclickable, it
-rendered nothing when no camera was selected so there was no sign anything had
-happened, and `drawing` was **persisted**, so a session that ended in that state
-came back to an unclickable screen on the next launch.
-
-So there are three exits and each is enough on its own:
-
-- the toolbar's **Done** button, drawn by the overlay itself;
-- the **Escape** key, which is why the window is `setFocusable(true)` and
-  focused for exactly the duration of drawing mode and at no other time;
-- the **tray**, kept reachable by dropping the window to `"floating"` level —
-  below `NSMainMenuWindowLevel` — for the duration. On Windows the taskbar is
-  topmost, so leaving always-on-top does the same job.
-
-And `normalizeRecordSettings` **never reads `drawing` back**. It is written like
-any other field, because one write path is simpler than two, and then ignored on
-load: it is a mode, not a preference.
-
-Annotations cross from the overlay to the compositor **as data, through main** —
-two renderer processes sharing no memory. A stroke is re-sent whole as it grows
-and replaces its earlier self by id, which is what makes the line appear in the
-recording as it is drawn rather than popping in complete when the pen lifts, and
-makes a dropped message cost one frame. Points are normalised `0..1` to the
-display, the only space the overlay's CSS pixels and the encoder's capture
-pixels can agree on. The fade is timed from when a stroke stopped changing, on
-the *engine's* clock — the two windows' `performance.now()` share no epoch.
-
-Strokes are re-drawn from their points rather than captured, which keeps them
-crisp at any scale and is anyway the only option: the overlay is
-content-protected and therefore invisible to the capture. `shouldCompose` is
-asked per encoded frame, so a take with no camera and nothing drawn keeps the
-zero-copy path until the moment something has to be drawn.
-
-Still not wired, though the pure module and its suite exist: **auto zoom**
-(`zoomPlan.ts`; `recordSession.ts` already records the cursor track at 30Hz).
-**Click highlight** needs a global mouse hook — `screen.getCursorScreenPoint()`
-gives position but not clicks — which means a native module and, on macOS, the
-Accessibility prompt.
-
-## Exporting
-
-The trigger is one button on the **title bar**, and it is the only one: the
-settings panel under `#nav-home` chooses the codec and the preset, under its
-Export tab, and starting a render is not its job. Menu, button and keystroke are one code path, the rule
-`features/editor/actions.ts` states for the toolbar.
-
-```
-apps/app/src/features/export/exportSession.ts   startExport / cancelExport — the one path
-apps/app/src/features/export/exportPhase.ts     the four phases, as a pure table
-apps/app/src/states/exportStore.ts              phase, percent, remainingMs, destination
-apps/app/src/features/export/exportProgress.ts  the ETA singleton — publishes, never paints
-apps/app/src/features/export/snapshot.ts        what the frame loop reads, detached
-apps/app/src/features/export/exportButton.ts    <export-button>, the ring and its popover
-apps/app/src/features/export/exportRing.ts      ringDash — pure, node-tested
-apps/app/src/features/asset/videoScope.ts       the decoders an export owns
-```
-
-### The modal was the safety, and it is gone
-
-Clicking Render used to open a Bootstrap dialog whose backdrop covered the
-window. Nobody chose that as a concurrency control, but it was one: **the export
-frame loop runs in the editor's own renderer and drove the same `<video>`
-handles as the preview.** `previewCanvas` repaints on every store write, and its
-draw path calls `syncPlayback` and `releaseUnusedVideos(timeline, cursorMs)` —
-the second of which `loadedAssetStore` already documented as the thing an export
-"must never" suffer. Editing during a render would have produced a plausible
-wrong frame, or a frame loop waiting forever on a `seeked` for a handle that had
-been torn down.
-
-So an export now owns its decoders. `videoScope.ts` holds a named set of
-handles, and `withVideoScope(scope, draw)` makes it answer `getElementVideo` for
-the duration of one composite.
-
-Four things about it are easy to get wrong:
-
-- **The seam is `getElementVideo`, not the renderer table.** `renderVideoWithWait`
-  and `renderVideoWithoutWait` differ only in `waitFilter` and both resolve
-  through the same lookup — and `App.ts` installs the *export* table on the
-  template resolver globally, so a per-caller table would never reach a
-  template's nested clips at all.
-- **The dynamic extent is only safe because every renderer is synchronous.**
-  `renderer/{timeline,element,video,image,gif,text,shape,template}.ts` and
-  `fx/compositor.ts` all are. The moment one gains an `await`, the export's scope
-  leaks into whatever runs next and the preview draws the export's frames.
-- **No fallback to the shared map inside a scope.** A silent fallback restores
-  the bug exactly, and converts a visible "this clip is missing" into an
-  invisible "this clip is at the preview's playhead".
-- **Overlay effects are a second decoder set**, in `fx/overlaySource.ts`, keyed
-  by scope for the same reason. `releaseUnusedOverlays` runs from the preview's
-  draw path and sweeps the preview's scope alone.
-
-Images and gifs stay shared: keyed by path, immutable once decoded, so nothing
-can move one under a frame loop. The contact sheet, the template thumbnail and
-the e2e reference render stay on the shared set too — they draw one frame of the
-*live* document, which is what `seek`'s unchanged signature keeps them doing.
-
-### What else the loop reads
-
-`snapshot.ts` copies the element map and each element, and **not one level
-deeper**. The document is immutable by convention, so `animation`, `mask`,
-`filter` and `lut` are safe to share — and a deep clone would not be: one baked
-lane is 36,000 samples per property. The shallow element copy exists for the two
-places that still write a field onto a live element, `elementTimeline.ts`'s
-`.blob` and `optionImage.ts`'s `.localpath`; the second would make a clip vanish
-from the delivered file mid-render.
-
-### The phases
-
-`idle → running → finalizing → idle`, plus `cancelling`. That last one is not
-decoration: aborting is instant in the renderer and slow in main, which is still
-SIGKILLing FFmpeg — and `ipcRenderV2.start` throws "An export is already
-running" throughout. With the button permanently on screen that window is one
-double-click away. `render:v2:cancelled` settles it, and `exportSession` arms a
-timeout in case it never arrives.
-
-`nextPhase` returns its input **by identity** for a transition that does not
-apply, and `exportStore` compares before writing, so the duplicate `settled`
-that the click handler's `finally` and the IPC event race over costs no repaint.
-`report` declines on an unchanged whole percent and whole second for the same
-reason: at one write per frame an 18,000-frame export would be 18,000 Lit
-renders on the thread pushing 8MB a frame into a pipe.
-
-**`exportProgress.begin` calls `reset`, never `stop`.** `stop` dispatches
-`settled`, and the session calls `begin` one line *before* `exportStore.begin` —
-so settling there would knock the phase back to idle and the button would sit as
-a pill for the whole export. `eta.ts`, `cost.ts` and `countdown.ts` are untouched
-by any of this; the singleton publishes where it used to paint.
-
-### Playback during a render is allowed
-
-Scrub, play, edit, undo — none of it can reach the export's handles now, and its
-audio was reconstructed in the main process from the timeline sent at
-`render:v2:start`. The cost is contention: both get slower and the preview drops
-frames. That is the trade, and it is stated rather than discovered.
-
-### How it is known to be right
-
-`tests/e2e/specs/background-export.spec.ts` exports the same project twice —
-once undisturbed, once while the playhead is scrubbed at 60Hz across a
-twenty-second timeline — and requires the two files to agree frame for frame.
-Asserting the *difference* is what lets it stay green while the seek defect in
-FINDINGS #1 is open: that afflicts both runs and cancels.
-
-The twenty seconds are load-bearing. `decoderWindow.ts` only releases a decoder
-more than 10s ahead or 6s behind the playhead, so a short project never triggers
-a release and the spec would pass with or without the scope — which a first
-draft of it did. With the scope removed the disturbed export **deadlocks**,
-which is how the spec is known to measure something.
-
-## Releasing and the download mirror
-
-`npm run build:osx` uploads a draft GitHub release. Publishing it runs
-`.github/workflows/mirror-r2.yml`, which copies the assets to Cloudflare R2
-under `cartcut/<tag>/` and rewrites `cartcut/latest.json` and `latest.txt` —
-what the "Download for macOS" button on cartesiancs.com/cartcut reads.
-
-```
-scripts/r2LatestManifest.mjs     release JSON -> latest.json, pure + CLI, no deps
-.github/workflows/mirror-r2.yml  download, upload, point latest, prune to 3
-```
-
-- **GitHub is the source of truth; R2 is a mirror.** electron-updater still
-  reads GitHub (`build.publish` is unchanged), and every installed copy has
-  that baked into its `app-update.yml`, so moving the updater means publishing
-  to both for as long as old installs exist.
-- **`latest.*` is written last**, after every file under the tag has landed,
-  so it never names a file that is not there. Everything under a tag is cached
-  `immutable`; only the two `latest.*` files change.
-- **The manifest refuses a release with no `.dmg`**, which is what renaming
-  an artifact would produce. `slotOf` maps names by suffix (`-arm64.dmg`, bare
-  `.dmg` = Intel); change `artifactName` and change it with it.
-- **Not `wrangler r2 object put`** — it stops at 300 MiB and a DMG is ~1.1 GB.
-  The workflow uses the S3 API through `aws s3 cp`, which goes multipart.
+Connect with the command under the ⚡ icon at the bottom right of the app, or set
+`CARTCUT_MCP_TOKEN` and use the committed `.mcp.json`.
 
 ## Testing
 
-Vitest, suites co-located with sources. The `features/timeline/` and
-`features/animation/` modules are deliberately DOM-free so they run under
+Vitest, suites co-located with sources. `features/timeline/` and
+`features/animation/` are deliberately DOM-free and run under
 `environment: "node"`; the renderer suites draw onto a real Skia canvas via
 `@napi-rs/canvas` and assert on pixels.
 
-New pure ops should get a co-located suite that covers the decline path —
-returning the input by identity — as well as the happy one.
+Two habits worth copying. **Check against something that shares no code with the
+subject**: the LUT and audio-envelope suites run the bundled ffmpeg and compare
+it to our own sampler, which is the only way to catch a grade or a fade that is
+plausibly wrong rather than broken. And **prove the harness measures something**:
+hand the two sides different inputs and require them to disagree.
 
-`tests/e2e/` is the end-to-end render suite: Playwright launches the real app,
-builds a project holding all nine element types, clicks the real Render button
-and checks the delivered file frame by frame. It lives outside the vitest
-include patterns and outside the root `tsconfig.json` (which has no `include`,
-so `tests` has to be excluded explicitly or the harness lands in the bundle's
-type program and breaks `webpack`). Start with `tests/e2e/README.md`, and
-`tests/e2e/FINDINGS.md` for what it currently reports — including a
-one-frame-in-three seek defect that makes it fail against `main`.
+`@napi-rs/canvas` applies the current transform to `putImageData`, which the spec
+says to ignore and Chromium does ignore. Both CPU appliers write back under an
+explicit identity; anything new that reads a layer back must do the same.
 
 ```
 npm run test:e2e:fixtures   # download and derive the media, once
 npm run test:e2e:smoke      # ~1 min at 360p30, for iterating
-npm run test:e2e:smoke120   # same size at 120fps — the top of the rate band
 npm run test:e2e            # 5 min at 1080p60, 18,000 frames
 npm run test:e2e:check      # typecheck the suite on its own
 ```
 
+`tests/e2e/` launches the real app, builds a project holding every element type,
+clicks the real Render button and checks the delivered file frame by frame. It
+lives outside the vitest include patterns and outside the root `tsconfig.json`
+(which has no `include`, so `tests` must be excluded explicitly or the harness
+lands in the bundle's type program and breaks webpack). Start with
+`tests/e2e/README.md`, and `tests/e2e/FINDINGS.md` for what it currently reports,
+including a one-frame-in-three seek defect that makes it fail against `main`.
+
 ## Known rough edges
 
-- Undo history stores post-edit snapshots only, and nothing checkpoints on
-  load, so the first edit after opening a project is not undoable. The agent
-  works around this in `features/agent/checkpoint.ts`; the app itself does not.
-- Video filters (`chromakey`, `blur`, `radialblur`) apply in the WebGL preview.
-  They were believed not to reach the FFmpeg export, on the strength of its
-  `[0:v]null[vout]` video branch — but that reading looks wrong for the v2 path:
-  input 0 is `-f rawvideo -i pipe:0`, i.e. frames the *renderer* drew, and
-  `export/renderers.ts` hands the exporter `renderVideoWithWait`, which runs
-  `VideoFilterPipeline` whenever `filter.enable` is set. So `null` is a
-  pass-through of already-filtered frames rather than a discard. The stale note
-  does still hold for `electron/render/renderMain.ts`, the legacy `RENDER` ipc
-  path, which nothing in the renderer calls any more.
-
-  The *pipe* half of that reading is now confirmed by a run:
-  `tests/e2e/specs/blend.spec.ts` exports through the real Render button and
-  decodes back per-clip compositing the renderer did, landing within one byte
-  per channel. So renderer-side picture work does reach the delivered file. The
-  filters specifically are still untested end to end — they go through WebGL
-  rather than the 2D context — so confirm `chromakey` before relying on it.
-  Note that the *LUT* path is a separate thing and is confirmed end to end:
-  `tests/e2e/specs/lut.spec.ts` decodes a graded export and matches it to the
-  arithmetic within one 8-bit step. See "LUTs".
-- Transitions and effects are finished, and this entry is the least
-  trustworthy thing in this file.
-  `TransitionElementType` and `EffectElementType` are real, `transitionOps.ts`
-  and `effectOps.ts` hold every mutator, `transitionRepair.ts` keeps them honest
-  from `normalizeDocument`, and both the WebGL preview and the v2 export render
-  them — 37 transition presets and 39 effect presets ship under
-  `assets/presets/`.
-
-  This entry has been wrong twice, in opposite directions. It first said
-  transitions did not exist at all, which made agents refuse work the renderer
-  could do. It then said MCP was missing entirely — also no longer true:
-  `electron/mcp/tools/fx.ts` ships `add_transition`, `set_transition`,
-  `remove_transition`, `add_effect`, `set_effect`, `get_fx` and both
-  `list_*_presets`, and `add_track`'s enum does include `"effect"`.
-
-  The last narrow claim — that **`FILETYPES` in
-  `electron/mcp/tools/define.ts` still omits `effect` and `transition`** — has
-  now gone the same way. That list is no longer checked by eye at all:
-  `@types/timeline.ts` exports `FILETYPES` as a runtime value and
-  `tools.test.ts` asserts the hand-copy matches it, so a filetype missing from
-  the agent's view is now a failing test rather than a note in this file. The
-  standing instruction this bullet gives about itself still holds for the rest
-  of it: verify before believing any claim in it, including this one.
-- **`fluent-ffmpeg` cannot read this ffmpeg's capabilities.** The bundled
-  binary is ffmpeg 9, whose `-formats` output puts *two* spaces between the flag
-  column and the name (it gained a third flag for devices); `fluent-ffmpeg`
-  2.1.2's parser expects one. So its capability list comes back **empty** and
-  every `.format(...)` is rejected with "Output format X is not available"
-  against a binary whose own `-muxers` lists it. Spawn ffmpeg directly for
-  anything new — `render/framePipe.ts`, `mcp/transcribe.ts` and `mcp/analyze.ts`
-  all do. The wrapper survives only in `render/renderMain.ts`, the legacy
-  `RENDER` ipc path nothing calls.
-- The playback loop still reads the wall clock and drives the cursor from
-  `requestAnimationFrame`; only the *value* is quantized
-  (`timeline/playbackClock.ts`). It does not drop or pace frames, so a project
-  faster than the display simply repeats cursor values, which `setCursor`
-  discards.
+- Undo history stores post-edit snapshots only and nothing checkpoints on load,
+  so the first edit after opening a project is not undoable. The agent works
+  around it in `features/agent/checkpoint.ts`; the app does not.
+- **`fluent-ffmpeg` cannot read this ffmpeg's capabilities.** The bundled binary
+  is ffmpeg 9, whose `-formats` output puts two spaces between the flag column
+  and the name; the 2.1.2 parser expects one. Its capability list comes back
+  empty and every `.format(...)` is rejected against a binary whose own
+  `-muxers` lists it. Spawn ffmpeg directly for anything new. The wrapper
+  survives only in `render/renderMain.ts`, the legacy `RENDER` ipc path that
+  nothing calls.
+- Video filters (`chromakey`, `blur`, `radialblur`) go through WebGL rather than
+  the 2D context, and are the one part of the picture path not confirmed end to
+  end. Renderer-side compositing *is* confirmed to reach the delivered file
+  (`blend.spec.ts`, `lut.spec.ts`), so the `[0:v]null` branch is a pass-through
+  of filtered frames and not a discard, but check `chromakey` yourself before
+  relying on it.
+- The playback loop reads the wall clock and drives the cursor from
+  `requestAnimationFrame`; only the value is quantized
+  (`timeline/playbackClock.ts`). It does not drop or pace frames.
 - Cross-component calls are frequently `document.querySelector("element-…")`
   followed by direct property access.
