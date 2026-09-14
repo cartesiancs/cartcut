@@ -48,6 +48,7 @@ import { isGradable, setClipLut } from "../timeline/lutOps";
 import { mirrorToggleTarget, type MirrorAxis } from "../timeline/mirrorOps";
 import { isReversed, isReversible } from "../timeline/reverseOps";
 import { mirrorClips } from "../editor/actions";
+import { refusesEdit } from "../editor/timelineLock";
 import {
   canReverseHere,
   isReversePending,
@@ -693,8 +694,17 @@ export class elementTimelineCanvas extends LitElement {
 
   // ---------------------------------------------------------------- editing
 
-  /** Apply a document transform and record one undo step. */
+  /**
+   * Apply a document transform and record one undo step.
+   *
+   * Guarded, because this is the canvas's own commit and does not go through
+   * `features/editor/actions`: a track move, a level point, a transition at a
+   * cut and the end of every drag all land here.
+   */
   private commit(fn: (doc: TimelineDocument) => TimelineDocument) {
+    if (refusesEdit()) {
+      return;
+    }
     useTimelineStore.getState().withCheckpoint(fn);
   }
 
@@ -1629,6 +1639,19 @@ export class elementTimelineCanvas extends LitElement {
       this.showSideOption(hit.transitionId);
     }
 
+    // Everything above settles the selection, and looking at a clip is not
+    // editing it, so a locked timeline still lets a press choose one. Below
+    // this line is where a press starts changing the document, and that is
+    // refused here rather than at the commit: a drag previews through
+    // `previewDocument`, which is the very channel the caption session writes
+    // its projection on, so an armed gesture would paint over the session's
+    // document for the length of the drag. A press on empty canvas is left
+    // alone, because a rubber band only selects.
+    if (hit.kind !== "none" && refusesEdit()) {
+      this.drawCanvas();
+      return;
+    }
+
     if (hit.kind === "cut") {
       this.addTransitionAtCut(hit.fromId, hit.toId);
     }
@@ -1734,6 +1757,13 @@ export class elementTimelineCanvas extends LitElement {
       return;
     }
 
+    // Refused whole rather than at the commit, so the OS drag ends with the
+    // file going nowhere instead of appearing and then being wiped by the
+    // caption session's next rebuild.
+    if (refusesEdit()) {
+      return;
+    }
+
     const { x, y } = this.dragPoint(e);
     const target = dropTargetAt(
       this.layout,
@@ -1804,6 +1834,15 @@ export class elementTimelineCanvas extends LitElement {
 
   _handleContextmenu(e) {
     this.targetIdDuringRightClick = [...this.targetId];
+
+    // The menu is split, delete, merge, group, detach and the rest: every item
+    // on it would decline. An affordance that could only decline is not
+    // offered, which is the rule `layout.ts#hitTest` already keeps about the
+    // trim handles on a template.
+    if (refusesEdit()) {
+      return;
+    }
+
     if (e.which == 3 || e.button == 2) {
       this.showMenuDropdown({ x: e.clientX, y: e.clientY });
     }

@@ -38,26 +38,6 @@ export function formatPlayhead(seconds: number): string {
     : `${minutes}:${pad(secs)}`;
 }
 
-/**
- * How far through, as 0..1.
- *
- * Answers 0 rather than `NaN` or `Infinity` for a duration that is not known
- * yet — which is every frame between the element being created and its metadata
- * arriving, and permanently for a stream. A `NaN` here reaches the progress bar
- * as a `width` the browser drops, so the bar silently disappears instead of
- * sitting at zero.
- */
-export function playbackFraction(
-  positionSec: number,
-  durationSec: number,
-): number {
-  const duration = usableSeconds(durationSec);
-  const position = usableSeconds(positionSec);
-  if (duration == null || duration <= 0 || position == null) {
-    return 0;
-  }
-  return Math.min(1, position / duration);
-}
 
 /** `0:06 / 0:12`, or just the position while the duration is unknown. */
 export function playheadLabel(
@@ -71,25 +51,3 @@ export function playheadLabel(
     : `${position} / ${formatPlayhead(duration)}`;
 }
 
-/**
- * The duration to show, in **seconds**.
- *
- * The media element's own answer wins. The obvious alternative — a clip's
- * `duration` field — is the length of its **trimmed span**, not of the file,
- * and the auto-caption panel transcribes and plays the whole file. Using the
- * clip's span made the readout and the bar wrong on every trimmed clip, and
- * right on exactly the untrimmed ones anyone would test with.
- *
- * The fallback is in **milliseconds**, because that is what a clip carries.
- */
-export function displayDurationSec(
-  mediaDurationSec: number | undefined,
-  fallbackMs: number | undefined,
-): number {
-  const fromMedia = usableSeconds(mediaDurationSec);
-  if (fromMedia != null && fromMedia > 0) {
-    return fromMedia;
-  }
-  const fromClip = usableSeconds(fallbackMs);
-  return fromClip != null && fromClip > 0 ? fromClip / 1000 : 0;
-}

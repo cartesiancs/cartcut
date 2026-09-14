@@ -127,39 +127,65 @@ export function applyCaptionCommit(
     if (ids == null) {
       return;
     }
-
-    const { sourceKey, text, startTime, duration, ...style } = row;
-    const onOriginal = captionToTimeline({ startTime, duration }, source);
-    const shifted = shiftSpan(
-      {
-        startMs: onOriginal.startTime,
-        endMs: onOriginal.startTime + onOriginal.duration,
-      },
-      plan.cuts,
-    );
-
-    // Null means the cuts consumed this caption's footage. Placing it anyway
-    // would put words over a moment that no longer exists.
-    if (shifted == null) {
-      return;
-    }
-
-    const placedStart = shifted.startMs;
-    const placedDuration = shifted.endMs - shifted.startMs;
-
-    next = placeNewElement(
-      next,
-      ids.element,
-      createTextElement({
-        ...style,
-        text,
-        startTime: placedStart,
-        duration: placedDuration,
-      }),
-      placedStart,
-      ids.track,
-    );
+    next = placeCaptionRow(next, row, ids, source, plan.cuts);
   });
 
   return next;
+}
+
+/**
+ * Place one caption, mapped through its clip and carried across the cuts.
+ *
+ * Lifted out of the loop above so the caption session can place rows **one at a
+ * time** during its reveal and reach the same document the batch reaches. Two
+ * copies of this arithmetic is the thing worth avoiding: the conversion is easy
+ * to get subtly wrong, and wrong here means captions a frame or two off the
+ * words, which is the failure nobody reports and everybody notices.
+ *
+ * `cuts` is the list this caption has to survive, and for the incremental
+ * caller that is **the cuts already applied**, not the whole plan. Those two
+ * are the same answer: the ripple is lane-local and the reveal runs in time
+ * order, so every cut that could move this caption is behind it already.
+ *
+ * Returns `doc` by identity when the cuts consumed the caption's footage, so a
+ * caller can tell that nothing was placed.
+ */
+export function placeCaptionRow(
+  doc: TimelineDocument,
+  row: CaptionRow,
+  ids: CaptionIds,
+  source: TimelineElement | undefined,
+  cuts: TimeRange[],
+): TimelineDocument {
+  const { sourceKey, lineId, text, startTime, duration, ...style } = row;
+  const onOriginal = captionToTimeline({ startTime, duration }, source);
+  const shifted = shiftSpan(
+    {
+      startMs: onOriginal.startTime,
+      endMs: onOriginal.startTime + onOriginal.duration,
+    },
+    cuts,
+  );
+
+  // Null means the cuts consumed this caption's footage. Placing it anyway
+  // would put words over a moment that no longer exists.
+  if (shifted == null) {
+    return doc;
+  }
+
+  const placedStart = shifted.startMs;
+  const placedDuration = shifted.endMs - shifted.startMs;
+
+  return placeNewElement(
+    doc,
+    ids.element,
+    createTextElement({
+      ...style,
+      text,
+      startTime: placedStart,
+      duration: placedDuration,
+    }),
+    placedStart,
+    ids.track,
+  );
 }

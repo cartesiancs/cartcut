@@ -151,6 +151,12 @@ export { renderOptionStore } from "./states/renderOptionStore";
 export { selectionStore } from "./states/selectionStore";
 export { previewViewportStore } from "./states/previewViewportStore";
 export { windowStore } from "./features/window/windowStore";
+// Whether the timeline is somebody else's, and the command surface that has to
+// refuse while it is. `tests/e2e/specs/caption-session.spec.ts` drives the
+// shipping refusal through these rather than reimplementing a gesture, which
+// would prove only that the spec can decline.
+export { timelineLockStore } from "./states/timelineLockStore";
+export * as editorActions from "./features/editor/actions";
 export { proxyStore } from "./states/proxyStore";
 // How far along an export is, and whether one is running at all. `harness/
 // export.ts` reads this instead of scraping a progress dialog that no longer

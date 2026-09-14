@@ -45,7 +45,13 @@ const LINES = Array.from({ length: 9 }, (_, index) => {
     start: start + w * 0.2,
     end: start + w * 0.2 + 0.18,
   }));
-  return { words, start, end: start + 1.4, text: words.map((w) => w.word).join(" ") };
+  return {
+    id: `line-${index + 1}`,
+    words,
+    start,
+    end: start + 1.4,
+    text: words.map((w) => w.word).join(" "),
+  };
 });
 
 /** Whether `inner` sits wholly inside `outer`, to a pixel of sub-pixel slack. */
@@ -229,13 +235,6 @@ test("the caption window docks beside the preview and is never clipped", async (
     await settle();
   };
 
-  const editorColumns = () =>
-    page.evaluate(() =>
-      document.querySelector("app-window .caption-editor")?.classList.contains("is-stacked")
-        ? "one"
-        : "two",
-    );
-
   /** Every rect this spec measures, read in one pass so they cannot disagree. */
   const measure = () =>
     page.evaluate(() => {
@@ -373,12 +372,15 @@ test("the caption window docks beside the preview and is never clipped", async (
   });
 
   await test.step("the transcript and the footer appear", async () => {
+    // Straight onto the panel, which is what keeps this spec about the window
+    // rather than about speech recognition. `phase` replaced `isEditing`: the
+    // panel has five of them now, and "live" is the one with the caption list
+    // and the footer on it.
     await page.evaluate((lines) => {
       const panel = document.querySelector("automatic-caption") as any;
       panel.lines = lines;
-      panel.mediaType = "video";
-      panel.mediaDuration = 14;
-      panel.openEditor();
+      panel.phase = "live";
+      panel.requestUpdate();
     }, LINES);
 
     await expect(page.locator("app-window .caption-apply")).toBeVisible({ timeout: 15_000 });
@@ -521,9 +523,12 @@ test("the caption window docks beside the preview and is never clipped", async (
     await expectNothingClipped("clamped narrow");
   });
 
-  await test.step("a wide window lays the editor out in two columns, a narrow one stacks", async () => {
-    // Only reachable in the app: `editorLayout.test.ts` pins the breakpoint as
-    // arithmetic, and says nothing about whether the class reaches the CSS.
+  await test.step("the transcript keeps its whole width, wide window or narrow", async () => {
+    // The editor was two columns, a preview canvas beside the lines, with a
+    // breakpoint deciding whether they fitted. Both went when the captions
+    // moved onto the real timeline: there is one column now and it is the
+    // words. What is left to check in the app is that it uses the width it is
+    // given at either end of the splitter's travel, which no node suite can see.
     const innerWidth = await page.evaluate(() => window.innerWidth);
 
     // Give the column as much of the app as its own limits allow.
@@ -531,8 +536,8 @@ test("the caption window docks beside the preview and is never clipped", async (
     await dragMainSplitter(innerWidth - 4);
     await dragWindowSplitter(-4000);
 
-    const wide = await expectNothingClipped("two columns");
-    writeJson(path.join(artifactDir, "two-column-step.json"), {
+    const wide = await expectNothingClipped("wide");
+    writeJson(path.join(artifactDir, "width-step.json"), {
       innerWidth,
       host: wide.host,
       region: wide.region,
@@ -540,26 +545,31 @@ test("the caption window docks beside the preview and is never clipped", async (
       splitter: wide.splitter,
       placement: (await openState()).placement,
       hostSizes: (await openState()).hostSizes,
-      columns: await editorColumns(),
     });
     expect(wide.window!.width).toBeGreaterThan(540);
-    expect(await editorColumns()).toBe("two");
-    // Side by side means the canvas and the list share a row.
-    const sideBySide = await page.evaluate(() => {
-      const canvas = document
-        .querySelector("app-window .caption-editor-canvas")!
-        .getBoundingClientRect();
-      const lines = document
-        .querySelector("app-window .caption-editor-lines")!
-        .getBoundingClientRect();
-      return lines.x >= canvas.x + canvas.width - 2;
-    });
-    expect(sideBySide, "the two columns overlap instead of sitting beside each other").toBe(true);
+
+    const fillsWindow = async (label: string) => {
+      const fit = await page.evaluate(() => {
+        const lines = document
+          .querySelector("app-window .caption-editor-lines")!
+          .getBoundingClientRect();
+        const body = document
+          .querySelector("app-window .caption-panel-body")!
+          .getBoundingClientRect();
+        return { lines: lines.width, body: body.width };
+      });
+      // Its own padding is the only thing it gives up. A second column would
+      // take a share of the width, which is what this would catch.
+      expect(fit.lines, label).toBeGreaterThan(fit.body - 40);
+      expect(fit.lines, label).toBeLessThanOrEqual(fit.body);
+    };
+
+    await fillsWindow("wide");
 
     await dragWindowSplitter(4000);
-    const narrow = await expectNothingClipped("stacked");
+    const narrow = await expectNothingClipped("narrow");
     expect(narrow.window!.width).toBeLessThan(540);
-    expect(await editorColumns()).toBe("one");
+    await fillsWindow("narrow");
   });
 
   await test.step("the splitter draws one pixel, not a bar", async () => {

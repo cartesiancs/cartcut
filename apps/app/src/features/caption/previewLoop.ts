@@ -1,29 +1,26 @@
 /**
- * The auto-caption preview's two animation-frame handles, and its re-render gate.
+ * The caption panel's frame clock, and its re-render gate.
  *
- * Small, and extracted for one reason: **there are two handles, they are
- * cancelled in different combinations by four different methods, and none of it
- * was reachable from a test.** The panel's own playback methods are straight
- * lines of three calls each and stay where they are — a mock-based test over
- * them would assert "pause was called" because the code calls pause, and pass
- * after any refactor that kept calling pause. The handles are the part with
- * actual invariants, and the part where a leak is silent.
+ * Two small things that survive from a preview the panel no longer has. It used
+ * to run its own animation loop over its own canvas, playing its own copy of
+ * the source file; the captions are on the real timeline now and the app's own
+ * preview draws them, so the loop went with the canvas.
  *
- * `window.requestAnimationFrame` is reached only through `FrameScheduler`, so
- * this runs under `environment: "node"` against a fake — the narrowing
- * `ui/transientModal.ts` does to `bootstrap.Modal`, for the same reason.
+ * What is left is what the rest of the feature turned out to need anyway:
  *
- * ## Two handles, not one
+ * - **`FrameScheduler`**, which is how `captionSession.ts` paces its reveal.
+ *   `window.requestAnimationFrame` is reached only through it, so that whole
+ *   state machine runs under `environment: "node"` against a counter, the
+ *   narrowing `ui/transientModal.ts` does to `bootstrap.Modal`.
+ * - **`ChromeGate`**, which decides whether a playhead change is worth a
+ *   re-render at all. The panel follows the app's cursor now, which moves at
+ *   the display's rate, and the only things in its template that depend on it
+ *   are the active line and the active word. Gating on exactly those is what
+ *   keeps a 60Hz cursor from rebuilding a TemplateResult for every word of the
+ *   transcript sixty times a second.
  *
- * - the **loop**, re-armed every frame while playing;
- * - the **paint**, a single coalesced repaint for an edit made while paused.
- *
- * They are deliberately independent, and the consequences are pinned in the
- * suite rather than tidied: `start()` cancels a pending loop but *not* a pending
- * paint, and the loop calls its step directly rather than through
- * `schedulePaint`. So "at most one repaint in flight" is **not** an invariant of
- * this class, and a test asserting it would be asserting something the panel has
- * never done.
+ * `PreviewLoop` was the third thing here. It is gone, along with the two
+ * animation-frame handles whose interaction it existed to pin.
  */
 
 import { playheadLabel } from "../media/playback";
@@ -41,91 +38,6 @@ export function windowScheduler(): FrameScheduler {
     request: (callback) => window.requestAnimationFrame(callback),
     cancel: (id) => window.cancelAnimationFrame(id),
   };
-}
-
-export class PreviewLoop {
-  /** Set by `stop`, read only when deciding whether to re-arm. */
-  private done = true;
-  private loopId: number | null = null;
-  private paintId: number | null = null;
-  private step: (() => void) | null = null;
-
-  constructor(private readonly scheduler: FrameScheduler) {}
-
-  /** Whether a frame is armed. For assertions. */
-  get isRunning(): boolean {
-    return this.loopId !== null;
-  }
-
-  /** Whether a coalesced repaint is armed. For assertions. */
-  get hasPendingPaint(): boolean {
-    return this.paintId !== null;
-  }
-
-  /**
-   * Run `step` every frame until stopped.
-   *
-   * Cancels a frame already armed first, so double-clicking Play cannot leave
-   * two loops running — which would composite the frame twice and advance
-   * nothing, on the thread doing the compositing.
-   *
-   * It does **not** cancel a pending paint. A repaint coalesced while paused
-   * therefore still fires, alongside the loop's first frame.
-   */
-  start(step: () => void): void {
-    this.done = false;
-    if (this.loopId !== null) {
-      this.scheduler.cancel(this.loopId);
-    }
-    this.step = step;
-    this.loopId = this.scheduler.request(() => this.tick());
-  }
-
-  /** Cancel both handles and clear them. */
-  stop(): void {
-    this.done = true;
-    if (this.loopId !== null) {
-      this.scheduler.cancel(this.loopId);
-      this.loopId = null;
-    }
-    if (this.paintId !== null) {
-      this.scheduler.cancel(this.paintId);
-      this.paintId = null;
-    }
-  }
-
-  /**
-   * Repaint once, on the next frame.
-   *
-   * Coalescing is the whole point: an edit that dirties the picture several times
-   * in one turn — a keystroke that both changes the text and moves the caret —
-   * costs one composite. A second call while one is armed is ignored rather than
-   * queued.
-   *
-   * Deliberately **not** gated on `stop()` having been called. The panel calls
-   * `stop()` and then `schedulePaint()` in that order to draw one last frame
-   * after pausing, so a guard here would blank the preview on every pause.
-   */
-  schedulePaint(paint: () => void): void {
-    if (this.paintId !== null) {
-      return;
-    }
-    this.paintId = this.scheduler.request(() => {
-      this.paintId = null;
-      paint();
-    });
-  }
-
-  private tick(): void {
-    this.step?.();
-    // Re-armed *after* the step, so a `stop()` from inside it wins. The id of
-    // the frame currently running is left in place until then, which is what
-    // makes that `stop()` cancel an already-fired id — harmless, and the reason
-    // `done` rather than the id decides whether to continue.
-    if (!this.done) {
-      this.loopId = this.scheduler.request(() => this.tick());
-    }
-  }
 }
 
 /**

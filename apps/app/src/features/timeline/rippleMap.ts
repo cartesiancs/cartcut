@@ -77,6 +77,37 @@ export function shiftPoint(tMs: number, cuts: TimeRange[]): number {
 }
 
 /**
+ * Where an instant on the cut timeline came from on the original one.
+ *
+ * The inverse of `shiftPoint`, and the caption panel needs it for the only
+ * question it asks backwards: the playhead sits at some moment of the cut
+ * timeline, and the panel has to say which word is being spoken, which is a
+ * time in the source file. Going forwards for every word until one matches
+ * would answer the same question in O(words) with rounding at each step.
+ *
+ * The walk is over the cuts **ascending in original coordinates**, growing `t`
+ * as it goes: a cut that begins at or before where `t` has reached is a cut the
+ * instant lies after, so its length is added and later cuts are compared
+ * against the grown value.
+ *
+ * It is not injective, and cannot be: every instant inside a cut was removed,
+ * and they all map back to the moment footage resumes. That is the same instant
+ * `shiftPoint` sends them to, so the pair round-trips for everything that
+ * survived and answers usefully for everything that did not.
+ */
+export function unshiftPoint(tMs: number, cuts: TimeRange[]): number {
+  const ascending = [...cuts].sort((a, b) => a.startMs - b.startMs);
+  let t = Math.max(0, tMs);
+  for (const cut of ascending) {
+    if (cut.startMs > t) {
+      break;
+    }
+    t += Math.max(0, cut.endMs - cut.startMs);
+  }
+  return t;
+}
+
+/**
  * Where a span ends up, or `null` when the cuts consumed all of it.
  *
  * The length is recomputed from what survives **inside** the span rather than

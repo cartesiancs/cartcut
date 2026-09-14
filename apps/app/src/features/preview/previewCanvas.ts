@@ -5,6 +5,7 @@ import type { TimelineDocument } from "../timeline/tracks";
 import { html, LitElement } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
+import { refusesEdit } from "../editor/timelineLock";
 import { IUIStore, uiStore } from "../../states/uiStore";
 import {
   IRenderOptionStore,
@@ -1175,6 +1176,9 @@ export class PreviewCanvas extends LitElement {
       return;
     }
     const elementId = session.elementId;
+    if (refusesEdit()) {
+      return;
+    }
     useTimelineStore.getState().withCheckpoint((doc) => {
       const withPath = setClipMaskPath(doc, elementId, commit.path);
       // The path first, then the frame it was drawn in — as one document, so
@@ -1566,6 +1570,9 @@ export class PreviewCanvas extends LitElement {
     if (write == null) {
       return false;
     }
+    if (refusesEdit()) {
+      return;
+    }
     useTimelineStore.getState().withCheckpoint(write);
   }
 
@@ -1621,6 +1628,9 @@ export class PreviewCanvas extends LitElement {
       duration: 1000,
     });
 
+    if (refusesEdit()) {
+      return;
+    }
     this.timelineState.withCheckpoint((doc) =>
       placeNewElement(doc, elementId, element, this.timelineCursor, uuidv4()),
     );

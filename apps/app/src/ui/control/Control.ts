@@ -24,14 +24,17 @@ import {
 } from "../../states/controlPanelStore";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { renderOptionStore } from "../../states/renderOptionStore";
+import { timelineLockStore } from "../../states/timelineLockStore";
 import {
-  applyCaptionCommit,
-  mintCaptionIds,
-} from "../../features/caption/applyCaptions";
-import { planCuts } from "../../features/caption/cuts";
+  CaptionSession,
+  type CaptionSessionPhase,
+} from "../../features/caption/captionSession";
+import { windowScheduler } from "../../features/caption/previewLoop";
+import type { CaptionPlayheadPort } from "../../features/caption/playheadPort";
 import { clipsAcrossCuts } from "../../features/timeline/rippleMap";
 import { snapMsToFrame } from "../../features/timeline/frames";
-import { commit } from "../../features/agent/commit";
+import { ensureUndoBaseline } from "../../features/agent/checkpoint";
+import { v4 as uuidv4 } from "uuid";
 import { LocaleController } from "../../controllers/locale";
 import { windowStore } from "../../features/window/windowStore";
 import type { WindowPanel } from "../../features/window/windowHost";
@@ -75,15 +78,17 @@ export class Control extends LitElement {
    *
    * Passed down rather than read there, because `apps/automatic-caption/`
    * resolves its packages from its own `node_modules` and reaching
-   * `renderOptionStore` would make it depend on zustand. The panel lays its
-   * captions out in these pixels and previews them at this size, which is what
-   * makes its preview and the placed element the same picture.
+   * `renderOptionStore` would make it depend on zustand. `captionStyle` lays a
+   * caption out as fractions of this frame, so it is what decides where the
+   * words sit and how big they are.
+   *
+   * The panel used to want it for a second reason, to size its own preview
+   * canvas. It has no canvas now: the captions are on the real timeline while
+   * the panel is open, so the app's own preview is the preview. `backgroundColor`
+   * went with that canvas and is no longer passed down at all.
    */
   @property()
   previewSize = renderOptionStore.getInitialState().options.previewSize;
-
-  @property()
-  backgroundColor = renderOptionStore.getInitialState().options.backgroundColor;
 
   createRenderRoot() {
     useTimelineStore.subscribe((state) => {
@@ -92,7 +97,6 @@ export class Control extends LitElement {
 
     renderOptionStore.subscribe((state) => {
       this.previewSize = state.options.previewSize;
-      this.backgroundColor = state.options.backgroundColor;
     });
 
     uiStore.subscribe((state) => {
@@ -143,79 +147,129 @@ export class Control extends LitElement {
   }
 
   /**
-   * Cut the footage the user struck out, and place what is left.
+   * The session that owns the timeline while the caption panel is open.
    *
-   * The transcript timestamps the *source file*, so each caption's start has to
-   * be mapped through the clip it came from, trim offset and speed included,
-   * before it can be placed. Captions used to carry a `parentKey` and be
-   * rendered at `parent.startTime + own.startTime`, which was the same
-   * conversion done implicitly, at draw time, forever, and only for a 1x
-   * untrimmed clip. Doing it once leaves every caption an ordinary clip holding
-   * an absolute time, so many of them share one text track.
+   * Held here rather than made per transcript, because `Control` is what
+   * outlives the panel: the window unmounts `<automatic-caption>` when it is
+   * closed, and an event dispatched from a detached element reaches nobody.
+   * That is the same reason `_handleWindowClose` exists a few lines down, and
+   * cancelling the session is the second thing it now has to do.
    *
-   * This was a loop of `control.addText`, one store commit and one undo step per
-   * caption. That is no longer survivable: the same gesture now removes footage,
-   * and a Cmd+Z that took back one caption while leaving the cuts in place would
-   * be worse than useless. `applyCaptionCommit` is the whole thing as one
-   * document transform, and `commit` records exactly one step for it.
-   *
-   * Everything decided here is decided somewhere testable: `planCuts` owns the
-   * conversion and the snapping, `applyCaptionCommit` owns the order. What is
-   * left is reading the store, minting ids and warning the user.
+   * The ports are the store, the lock and a frame clock. None of them is
+   * imported inside `captionSession.ts`, which is what lets its whole state
+   * machine run under `environment: "node"` against fakes.
    */
-  _handleComplateAutoCaption(e) {
-    const rows = e.detail.result ?? [];
-    const sourceKey = e.detail.sourceKey ?? null;
-    const sourceCuts = e.detail.cuts ?? [];
+  private captionSession = new CaptionSession({
+    document: {
+      read: () => useTimelineStore.getState().getDocument(),
+      // No normalisation and no history: the session writes on every frame of
+      // its reveal and on every keystroke, and `previewDocument` is the channel
+      // the drag preview already uses for exactly that reason.
+      preview: (doc) => useTimelineStore.getState().previewDocument(doc),
+      // What is on screen, not a recomputation of it. `GestureCommit.flush`
+      // makes the same call: a second computation is a second chance to
+      // disagree with the picture the user just approved.
+      commitShown: () => {
+        const shown = useTimelineStore.getState().getDocument();
+        useTimelineStore.getState().withCheckpoint(() => shown);
+      },
+      ensureBaseline: () => ensureUndoBaseline(),
+    },
+    lock: {
+      lock: () => timelineLockStore.getState().lock("captionSession"),
+      unlock: () => timelineLockStore.getState().unlock(),
+    },
+    scheduler: windowScheduler(),
+    now: () => performance.now(),
+    mintId: uuidv4,
+    // The same grid the mouse is held to. Passed in rather than imported there,
+    // so `captionSession.ts` reads no store and stays node-testable.
+    snap: (ms) =>
+      snapMsToFrame(ms, renderOptionStore.getState().options.fps),
+    onPhase: (phase) => {
+      this.captionSessionPhase = phase;
+    },
+  });
 
+  /**
+   * What the session is doing, for the panel's own progress screen.
+   *
+   * Written twice per session rather than per frame, which is why it can be a
+   * plain property: the panel needs to know when the reveal has finished so it
+   * can swap its "Applying to the timeline" screen for the caption list, and
+   * only the session knows when that is.
+   */
+  @property()
+  captionSessionPhase: CaptionSessionPhase = "idle";
+
+  /**
+   * The panel has words and silences. Take the timeline.
+   *
+   * What is left here is the one thing only this component can do: read the
+   * store. The clip is resolved, the session is handed it, and everything after
+   * that is the session's, including the planning, because by the second change
+   * `doc.elements[sourceKey]` names a *piece* of the clip or nothing at all.
+   *
+   * The two warnings moved forward with the cuts. They used to fire on Apply,
+   * which was the moment the cuts happened; the cuts happen as soon as a
+   * transcript lands now, so this is that moment.
+   */
+  /**
+   * An arrow property, and all four of these have to be.
+   *
+   * The panel's template is built here and rendered by `<app-window>`, and Lit
+   * binds an event listener's `this` to the **host of the render**, which is
+   * that component and not this one. A plain method therefore runs with `this`
+   * as the window: `this.captionSession` is undefined and the listener throws
+   * inside Lit, where nothing surfaces it.
+   *
+   * It was already wrong before this feature and mostly got away with it: the
+   * old `editComplate` handler read only module-level stores on its common
+   * path. The single line that did use `this`, the toast for cuts covering the
+   * whole clip, was the one branch nobody hit. `changeCursorType` was not so
+   * lucky, and the panel's keyboard lock has been silently dead since the
+   * editor became a window.
+   */
+  _handleCaptionSessionStart = (e) => {
     const doc = useTimelineStore.getState().getDocument();
+    const sourceKey = e.detail.sourceKey ?? null;
+    // Read before anything cuts it. `removeRanges` splits the clip and the
+    // original id does not always survive, so this is the only moment the
+    // transcribed clip can be resolved at all. The session holds it from here.
     const source = sourceKey ? doc.elements[sourceKey] : undefined;
-    const fps = renderOptionStore.getState().options.fps;
 
-    // Snapped here rather than inside the pure module, which must not read a
-    // store. The grid is the same one the mouse is held to.
-    const plan = planCuts(sourceCuts, source, (ms) => snapMsToFrame(ms, fps));
+    this.captionSession.start({
+      lines: e.detail.lines ?? [],
+      sourceKey,
+      source,
+      frame: this.previewSize,
+      placement: e.detail.placement ?? "lowerThird",
+      sourceRanges: e.detail.sourceRanges ?? [],
+    });
 
-    // Refusing the cuts and keeping the captions is the recoverable half: the
-    // user gets their transcript and can cut by hand. Cutting would leave an
-    // empty track and nothing to undo back to but the checkpoint.
-    const cuts = plan.coversWholeClip ? [] : plan.cuts;
-    if (plan.coversWholeClip) {
+    // Both warnings read back what the session decided, because the planning
+    // and the clamping are its job now. They fire here and not on every later
+    // change: each describes something settled once, not a state the user is
+    // going to keep looking at.
+    if (this.captionSession.coversWholeClip) {
       this.toastCaption(
-        "Those cuts would remove the whole clip, so nothing was cut. The captions were placed.",
+        "Those silences cover the whole clip, so nothing was cut. The captions were placed.",
       );
     }
 
+    const cuts = this.captionSession.cuts;
     if (cuts.length > 0 && sourceKey != null) {
       // The ripple is lane-local, so anything already sitting on another row
       // keeps its old timing and drifts out of sync with the speech. Said
       // plainly rather than discovered at playback.
-      const stranded = clipsAcrossCuts(doc, source?.trackId ?? "", cuts);
+      const stranded = clipsAcrossCuts(doc, (source as any)?.trackId ?? "", cuts);
       if (stranded.length > 0) {
         this.toastCaption(
           `${stranded.length} clip(s) on other tracks overlap the cuts and were not moved, so they may now be out of sync.`,
         );
       }
     }
-
-    if (cuts.length === 0 && rows.length === 0) {
-      return;
-    }
-
-    commit(
-      (d) =>
-        applyCaptionCommit(d, {
-          sourceKey,
-          cuts,
-          rows,
-          // Minted outside the transform: `commit` runs it twice, once to probe
-          // whether it declines, and ids made inside would differ between the
-          // two runs.
-          ids: mintCaptionIds(rows.length, cuts.length),
-        }),
-      "Nothing to place, and nothing to cut.",
-    );
-  }
+  };
 
   private toastCaption(message: string) {
     (document.querySelector("toast-box") as any)?.showToast({
@@ -224,11 +278,48 @@ export class Control extends LitElement {
     });
   }
 
-  _handleChangeCursorType(e) {
-    const type = e.detail.type;
+  /** A text edit, a split, a merge, a strike-out, a realignment, a toggle. */
+  _handleCaptionSessionChange = (e) => {
+    this.captionSession.update({
+      lines: e.detail.lines ?? [],
+      placement: e.detail.placement ?? "lowerThird",
+      sourceRanges: e.detail.sourceRanges ?? [],
+    });
+  };
 
-    this.timelineState.setCursorType(type);
-  }
+  /** Apply. One undo step, holding exactly what the user is looking at. */
+  _handleCaptionSessionApply = () => {
+    this.captionSession.apply();
+  };
+
+  /**
+   * The panel's view of the playhead, as one stable object.
+   *
+   * Built once and handed down, so subscribing costs the panel one listener and
+   * costs this component nothing. Writing the cursor into a `@property` instead
+   * would re-render the whole preview column sixty times a second.
+   */
+  private captionPlayhead: CaptionPlayheadPort = {
+    subscribe: (onChange) =>
+      useTimelineStore.subscribe((state, previous) => {
+        if (state.cursor !== previous.cursor) {
+          onChange();
+        }
+      }),
+    sourceSeconds: () =>
+      this.captionSession.sourceSecondsOf(useTimelineStore.getState().cursor),
+    seekToSource: (seconds) =>
+      useTimelineStore
+        .getState()
+        .setCursor(this.captionSession.timelineMsOf(seconds * 1000)),
+  };
+
+  _handleChangeCursorType = (e) => {
+    // See `_handleCaptionSessionStart` on why this is an arrow property. As a
+    // method it ran with `this` bound to `<app-window>`, so `this.timelineState`
+    // was undefined and the panel's keyboard lock threw instead of applying.
+    useTimelineStore.getState().setCursorType(e.detail.type);
+  };
 
   /**
    * What the preview column is able to dock beside itself.
@@ -247,9 +338,12 @@ export class Control extends LitElement {
         content: html`<automatic-caption
           .timeline=${this.timeline}
           .previewSize=${this.previewSize}
-          .backgroundColor=${this.backgroundColor}
+          .playhead=${this.captionPlayhead}
+          .sessionPhase=${this.captionSessionPhase}
           .isDev=${false}
-          @editComplate=${this._handleComplateAutoCaption}
+          @captionSessionStart=${this._handleCaptionSessionStart}
+          @captionSessionChange=${this._handleCaptionSessionChange}
+          @captionSessionApply=${this._handleCaptionSessionApply}
           @changeCursorType=${this._handleChangeCursorType}
         ></automatic-caption>`,
       },
@@ -282,6 +376,12 @@ export class Control extends LitElement {
       return;
     }
     this.timelineState.setCursorType("pointer");
+    // Closing without applying discards, which is the only other way out of a
+    // session. It has to be done here for the same reason the keyboard is given
+    // back here: closing unmounts the panel, and an event dispatched from a
+    // detached element reaches nobody. `cancel` is a no-op when no session is
+    // running, so closing the window on the setup screen costs nothing.
+    this.captionSession.cancel();
   }
 
   render() {

@@ -19,6 +19,7 @@
  * find out, so the answer is a list of ids plus rows for what was created.
  */
 
+import { isTimelineLocked } from "../../states/timelineLockStore";
 import { useTimelineStore } from "../../states/timelineStore";
 import type { TimelineDocument } from "../timeline/tracks";
 import { ensureUndoBaseline } from "./checkpoint";
@@ -45,6 +46,16 @@ export function commit(
   fn: (doc: TimelineDocument) => TimelineDocument,
   declineReason: string,
 ): EditResult {
+  // Before the probe, because a locked timeline is not a declined edit: the op
+  // would have gone through perfectly well, and the agent needs to be told the
+  // difference between "that does nothing" and "not while the caption panel is
+  // open". Every mutating MCP tool goes through here, so this is all of them.
+  if (isTimelineLocked()) {
+    return declined(
+      "The timeline is locked while a caption session is live. Press Apply in the caption panel, or close it, and try again.",
+    );
+  }
+
   const before = useTimelineStore.getState().getDocument();
 
   // Probe before committing anything. `withCheckpoint` would tell us the same

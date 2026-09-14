@@ -16,6 +16,7 @@
  */
 
 import { useTimelineStore } from "../../states/timelineStore";
+import { refusesEdit } from "../editor/timelineLock";
 import type { TimelineDocument } from "../timeline/tracks";
 
 /** How long a gesture may pause before it counts as finished. */
@@ -58,6 +59,19 @@ export class GestureCommit {
    * async asset finishing, a clip drag committing) from being erased.
    */
   apply(fn: (doc: TimelineDocument) => TimelineDocument): void {
+    // Refused at the first step rather than at the flush, because every step
+    // writes `previewDocument`. That is the channel the caption session paints
+    // its own projection on, so a slider held down while it is live would
+    // overwrite the session's document sixty times a second and the session
+    // would overwrite the slider's back on its next rebuild. One of the two has
+    // to own the timeline, and while a session is running it is the session.
+    //
+    // This covers the preview canvas's move, resize and rotate as well as every
+    // option panel that scrubs, because all of them are here.
+    if (refusesEdit()) {
+      return;
+    }
+
     const store = useTimelineStore.getState();
 
     if (!this.active) {

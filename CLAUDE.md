@@ -265,7 +265,8 @@ features/renderer/     element, video, image, text, shape, template, mask, blend
 features/project/      the .ngt, autosave, asset paths
 features/export/       exportSession, phases, snapshot, the ETA singleton
 features/agent/        commit, context, serialize, commands/, what MCP forwards to
-features/caption/      the auto-caption panel's every decision, outside the Lit class
+features/caption/      the auto-caption panel's every decision, and the session
+                       that owns the timeline while it is open
 features/window/       docked panels beside a host's content, splitter, pure layout
 features/mask/         one mask per clip: templates, bezier geometry, the pen session
 features/shape/        parametric outlines, over mask/geometry.ts unchanged
@@ -316,6 +317,32 @@ The handful of facts inside those that are worth stating up front:
   target so its macOS 26 Speech symbols stay weak imports and it can report
   `requires_macos_26` instead of failing at `exec`. Word timings live on the runs
   of the `AttributedString`, not on `Result.range`.
+- **The auto-caption panel edits the live timeline, and Apply is the only thing
+  that keeps it.** From the moment a transcript lands, the document in the store
+  is a *projection* of a held baseline and whatever the panel says
+  (`captionProjection.ts`), rebuilt from that baseline on every change and
+  written through `previewDocument`, so no intermediate state records an undo
+  step. The silences are swept and cut at once, the captions land one at a time
+  from 0ms forwards (`captionReveal.ts`), and editing a caption's text reaches
+  its clip on the next frame. `applyCaptionCommit` stays as the *definition* of
+  the finished edit, and the sequence is tested against arriving where it does.
+  - **The silence toggle is not an undo.** `removeRanges` has no inverse; both
+    states are built from the same baseline, which is what makes the round trip
+    exact down to the element ids.
+  - **Ids are minted once and keyed**, a caption's by its line's id and a cut's
+    by the cut's index. A running pool would rename every piece on every frame
+    of the reveal, and `loadedAssetStore` caches decoders by element id.
+  - **`timelineLockStore` is ephemeral, deliberately.** A `locked?: true` on
+    `TimelineTrack` would persist, undo and save for free, and would also
+    survive a crash as a lock with no holder and no way to release it. Five
+    gates refuse while it is held (`actions.ts#commit`, `agent/commit.ts`, the
+    timeline canvas, the preview canvas, `GestureCommit.apply`); the playhead,
+    playback and the selection are left alone.
+  - **A handler passed into another component's template binds `this` to that
+    component.** `Control` builds the panel's template and `<app-window>`
+    renders it, so Lit's listener host is the window. All four of the panel's
+    handlers are arrow properties for that reason, and `changeCursorType` was
+    silently dead as a method.
 - **The window system's clamp precedence is `host > window min > content min`.**
   A rect outside the host is invisible rather than small, and invisible in a way
   no `getBoundingClientRect` check can see, because the column carries

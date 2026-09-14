@@ -30,9 +30,24 @@ const lines = () => linesFromWordGroups([WORDS]);
 
 describe("linesFromWordGroups", () => {
   it("takes the span from the words and the text from joining them", () => {
-    expect(lines()).toEqual([
-      { words: WORDS, start: 0, end: 3, text: "hello there world" },
-    ]);
+    const [line] = lines();
+    expect(line).toMatchObject({
+      words: WORDS,
+      start: 0,
+      end: 3,
+      text: "hello there world",
+    });
+  });
+
+  it("names every line, and names each one once", () => {
+    const built = linesFromWordGroups([WORDS, WORDS, WORDS]);
+    expect(new Set(built.map((line) => line.id)).size).toBe(3);
+  });
+
+  it("takes the names from an injected minter when one is given", () => {
+    let n = 0;
+    const built = linesFromWordGroups([WORDS, WORDS], () => `L${(n += 1)}`);
+    expect(built.map((line) => line.id)).toEqual(["L1", "L2"]);
   });
 
   it("drops empty groups rather than making a line with no span", () => {
@@ -227,8 +242,30 @@ describe("lineIndexAt / wordIndexAt", () => {
 
 describe("captionsFrom", () => {
   it("converts to whole milliseconds", () => {
-    expect(captionsFrom(lines())).toEqual([
-      { text: "hello there world", startTime: 0, duration: 3000 },
+    const built = lines();
+    expect(captionsFrom(built)).toEqual([
+      {
+        lineId: built[0].id,
+        text: "hello there world",
+        startTime: 0,
+        duration: 3000,
+      },
+    ]);
+  });
+
+  // The caption is how a session finds the element it placed for a line, and
+  // `captionsFrom` is where the two stop sharing an index: it drops the empty
+  // and the struck-out. Carrying the name through is what survives that.
+  it("carries each line's own name, through a drop that shifts the rest", () => {
+    const three = linesFromWordGroups([
+      [{ word: "one", start: 0, end: 1 }],
+      [{ word: "two", start: 1, end: 2 }],
+      [{ word: "three", start: 2, end: 3 }],
+    ]);
+    const withoutMiddle = removeLine(three, 1);
+    expect(captionsFrom(withoutMiddle).map((out) => out.lineId)).toEqual([
+      three[0].id,
+      three[2].id,
     ]);
   });
 

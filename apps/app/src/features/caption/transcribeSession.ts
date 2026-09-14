@@ -45,14 +45,17 @@ export type JobProgress = { fraction: number; stage: string };
 const NOTE_LOCAL = "The audio never leaves your computer.";
 
 /**
- * The dialog's copy for a progress stage.
+ * The copy for a progress stage.
  *
- * Main can send four: `extracting`, `downloading`, `transcribing`, and
- * **`queued`** — which it sends, with a `null` fraction, when a job waits behind
- * another. There is no branch for `queued`, so it falls through to
- * "Transcribing…" at 0%, indistinguishable from a job that has just started.
- * That is the behaviour today and it is pinned, not fixed: see the findings note
- * on this function's suite.
+ * Main sends four: `extracting`, `downloading`, `transcribing`, and **`queued`**.
+ * The last carries a `null` fraction, and arrives when a job waits behind
+ * another, because `ipcTranscribe` runs one at a time.
+ *
+ * `queued` had no branch and fell through to "Transcribing..." at 0%,
+ * indistinguishable from a job that had just started. That was pinned rather
+ * than fixed while this copy lived in a modal nobody could see past; the panel
+ * shows these phases in its own body now, where a wait that claims to be work
+ * is the difference between "slow" and "stuck".
  */
 export function progressCopy(stage: string): { title: string; note: string } {
   if (stage === "downloading") {
@@ -63,6 +66,12 @@ export function progressCopy(stage: string): { title: string; note: string } {
   }
   if (stage === "extracting") {
     return { title: "Extracting audio...", note: NOTE_LOCAL };
+  }
+  if (stage === "queued") {
+    return {
+      title: "Waiting for the recogniser...",
+      note: "Another clip is being transcribed. This one starts when it finishes.",
+    };
   }
   return { title: "Transcribing...", note: NOTE_LOCAL };
 }
@@ -173,9 +182,17 @@ export class TranscribeSession {
 
     // Main groups the words with `analysis/segments.ts`, which is where the rule
     // for where a caption breaks lives and is tested. Only the units change.
+    //
+    // The same `mintId` that names jobs names the lines. One injected source of
+    // identity per session is one thing for a suite to control, and a line's id
+    // is what the caption session keys its timeline element by, so it has to be
+    // as deterministic under test as the job id already is.
     return {
       kind: "lines",
-      lines: linesFromTranscript(payload.lines as TranscribedWord[][] | undefined),
+      lines: linesFromTranscript(
+        payload.lines as TranscribedWord[][] | undefined,
+        this.mintId,
+      ),
     };
   }
 

@@ -7,7 +7,6 @@ import {
 } from "../../app/src/features/caption/locale";
 import { type CaptionPlacement } from "../../app/src/features/caption/layout";
 import {
-  hasRemovedLines,
   removedSpans,
   activeAt,
   type CaptionLine,
@@ -21,9 +20,13 @@ import {
   type CaptionEditor,
   type CaptionKeyIntent,
 } from "../../app/src/features/caption/editor";
-import { captionRows } from "../../app/src/features/caption/rows";
-import { captionEditorLayout } from "../../app/src/features/caption/editorLayout";
 import { silenceButtonState } from "../../app/src/features/caption/silenceButton";
+import {
+  captionPhaseView,
+  type CaptionPhase,
+} from "../../app/src/features/caption/captionPhase";
+import type { CaptionSessionPhase } from "../../app/src/features/caption/captionSession";
+import type { CaptionPlayheadPort } from "../../app/src/features/caption/playheadPort";
 import {
   DEFAULT_SILENCE_OPTIONS,
   silenceCuts,
@@ -32,68 +35,73 @@ import {
 import { sourceWindowOf } from "../../app/src/features/caption/cuts";
 import {
   ChromeGate,
-  PreviewLoop,
   chromeStateOf,
-  windowScheduler,
 } from "../../app/src/features/caption/previewLoop";
 import {
   captionSources,
   sourceDisplayName,
   type CaptionSource,
 } from "../../app/src/features/caption/sources";
-import { seekMedia } from "../../app/src/features/media/seek";
-import {
-  displayDurationSec,
-  playbackFraction,
-  playheadLabel,
-} from "../../app/src/features/media/playback";
-import { fontsSettled } from "../../app/src/features/element/rasterizeText";
-import { paintCaptionPreview } from "../../app/src/features/caption/preview";
-import {
-  TranscribeSession,
-  progressCopy,
-  progressPercent,
-  type JobProgress,
-} from "../../app/src/features/caption/transcribeSession";
-import { TransientModal } from "../../app/src/features/ui/transientModal";
+import { TranscribeSession } from "../../app/src/features/caption/transcribeSession";
 import "./progress";
 
 @customElement("automatic-caption")
 export class AutomaticCaption extends LitElement {
   isLoadVideo: boolean;
   videoPath: string;
-  /** The progress dialog. Gated, because a cached transcript returns instantly. */
-  analyzingVideoModal: TransientModal | undefined;
   selectVideoModal: any;
   videoRows: any;
   hasUpdatedOnce: boolean;
-  /**
-   * Whether the caption editor is showing.
-   *
-   * This was `panelVideoModal.show()` on a `modal-fullscreen`. It is a plain
-   * field now, because the editor is a region inside a window rather than a
-   * dialog over the app, and Bootstrap owned its visibility before.
-   */
-  isEditing: boolean;
-  isPlay: boolean;
-  /** The two animation-frame handles. See `caption/previewLoop.ts`. */
-  private readonly _loop = new PreviewLoop(windowScheduler());
 
-  /** Silences the sweep found, in source ms. Cleared by the Clear button. */
-  private _silenceCuts: Array<{ startMs: number; endMs: number }> = [];
+  /**
+   * What the panel is doing, and therefore which of three bodies it draws.
+   *
+   * It replaced `isEditing`, which was a boolean because there were only ever
+   * two states worth drawing: the setup form, and the editor. The work between
+   * them was a Bootstrap dialog over the whole app. That dialog is gone, and
+   * the phases it used to hide are the panel's own body now, which is what
+   * "show progress in the window rather than over the app" amounts to.
+   *
+   * `captionPhase.ts` decides what each one says. Nothing here does.
+   */
+  phase: CaptionPhase = "setup";
+
+  /** Why the last transcription failed, shown on the `failed` screen. */
+  private _failMessage: string | null = null;
+
+  /**
+   * The silences the sweep found, in source ms.
+   *
+   * Kept whole and kept for the whole session, because the toggle needs them
+   * back. Turning the cuts off does not put a cut back, which has no inverse:
+   * it sends a shorter list of ranges and the session rebuilds from its
+   * baseline. So this list is the thing that has to survive, not the cuts.
+   */
+  private _silenceRanges: Array<{ startMs: number; endMs: number }> = [];
+
+  /** Whether those gaps are currently cut out of the timeline. */
+  private _silenceOn = true;
 
   /** A decode is running. One ffmpeg pass, so a spinner rather than a bar. */
   private _silenceBusy = false;
 
   /** Why the last sweep found nothing, shown rather than swallowed. */
   private _silenceError: string | null = null;
-  /** Seconds into the source media. Read from the media element, never accumulated. */
-  progress: number;
+
+  /**
+   * The clip's window into its source file, read when the transcript landed.
+   *
+   * Held rather than looked up, and that is the same rule `applyCaptions.ts`
+   * states: the session cuts the clip within a second of this being set, and
+   * `removeRanges` does not always leave the original id behind. Asking
+   * `this.timeline[selectedKey]` afterwards gets `undefined` for an entirely
+   * ordinary case, and `wordGaps` would then be bounded by nothing.
+   */
+  private _sourceWindow: { startMs: number; endMs: number } | null = null;
+
   /** The element key of the chosen clip. Identifies the row and the source. */
   selectedKey: string | null;
-  mediaType: string;
   sttMethod: "apple" | "openai";
-  mediaDuration: number;
 
   /**
    * The captions, as one list.
@@ -114,21 +122,13 @@ export class AutomaticCaption extends LitElement {
    */
   private _verticalPlacement: CaptionPlacement;
 
-  /** What the template last showed, so a 60Hz loop does not re-render it. */
+  /** What the template last showed, so a 60Hz playhead does not re-render it. */
   private readonly _chrome = new ChromeGate();
 
-  /**
-   * The panel's own box, in px, and what decides the two-column layout.
-   *
-   * Measured rather than queried in CSS because `captionEditorLayout` has to
-   * answer with a number as well as a class: the preview canvas takes a pixel
-   * height cap, and a `@media` query could not supply one. It is the *panel's*
-   * width and not the viewport's, which is the only one that moves when the
-   * window's splitter does.
-   */
-  private _panelSize = { width: 0, height: 0 };
+  /** Where the playhead is, in source seconds. Fed by the `playhead` port. */
+  private _progressSec = 0;
 
-  private _panelResizeObserver: ResizeObserver | null = null;
+  private _unsubscribePlayhead: (() => void) | null = null;
 
   /** Languages this Mac can transcribe, and whether it can at all. */
   locales: { id: string; name: string; installed: boolean }[];
@@ -144,21 +144,13 @@ export class AutomaticCaption extends LitElement {
     super();
 
     this.isLoadVideo = false;
-    this.isEditing = false;
     this.videoPath = "";
-    this.mediaType = "";
     this.lines = [];
     this._undo = [];
-
-    this.analyzingVideoModal = undefined;
 
     this.selectedKey = null;
 
     this.hasUpdatedOnce = false;
-
-    this.isPlay = false;
-    this.progress = 0;
-    this.mediaDuration = 0;
 
     this.locales = [];
     this.selectedLocale = "";
@@ -210,27 +202,22 @@ export class AutomaticCaption extends LitElement {
     super.disconnectedCallback();
     this._unsubscribeProgress?.();
     this._unsubscribeProgress = null;
-    // The animation loop used to outlive the component, going on compositing a
-    // full-resolution frame every 16ms against a canvas nobody could see.
-    this._stopLoop();
-    this.mediaElement()?.pause();
-    this._panelResizeObserver?.disconnect();
-    this._panelResizeObserver = null;
+    this._unsubscribePlayhead?.();
+    this._unsubscribePlayhead = null;
 
-    // All three of these are new obligations, and they are new because the
-    // panel can now be unmounted at all: as a tab pane it was built once and
-    // stayed in the DOM for the life of the app, so nothing it held had to be
-    // given back. Closing the window destroys it, and reopening builds a fresh
-    // one, so anything left behind accumulates once per open.
-    this.analyzingVideoModal?.dispose();
+    // These are new obligations, and they are new because the panel can now be
+    // unmounted at all: as a tab pane it was built once and stayed in the DOM
+    // for the life of the app, so nothing it held had to be given back. Closing
+    // the window destroys it, and reopening builds a fresh one, so anything
+    // left behind accumulates once per open.
     this.selectVideoModal?.dispose?.();
     // A transcription nobody is waiting for. `requestCancel` is a no-op with no
     // job in flight, so this needs no guard of its own.
     this._session?.requestCancel();
-  }
 
-  private _stopLoop() {
-    this._loop.stop();
+    // The session itself is *not* cancelled here. An event dispatched from a
+    // detached element reaches nobody, so `Control` does it from the window's
+    // own close, which is the same reason the keyboard is given back there.
   }
 
   private _transcribeApi(): any {
@@ -238,8 +225,8 @@ export class AutomaticCaption extends LitElement {
     return (window as any).electronAPI?.req?.transcribe ?? null;
   }
 
-  /** What the progress dialog shows. Inert without a bridge. */
-  private get _progress(): JobProgress {
+  /** What the progress screen shows. Inert without a bridge. */
+  private get _progress(): { fraction: number; stage: string } {
     return this._session?.progress ?? { fraction: 0, stage: "" };
   }
 
@@ -257,24 +244,41 @@ export class AutomaticCaption extends LitElement {
     return [...(navigator.languages ?? []), navigator.language ?? ""];
   }
 
-  @query("#previewCanvasCaption") canvas!: HTMLCanvasElement;
-
   @property()
   timeline: any;
 
   /**
    * The project's frame, from `Control`.
    *
-   * Captions are laid out in these pixels and previewed at this size. The panel
-   * used to mix three spaces — `width` from the source clip's native size,
-   * `locationY` from a literal 1080, and the element then landing on a canvas
-   * sized by the project — so what you positioned was not what you got.
+   * Captions are laid out as fractions of it, which is what decides where the
+   * words sit and how big they are. The panel used to mix three spaces:
+   * `width` from the source clip's native size, `locationY` from a literal
+   * 1080, and the element then landing on a canvas sized by the project. So
+   * what you positioned was not what you got.
    */
   @property()
   previewSize: { w: number; h: number } = { w: 1920, h: 1080 };
 
+  /**
+   * The app's playhead, in source seconds, both ways.
+   *
+   * The panel had its own `<video>`, its own canvas and its own clock. It has
+   * none of them now: the captions are on the real timeline from the moment a
+   * transcript lands, so the app's preview is the preview and its playhead is
+   * the clock. See `features/caption/playheadPort.ts` for why this is a port
+   * and not a property carrying the cursor.
+   */
+  @property({ attribute: false })
+  playhead: CaptionPlayheadPort | null = null;
+
+  /**
+   * What the session is doing, from `Control`.
+   *
+   * The panel cannot tell when the reveal has finished; only the session can,
+   * and this is how it says so. Written twice per session, not per frame.
+   */
   @property()
-  backgroundColor = "#000000";
+  sessionPhase: CaptionSessionPhase = "idle";
 
   @property()
   isDev = false;
@@ -283,68 +287,39 @@ export class AutomaticCaption extends LitElement {
     return this;
   }
 
-  // ---------------------------------------------------------------- painting
-
-  private mediaElement(): HTMLMediaElement | null {
-    return this.querySelector(
-      this.mediaType === "audio" ? "#captionPreviewAudio" : "#captionPreviewVideo",
-    );
-  }
+  // --------------------------------------------------------- the playhead
 
   /**
-   * The one place pixels are written.
+   * Follow the app's playhead, and re-render only when something moved.
    *
-   * Never called from `render()` or `updated()`: those fire for every unrelated
-   * state change — the locale picker, the method toggle, transcription progress
-   * — and painting there would couple the paint rate to that noise.
+   * `ChromeGate` is why this can be a subscription at all: the cursor changes
+   * at the display's rate, and the only things in this template that depend on
+   * it are which word is highlighted and which line is active. Gating on
+   * exactly those drops the re-renders by about two orders of magnitude, which
+   * is the measurement `previewLoop.test.ts` pins. Without it, Lit would
+   * rebuild a `TemplateResult` for every word of the transcript sixty times a
+   * second.
    */
-  private redrawPreview(): void {
-    const canvas = this.canvas;
-    if (canvas == null) {
+  private _watchPlayhead(): void {
+    if (this._unsubscribePlayhead != null || this.playhead == null) {
       return;
     }
-    const ctx = canvas.getContext("2d");
-    if (ctx == null) {
-      return;
-    }
-
-    paintCaptionPreview(ctx, {
-      // The backing store and the project frame are equal here, because the
-      // <canvas> attributes are bound to `previewSize` and CSS does the
-      // downscale. They are passed separately because they mean different
-      // things — see `caption/preview.ts`.
-      canvasSize: { w: canvas.width, h: canvas.height },
-      frame: this.previewSize,
-      backgroundColor: this.backgroundColor,
-      lines: this.lines,
-      progressSec: this.progress,
-      placement: this._verticalPlacement,
-      sourceImage: this.sourceFrame(),
+    const port = this.playhead;
+    this._unsubscribePlayhead = port.subscribe(() => {
+      this._progressSec = port.sourceSeconds();
+      this._syncChrome();
     });
+    this._progressSec = port.sourceSeconds();
   }
 
-  private sourceFrame(): CanvasImageSource | null {
-    if (this.mediaType !== "video") {
-      return null;
+  private _syncChrome(): void {
+    // Gated on the string the template actually shows, not on a rounded second.
+    // The duration is no longer part of it: the readout that needed one went
+    // with the preview column, and the app's own transport shows the time.
+    const { active, label } = chromeStateOf(this.lines, this._progressSec, 0);
+    if (this._chrome.changed(active, label)) {
+      this.requestUpdate();
     }
-    const video = this.mediaElement() as HTMLVideoElement | null;
-    // `readyState < 2` is HAVE_NOTHING or HAVE_METADATA: no frame to draw yet.
-    return video != null && video.readyState >= 2 ? video : null;
-  }
-
-  /**
-   * The canvas backing store is the project's own frame, and CSS does the
-   * downscale — the arrangement `templateThumbnail.ts` and the contact sheet
-   * use. Scaling the context instead would leave the wrap width, band padding
-   * and outline geometrically right but no longer bit-identical to the export.
-   * See the `<canvas>` in `render`: `width:auto; height:auto` under both maxima
-   * is what stops a vertical project being stretched, and its column had to
-   * stop being `position: fixed` with no box before that could mean anything.
-   */
-
-  /** Coalesce repaints through one frame, as `previewCanvas.scheduleDraw` does. */
-  private schedulePaint(): void {
-    this._loop.schedulePaint(() => this.redrawPreview());
   }
 
   /**
@@ -356,8 +331,9 @@ export class AutomaticCaption extends LitElement {
   handleRowSelection(row: CaptionSource) {
     this.selectedKey = row.key;
     this.videoPath = row.localpath;
-    this.mediaType = row.filetype;
-    this.mediaDuration = row.durationMs;
+    // `filetype` and `durationMs` used to be kept here, for a hidden media
+    // element and a playback readout that are both gone. The panel does not
+    // play anything any more, so a row is a key and a path and nothing else.
     this.requestUpdate();
   }
 
@@ -413,60 +389,156 @@ export class AutomaticCaption extends LitElement {
     this.lines = outcome.lines;
     this._undo = [];
 
-    // The editor is a region rather than a second modal now, so the ordering
-    // hazard this used to carry is gone: there is no shared `body.modal-open`
-    // for two dialogs to fight over in one tick. The progress dialog still has
-    // to be closed, and `openEditor` still has to defer the first paint, but
-    // for the plainer reason that a canvas has no box until it is in the DOM.
-    this.analyzingVideoModal?.close();
-    this.openEditor();
+    // Read the clip's window now, before the session cuts it. After that the
+    // original id may name a piece or nothing at all.
+    this._sourceWindow = sourceWindowOf(this.selectedSource()) ?? null;
+
+    // The sweep used to be a button the user pressed, and pressing it was the
+    // only way to find out whether there was anything to cut. It is part of the
+    // same run now: one press gets a transcript, the silences gone and the
+    // words on the timeline, which is the whole gesture anybody wanted.
+    await this.sweepSilence();
+
+    this._startSession();
   }
 
   /**
-   * Show the caption editor.
+   * Find the silences worth cutting.
    *
-   * The first paint is deferred to the render after this one, because the
-   * canvas has no layout box until the editor region is in the DOM. As a modal
-   * that was hung off `shown.bs.modal`, and before that hook existed the
-   * preview stayed blank until the user pressed play, reset, or clicked a word.
+   * Both halves must agree: the signal (an absolute dBFS threshold over an RMS
+   * envelope, from `analyze:silences`) and the **words**. The signal alone cuts
+   * a word quiet enough to dip under the threshold and keeps laughter; the
+   * words alone call every wordless gap dead air, sting included.
+   *
+   * `analyzeSilences` is cached on disk by file identity and deduped while it
+   * runs, so this is one ffmpeg decode the first time and nothing after. A
+   * failure leaves the list empty and the reason on the footer: there is still
+   * a transcript to place, so it is a part of the run that can fail on its own.
    */
-  openEditor() {
-    if (this.isEditing) {
+  private async sweepSilence(): Promise<void> {
+    const api = this._analyzeApi();
+    const window = this._sourceWindow;
+    if (api == null || window == null) {
       return;
     }
-    this.isEditing = true;
+
+    this._silenceBusy = true;
+    this.phase = "sweeping";
+    this.requestUpdate();
+
+    try {
+      const response = await api.silences({ source: this.videoPath });
+      if (response?.ok !== true) {
+        this._silenceError =
+          response?.error ?? "Could not read the audio for this clip.";
+        return;
+      }
+
+      this._silenceError = null;
+      this._silenceRanges = silenceCuts(
+        response.silences,
+        wordGaps(this.lines, window),
+        DEFAULT_SILENCE_OPTIONS,
+      );
+    } catch (error) {
+      this._silenceError =
+        error instanceof Error ? error.message : String(error);
+    } finally {
+      this._silenceBusy = false;
+      this.requestUpdate();
+    }
+  }
+
+  /**
+   * Hand the whole edit to the session, which takes the timeline.
+   *
+   * From here until Apply or a close, the document in the store is a projection
+   * of what this panel says, and the timeline is locked so nothing else can
+   * write to it. The panel's job for the rest of the session is to say what
+   * changed.
+   */
+  private _startSession(): void {
+    this._silenceOn = true;
+    this.phase = "revealing";
+    this.isLoadVideo = false;
     this.requestUpdate();
 
     this.dispatchEvent(
-      new CustomEvent("captionEditorOpen", { bubbles: true, composed: true }),
+      new CustomEvent("captionSessionStart", {
+        detail: {
+          lines: this.lines,
+          sourceKey: this.selectedKey,
+          placement: this._verticalPlacement,
+          sourceRanges: this._sourceRanges(),
+        },
+        bubbles: true,
+        composed: true,
+      }),
     );
-
-    void this.updateComplete
-      .then(() => {
-        this._measurePanel();
-        return fontsSettled();
-      })
-      .then(() => this.schedulePaint());
   }
 
   /**
-   * Put the editor away.
+   * Every range the session should cut, in source ms.
    *
-   * The one way out, reached from the window's title bar close as well as from
-   * finishing an edit. It was two: `hidden.bs.modal` stopped the loop and the
-   * footer's own Close button reset `isLoadVideo`, so whichever one a user did
-   * not use left the other half undone.
+   * Two gestures, one list, and they are the same thing by the time they get
+   * here: a struck-out caption line contributes its own span, and the sweep
+   * contributes what the signal and the words agreed on. The toggle decides
+   * only whether the second half is included.
    */
-  closeEditor() {
-    if (!this.isEditing) {
+  private _sourceRanges(): Array<{ startMs: number; endMs: number }> {
+    return [
+      ...removedSpans(this.lines),
+      ...(this._silenceOn ? this._silenceRanges : []),
+    ];
+  }
+
+  /**
+   * Tell the session something changed.
+   *
+   * Called from every edit: a keystroke, a split, a merge, a strike-out, a
+   * realignment, the toggle. One event for all of them, because the session
+   * rebuilds its projection from the baseline either way and does not care
+   * which of them it was. The session coalesces these into one frame, so
+   * calling it per keystroke is what it expects.
+   */
+  private _emitChange(): void {
+    if (this.sessionPhase === "idle") {
       return;
     }
-    this.isEditing = false;
+    this.dispatchEvent(
+      new CustomEvent("captionSessionChange", {
+        detail: {
+          lines: this.lines,
+          placement: this._verticalPlacement,
+          sourceRanges: this._sourceRanges(),
+        },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  /**
+   * Put the panel away.
+   *
+   * The one way out, reached from the window's title bar close as well as from
+   * Apply. It was two: `hidden.bs.modal` stopped the loop and the footer's own
+   * Close button reset `isLoadVideo`, so whichever one a user did not use left
+   * the other half undone.
+   *
+   * It does **not** end the session. Apply ends it by committing and the window
+   * close ends it by discarding, and both of those are decided in `Control`,
+   * which is the only thing that outlives this element.
+   */
+  closeEditor() {
+    if (this.phase === "setup") {
+      return;
+    }
+    this.phase = "setup";
     this.isLoadVideo = false;
-    this.isPlay = false;
-    this.mediaElement()?.pause();
-    this._stopLoop();
-    this.analyzingVideoModal?.close();
+    this._silenceRanges = [];
+    this._silenceError = null;
+    this._sourceWindow = null;
     this.applyCursorEvent("pointer");
     this.requestUpdate();
 
@@ -486,7 +558,7 @@ export class AutomaticCaption extends LitElement {
    * the caret is in a caption field, and mean the selected clip everywhere else.
    */
   private _handlePanelFocusIn() {
-    if (this.isEditing) {
+    if (this.phase === "live") {
       this.applyCursorEvent("lockKeyboard");
     }
   }
@@ -503,34 +575,31 @@ export class AutomaticCaption extends LitElement {
     this.applyCursorEvent("pointer");
   }
 
-  private _measurePanel() {
-    const box = this.getBoundingClientRect();
-    if (box.width === this._panelSize.width && box.height === this._panelSize.height) {
-      return;
-    }
-    this._panelSize = { width: box.width, height: box.height };
-    this.requestUpdate();
-    // The canvas is a fixed backing store scaled by CSS, so a resize alone does
-    // not need new pixels. It does when the layout crosses the breakpoint and
-    // the canvas is handed a different height cap.
-    this.schedulePaint();
-  }
-
-  /** Give the keyboard back and close the progress modal. */
+  /** Back to the setup screen, with the keyboard given up. */
   _endAnalysis() {
-    this.analyzingVideoModal?.close();
+    this.phase = "setup";
     this.isLoadVideo = false;
     this._session?.clear();
     this.applyCursorEvent("pointer");
     this.requestUpdate();
   }
 
+  /**
+   * Say what went wrong, on the panel rather than in an alert.
+   *
+   * The old local path swallowed every failure into an empty catch with a
+   * `// NOTE: alert 띄우기` beside it, so a server that was not running looked
+   * exactly like a clip with no speech in it. Then it was a `window.alert`,
+   * which is a modal dialog over the whole app for something that concerns one
+   * docked window and has a Try again beside it here.
+   */
   _failAnalysis(message: string) {
-    this._endAnalysis();
-    // The old local path swallowed every failure into an empty catch with a
-    // `// NOTE: alert 띄우기` beside it, so a server that was not running looked
-    // exactly like a clip with no speech in it.
-    window.alert(message);
+    this._session?.clear();
+    this.isLoadVideo = false;
+    this._failMessage = message;
+    this.phase = "failed";
+    this.applyCursorEvent("pointer");
+    this.requestUpdate();
   }
 
   cancelAnalysis() {
@@ -562,44 +631,34 @@ export class AutomaticCaption extends LitElement {
     // One path for video and audio alike: main runs ffmpeg over whatever it is
     // handed. The panel used to skip extraction for audio and give the file
     // straight to the recogniser, which was two flows and two ways to fail.
-    this.analyzingVideoModal?.open();
+    //
+    // The progress used to be a Bootstrap dialog opened here, behind a 180ms
+    // gate so a cached transcript would not flash one. There is no gate any
+    // more and none is needed: the run does not end with the transcript, it
+    // goes on into the sweep and the reveal, so there is no instant path to
+    // flicker.
+    this.phase = "transcribing";
     this.requestUpdate();
 
     await this.transcribeSelectedClip();
   }
 
+  /**
+   * Apply.
+   *
+   * The captions and the cuts are already on the timeline and have been since
+   * the transcript landed. What this does is make them the user's: the session
+   * records one undo step holding exactly what is on screen, gives the timeline
+   * back, and the panel returns to its setup screen.
+   *
+   * It carries no payload. Everything it would have said has been said on every
+   * change since the session began, which is what "the panel edits the timeline
+   * directly" means.
+   */
   handleClickComplate() {
-
-    // `captionRows` drops a line the user emptied, guarantees a positive
-    // duration, and applies the same `captionStyle` the preview drew with — so
-    // what is placed is what was on screen. `startTime`/`duration` are in the
-    // transcribed file's own time, since that is what a transcript timestamps;
-    // `Control` converts them to timeline time before placing the captions.
-    const result = captionRows(
-      this.lines,
-      this.selectedKey,
-      this.previewSize,
-      this._verticalPlacement,
-    );
-
-    // `sourceKey` and `cuts` travel beside the rows rather than inside them:
-    // they belong to the gesture, not to any one caption. The cuts are source
-    // milliseconds, the clock a transcript keeps. `Control` owns the frame rate
-    // and the document, so it is where they become timeline ranges.
     this.dispatchEvent(
-      new CustomEvent("editComplate", {
-        detail: {
-          result,
-          sourceKey: this.selectedKey,
-          cuts: this.pendingCuts(),
-        },
-        bubbles: true,
-        composed: true,
-      }),
+      new CustomEvent("captionSessionApply", { bubbles: true, composed: true }),
     );
-
-    this._silenceCuts = [];
-    this._silenceError = null;
     // Closing is the same path the title bar's close takes, so a finished edit
     // and an abandoned one leave the panel in exactly one state.
     this.closeEditor();
@@ -608,13 +667,18 @@ export class AutomaticCaption extends LitElement {
   /**
    * Where the caption block sits vertically.
    *
-   * Repaints. It previously did not — not even `requestUpdate()` — so while the
-   * preview was paused, which is the normal state when someone is positioning
-   * captions, both buttons appeared to do nothing at all.
+   * Re-projects, so the captions move on the timeline as the button is pressed.
+   * It previously repainted a canvas in this panel, and before that it did not
+   * even `requestUpdate()`. So while the preview was paused, which is the
+   * normal state when someone is positioning captions, both buttons appeared to
+   * do nothing at all.
    */
   handleClickAlignCaptionButton(placement: CaptionPlacement) {
+    if (this._verticalPlacement === placement) {
+      return;
+    }
     this._verticalPlacement = placement;
-    this.schedulePaint();
+    this._emitChange();
     this.requestUpdate();
   }
 
@@ -626,146 +690,37 @@ export class AutomaticCaption extends LitElement {
           keyboard: false,
         },
       );
+    }
 
-      const analyzing = document.getElementById("AnalyzingVideo");
-      this.analyzingVideoModal = new TransientModal(
-        new bootstrap.Modal(analyzing, { keyboard: false }),
-        analyzing!,
-      );
+    // The port arrives as a property, so it cannot be subscribed to in the
+    // constructor. `_watchPlayhead` is idempotent and cheap, so asking on every
+    // update is simpler than a second flag to get wrong.
+    this._watchPlayhead();
 
-      // The editor's own size decides its layout, so the panel watches itself.
-      // As a `modal-fullscreen` it had exactly one width and needed none of
-      // this; docked beside the preview it is a few hundred pixels wide and
-      // both the column split and the canvas cap follow from the measurement.
-      this._panelResizeObserver = new ResizeObserver(() => this._measurePanel());
-      this._panelResizeObserver.observe(this);
-      this._measurePanel();
-
-      // `renderer/text.ts` clears its wrap cache when a face lands, but a
-      // cleared cache does not repaint a canvas. The first caption drawn is the
-      // one at risk of being measured in the fallback face.
-      (document as any).fonts?.addEventListener?.("loadingdone", () =>
-        this.schedulePaint(),
-      );
+    // The panel cannot tell when the reveal has finished. It knows how many
+    // captions there are, but not the pace, and re-deriving the pace here would
+    // be a second copy of `captionReveal.ts` that could disagree with the one
+    // driving the animation. So the session says, through `Control`, and the
+    // panel swaps its "Applying to the timeline" screen for the transcript.
+    if (this.phase === "revealing" && this.sessionPhase === "live") {
+      this.phase = "live";
+      this.requestUpdate();
     }
 
     this.hasUpdatedOnce = true;
   }
 
-  // ------------------------------------------------------------ the clock
-
   /**
-   * One animation frame.
+   * Seek to a word.
    *
-   * **`progress` is read from the media element, not accumulated.** The editor
-   * deliberately runs its cursor off a wall clock, because it has many handles
-   * that must all obey one authoritative time; the panel has exactly one media
-   * element and nothing to stay in sync with, so the media *is* the clock.
-   * Accumulating rAF timestamps drifted from the audio the user could hear, and
-   * `stopVideo` snapshotted the drifted value, so the error compounded across
-   * every pause and resume.
+   * The chips are the timing ribbon, and this is what they are for. It moves
+   * the **app's** playhead now, through the port, so the preview the user is
+   * already looking at jumps to the word. It used to seek a hidden `<video>`
+   * behind a canvas in this panel, which was a second copy of the same footage
+   * playing on a second clock.
    */
-  _step() {
-    const media = this.mediaElement();
-    if (media != null) {
-      this.progress = media.currentTime;
-    }
-
-    this.redrawPreview();
-    this.syncChrome();
-  }
-
-  /**
-   * Re-render only when something the template shows has actually changed.
-   *
-   * `_step` used to call `requestUpdate()` every frame, which rebuilt a
-   * `TemplateResult` for every word of the whole transcript sixty times a
-   * second, on the same thread compositing the frame. Nothing in the template
-   * moves that fast: only which word is highlighted, and a readout rounded to
-   * whole seconds. Gating on exactly those two drops updates by about two
-   * orders of magnitude and changes nothing on screen.
-   */
-  private syncChrome() {
-    // Gated on the string the template actually shows, not on a rounded second —
-    // see `ChromeGate`.
-    const { active, label } = chromeStateOf(
-      this.lines,
-      this.progress,
-      this.durationSec(),
-    );
-
-    if (this._chrome.changed(active, label)) {
-      this.requestUpdate();
-    }
-  }
-
-  /**
-   * The length to show, in seconds.
-   *
-   * The media element's own, not the clip's `duration` — that is the length of
-   * its *trimmed span*, while the panel transcribes and plays the whole file.
-   * Reading the clip's made the bar reach 100% a third of the way through any
-   * trimmed clip, and behave perfectly on the untrimmed ones anyone would test.
-   */
-  private durationSec(): number {
-    return displayDurationSec(
-      this.mediaElement()?.duration,
-      this.mediaDuration,
-    );
-  }
-
-  /** Seek the media and wait for a frame, then repaint. */
-  private async seekTo(timeSec: number) {
-    const media = this.mediaElement();
-    if (media == null) {
-      return;
-    }
-    try {
-      await seekMedia(media, timeSec);
-    } catch {
-      // A media element that cannot be read is already visible as a blank
-      // preview; there is nothing useful to say about it here.
-    }
-    this.progress = media.currentTime;
-    this.schedulePaint();
-    this.syncChrome();
-  }
-
-  playVideo() {
-    this.isPlay = true;
-    // `start` cancels a frame already armed, so double-clicking Play cannot
-    // leave two loops compositing the same frame.
-    this._loop.start(() => this._step());
-
-    void this.mediaElement()?.play();
-    this.requestUpdate();
-  }
-
-  stopVideo() {
-    this.isPlay = false;
-    this.mediaElement()?.pause();
-    this._stopLoop();
-    this.schedulePaint();
-    this.requestUpdate();
-  }
-
-  async resetVideo() {
-    this.isPlay = false;
-    // It used to kill the loop without pausing, so the audio went on playing
-    // audibly underneath a frozen canvas.
-    this.mediaElement()?.pause();
-    this._stopLoop();
-    await this.seekTo(0);
-    this.requestUpdate();
-  }
-
-  /** Seek to a word. The chips are the timing ribbon, and this is what they are for. */
-  async clickCaptionText(timeSec: number) {
-    this.isPlay = false;
-    this.mediaElement()?.pause();
-    this._stopLoop();
-    await this.seekTo(timeSec);
-    this.requestUpdate();
+  clickCaptionText(timeSec: number) {
+    this.playhead?.seekToSource(timeSec);
   }
 
   setSttMethod(method: "apple" | "openai") {
@@ -802,7 +757,7 @@ export class AutomaticCaption extends LitElement {
     }
     this.lines = editor.lines;
     this._undo = editor.undo;
-    this.schedulePaint();
+    this._emitChange();
     this.requestUpdate();
     if (focus != null) {
       this.focusLine(focus.index, focus.caretOffset);
@@ -828,7 +783,11 @@ export class AutomaticCaption extends LitElement {
    * Not an intent, because there is no keystroke to cancel; see
    * `editor.ts#applyLineRemoval`. The identity check is the same one
    * `_applyIntent` makes and for the same reason: a second click on an already
-   * struck-out line must cost no repaint and no undo entry.
+   * struck-out line must cost no rebuild and no undo entry.
+   *
+   * It cuts the picture as well as the words, and it does so at once: the
+   * line's span joins the ranges the session is asked to remove, so the footage
+   * under a struck-out caption goes as the button is pressed.
    */
   toggleLineRemoved(index: number, removed: boolean) {
     const editor = applyLineRemoval(this._editorState(), index, removed);
@@ -837,73 +796,29 @@ export class AutomaticCaption extends LitElement {
     }
     this.lines = editor.lines;
     this._undo = editor.undo;
-    this.schedulePaint();
+    this._emitChange();
     this.requestUpdate();
   }
 
   /**
-   * Find the silences worth cutting, and offer them.
+   * Turn the silence cuts off, or back on.
    *
-   * The sweep is a panel field rather than part of `CaptionEditor` on purpose.
-   * That editor's undo stack is `CaptionLine[][]`, and the panel's whole
-   * "a declined gesture costs nothing" check is `editor.lines === this.lines`.
-   * A sweep changes neither, so folding it in would mean rewriting the one line
-   * everything else rests on, to serve a gesture with a different lifetime: the
-   * lines change per keystroke, a sweep is an async result replaced whole. A
-   * deletion needs the undo stack and has it through `removed`; a sweep has a
-   * Clear button.
+   * A true toggle now, and the reason is that there is nothing left for it to
+   * *start*: the sweep runs as part of the transcription, so by the time anyone
+   * sees this button the gaps are already gone from the timeline. It used to
+   * mean "go and look" the first time and "put them back" afterwards, which is
+   * a control that changes meaning under the user.
    *
-   * `analyzeSilences` is cached on disk by file identity and deduped while it
-   * runs, so this is one ffmpeg decode the first time and nothing after.
+   * Neither direction undoes anything. `removeRanges` has no inverse; both
+   * states are built from the session's baseline, which is why switching the
+   * cuts off and on again lands on exactly the same document.
    */
-  async handleClickRemoveSilence() {
-    const api = this._analyzeApi();
-    const source = this.selectedSource();
-    if (api == null || source == null || this._silenceBusy) {
+  toggleSilence(on: boolean) {
+    if (this._silenceOn === on || this._silenceRanges.length === 0) {
       return;
     }
-
-    this._silenceBusy = true;
-    this.requestUpdate();
-
-    try {
-      const response = await api.silences({ source: this.videoPath });
-      if (response?.ok !== true) {
-        this._silenceError =
-          response?.error ?? "Could not read the audio for this clip.";
-        return;
-      }
-
-      // Bounded by the clip's window rather than the file's length: the panel
-      // plays the whole file, but only what the clip holds can be cut, and a
-      // gap outside it would be clamped away later anyway.
-      const window = sourceWindowOf(source);
-      if (window == null) {
-        return;
-      }
-
-      this._silenceError = null;
-      this._silenceCuts = silenceCuts(
-        response.silences,
-        wordGaps(this.lines, window),
-        DEFAULT_SILENCE_OPTIONS,
-      );
-    } catch (error) {
-      this._silenceError =
-        error instanceof Error ? error.message : String(error);
-    } finally {
-      this._silenceBusy = false;
-      this.requestUpdate();
-    }
-  }
-
-  /** Put the swept silences back. Nothing has been cut yet either way. */
-  clearSilenceCuts() {
-    if (this._silenceCuts.length === 0) {
-      return;
-    }
-    this._silenceCuts = [];
-    this._silenceError = null;
+    this._silenceOn = on;
+    this._emitChange();
     this.requestUpdate();
   }
 
@@ -925,11 +840,6 @@ export class AutomaticCaption extends LitElement {
    */
   private _analyzeApi() {
     return (window as any).electronAPI?.req?.analyze ?? null;
-  }
-
-  /** Every range a Complate would cut, in source ms. */
-  private pendingCuts() {
-    return [...removedSpans(this.lines), ...this._silenceCuts];
   }
 
   /** Put the caret back where the gesture left it, after Lit has re-rendered. */
@@ -987,8 +897,15 @@ export class AutomaticCaption extends LitElement {
   _handleChangeInput(event: Event, index: number) {
     const value = (event.target as HTMLInputElement).value;
     // Straight to state, no snapshot: typing is the input's own undo to manage.
-    this.lines = editText(this._editorState(), index, value).lines;
-    this.schedulePaint();
+    const next = editText(this._editorState(), index, value).lines;
+    if (next === this.lines) {
+      return;
+    }
+    this.lines = next;
+    // Straight onto the timeline. The session coalesces a burst of these into
+    // one rebuild per frame, so typing at speed costs one write per frame and
+    // not one per key.
+    this._emitChange();
   }
 
   render() {
@@ -1137,60 +1054,64 @@ export class AutomaticCaption extends LitElement {
           }
         }
 
-        /* ------------------------------------------------ the two columns */
+        /* -------------------------------------------------- the transcript */
 
-        .caption-editor {
+        /*
+         * One column. It was two, with a preview canvas beside the lines and a
+         * breakpoint in caption/editorLayout.ts deciding whether they fitted
+         * side by side. Both went with the canvas: the captions are on the real
+         * timeline while this panel is open, so the app's own preview is the
+         * preview and this is just the words.
+         *
+         * No backticks in here. This is inside an html template literal, so one
+         * would end it, and the error lands on a line some way below.
+         */
+        .caption-editor-lines {
           display: flex;
-          flex-direction: row;
-          align-items: flex-start;
-          gap: 1rem;
+          flex-direction: column;
+          gap: 0.5rem;
           padding: 0.75rem;
         }
 
-        .caption-editor-preview {
-          /* Sticky so the frame stays in view while the transcript scrolls
-             past it, which is the whole reason the two are side by side. */
+        /* Sticky, so the two placement buttons stay reachable however long the
+           transcript is. The footer below is pinned by the panel itself. */
+        .caption-placement {
           position: sticky;
-          top: 0;
-          align-self: flex-start;
-          min-width: 0;
+          bottom: 0;
           display: flex;
-          flex-direction: column;
           gap: 0.5rem;
-        }
-
-        .caption-editor-lines {
-          flex: 1 1 0;
-          min-width: 0;
-          display: flex;
-          flex-direction: column;
-          gap: 0.5rem;
+          flex-wrap: wrap;
+          padding: 0.5rem 0.75rem 0.75rem;
+          background-color: #111315;
         }
 
         /*
-         * Stacked. The switch is decided by caption/editorLayout.ts and
-         * applied as this class, not by a media query: a media query answers
-         * about the screen, and the screen is the one measurement that does not
-         * change when the window's splitter moves.
+         * The working screens: transcribing, sweeping, applying, failed.
+         *
+         * Centred in the panel rather than laid out at the top, because each of
+         * them is the only thing on screen for as long as it lasts, and a
+         * heading pinned to the top of an otherwise empty region reads as
+         * content that failed to load.
          */
-        .caption-editor.is-stacked {
+        .caption-phase {
+          display: flex;
           flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          text-align: center;
+          gap: 0.75rem;
+          padding: 1rem;
+          min-height: 100%;
         }
 
-        .caption-editor.is-stacked .caption-editor-preview {
-          position: static;
+        .caption-phase > * {
+          flex: 0 0 auto;
           width: 100%;
+          max-width: 22rem;
         }
 
-        .caption-editor-canvas {
-          display: block;
-          max-width: 100%;
-          /* width:auto and height:auto under both maxima is what stops a
-             vertical project being stretched. The height cap is an inline
-             style, from captionEditorLayout. */
-          width: auto;
-          height: auto;
-          background: #000;
+        .caption-phase .material-symbols-outlined {
+          font-size: 2rem;
         }
 
         .caption-setup {
@@ -1224,45 +1145,10 @@ export class AutomaticCaption extends LitElement {
         @focusout=${this._handlePanelFocusOut}
       >
         <div class="caption-panel-body">
-          ${this.isEditing ? this.renderEditor() : this.renderSetup()}
+          ${this.renderBody()}
         </div>
-        ${this.isEditing ? this.renderFooter() : nothing}
-      </div>
 
-      <div
-        class="modal fade"
-        id="AnalyzingVideo"
-        data-bs-keyboard="false"
-        data-bs-backdrop="static"
-        tabindex="-1"
-      >
-        <div class="modal-dialog modal-dialog-centered modal-lg">
-          <div class="modal-content bg-dark">
-            <div class="modal-body">
-              <h5 class="modal-title text-white font-weight-lg">
-                ${progressCopy(this._progress.stage).title}
-              </h5>
-
-              <b class="text-secondary"
-                >${progressCopy(this._progress.stage).note}</b
-              >
-
-              <progress-bar
-                percent="${progressPercent(this._progress.fraction)}"
-              ></progress-bar>
-
-              <div class="d-flex justify-content-end mt-3">
-                <button
-                  type="button"
-                  class="btn btn-sm btn-secondary"
-                  @click=${this.cancelAnalysis}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        ${this.phase === "live" ? this.renderFooter() : nothing}
       </div>
 
       <div
@@ -1319,6 +1205,74 @@ export class AutomaticCaption extends LitElement {
             </div>
           </div>
         </div>
+      </div>
+    `;
+  }
+
+  /**
+   * One of three bodies, and the phase decides which.
+   *
+   * `captionPhaseView` answers `null` for the two phases that have a body of
+   * their own and a screen for the three that are work in progress. That
+   * split is the whole of "show progress in the window rather than over the
+   * app": the states that used to be hidden behind a Bootstrap dialog are
+   * ordinary contents of this panel now.
+   */
+  renderBody() {
+    const view = captionPhaseView({
+      phase: this.phase,
+      stage: this._progress.stage,
+      fraction: this._progress.fraction,
+      message: this._failMessage ?? undefined,
+    });
+
+    if (view != null) {
+      return this.renderPhase(view);
+    }
+    return this.phase === "live" ? this.renderEditor() : this.renderSetup();
+  }
+
+  /**
+   * Working.
+   *
+   * A bar when there is a fraction worth drawing and a spinner when there is
+   * not. A bar sitting at zero through a real decode says the work has not
+   * started, which is the one thing it must not say.
+   */
+  renderPhase(view: NonNullable<ReturnType<typeof captionPhaseView>>) {
+    return html`
+      <div class="caption-phase">
+        <h6 class="text-light m-0">${view.title}</h6>
+        <b class="${view.failed ? "text-warning" : "text-secondary"}"
+          >${view.note}</b
+        >
+
+        ${view.percent == null
+          ? html`<span
+              class="material-symbols-outlined icon-white caption-spin"
+              aria-hidden="true"
+              >progress_activity</span
+            >`
+          : html`<progress-bar percent="${view.percent}"></progress-bar>`}
+
+        ${view.cancellable
+          ? html`<button
+              type="button"
+              class="btn btn-sm btn-secondary"
+              @click=${this.cancelAnalysis}
+            >
+              Cancel
+            </button>`
+          : nothing}
+        ${this.phase === "failed"
+          ? html`<button
+              type="button"
+              class="btn btn-sm btn-primary"
+              @click=${this._endAnalysis}
+            >
+              Try again
+            </button>`
+          : nothing}
       </div>
     `;
   }
@@ -1397,180 +1351,130 @@ export class AutomaticCaption extends LitElement {
    * `caption/editorLayout.ts`, which is a pure function with a suite. The panel
    * only applies what it is told.
    */
+  /**
+   * The transcript, as one editable column.
+   *
+   * It was two columns: a preview canvas on the left playing the source file,
+   * and the lines on the right. The canvas is gone and so is the breakpoint
+   * that decided whether the two fitted side by side, because the captions are
+   * on the real timeline while this is open and the app's own preview is
+   * showing them. Two previews of one edit is one too many, and the one that
+   * went is the one that could disagree.
+   */
   renderEditor() {
-    // The same pair `syncChrome` gates on, from the same function: these were
+    // The same pair `_syncChrome` gates on, from the same function: these were
     // two independent copies of the same three lines.
     const { lineIndex: activeLine, wordIndex: activeWord } = activeAt(
       this.lines,
-      this.progress,
-    );
-
-    const layout = captionEditorLayout(this._panelSize);
-
-    const analyzedTextMap = this.lines.map(
-      (line, index) => html`<div
-        class="text-light caption ${line.removed === true ? "caption-cut" : ""}"
-      >
-        <div class="caption-ribbon">
-          ${line.words.map(
-            (word, wordIndex) => html`<span
-              @click=${() => this.clickCaptionText(word.start)}
-              class="${activeLine === index && activeWord === wordIndex
-                ? "caption-part active"
-                : "caption-part"}"
-              >${word.word}</span
-            >`,
-          )}
-        </div>
-
-        <div class="d-flex gap-1 mt-2 align-items-center">
-          <button
-            class="btn btn-sm btn-secondary caption-merge"
-            ?disabled=${index === 0 || line.removed === true}
-            title="Merge into the line above (Backspace at the start of the line)"
-            @click=${() => this.mergeLine(index)}
-          >
-            <span class="material-symbols-outlined icon-white">merge</span>
-          </button>
-          <button
-            class="btn btn-sm btn-secondary caption-merge"
-            title=${line.removed === true
-              ? "Keep this line, and its footage"
-              : "Delete this line and cut its footage out of the video"}
-            @click=${() => this.toggleLineRemoved(index, line.removed !== true)}
-          >
-            <span class="material-symbols-outlined icon-white"
-              >${line.removed === true ? "undo" : "content_cut"}</span
-            >
-          </button>
-          <input
-            @input=${(e: Event) => this._handleChangeInput(e, index)}
-            @keydown=${(e: KeyboardEvent) => this._handleCaptionKeydown(e, index)}
-            class="form-control bg-dark text-light"
-            type="text"
-            id="analyzedEditCaption_${index}"
-            ?disabled=${line.removed === true}
-            .value=${line.text}
-          />
-        </div>
-      </div>`,
+      this._progressSec,
     );
 
     return html`
-      <div
-        class="caption-editor ${layout.columns === "one" ? "is-stacked" : ""}"
-      >
-        <div
-          class="caption-editor-preview"
-          style=${layout.columns === "two"
-            ? `flex: 0 0 ${Math.round(layout.previewShare * 100)}%;`
-            : "flex: 0 0 auto;"}
-        >
-          <canvas
-            id="previewCanvasCaption"
-            class="caption-editor-canvas"
-            width=${this.previewSize.w}
-            height=${this.previewSize.h}
-            style="max-height: ${layout.canvasMaxHeightPx}px;"
-          ></canvas>
-
-          <video
-            class="d-none"
-            id="captionPreviewVideo"
-            src=${this.isDev ? "/test.MOV" : this.videoPath}
-          ></video>
-
-          <audio
-            class="d-none"
-            id="captionPreviewAudio"
-            src=${this.videoPath}
-          ></audio>
-
-          <span class="text-light font-monospace"
-            >${playheadLabel(this.progress, this.durationSec())}</span
+      <div class="caption-editor-lines">
+        ${this.lines.map(
+          (line, index) => html`<div
+            class="text-light caption ${line.removed === true
+              ? "caption-cut"
+              : ""}"
           >
+            <div class="caption-ribbon">
+              ${line.words.map(
+                (word, wordIndex) => html`<span
+                  @click=${() => this.clickCaptionText(word.start)}
+                  class="${activeLine === index && activeWord === wordIndex
+                    ? "caption-part active"
+                    : "caption-part"}"
+                  >${word.word}</span
+                >`,
+              )}
+            </div>
 
-          <progress-bar
-            percent="${playbackFraction(this.progress, this.durationSec()) * 100}"
-          ></progress-bar>
+            <div class="d-flex gap-1 mt-2 align-items-center">
+              <button
+                class="btn btn-sm btn-secondary caption-merge"
+                ?disabled=${index === 0 || line.removed === true}
+                title="Merge into the line above (Backspace at the start of the line)"
+                @click=${() => this.mergeLine(index)}
+              >
+                <span class="material-symbols-outlined icon-white">merge</span>
+              </button>
+              <button
+                class="btn btn-sm btn-secondary caption-merge"
+                title=${line.removed === true
+                  ? "Keep this line, and its footage"
+                  : "Delete this line and cut its footage out of the video"}
+                @click=${() =>
+                  this.toggleLineRemoved(index, line.removed !== true)}
+              >
+                <span class="material-symbols-outlined icon-white"
+                  >${line.removed === true ? "undo" : "content_cut"}</span
+                >
+              </button>
+              <input
+                @input=${(e: Event) => this._handleChangeInput(e, index)}
+                @keydown=${(e: KeyboardEvent) =>
+                  this._handleCaptionKeydown(e, index)}
+                class="form-control bg-dark text-light"
+                type="text"
+                id="analyzedEditCaption_${index}"
+                ?disabled=${line.removed === true}
+                .value=${line.text}
+              />
+            </div>
+          </div>`,
+        )}
+      </div>
 
-          <!--
-            Two flex rows, not Bootstrap's col. A grid class has no business on
-            a flex child outside a .row, which is
-            the same trap the panel's two columns were in before this.
-          -->
-          <div class="d-flex gap-2 flex-wrap">
-            <button class="btn btn-sm btn-secondary" @click=${this.resetVideo}>
-              <span class="material-symbols-outlined icon-white icon-md">
-                restart_alt
-              </span>
-            </button>
-            <button
-              class="${this.isPlay ? "d-none" : ""} btn btn-sm btn-secondary"
-              @click=${this.playVideo}
-            >
-              <span class="material-symbols-outlined icon-white icon-md">
-                play_circle
-              </span>
-            </button>
-            <button
-              class="${!this.isPlay ? "d-none" : ""} btn btn-sm btn-danger"
-              @click=${this.stopVideo}
-            >
-              <span class="material-symbols-outlined icon-white icon-md">
-                stop_circle
-              </span>
-            </button>
-          </div>
-
-          <div class="d-flex gap-2 flex-wrap">
-            <button
-              class="btn btn-sm ${this._verticalPlacement == "center"
-                ? "btn-primary"
-                : "btn-secondary"}"
-              @click=${() => this.handleClickAlignCaptionButton("center")}
-            >
-              align center
-            </button>
-            <button
-              class="btn btn-sm ${this._verticalPlacement == "lowerThird"
-                ? "btn-primary"
-                : "btn-secondary"}"
-              @click=${() => this.handleClickAlignCaptionButton("lowerThird")}
-            >
-              align bottom
-            </button>
-          </div>
-        </div>
-
-        <div class="caption-editor-lines">${analyzedTextMap}</div>
+      <div class="caption-placement">
+        <button
+          class="btn btn-sm ${this._verticalPlacement == "center"
+            ? "btn-primary"
+            : "btn-secondary"}"
+          @click=${() => this.handleClickAlignCaptionButton("center")}
+        >
+          align center
+        </button>
+        <button
+          class="btn btn-sm ${this._verticalPlacement == "lowerThird"
+            ? "btn-primary"
+            : "btn-secondary"}"
+          @click=${() => this.handleClickAlignCaptionButton("lowerThird")}
+        >
+          align bottom
+        </button>
       </div>
     `;
   }
 
   /**
-   * What the edit will cost, and the two buttons that act on it.
+   * What the edit has already cost, and the two buttons that act on it.
    *
-   * Said before Apply is pressed rather than discovered afterwards. An Apply
-   * that silently shortens the timeline is the version of this feature nobody
-   * could trust.
+   * The tense changed with the feature. It used to say what Apply *would* do,
+   * because nothing had happened yet; the cuts are on the timeline by the time
+   * anyone reads this, so it says what is currently removed and the toggle
+   * beside it puts it back.
    *
    * There is no Close button. The window's title bar carries the only one, so
    * there is one way out and it cannot get out of step with the other.
    */
   renderFooter() {
-    const pending = this.pendingCuts();
-    const pendingMs = pending.reduce(
-      (total, cut) => total + Math.max(0, cut.endMs - cut.startMs),
-      0,
-    );
+    const removedMs = this._silenceOn
+      ? this._sourceRanges().reduce(
+          (total, cut) => total + Math.max(0, cut.endMs - cut.startMs),
+          0,
+        )
+      : removedSpans(this.lines).reduce(
+          (total, cut) => total + Math.max(0, cut.endMs - cut.startMs),
+          0,
+        );
 
-    // The sweep is an icon and nothing else, so everything it means has to come
-    // out of `caption/silenceButton.ts`, where a test can see it.
+    // The toggle is an icon and nothing else, so everything it means has to
+    // come out of `caption/silenceButton.ts`, where a test can see it.
     const silence = silenceButtonState({
       available: this._analyzeApi() != null,
       busy: this._silenceBusy,
-      cutCount: this._silenceCuts.length,
+      gapCount: this._silenceRanges.length,
+      silenceOn: this._silenceOn,
       lineCount: this.lines.length,
     });
 
@@ -1580,11 +1484,10 @@ export class AutomaticCaption extends LitElement {
           ? html`<span class="caption-summary text-warning"
               >${this._silenceError}</span
             >`
-          : pending.length === 0
+          : removedMs <= 0
             ? nothing
             : html`<span class="caption-summary text-light">
-                ${pending.length} cut${pending.length === 1 ? "" : "s"},
-                ${(pendingMs / 1000).toFixed(1)}s removed when you finish.
+                ${(removedMs / 1000).toFixed(1)}s cut out.
               </span>`}
 
         ${silence == null
@@ -1595,10 +1498,7 @@ export class AutomaticCaption extends LitElement {
               ?disabled=${silence.disabled}
               title=${silence.label}
               aria-label=${silence.label}
-              @click=${() =>
-                silence.action === "clear"
-                  ? this.clearSilenceCuts()
-                  : void this.handleClickRemoveSilence()}
+              @click=${() => this.toggleSilence(silence.action === "on")}
             >
               <span
                 class="material-symbols-outlined icon-white ${silence.busy
@@ -1618,7 +1518,6 @@ export class AutomaticCaption extends LitElement {
       </div>
     `;
   }
-
 
   renderRows() {
     if (!Array.isArray(this.videoRows)) {

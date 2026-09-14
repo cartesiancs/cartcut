@@ -33,6 +33,7 @@
 import {
   mergeCaretOffset,
   mergeLineWithPrevious,
+  mintLineId,
   removeLine,
   restoreLine,
   setLineText,
@@ -173,14 +174,25 @@ export function captionKeyIntent(
  * Returns the editor **by identity** when nothing happened, so the panel can
  * skip its repaint and its re-render — the convention `features/timeline/`
  * states, here because a declining gesture should cost the user nothing.
+ *
+ * `mintId` names the line a split creates. It is drawn unconditionally, before
+ * the op has had its say, so a declined split still consumes one: an id is
+ * cheap and the alternative is deciding here what `splitLineAt` decides, which
+ * is the kind of duplicate rule that drifts.
  */
 export function applyCaptionEdit(
   editor: CaptionEditor,
   intent: CaptionKeyIntent,
+  mintId: () => string = mintLineId,
 ): CaptionEditResult {
   switch (intent.kind) {
     case "split": {
-      const next = splitLineAt(editor.lines, intent.index, intent.caretOffset);
+      const next = splitLineAt(
+        editor.lines,
+        intent.index,
+        intent.caretOffset,
+        mintId(),
+      );
       // The caret belongs at the start of the new line, as in any editor.
       return commit(editor, next, { index: intent.index + 1, caretOffset: 0 });
     }

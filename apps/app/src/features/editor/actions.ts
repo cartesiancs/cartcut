@@ -33,6 +33,7 @@ import { canMergeClips, mergeClips } from "../timeline/mergeOps";
 import { canRotateClips, rotateClips } from "../timeline/rotateOps";
 import { toggleMirror, type MirrorAxis } from "../timeline/mirrorOps";
 import { projectBakeHz } from "./frameRate";
+import { refusesEdit } from "./timelineLock";
 import { canDetachAudio } from "../timeline/audio";
 import { detachAudioFrom } from "../timeline/audioOps";
 import { normalizeFps, snapMsToFrame } from "../timeline/frames";
@@ -68,8 +69,18 @@ function playheadMs(): number {
   return snapMsToFrame(useTimelineStore.getState().cursor, fps());
 }
 
-/** Apply a pure document transform and record one undo step. */
+/**
+ * Apply a pure document transform and record one undo step.
+ *
+ * The one chokepoint for every command below, which is what makes it the right
+ * place to turn an edit away while the timeline is locked. All twenty commands
+ * are reached from three surfaces and each of those would otherwise need its
+ * own guard, which is the drift this module was written to stop.
+ */
 function commit(fn: (input: TimelineDocument) => TimelineDocument): void {
+  if (refusesEdit()) {
+    return;
+  }
   useTimelineStore.getState().withCheckpoint(fn);
 }
 
@@ -285,11 +296,27 @@ export function clearSelection(): void {
   selectionStore.getState().clear();
 }
 
+/**
+ * Step back through the history.
+ *
+ * Refused while the timeline is locked, and this is the one guard that is not
+ * about protecting a pure op. The caption session's writes record no history at
+ * all, so undo would jump past the whole session to whatever the user did
+ * before it, leaving a provisional document on screen with a history position
+ * that has nothing to do with it. Cmd+Z is for after Apply, where it takes the
+ * entire session back in one press.
+ */
 export function undo(): void {
+  if (refusesEdit()) {
+    return;
+  }
   useTimelineStore.getState().rollbackTimelineFromCheckPoint(-1);
 }
 
 export function redo(): void {
+  if (refusesEdit()) {
+    return;
+  }
   useTimelineStore.getState().rollbackTimelineFromCheckPoint(1);
 }
 

@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  displayDurationSec,
   formatPlayhead,
-  playbackFraction,
   playheadLabel,
 } from "./playback";
 
@@ -46,35 +44,6 @@ describe("formatPlayhead", () => {
   });
 });
 
-describe("playbackFraction", () => {
-  it("is the position over the duration", () => {
-    expect(playbackFraction(0, 10)).toBe(0);
-    expect(playbackFraction(5, 10)).toBe(0.5);
-    expect(playbackFraction(10, 10)).toBe(1);
-  });
-
-  it("clamps past the end", () => {
-    expect(playbackFraction(99, 10)).toBe(1);
-  });
-
-  it("answers 0 for a duration that is not known yet", () => {
-    // A media element reports NaN before metadata and Infinity for a stream.
-    // Either would reach the progress bar as a width the browser drops, so the
-    // bar would vanish rather than sit at zero.
-    expect(playbackFraction(3, Number.NaN)).toBe(0);
-    expect(playbackFraction(3, Number.POSITIVE_INFINITY)).toBe(0);
-    expect(playbackFraction(3, 0)).toBe(0);
-  });
-
-  it("never returns NaN for any input", () => {
-    const odd = [Number.NaN, Number.POSITIVE_INFINITY, -1, 0, 5];
-    for (const a of odd) {
-      for (const b of odd) {
-        expect(Number.isFinite(playbackFraction(a, b))).toBe(true);
-      }
-    }
-  });
-});
 
 describe("playheadLabel", () => {
   it("reads position over total", () => {
@@ -89,23 +58,3 @@ describe("playheadLabel", () => {
   });
 });
 
-describe("displayDurationSec", () => {
-  it("prefers the media element's own duration", () => {
-    // The clip's span is 5s of a 12.6s file — the trimmed-clip case, where
-    // using the clip made the bar reach 100% a third of the way through.
-    expect(displayDurationSec(12.667, 5000)).toBeCloseTo(12.667, 3);
-  });
-
-  it("falls back to the clip's span, converting from ms", () => {
-    expect(displayDurationSec(undefined, 5000)).toBe(5);
-    expect(displayDurationSec(Number.NaN, 5000)).toBe(5);
-    // Infinity is what a live stream reports.
-    expect(displayDurationSec(Number.POSITIVE_INFINITY, 5000)).toBe(5);
-  });
-
-  it("answers 0 when neither is usable, rather than NaN", () => {
-    expect(displayDurationSec(undefined, undefined)).toBe(0);
-    expect(displayDurationSec(Number.NaN, Number.NaN)).toBe(0);
-    expect(displayDurationSec(0, 0)).toBe(0);
-  });
-});

@@ -471,13 +471,16 @@ describe("progressCopy", () => {
     expect(progressCopy("transcribing").title).toBe("Transcribing...");
   });
 
-  it("shows QUEUED as 'Transcribing...', which is a pinned defect", () => {
-    // Findings F13. Main sends `queued` with a null fraction when a job waits
-    // behind another, and there is no branch for it — so a queued job claims to
-    // be transcribing at 0%, indistinguishable from one that has just started.
-    // Pinned rather than fixed; flip this test when the branch is added.
-    expect(progressCopy("queued")).toEqual(progressCopy("transcribing"));
-    expect(progressCopy("queued").title).toBe("Transcribing...");
+  it("says a queued job is waiting, not that it is transcribing", () => {
+    // Findings F13, fixed. Main sends `queued` with a null fraction when a job
+    // waits behind another, and there was no branch for it, so a queued job
+    // claimed to be transcribing at 0% and was indistinguishable from one that
+    // had just started. That was survivable while this copy lived in a modal;
+    // the panel shows these phases in its own body now, where a wait that
+    // claims to be work is the difference between "slow" and "stuck".
+    expect(progressCopy("queued")).not.toEqual(progressCopy("transcribing"));
+    expect(progressCopy("queued").title).toBe("Waiting for the recogniser...");
+    expect(progressCopy("queued").note.length).toBeGreaterThan(0);
   });
 
   it("falls through for an unknown or empty stage", () => {

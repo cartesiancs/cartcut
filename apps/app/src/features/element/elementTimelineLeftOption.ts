@@ -2,6 +2,8 @@ import { html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { IUIStore, uiStore } from "../../states/uiStore";
+import { timelineLockStore } from "../../states/timelineLockStore";
+import { timelineIsLocked } from "../editor/timelineLock";
 import { consume } from "@lit/context";
 import { timelineContext } from "../../context/timelineContext";
 import { RULER_OFFSET, TRACK_GAP, TRACK_HEIGHT } from "../timeline/layout";
@@ -80,6 +82,10 @@ export class ElementTimelineLeftOption extends LitElement {
       this.resize = state.resize;
       this.requestUpdate();
     });
+
+    // Twice per caption session, so the lock glyph appears and goes with it.
+    // The store guards its own writes, so this fires only on a real change.
+    timelineLockStore.subscribe(() => this.requestUpdate());
 
     window.addEventListener("mouseup", this._handleMouseUp.bind(this));
     window.addEventListener("mousemove", this._handleMouseMove.bind(this));
@@ -338,6 +344,9 @@ export class ElementTimelineLeftOption extends LitElement {
   render() {
     const ordered = [...this.tracks].sort((a, b) => a.index - b.index);
     const width = this.resize.timelineVertical.leftOption;
+    // Asked without announcing, because this is a render path: `refusesEdit`
+    // raises a toast on its first refusal, and a window resize is not a refusal.
+    const locked = timelineIsLocked();
 
     const rows = ordered.map(
       (track) => html`
@@ -350,15 +359,21 @@ export class ElementTimelineLeftOption extends LitElement {
             title=${TRACK_KIND_TITLE[track.kind] ?? "Track"}
             >${TRACK_KIND_ICON[track.kind] ?? "layers"}</span
           >
-          <button
-            class="btn btn-xxs btn-default text-light track-menu"
-            title="Track options"
-            aria-haspopup="menu"
-            aria-expanded=${this.openMenu?.trackId === track.id}
-            @click=${(e: MouseEvent) => this.toggleMenu(track.id, e)}
-          >
-            <span class="material-symbols-outlined icon-xs">more_vert</span>
-          </button>
+          ${locked
+            ? html`<span
+                class="material-symbols-outlined track-lock"
+                title="Locked while the caption panel is open"
+                >lock</span
+              >`
+            : html`<button
+                class="btn btn-xxs btn-default text-light track-menu"
+                title="Track options"
+                aria-haspopup="menu"
+                aria-expanded=${this.openMenu?.trackId === track.id}
+                @click=${(e: MouseEvent) => this.toggleMenu(track.id, e)}
+              >
+                <span class="material-symbols-outlined icon-xs">more_vert</span>
+              </button>`}
         </div>
       `,
     );
@@ -375,6 +390,19 @@ export class ElementTimelineLeftOption extends LitElement {
           justify-content: space-between;
           padding: 0 0.5rem;
           box-sizing: border-box;
+        }
+
+        /*
+         * Said, not merely enforced. Every item behind the track menu would
+         * decline while the timeline is locked, so the menu is replaced rather
+         * than disabled: an affordance that could only decline is not offered,
+         * and a row with nothing in its place would read as a row that had lost
+         * its controls for no reason.
+         */
+        .track-lock {
+          font-size: 1rem;
+          opacity: 0.55;
+          cursor: default;
         }
 
         .track-icon {

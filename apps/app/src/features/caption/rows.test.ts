@@ -87,9 +87,14 @@ describe("captionRows", () => {
     // Pinned as a set, because a missing key is silently replaced by
     // `createTextElement`'s own default — a caption placed 500px wide and
     // left-aligned instead of across the frame and centred.
+    //
+    // `sourceKey` and `lineId` are the two that are *not* `TextElementOptions`
+    // keys. Both are destructured off in `placeCaptionRow`, and a third such
+    // field arriving without that being done is the failure this set catches.
     expect(new Set(Object.keys(captionRows(twoLines(), "k", FRAME)[0]))).toEqual(
       new Set([
         "sourceKey",
+        "lineId",
         "fontsize",
         "height",
         "width",

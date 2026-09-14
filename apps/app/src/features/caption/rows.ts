@@ -28,8 +28,14 @@ import { captionsFrom, type CaptionLine, type CaptionOut } from "./lines";
 /**
  * One caption, ready for `addText`.
  *
- * Every field is a `TextElementOptions` key except `sourceKey`, which `Control`
- * removes before placing. The times are source-file milliseconds.
+ * Every field is a `TextElementOptions` key except `sourceKey` and `lineId`,
+ * both of which are destructured off before placing. The times are source-file
+ * milliseconds.
+ *
+ * `lineId` rides along rather than being looked up because the row is the only
+ * thing that crosses into `applyCaptions.ts`, and by then `captionsFrom` has
+ * already dropped the empty and struck-out lines: there is no index that would
+ * find the line again.
  */
 export type CaptionRow = CaptionStyle &
   CaptionOut & {

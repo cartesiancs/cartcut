@@ -37,6 +37,23 @@ export type CaptionWord = {
 };
 
 export type CaptionLine = {
+  /**
+   * The line's own name, stable across every edit that keeps it the same line.
+   *
+   * The line owns its span, and it owns this for the same kind of reason. A
+   * caption session holds one timeline element per line and has to find that
+   * element again after each edit; position cannot do it, because the row a
+   * caption occupies comes from `captionsFrom`, which drops empty and
+   * struck-out lines. Striking line three out shifts every line after it by
+   * one, and an id keyed on position would move every later caption's element
+   * with it: the next keystroke would then edit the wrong clip.
+   *
+   * A split keeps it on the head and names the tail; a merge keeps the upper
+   * line's. The split takes that name as an argument, defaulting to
+   * `mintLineId`, so a caller that has to control identity can and one that
+   * does not need not.
+   */
+  id: string;
   /** The words this line covers: the timing ribbon, and the seek targets. */
   words: CaptionWord[];
   /** Seconds. The line's own span — survives an edit and a mid-word split. */
@@ -60,6 +77,8 @@ export type CaptionLine = {
 
 /** A caption ready for the timeline, in **milliseconds**. */
 export type CaptionOut = {
+  /** The line this came from. What a session keys its element id by. */
+  lineId: string;
   text: string;
   startTime: number;
   duration: number;
@@ -68,11 +87,35 @@ export type CaptionOut = {
 /** The shortest caption worth placing, in ms. */
 const MIN_DURATION_MS = 1;
 
+let nextLineId = 0;
+
+/**
+ * The default source of line ids.
+ *
+ * A counter rather than a uuid, and that is not a shortcut. A line id has to be
+ * unique among the lines **one session is holding**, and nothing else: it is
+ * never written to a `.ngt`, never crosses IPC, and never names a timeline
+ * element directly. A process-wide counter satisfies that outright, and it
+ * gives a suite ids it can print rather than thirty-six characters to assert
+ * around.
+ *
+ * It stays injectable anyway, so a caller that wants control has it:
+ * `TranscribeSession` passes the same minter it names jobs with.
+ */
+export function mintLineId(): string {
+  nextLineId += 1;
+  return `line-${nextLineId}`;
+}
+
 /** Build from what the transcriber returned, already grouped into lines. */
-export function linesFromWordGroups(groups: CaptionWord[][]): CaptionLine[] {
+export function linesFromWordGroups(
+  groups: CaptionWord[][],
+  mintId: () => string = mintLineId,
+): CaptionLine[] {
   return groups
     .filter((words) => words.length > 0)
     .map((words) => ({
+      id: mintId(),
       words,
       start: words[0].start,
       end: words[words.length - 1].end,
@@ -120,6 +163,7 @@ export type TranscribedWord = {
  */
 export function linesFromTranscript(
   groups: TranscribedWord[][] | null | undefined,
+  mintId: () => string = mintLineId,
 ): CaptionLine[] {
   return linesFromWordGroups(
     (groups ?? []).map((group) =>
@@ -130,6 +174,7 @@ export function linesFromTranscript(
         ...(word.confidence != null ? { score: word.confidence } : {}),
       })),
     ),
+    mintId,
   );
 }
 
@@ -157,11 +202,17 @@ export function linesFromTranscript(
  * Declines when either side would be empty: a caption with no text is not
  * something a user can see or fix, and an editor that silently makes one is
  * worse than one that does nothing.
+ *
+ * **The head keeps the line's id and the tail takes `newId`.** So a session
+ * holding one timeline element per line keeps the element it already placed for
+ * the text above the caret, and creates exactly one. Handing the id to the tail
+ * instead would make every split look like a delete and an insert.
  */
 export function splitLineAt(
   lines: CaptionLine[],
   index: number,
   caretOffset: number,
+  newId: string = mintLineId(),
 ): CaptionLine[] {
   const line = lines[index];
   if (line == null) {
@@ -192,12 +243,14 @@ export function splitLineAt(
   }
 
   const first: CaptionLine = {
+    id: line.id,
     words: before,
     start: line.start,
     end: cut,
     text: head,
   };
   const second: CaptionLine = {
+    id: newId,
     words: after,
     start: cut,
     end: line.end,
@@ -212,6 +265,10 @@ export function splitLineAt(
  *
  * The gesture behind Backspace at the start of a line, and behind the merge-up
  * button. Declines at the top of the list, where there is nothing to merge into.
+ *
+ * The merged line keeps the **upper** line's id, which is the half the caret
+ * ends up in. No id is minted, so unlike `splitLineAt` this needs no pool: a
+ * merge only ever destroys one.
  */
 export function mergeLineWithPrevious(
   lines: CaptionLine[],
@@ -232,6 +289,7 @@ export function mergeLineWithPrevious(
   }
 
   const merged: CaptionLine = {
+    id: previous.id,
     words: [...previous.words, ...current.words],
     start: Math.min(previous.start, current.start),
     end: Math.max(previous.end, current.end),
@@ -421,6 +479,7 @@ export function captionsFrom(lines: CaptionLine[]): CaptionOut[] {
   return lines
     .filter((line) => line.removed !== true && line.text.trim().length > 0)
     .map((line) => ({
+      lineId: line.id,
       text: line.text.trim(),
       startTime: Math.max(0, Math.round(line.start * 1000)),
       duration: Math.max(
