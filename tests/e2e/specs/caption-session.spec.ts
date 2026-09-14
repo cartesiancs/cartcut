@@ -205,6 +205,47 @@ test("a transcript takes the timeline, and only Apply keeps it", async ({
     expect(live.historyNow).toBe(live.historyLength - 1);
   });
 
+  // Two things at once, and the second is the one that is easy to lose: a
+  // struck-out line's span joins the ranges the session cuts, so the footage
+  // under it goes and everything after it slides back. A caption that vanished
+  // while the picture stayed put would be the panel editing only half of what
+  // it says it edits.
+  await test.step("striking a line out takes its caption and its footage", async () => {
+    const before = await state();
+    const secondStart = before.captions[1].start;
+    const thirdStart = before.captions[2].start;
+
+    // The second button on the second line: merge, then the scissors.
+    await page.locator("app-window .caption").nth(1).locator(".caption-merge").nth(1).click();
+    await expect
+      .poll(async () => (await state()).captions.length, { timeout: 5_000 })
+      .toBe(before.captions.length - 1);
+
+    const after = await state();
+    expect(after.captions.map((c) => c.text)).not.toContain("second line");
+    // One more piece, because the cut fell in the middle of one.
+    expect(after.pieces).toBe(before.pieces + 1);
+    // And the caption after it moved back by what the cut removed, which is the
+    // half a lane-local ripple would not do for the text track on its own.
+    expect(after.captions[1].start).toBeLessThan(thirdStart);
+    expect(thirdStart - after.captions[1].start).toBeGreaterThan(0);
+    expect(after.captions[0].start).toBe(before.captions[0].start);
+    void secondStart;
+  });
+
+  await test.step("putting it back restores the footage and the caption", async () => {
+    const struck = await state();
+
+    await page.locator("app-window .caption").nth(1).locator(".caption-merge").nth(1).click();
+    await expect
+      .poll(async () => (await state()).captions.length, { timeout: 5_000 })
+      .toBe(struck.captions.length + 1);
+
+    const restored = await state();
+    expect(restored.pieces).toBe(struck.pieces - 1);
+    expect(restored.captions.map((c) => c.text)).toContain("second line");
+  });
+
   await test.step("Apply costs one undo step, and one press takes it all back", async () => {
     const live = await state();
     await page.locator("app-window .caption-apply").click();

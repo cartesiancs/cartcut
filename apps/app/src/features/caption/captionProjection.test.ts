@@ -323,6 +323,97 @@ describe("ids survive being rebuilt", () => {
   });
 });
 
+// `applyCaptions.ts` states this hazard for the batch path and
+// `applyCaptions.test.ts` pins it there. The sequence has to survive it too,
+// and it is harder here: each step re-finds the piece by position, so a cut
+// that leaves the original id behind would strand every later step.
+describe("a cut flush to the clip's own edge", () => {
+  const firstLineRemoved = (): CaptionLine[] =>
+    removeLine(
+      linesFromWordGroups(
+        [
+          [{ word: "opening", start: 0, end: 1.5 }],
+          [{ word: "middle", start: 4, end: 5 }],
+          [{ word: "closing", start: 7, end: 8 }],
+        ],
+        counter("line"),
+      ),
+      0,
+    );
+
+  /** The struck-out line's own span, which is what the panel sends. */
+  const cutsFromLines = (base: TimelineDocument, ls: CaptionLine[]) =>
+    planCuts(
+      ls
+        .filter((line) => line.removed === true)
+        .map((line) => ({ startMs: line.start * 1000, endMs: line.end * 1000 })),
+      base.elements.clip,
+    ).cuts;
+
+  function planned(base: TimelineDocument, ls: CaptionLine[]) {
+    const cuts = cutsFromLines(base, ls);
+    const ids = mintSessionIds(null, ls, cuts.length, counter("id"));
+    const plan = buildCaptionPlan({
+      lines: ls,
+      sourceKey: "clip",
+      frame: FRAME,
+      placement: "lowerThird",
+      cuts,
+      ids,
+    });
+    return { plan, steps: revealSteps(plan, base.elements.clip) };
+  }
+
+  it("takes the head off, and the survivor carries a new name", () => {
+    const base = doc();
+    const ls = firstLineRemoved();
+    const { plan, steps } = planned(base, ls);
+
+    const after = projectCaptions(base, plan, steps, base.elements.clip);
+
+    // The id the session started with is the deleted middle: gone, not renamed.
+    expect(after.elements.clip).toBeUndefined();
+    expect(footage(after)).toHaveLength(1);
+    // 1.5s off the front of a 10s clip, rippled back to the start.
+    expect(footage(after)[0]).toMatchObject({ start: 0, end: 8500, from: 1500 });
+  });
+
+  it("still places the captions that survived, in the right places", () => {
+    const base = doc();
+    const ls = firstLineRemoved();
+    const { plan, steps } = planned(base, ls);
+
+    const after = projectCaptions(base, plan, steps, base.elements.clip);
+    expect(captions(after)).toEqual([
+      { text: "middle", startTime: 2500, duration: 1000 },
+      { text: "closing", startTime: 5500, duration: 1000 },
+    ]);
+  });
+
+  it("arrives where the batch does, id churn and all", () => {
+    const base = doc();
+    const ls = firstLineRemoved();
+    const cuts = cutsFromLines(base, ls);
+    const ids = mintSessionIds(null, ls, cuts.length, counter("id"));
+    const { plan, steps } = planned(base, ls);
+    const rows = captionRows(ls, "clip", FRAME, "lowerThird");
+
+    const batched = applyCaptionCommit(base, {
+      sourceKey: "clip",
+      cuts,
+      rows,
+      ids: {
+        captions: rows.map((row) => ids.captions.get(row.lineId)!),
+        splits: ids.splits.flatMap((pair) => [...pair]),
+      },
+    });
+
+    const sequenced = projectCaptions(base, plan, steps, base.elements.clip);
+    expect(captions(sequenced)).toEqual(captions(batched));
+    expect(footage(sequenced)).toEqual(footage(batched));
+  });
+});
+
 describe("the silence toggle", () => {
   it("comes back to the baseline's own footage when it is switched off", () => {
     const base = doc();
