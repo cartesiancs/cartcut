@@ -139,7 +139,13 @@ const sane = (rect: Rect): Rect => ({
 export type WindowRects = {
   id: string;
   rect: Rect;
-  /** Null for a window that cannot be resized, and for a floating one. */
+  /**
+   * The grab strip, or null for a window that cannot be resized or is floating.
+   *
+   * Overlaps the content region rather than sitting between it and the window.
+   * It is **not** part of the tiling: `content` and the windows account for the
+   * whole host on their own.
+   */
   splitter: Rect | null;
 };
 
@@ -180,25 +186,20 @@ export function layoutHost(host: Size, windows: WindowState[]): HostLayout {
 
     const { side, sizePct } = win.placement;
     const axis = axisOf(side);
-    const available = free[axis];
-
-    // A splitter that would be wider than the space it divides is not a
-    // splitter, it is the whole region. Dropping it keeps the tiling exact.
-    const splitterSpan =
-      win.resizable && available > SPLITTER_PX ? SPLITTER_PX : 0;
 
     const size = fitSpan(
       Math.round((sizePct / 100) * Math.max(0, host[axis])),
       win.minSize[axis],
-      available - splitterSpan,
+      free[axis],
       CONTENT_MIN[axis],
     );
 
-    const carved = carve(free, side, size, splitterSpan);
+    const carved = carve(free, side, size);
+    const rect = sane(carved.window);
     out.push({
       id: win.id,
-      rect: sane(carved.window),
-      splitter: carved.splitter,
+      rect,
+      splitter: win.resizable ? straddle(rect, side, host) : null,
     });
     free = carved.rest;
   }
@@ -223,28 +224,55 @@ export function layoutHost(host: Size, windows: WindowState[]): HostLayout {
   };
 }
 
-/** Take `size` off one side of `free`, leaving a splitter behind it. */
+/**
+ * The strip the pointer grabs, sitting **outside** the window.
+ *
+ * It takes no layout space at all. A splitter that carved a gap between the
+ * content and the window left `SPLITTER_PX` of whatever is behind the host
+ * showing through, which reads as a coloured band down the seam rather than as
+ * two panes meeting. `.split-col-bar` makes the same call one level up: it is
+ * `position: absolute` at `right: -0.2rem`, overlapping its neighbour rather
+ * than pushing it.
+ *
+ * So the two panes are flush, and this overlays the boundary on the content's
+ * side of it, where there is room to spare. The visible hairline is drawn on
+ * the strip's window-facing edge, which puts it exactly on the seam.
+ */
+function straddle(window: Rect, side: DockSide, host: Size): Rect {
+  const strip =
+    side === "left"
+      ? { x: window.x + window.width, y: window.y, width: SPLITTER_PX, height: window.height }
+      : side === "right"
+        ? { x: window.x - SPLITTER_PX, y: window.y, width: SPLITTER_PX, height: window.height }
+        : side === "top"
+          ? { x: window.x, y: window.y + window.height, width: window.width, height: SPLITTER_PX }
+          : { x: window.x, y: window.y - SPLITTER_PX, width: window.width, height: SPLITTER_PX };
+
+  // Clipped into the host, because a window that has taken the whole region
+  // leaves nothing on the content side to overlap and the strip would otherwise
+  // start at a negative coordinate. The contract is that every rect this module
+  // returns is inside the host, and the strip is no exception.
+  const x0 = Math.max(0, strip.x);
+  const y0 = Math.max(0, strip.y);
+  const x1 = Math.min(Math.max(0, host.width), strip.x + strip.width);
+  const y1 = Math.min(Math.max(0, host.height), strip.y + strip.height);
+
+  return { x: x0, y: y0, width: Math.max(0, x1 - x0), height: Math.max(0, y1 - y0) };
+}
+
+/** Take `size` off one side of `free`. The two panes meet with no gap. */
 function carve(
   free: Rect,
   side: DockSide,
   size: number,
-  splitterSpan: number,
-): { window: Rect; splitter: Rect | null; rest: Rect } {
-  const splitterAt = (
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-  ): Rect | null => (splitterSpan > 0 ? { x, y, width: w, height: h } : null);
-
+): { window: Rect; rest: Rect } {
   if (side === "left") {
     return {
       window: { x: free.x, y: free.y, width: size, height: free.height },
-      splitter: splitterAt(free.x + size, free.y, splitterSpan, free.height),
       rest: {
-        x: free.x + size + splitterSpan,
+        x: free.x + size,
         y: free.y,
-        width: free.width - size - splitterSpan,
+        width: free.width - size,
         height: free.height,
       },
     };
@@ -254,11 +282,10 @@ function carve(
     const x = free.x + free.width - size;
     return {
       window: { x, y: free.y, width: size, height: free.height },
-      splitter: splitterAt(x - splitterSpan, free.y, splitterSpan, free.height),
       rest: {
         x: free.x,
         y: free.y,
-        width: free.width - size - splitterSpan,
+        width: free.width - size,
         height: free.height,
       },
     };
@@ -267,12 +294,11 @@ function carve(
   if (side === "top") {
     return {
       window: { x: free.x, y: free.y, width: free.width, height: size },
-      splitter: splitterAt(free.x, free.y + size, free.width, splitterSpan),
       rest: {
         x: free.x,
-        y: free.y + size + splitterSpan,
+        y: free.y + size,
         width: free.width,
-        height: free.height - size - splitterSpan,
+        height: free.height - size,
       },
     };
   }
@@ -280,12 +306,11 @@ function carve(
   const y = free.y + free.height - size;
   return {
     window: { x: free.x, y, width: free.width, height: size },
-    splitter: splitterAt(free.x, y - splitterSpan, free.width, splitterSpan),
     rest: {
       x: free.x,
       y: free.y,
       width: free.width,
-      height: free.height - size - splitterSpan,
+      height: free.height - size,
     },
   };
 }

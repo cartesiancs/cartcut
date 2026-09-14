@@ -247,15 +247,19 @@ export class WindowHost extends LitElement {
 
         const vertical =
           win.placement.mode === "docked" && axisOf(win.placement.side) === "width";
+        // Which edge of the strip touches the window. The divider line is drawn
+        // there rather than down the middle, so it reads as the window's edge
+        // the way `.option-window`'s own `border-left` does, instead of as a
+        // hairline floating a pixel away from it.
 
         return html`
           ${entry.splitter == null
             ? nothing
             : html`<div
-                class="window-splitter ${vertical ? "is-vertical" : "is-horizontal"} ${this
-                  .draggingId === entry.id
-                  ? "is-dragging"
-                  : ""}"
+                class="window-splitter ${vertical ? "is-vertical" : "is-horizontal"} faces-${win
+                  .placement.mode === "docked"
+                  ? win.placement.side
+                  : "right"} ${this.draggingId === entry.id ? "is-dragging" : ""}"
                 style=${rectStyle(entry.splitter)}
                 @mousedown=${(event: MouseEvent) =>
                   this.handleSplitterDown(event, win, entry.rect)}

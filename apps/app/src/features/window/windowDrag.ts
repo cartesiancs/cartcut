@@ -25,7 +25,6 @@
 
 import {
   CONTENT_MIN,
-  SPLITTER_PX,
   axisOf,
   clampRect,
   fitSpan,
@@ -123,7 +122,7 @@ function resolveDockedDrag(
   const towardsContent = origin.side === "right" || origin.side === "bottom";
   const wanted = input.originRect[axis] + (towardsContent ? -delta : delta);
 
-  const available = Math.max(0, input.host[axis]) - SPLITTER_PX;
+  const available = Math.max(0, input.host[axis]);
   const sized = fitSpan(
     Math.round(wanted),
     input.minSize[axis],

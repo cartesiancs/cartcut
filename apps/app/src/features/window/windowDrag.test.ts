@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { resolveWindowDrag, type DragHandle, type WindowDragInput } from "./windowDrag";
 import {
   CONTENT_MIN,
-  SPLITTER_PX,
   contains,
   layoutHost,
   type DockSide,
@@ -159,7 +158,7 @@ describe("resolveWindowDrag, docked", () => {
     const placement = placed(resolveWindowDrag(dockedInput("right", "w", -5000, 0)));
     const layout = layoutHost(HOST, [{ ...dockedState("right", 0), placement }]);
     expect(layout.content.width).toBe(CONTENT_MIN.width);
-    expect(layout.windows[0].rect.width).toBe(HOST.width - CONTENT_MIN.width - SPLITTER_PX);
+    expect(layout.windows[0].rect.width).toBe(HOST.width - CONTENT_MIN.width);
   });
 
   it("stops at the window's own minimum at the near end", () => {

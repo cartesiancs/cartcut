@@ -8,6 +8,11 @@
 // is decided and a stylesheet cannot disagree with a test.
 
 .window-host {
+  // Every line this feature draws, in one place. It is declared here and not on
+  // `.app-window` because the splitter is that element's *sibling*, not its
+  // child, so a custom property on the window cannot reach it: the splitter had
+  // its own copy of the colour and the two could drift.
+  --app-window-border: #3a3f44;
   // `display: block` is load-bearing, not tidiness. A custom element with no
   // styles is `display: inline`, where `width` and `height` do nothing at all,
   // so without this the host measures 0x0, every rect below it is 0x0, and the
@@ -32,10 +37,6 @@
   position: absolute;
   display: flex;
   flex-direction: column;
-  // Inherited by the title bar's rule and by the splitter's line. Read by
-  // `caption-window.spec.ts` rather than hardcoded there, so the pixel check
-  // cannot drift from the design it is checking.
-  --app-window-border: #{$background-border-color};
   background-color: #111315;
   // No outline around the window, and no radius. A docked window meets its
   // splitter on one side and the region's own edges on the other three, so a
@@ -139,21 +140,38 @@
 .window-splitter::after {
   content: "";
   position: absolute;
-  background-color: #{$background-border-color};
+  background-color: var(--app-window-border);
 }
 
-// Centred in the strip rather than against either edge, so it reads as the line
-// between the two panes rather than as an edge belonging to one of them.
+// Flush against the window, not centred in the strip. Centred leaves a pixel of
+// host background between the line and the window it divides, so the hairline
+// floats instead of reading as an edge, and that gap is what made it stand out
+// next to the app's other dividers. `.option-window` puts its `border-left` on
+// exactly this boundary, and `faces-*` says which side of the strip that is.
 .window-splitter.is-vertical::after {
   top: 0;
   bottom: 0;
-  left: calc(50% - 0.025rem);
   width: 0.05rem;
 }
 
 .window-splitter.is-horizontal::after {
   left: 0;
   right: 0;
-  top: calc(50% - 0.025rem);
   height: 0.05rem;
+}
+
+.window-splitter.faces-right::after {
+  right: 0;
+}
+
+.window-splitter.faces-left::after {
+  left: 0;
+}
+
+.window-splitter.faces-bottom::after {
+  bottom: 0;
+}
+
+.window-splitter.faces-top::after {
+  top: 0;
 }

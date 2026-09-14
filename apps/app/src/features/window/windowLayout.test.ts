@@ -108,13 +108,17 @@ describe("layoutHost", () => {
 
       expect(window.splitter).not.toBeNull();
       expect(overlaps(layout.content, window.rect)).toBe(false);
-      expect(overlaps(layout.content, window.splitter!)).toBe(false);
-      expect(overlaps(window.rect, window.splitter!)).toBe(false);
 
-      // Exact tiling: no gap, no overlap, nothing unaccounted for.
-      expect(
-        areaOf(layout.content) + areaOf(window.rect) + areaOf(window.splitter!),
-      ).toBe(HOST.width * HOST.height);
+      // The content and the window account for the whole host between them.
+      // The grab strip is an overlay and takes none of it: a strip that carved
+      // a gap left `SPLITTER_PX` of whatever is behind the host showing through
+      // the seam, which reads as a coloured band rather than as two panes
+      // meeting.
+      expect(areaOf(layout.content) + areaOf(window.rect)).toBe(
+        HOST.width * HOST.height,
+      );
+      expect(overlaps(layout.content, window.splitter!)).toBe(true);
+      expect(overlaps(window.rect, window.splitter!)).toBe(false);
     },
   );
 
@@ -131,10 +135,7 @@ describe("layoutHost", () => {
 
     const total =
       areaOf(layout.content) +
-      layout.windows.reduce(
-        (sum, entry) => sum + areaOf(entry.rect) + areaOf(entry.splitter ?? { x: 0, y: 0, width: 0, height: 0 }),
-        0,
-      );
+      layout.windows.reduce((sum, entry) => sum + areaOf(entry.rect), 0);
     expect(total).toBe(HOST.width * HOST.height);
   });
 
@@ -147,7 +148,7 @@ describe("layoutHost", () => {
     const [side, strip] = layout.windows;
     expect(overlaps(side.rect, strip.rect)).toBe(false);
     // The strip only spans what was left after the side window took its share.
-    expect(strip.rect.width).toBe(HOST.width - side.rect.width - SPLITTER_PX);
+    expect(strip.rect.width).toBe(HOST.width - side.rect.width);
   });
 
   it("keeps a floor under the content, and the window is what yields", () => {
@@ -156,9 +157,7 @@ describe("layoutHost", () => {
     ]);
 
     expect(layout.content.width).toBe(CONTENT_MIN.width);
-    expect(layout.windows[0].rect.width).toBe(
-      HOST.width - CONTENT_MIN.width - SPLITTER_PX,
-    );
+    expect(layout.windows[0].rect.width).toBe(HOST.width - CONTENT_MIN.width);
   });
 
   it("lets the window's own minimum outrank the content's floor", () => {
@@ -198,14 +197,30 @@ describe("layoutHost", () => {
     }
   });
 
-  it("drops the splitter rather than letting it outgrow the space it divides", () => {
-    // Sized from the constant, not from a literal: the first draft hardcoded a
-    // host of 4 against a 6px splitter, and silently stopped testing anything
-    // the day the strip got narrower than that.
-    const layout = expectInsideHost({ width: SPLITTER_PX, height: 200 }, [
-      docked("w", "right", 50, { minSize: { width: 1, height: 1 } }),
+  it("hands the grab strip no layout space of its own", () => {
+    const bare = layoutHost(HOST, [docked("w", "right", 40, { resizable: false })]);
+    const withStrip = layoutHost(HOST, [docked("w", "right", 40)]);
+
+    // Turning the splitter on must not move anything. It overlays the content
+    // rather than pushing it, the way `.split-col-bar` does one level up.
+    expect(withStrip.content).toEqual(bare.content);
+    expect(withStrip.windows[0].rect).toEqual(bare.windows[0].rect);
+
+    const strip = withStrip.windows[0].splitter!;
+    expect(strip.width).toBe(SPLITTER_PX);
+    // Immediately outside the window, on the content's side of the seam.
+    expect(strip.x + strip.width).toBe(withStrip.windows[0].rect.x);
+  });
+
+  it("clips the grab strip into the host when the window has taken it all", () => {
+    // Nothing on the content side to overlap, so the strip would otherwise
+    // start at a negative coordinate and break the one contract this module has.
+    const layout = expectInsideHost({ width: 2, height: 200 }, [
+      docked("w", "right", 100, { minSize: { width: 1, height: 1 } }),
     ]);
-    expect(layout.windows[0].splitter).toBeNull();
+    const strip = layout.windows[0].splitter!;
+    expect(strip.x).toBeGreaterThanOrEqual(0);
+    expect(strip.x + strip.width).toBeLessThanOrEqual(2);
   });
 
   it("gives an unresizable window no splitter", () => {
