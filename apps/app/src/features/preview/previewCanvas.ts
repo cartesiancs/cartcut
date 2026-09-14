@@ -1,8 +1,4 @@
-import {
-  bakeRateFor,
-  emptyAnimation,
-  sampleTrackXY,
-} from "../animation/keyframes";
+import { bakeRateFor, sampleTrackXY } from "../animation/keyframes";
 import { addKeyframePaired } from "../animation/keyframeOps";
 import { displayPosition, isPositionAnimated } from "./elementPosition";
 import type { TimelineDocument } from "../timeline/tracks";
@@ -18,6 +14,7 @@ import { v4 as uuidv4 } from "uuid";
 import { renderText } from "../renderer/text";
 import { renderImage } from "../renderer/image";
 import { renderShape, shapeDrawScale } from "../renderer/shape";
+import { createShapeElement } from "../element/shapeElement";
 import { renderTemplate } from "../renderer/template";
 import { assetTimeline } from "../template/assetTimeline";
 import { renderGif } from "../renderer/gif";
@@ -1595,44 +1592,35 @@ export class PreviewCanvas extends LitElement {
       .syncPlayback(assetTimeline(this.timeline), this.timelineCursor, true);
   }
 
+  /**
+   * Begin a hand-drawn polygon at one vertex.
+   *
+   * Through `createShapeElement` like every other way of making a shape. It
+   * used to assemble the element inline here, which is how `oHeight` came to be
+   * written by one path and not the other, and it is why a new field on a shape
+   * had to be added in two places or silently miss half the shapes in the app.
+   *
+   * **No recipe.** A polygon clicked out by hand is an outline and nothing
+   * else; there is no `ShapeGeometry` that describes it, which is precisely the
+   * case `shapeGeometryOf` answering `null` is for. Its authoring box is the
+   * preview frame rather than the usual hundred, because the vertices arrive in
+   * preview coordinates.
+   */
   createShape(x: number, y: number) {
     const elementId = uuidv4();
 
     const width = this.renderOption.previewSize.w;
     const height = this.renderOption.previewSize.h;
 
-    this.timeline[elementId] = {
-      key: elementId,
-      // Both are supplied by `placeNewElement` below, which picks the track and
-      // derives the paint rank from it.
-      trackId: "",
-      priority: 0,
-      blob: "",
-      startTime: 0,
-      duration: 1000,
-      opacity: 100,
-      location: { x: 0, y: 0 },
-      // trim: { startTime: 0, endTime: 1000 },
-      rotation: 0,
-      width: width,
-      height: height,
+    const element = createShapeElement({
+      shape: [[x, y]],
+      width,
+      height,
       oWidth: width,
       oHeight: height,
-      ratio: width / height,
-      filetype: "shape",
-      localpath: "SHAPE",
-      shape: [[x, y]],
-      option: {
-        fillColor: "#ffffff",
-      },
-      animation: emptyAnimation("shape"),
-      timelineOptions: {
-        color: "rgb(59, 143, 179)",
-      },
-    };
+      duration: 1000,
+    });
 
-    const element = this.timeline[elementId];
-    delete this.timeline[elementId];
     this.timelineState.withCheckpoint((doc) =>
       placeNewElement(doc, elementId, element, this.timelineCursor, uuidv4()),
     );

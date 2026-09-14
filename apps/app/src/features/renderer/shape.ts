@@ -1,6 +1,28 @@
 import type { ShapeElementType } from "../../@types/timeline";
+import { appendSubpath } from "../mask/draw";
+import { roundCornersEach } from "../mask/round";
+import { shapeGeometryOf } from "../shape/shapeGeometry";
+import { outlineInBox, radiusAtOf } from "../shape/shapeOutline";
 import type { ElementRenderFunction } from "./type";
 
+/**
+ * A shape's fill.
+ *
+ * Two paths, and which one runs is decided by whether the clip has a recipe.
+ *
+ *  - **No recipe** is every shape made before recipes existed and every polygon
+ *    clicked out by hand: the stored point list, straight segments, exactly as
+ *    it has always drawn. Not one line of it changed.
+ *  - **A recipe** generates the outline instead, as cubics, so a corner can be
+ *    rounded and an ellipse can be a real ellipse rather than a fifty-sided
+ *    approximation of one.
+ *
+ * The recipe path draws in the **drawn box** rather than the authoring one, and
+ * that is the whole reason the corner radius is in drawn pixels: the outline is
+ * built at the size it will appear, so rounding happens after the stretch and a
+ * 400 by 50 rectangle gets circular corners instead of elliptical ones. It is
+ * the order `mask/place.ts` states, for the same reason.
+ */
 export const renderShape: ElementRenderFunction<ShapeElementType> = (
   ctx,
   elementId,
@@ -9,12 +31,26 @@ export const renderShape: ElementRenderFunction<ShapeElementType> = (
 ) => {
   const { shape, option } = shapeElement;
 
-  const { sx, sy } = shapeDrawScale(shapeElement);
-
-  ctx.beginPath();
   // Once, not once per point. Inside the loop it was never set at all for a
   // shape with no points, leaving the fill to whatever the last element used.
   ctx.fillStyle = option.fillColor;
+
+  const geometry = shapeGeometryOf(shapeElement);
+  if (geometry != null) {
+    const { width, height } = drawnBox(shapeElement);
+    ctx.beginPath();
+    for (const nodes of outlineInBox(geometry, { width, height })) {
+      appendSubpath(ctx, roundCornersEach(nodes, radiusAtOf(geometry, nodes.length)));
+    }
+    // The default nonzero rule, so a reversed inner ring is a hole. Asking for
+    // `"evenodd"` would also change what a self-intersecting outline fills.
+    ctx.fill();
+    return;
+  }
+
+  const { sx, sy } = shapeDrawScale(shapeElement);
+
+  ctx.beginPath();
 
   for (let index = 0; index < shape.length; index++) {
     const point = shape[index];
@@ -24,6 +60,30 @@ export const renderShape: ElementRenderFunction<ShapeElementType> = (
   ctx.closePath();
   ctx.fill();
 };
+
+/**
+ * The box a recipe is generated into: the size the clip is actually drawn at.
+ *
+ * Not `width`/`height` read raw, because `drawDirect` may have substituted a
+ * sampled `size` into them and either may be missing or zero on a hand-edited
+ * project. Falling back through the authoring box and then to it reproduces
+ * what `shapeDrawScale` would have done with the same numbers, so a recipe and
+ * a point list of the same shape land in the same place.
+ */
+function drawnBox(element: ShapeElementType): { width: number; height: number } {
+  const { sx, sy } = shapeDrawScale(element);
+  const authoredWidth = usableSize(element.oWidth)
+    ? element.oWidth
+    : usableSize(element.oHeight)
+      ? element.oHeight
+      : 100;
+  const authoredHeight = usableSize(element.oHeight)
+    ? element.oHeight
+    : usableSize(element.oWidth)
+      ? element.oWidth
+      : 100;
+  return { width: authoredWidth * sx, height: authoredHeight * sy };
+}
 
 /**
  * Authoring space to draw space, one factor per axis. Non-uniform is the

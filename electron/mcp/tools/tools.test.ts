@@ -21,6 +21,7 @@ import {
   FILETYPES,
   MASK_SHAPES,
   PRESETS,
+  SHAPE_GEOMETRY_KINDS,
   type Registrar,
   type ToolConfig,
 } from "./define";
@@ -81,6 +82,7 @@ const EXPECTED = [
   "set_color_adjustments",
   // masking
   "set_mask",
+  "set_shape",
   // groups
   "create_null",
   "group_clips",
@@ -239,6 +241,19 @@ describe("every tool is usable as declared", () => {
       "../../../apps/app/src/@types/timeline"
     );
     expect([...MASK_SHAPES].sort()).toEqual([...renderer].sort());
+  });
+
+  /**
+   * The same guard, for the parametric shape kinds. A kind the renderer can
+   * generate but the schema does not offer is a shape an agent cannot ask for
+   * and cannot be told about, which is the failure the `FILETYPES` copy above
+   * was written to stop happening by eye.
+   */
+  it("advertises exactly the shape kinds the renderer can generate", async () => {
+    const { SHAPE_GEOMETRY_KINDS: renderer } = await import(
+      "../../../apps/app/src/@types/timeline"
+    );
+    expect([...SHAPE_GEOMETRY_KINDS].sort()).toEqual([...renderer].sort());
   });
 
   it("advertises exactly the colour adjustments a clip can carry", async () => {

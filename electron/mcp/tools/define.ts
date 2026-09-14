@@ -254,6 +254,25 @@ export const animatableProperty = z
 export const MASK_SHAPES = ["rectangle", "star", "heart", "pen"] as const;
 
 /**
+ * The parametric shapes a shape clip can be generated from.
+ *
+ * A copy of `@types/timeline.ts`'s `SHAPE_GEOMETRY_KINDS`, for the reason every
+ * copy in this file exists: `electron/` cannot import that module. `tools.test.ts`
+ * pins the two together.
+ *
+ * There is no `"triangle"`: it is a `polygon` with three points, which is what
+ * makes "turn this triangle into a pentagon" one number rather than a change of
+ * kind. `add_shape` still takes the word, because that is what the create menu
+ * calls it and what every existing agent call says.
+ */
+export const SHAPE_GEOMETRY_KINDS = [
+  "rectangle",
+  "ellipse",
+  "polygon",
+  "star",
+] as const;
+
+/**
  * The colour adjustment sliders, by stored name.
  *
  * A copy of `@types/timeline.ts#COLOR_ADJUSTMENT_KEYS` for the `rootDir`

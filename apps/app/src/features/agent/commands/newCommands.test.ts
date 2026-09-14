@@ -47,6 +47,7 @@ import "./animation";
 import "./groups";
 import "./fx";
 import "./plan";
+import "./shape";
 
 /** Invoke a command the way the bridge does. */
 async function run(name: string, params: any = {}) {
@@ -308,6 +309,171 @@ describe("add_shape", () => {
     seed({});
     const result = await run("add_shape", { kind: "ellipse", startMs: 0 });
     expect(JSON.stringify(result)).not.toMatch(/"shape":/);
+  });
+
+  /**
+   * A shape made by naming a kind carries a recipe, so its options are
+   * reachable from the sidebar and from `set_shape` the moment it lands. A
+   * shape made by handing over `points` does not: there is no recipe that
+   * describes an arbitrary polygon, which is the polygon tool's case reached
+   * over the wire.
+   */
+  it("gives a shape made from a kind a recipe, and one made from points none", async () => {
+    seed({});
+    const shaped = await run("add_shape", { kind: "star", count: 7, startMs: 0 });
+    expect((doc().elements[shaped.created[0]] as any).geometry).toEqual({
+      kind: "star",
+      count: 7,
+    });
+
+    const drawn = await run("add_shape", {
+      points: [
+        [0, 0],
+        [100, 0],
+        [50, 100],
+      ],
+      startMs: 0,
+    });
+    expect((doc().elements[drawn.created[0]] as any).geometry).toBeUndefined();
+  });
+
+  it('takes "triangle" as the name for a three-point polygon', async () => {
+    seed({});
+    const result = await run("add_shape", { kind: "triangle", startMs: 0 });
+    const element = doc().elements[result.created[0]] as any;
+    expect(element.geometry).toEqual({ kind: "polygon" });
+    expect(element.shape).toHaveLength(3);
+  });
+
+  it("takes the recipe's own fields", async () => {
+    seed({});
+    const result = await run("add_shape", {
+      kind: "rectangle",
+      cornerRadius: 12,
+      startMs: 0,
+    });
+    expect((doc().elements[result.created[0]] as any).geometry).toEqual({
+      kind: "rectangle",
+      radius: 12,
+    });
+  });
+});
+
+// ------------------------------------------------------------------ set_shape
+
+describe("set_shape", () => {
+  const withShape = async () => {
+    seed({});
+    const result = await run("add_shape", { kind: "polygon", startMs: 0 });
+    return result.created[0] as string;
+  };
+
+  it("changes an outline in one undo step", async () => {
+    const id = await withShape();
+    // `stepsToUndo` rewinds what it measures, so nothing may be asserted about
+    // the document after it. The change itself is the next test.
+    expect(
+      await stepsToUndo(() => run("set_shape", { elementIds: [id], count: 9 })),
+    ).toBe(1);
+  });
+
+  it("writes the recipe it was given", async () => {
+    const id = await withShape();
+    await run("set_shape", { elementIds: [id], count: 9 });
+    expect((doc().elements[id] as any).geometry).toEqual({
+      kind: "polygon",
+      count: 9,
+    });
+  });
+
+  /** The pair, over the wire: the mirror moves with the recipe. */
+  it("rewrites the stored point list with the recipe", async () => {
+    const id = await withShape();
+    await run("set_shape", { elementIds: [id], count: 9 });
+    expect((doc().elements[id] as any).shape).toHaveLength(9);
+  });
+
+  it("patches one field without restating the rest", async () => {
+    const id = await withShape();
+    await run("set_shape", { elementIds: [id], count: 8 });
+    await run("set_shape", { elementIds: [id], cornerRadius: 5 });
+    expect((doc().elements[id] as any).geometry).toEqual({
+      kind: "polygon",
+      count: 8,
+      radius: 5,
+    });
+  });
+
+  it("reports what each clip now carries", async () => {
+    const id = await withShape();
+    const result = await run("set_shape", { elementIds: [id], kind: "star" });
+    expect(result.clips).toEqual([{ id, geometry: { kind: "star" } }]);
+  });
+
+  /**
+   * Reported rather than clamped. A mouse cannot be told anything and so is
+   * clamped in the panel; an agent that is told the bound learns something.
+   */
+  it("refuses a count outside the range it advertises", async () => {
+    const id = await withShape();
+    await expect(
+      run("set_shape", { elementIds: [id], count: 500 }),
+    ).rejects.toThrow(/between 3 and 60/);
+  });
+
+  it("refuses a corner radius array that is not four long", async () => {
+    const id = await withShape();
+    await expect(
+      run("set_shape", { elementIds: [id], kind: "rectangle", cornerRadius: [1, 2, 3] }),
+    ).rejects.toThrow(/four/);
+  });
+
+  it("refuses a clip that is not a shape", async () => {
+    seed({ pic: imageElement({ trackId: "v1", startTime: 0, duration: 1000 }) });
+    await expect(
+      run("set_shape", { elementIds: ["pic"], kind: "star" }),
+    ).rejects.toThrow(/Only shape clips/);
+  });
+
+  it("needs no ids to be an error worth saying out loud", async () => {
+    seed({});
+    await expect(run("set_shape", { elementIds: [] })).rejects.toThrow(/at least one/);
+  });
+
+  /**
+   * A hand-drawn polygon has no recipe to patch, and guessing one would replace
+   * an outline the user drew with a shape they did not ask for. The message
+   * says what to do instead.
+   */
+  it("refuses to patch a hand-drawn shape without a kind", async () => {
+    seed({});
+    const drawn = await run("add_shape", {
+      points: [
+        [0, 0],
+        [100, 0],
+        [50, 100],
+      ],
+      startMs: 0,
+    });
+    await expect(
+      run("set_shape", { elementIds: [drawn.created[0]], cornerRadius: 4 }),
+    ).rejects.toThrow(/no recipe/);
+
+    // With a kind it is allowed, and it says so in the same message.
+    const result = await run("set_shape", {
+      elementIds: [drawn.created[0]],
+      kind: "star",
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  /** A declined instruction costs no undo step at all. */
+  it("costs nothing when the shape already has that outline", async () => {
+    const id = await withShape();
+    await run("set_shape", { elementIds: [id], count: 9 });
+    expect(
+      await stepsToUndo(() => run("set_shape", { elementIds: [id], count: 9 })),
+    ).toBe(0);
   });
 });
 

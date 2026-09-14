@@ -17,7 +17,10 @@ import {
   renderOptionStore,
 } from "../../states/renderOptionStore";
 import { ZOOM_STEP } from "./viewport";
-import { createShapeElement, shapePoints } from "../element/shapeElement";
+import {
+  createShapeElement,
+  geometryForKind,
+} from "../element/shapeElement";
 import { createNullElement } from "../element/nullElement";
 
 /** 100% is the fit scale, so it doubles as the "fit" preset. */
@@ -99,14 +102,21 @@ export class PreviewTopBar extends LitElement {
       .fit(Number(previewSize.w), Number(previewSize.h));
   }
 
-  createShape(shape) {
+  /**
+   * Place a parametric shape at the playhead.
+   *
+   * Every entry in this menu names a **kind**, so every shape it makes carries
+   * a recipe and its options are reachable from the sidebar the moment it
+   * lands. The polygon tool is the one entry that does not: it makes an outline
+   * by hand and there is no recipe that would describe it.
+   *
+   * Shape construction lives in `element/shapeElement.ts` so the agent's
+   * `add_shape` and this button produce the same element.
+   */
+  createShape(geometry) {
     const elementId = uuidv4();
 
-    // Shape construction lives in `element/shapeElement.ts` so the agent's
-    // `add_shape` and this button produce the same element. The pen tool's own
-    // freehand path (`previewCanvas.createShape`) is a different thing and
-    // stays where it is.
-    const element = createShapeElement({ shape });
+    const element = createShapeElement({ geometry });
 
     this.timelineState.withCheckpoint((doc) =>
       placeNewElement(
@@ -153,15 +163,27 @@ export class PreviewTopBar extends LitElement {
   }
 
   createSquare() {
-    return this.createShape(shapePoints("rectangle"));
+    return this.createShape(geometryForKind("rectangle"));
   }
 
+  /**
+   * A triangle is a polygon with three points, not a kind of its own.
+   *
+   * That is Figma's arrangement and the whole reason the vertex count is a
+   * number the user can change: with a separate kind, turning this into a
+   * pentagon would be a change of kind rather than a change of one field, and
+   * the sidebar would have to offer a conversion nobody would look for.
+   */
   createTriangle() {
-    return this.createShape(shapePoints("triangle"));
+    return this.createShape(geometryForKind("triangle"));
   }
 
   createCircle() {
-    return this.createShape(shapePoints("ellipse"));
+    return this.createShape(geometryForKind("ellipse"));
+  }
+
+  createStar() {
+    return this.createShape(geometryForKind("star"));
   }
 
   _handleClickButton(type) {
@@ -511,6 +533,15 @@ export class PreviewTopBar extends LitElement {
                     circle
                   </span>
                   Circle</a
+                >
+                <a
+                  class="dropdown-item dropdown-item-sm"
+                  @click=${this.createStar}
+                >
+                  <span class="material-symbols-outlined icon-xs">
+                    star
+                  </span>
+                  Star</a
                 >
                 <a
                   class="dropdown-item dropdown-item-sm ${this.control

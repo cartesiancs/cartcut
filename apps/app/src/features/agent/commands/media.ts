@@ -18,7 +18,14 @@ import { placeNewElement } from "../../timeline/placement";
 import { DEFAULT_STILL_MS } from "../../element/mediaElement";
 import { placeImported } from "../../asset/importMedia";
 import { probeMedia, type MediaProber } from "../../element/mediaProbe";
-import { createShapeElement, type ShapeKind } from "../../element/shapeElement";
+import {
+  createShapeElement,
+  geometryForKind,
+  type ShapeKind,
+} from "../../element/shapeElement";
+import type { ShapeGeometry, ShapeGeometryKind } from "../../../@types/timeline";
+import { coerceShapeGeometry } from "../../shape/shapeGeometry";
+import { shapePatchFrom, type ShapeToolParams } from "./shape";
 import type { TimelineDocument } from "../../timeline/tracks";
 import { commit, declined } from "../commit";
 import { currentDoc, onFrame, playheadMs, projectFps, requireTrack } from "../context";
@@ -116,20 +123,22 @@ registerCommands({
     return { ...result, skipped, sequential };
   },
 
-  add_shape: (params: {
-    kind?: ShapeKind;
-    points?: number[][];
-    startMs?: number;
-    durationMs?: number;
-    x?: number;
-    y?: number;
-    width?: number;
-    height?: number;
-    fillColor?: string;
-    opacity?: number;
-    rotation?: number;
-    trackId?: string;
-  }) => {
+  add_shape: (
+    params: ShapeToolParams & {
+      kind?: ShapeKind | ShapeGeometryKind;
+      points?: number[][];
+      startMs?: number;
+      durationMs?: number;
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+      fillColor?: string;
+      opacity?: number;
+      rotation?: number;
+      trackId?: string;
+    },
+  ) => {
     if (params.points != null && params.points.length < 3) {
       throw new Error("add_shape needs at least three points to draw a polygon.");
     }
@@ -139,10 +148,25 @@ registerCommands({
       requireTrack(doc, params.trackId);
     }
 
+    // `points` makes an outline by hand and takes no recipe, which is the
+    // polygon tool's case reached over the wire. Everything else names a kind
+    // and therefore gets one, so its options are reachable from the sidebar the
+    // moment it lands.
+    let geometry: ShapeGeometry | undefined;
+    if (params.points == null) {
+      const base = geometryForKind(params.kind ?? "rectangle");
+      const patch = shapePatchFrom({ ...params, kind: base.kind }, null);
+      const checked = coerceShapeGeometry({ ...base, ...patch, kind: base.kind });
+      if (!checked.ok) {
+        throw new Error(checked.error);
+      }
+      geometry = checked.geometry;
+    }
+
     const startTime = onFrame(Math.max(0, params.startMs ?? playheadMs()));
     const element = createShapeElement({
       shape: params.points,
-      kind: params.kind,
+      geometry,
       startTime,
       duration: params.durationMs ?? DEFAULT_STILL_MS,
       locationX: params.x,

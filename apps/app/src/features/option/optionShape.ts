@@ -6,6 +6,7 @@ import "./controlBlendMode";
 import "./optionLutSection";
 import "./optionAdjustSection";
 import "./optionMaskSection";
+import "./optionShapeSection";
 import "./animationPresetBrowser";
 import "./optionTabBar";
 import type { OptionTab } from "./optionTabBar";
@@ -101,17 +102,19 @@ export class OptionShape extends LitElement {
         .elementId=${this.elementId}
       ></option-lut-section>
 
-      <div class="mb-2">
-        <label class="form-label text-light">Fill Color</label>
-        <input
-          @input=${this.handleChangeColor}
-          aria-event="font-color"
-          type="color"
-          class="form-control bg-default form-control-color"
-          value="#ffffff"
-          title="Choose your color"
-        />
-      </div>
+      <!--
+        The shape's own controls, and its fill, in one section. Both write
+        through timeline/shapeOps.ts: the fill used to go straight into the
+        store with updateTimeline, which records no undo step at all, so a
+        colour change could not be taken back and a colour picker's drag wrote
+        once per input event.
+
+        No backticks in here. This is inside a lit html template literal, so
+        one would end the template and the rest of the panel becomes syntax.
+      -->
+      <option-shape-section
+        .elementIds=${[this.elementId]}
+      ></option-shape-section>
       </div>
     `;
   }
@@ -128,26 +131,12 @@ export class OptionShape extends LitElement {
 
   setElementId({ elementId }) {
     this.elementId = elementId;
-    this.resetValue();
-  }
-
-  resetValue() {
-    const timeline = document.querySelector("element-timeline").timeline;
-    const fontColor: any = this.querySelector("input[aria-event='font-color'");
-
-    fontColor.value = timeline[this.elementId].option.fillColor;
-  }
-
-  handleChangeColor() {
-    const elementControl = document.querySelector("element-control");
-    const fontColor: any = this.querySelector("input[aria-event='font-color'");
-    const color = fontColor.value;
-    // this.timeline[this.elementId].option.fillColor = color;
-
-    this.timelineState.updateTimeline(
-      this.elementId,
-      ["option", "fillColor"],
-      color,
-    );
+    // No `resetValue` any more. Every control in the section binds with
+    // `.value=` against the store it reads on each render, so there is nothing
+    // to push into the DOM by hand. The old one also reached through
+    // `document.querySelector("element-timeline").timeline` with no guards,
+    // into a `try {} catch {}` in `optionGroup.showOption` that would have
+    // shown the panel blank rather than saying anything.
+    this.requestUpdate();
   }
 }

@@ -1577,6 +1577,140 @@ before the feature.
   export reported a `.cttpl` it had not written. Anything that must know whether
   its bytes landed should use the new one.
 
+## Parametric shapes
+
+A shape clip's outline, generated from a recipe rather than stored as a list of
+points: a rectangle with rounded corners, a polygon with a vertex count, a star
+with a waist, an ellipse cut into a pie or a ring. Figma's Shape options, and
+the vocabulary is deliberately theirs.
+
+```
+apps/app/src/features/shape/shapeOutline.ts    the generators, and flattenOutline
+apps/app/src/features/shape/shapeGeometry.ts   shapeGeometryOf / coerceShapeGeometry
+apps/app/src/features/timeline/shapeOps.ts     setClipShapeGeometry, and the declines
+apps/app/src/features/renderer/shape.ts        the one branch that reads a recipe
+apps/app/src/features/option/optionShapeSection.ts  the Shape section, in the Media pane
+apps/app/src/features/mask/round.ts            roundCornersEach, shared with the mask
+electron/mcp/tools/shape.ts                    set_shape
+```
+
+### The decision the feature turns on
+
+> **`geometry` is the recipe and `shape` is its outer boundary, flattened and
+> un-rounded.**
+
+An optional `geometry` on the element. Present, it is the definition and
+`renderShape` builds bezier nodes from it; absent, the stored point list is
+drawn exactly as it always was. Clearing deletes the key, so a project nobody
+has parameterised saves byte-identically to one written before the feature and
+**`SCHEMA_VERSION` did not move**, the rule `blend`, `lut`, `mask` and `adjust`
+all follow.
+
+The point list is kept alongside, and not because of old builds: **three
+readers want the cheap form** and none of them has to learn recipes exist. The
+polygon tool's vertex overlay, `serialize.ts#shapePointCount`, and
+`renderShape`'s own no-recipe branch. `shapeOps.ts` is the only writer of the
+pair, which is what keeps them from disagreeing. `shape` is also a required
+field, so `[]` would be a landmine: it is already the "draw nothing" case.
+
+What the mirror leaves out is the point of it. **The rounding**, so dragging the
+radius slider does not rewrite the point list once a frame and the overlay marks
+the corners the shape actually turns at. **The hole**, because this is the outer
+boundary. Nothing else, so the three kinds that existed before come out as the
+lists `shapePoints` has always produced: a rectangle's four points, a triangle's
+three, an ellipse's fifty.
+
+The ellipse is the same **array**, down to the floating-point association: a
+closed ring has no start, so it is flattened from 3 o'clock with the legacy
+loop's own arithmetic, and a circle that gains a recipe stays byte-identical to
+the one in every saved project. The two polygons are the same **points** in the
+opposite order, because the generators wind clockwise and `shapePoints` does
+not. `fill()` cannot tell, so that claim is pinned on pixels rather than on
+arrays.
+
+Two more rules:
+
+- **A recipe is normalised per kind.** `normalizeShapeGeometry` drops a key the
+  kind does not read and a value already at its default, the way
+  `normalizeAdjustments` drops a slider at zero. Remembering a star's point
+  count across a switch to rectangle is the panel's job, not the document's.
+- **A recipe is given only to a shape made by naming a kind.** The create menu
+  and `add_shape` mint one; the polygon tool does not, because no recipe
+  describes a path clicked out by hand. The panel offers such a shape a kind,
+  and says that choosing one replaces its outline.
+
+### The geometry is the mask's, unchanged
+
+`mask/geometry.ts`, `round.ts` and `draw.ts` are unitless arithmetic over closed
+cubic paths with no mask-specific concept in them, so `features/shape/` imports
+them rather than growing a second copy. `MaskNode` was renamed `PathNode` with
+the old name kept as an alias: the type's own comment already claimed one
+vocabulary for "an anchor and its two handles", and a shape built out of mask
+nodes would be the "two things called a filter" problem again.
+
+Three changes were needed and no more. `roundCornersEach` takes a radius per
+node index, which `roundCorners` is now a constant application of, because Figma
+gives a rectangle four independent radii. `appendSubpath` adds a loop to an open
+path instead of beginning one, because a donut is two loops filled together.
+`normalized` became exported.
+
+Five things that are easy to get wrong:
+
+- **Round after scaling, never before.** The order `mask/place.ts` states: the
+  outline is generated at the size it will be drawn, so a 400 by 50 rectangle
+  gets circular corners rather than elliptical ones. That is also why the radius
+  is in **drawn pixels**, which is what makes resizing leave it alone and the
+  scale tool carry it, exactly as Figma behaves.
+- **Every generator winds clockwise.** Two things rest on it and neither is
+  obvious: a hole is the loop wound the other way, so the default nonzero fill
+  rule makes it a hole with nobody asking for `"evenodd"`; and a per-corner
+  radius is addressed by index, so "the top left corner" is only answerable if
+  the winding is a rule rather than a coincidence of each kind.
+- **A ring's vertices are mirrored, not computed one by one.** `Math.sin(30°)`
+  and `Math.sin(150°)` differ in the last place, so a triangle's two base
+  corners came out at different heights and its base sat 4e-14 off the bottom of
+  its box. The vertices on the axis are written rather than computed for the
+  same reason: `Math.cos(-π/2)` is 6.1e-17. Both are a fraction of a pixel of
+  antialiasing along one edge, which is exactly enough to stop a generated
+  triangle rendering as the hand-written list of the same triangle.
+- **An ellipse's frame does not move when its sweep does.** The wedge is carved
+  inside the full ellipse rather than refitted to its own extent, or the shape
+  would resize every time the sweep slider moved.
+- **A pie has one corner, the centre.** The ends of its arc carry one handle
+  each, so they are cusps, and rounding needs a straight edge on both sides
+  anyway. An ellipse has no corners at all, so a radius on one correctly does
+  nothing rather than being special-cased away.
+
+### Static values only
+
+There are no shape keyframes yet, the position Color adjustments takes, and
+nothing in the design stands in the way: `animatableProperties` would gain a
+conditional track the way an effect's parameters did.
+
+### How it is known to be right
+
+The generators, the read/write split, the ops and the renderer each have a
+co-located suite. Three of them carry the load.
+
+`golden.test.ts`'s **plain digests did not move**, which is the proof that a
+project nobody has parameterised renders exactly as it did. A separate block
+pins that a recipe reaches the picture, and that a default recipe draws what its
+own point list draws, held to **no channel moving by more than half**. It cannot
+be a digest match: every edge in the recipe path is a cubic, including a
+straight one, and Skia shades a degenerate cubic a fraction differently from a
+line. Measured against a triangle pointing the other way that count is over
+three thousand, which is how the bound is known to measure something.
+
+`renderer/shape.test.ts` drives the shipping renderer onto a real Skia surface:
+a default rectangle recipe is byte-identical to the legacy point list, a
+rounded corner is circular on a stretched clip, each of the four corner radii
+cuts its own corner, a donut's centre is empty and an arc fills one quadrant.
+
+`tests/e2e/specs/shape.spec.ts` is the half no node suite can see: the panel
+mounts and offers the rows each kind has, a drag across the radius slider is
+**one** undo step, and a rounded corner survives the pipe to FFmpeg into the
+delivered `.mp4`.
+
 ## Masks
 
 **One mask per clip**, cutting its picture to a shape: `rectangle`, `star`,

@@ -29,12 +29,30 @@ export function traceMaskPath(
   ctx: CanvasRenderingContext2D,
   nodes: readonly MaskNode[],
 ): boolean {
+  ctx.beginPath();
+  return appendSubpath(ctx, nodes);
+}
+
+/**
+ * The same trace, **added** to whatever path is already open.
+ *
+ * `beginPath` is the whole difference, and it is why this exists separately: a
+ * shape with a hole is two closed loops wound in opposite directions filled in
+ * one go, and a tracer that starts a fresh path per loop can only ever draw the
+ * last one. `renderShape` walks its subpaths through here after one `beginPath`
+ * of its own, and the default nonzero fill rule turns the reversed inner loop
+ * into the hole. Nothing has to ask for `"evenodd"`, which matters because that
+ * would also change what a self-intersecting drawn path fills.
+ */
+export function appendSubpath(
+  ctx: CanvasRenderingContext2D,
+  nodes: readonly MaskNode[],
+): boolean {
   const segments = segmentsOf(nodes);
   if (segments.length === 0) {
     return false;
   }
 
-  ctx.beginPath();
   ctx.moveTo(segments[0].from.x, segments[0].from.y);
   for (const segment of segments) {
     ctx.bezierCurveTo(

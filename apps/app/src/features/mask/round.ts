@@ -71,7 +71,32 @@ export function roundCorners(
   nodes: readonly MaskNode[],
   radius: number,
 ): MaskNode[] {
-  if (!(radius > 0) || !Number.isFinite(radius) || nodes.length < 3) {
+  if (!(radius > 0) || !Number.isFinite(radius)) {
+    return nodes as MaskNode[];
+  }
+  return roundCornersEach(nodes, () => radius);
+}
+
+/**
+ * The same, with a radius per node index.
+ *
+ * Figma gives a rectangle four independent corner radii, and one radius for the
+ * whole list cannot express that. The index is the node's position in the list
+ * as passed in, which is why `features/shape/shapeOutline.ts` authors every
+ * shape clockwise: a caller that wants "the top left corner" has to know where
+ * the generator put it, and a winding that varied by kind would make that
+ * unanswerable.
+ *
+ * Everything else is `roundCorners`, and `roundCorners` is now this with a
+ * constant. A radius that is not a positive finite number rounds nothing at
+ * that corner, which is what makes `radiusAt` safe to build straight from a
+ * possibly sparse `CornerRadii`.
+ */
+export function roundCornersEach(
+  nodes: readonly MaskNode[],
+  radiusAt: (index: number) => number,
+): MaskNode[] {
+  if (nodes.length < 3) {
     return nodes as MaskNode[];
   }
 
@@ -80,6 +105,11 @@ export function roundCorners(
 
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
+    const radius = radiusAt(i);
+    if (!(radius > 0) || !Number.isFinite(radius)) {
+      out.push(node);
+      continue;
+    }
     const previous = nodes[(i - 1 + nodes.length) % nodes.length];
     const next = nodes[(i + 1) % nodes.length];
 

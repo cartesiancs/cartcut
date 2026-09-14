@@ -8,12 +8,14 @@
 import { z } from "zod";
 import { requestEditor } from "../bridge";
 import {
+  SHAPE_GEOMETRY_KINDS,
   Z_ORDER_NOTE,
   mutating,
   tool,
   trackIdField,
   type Registrar,
 } from "./define";
+import { shapeGeometryFields } from "./shape";
 
 /**
  * Long enough for ffprobe plus a metadata decode on a feature-length file.
@@ -71,15 +73,20 @@ export function registerMediaTools(define: Registrar) {
     {
       title: "Add a shape",
       description:
-        "Draw a rectangle, ellipse or triangle on the canvas — useful as a background, a lower-third bar, or a " +
-        "block to mask something out. Pass `points` instead of `kind` for an arbitrary polygon, in a 0-100 box. " +
+        "Draw a rectangle, ellipse, polygon or star on the canvas. Useful as a background, a lower-third bar, " +
+        "or a block to mask something out. Corners can be rounded, a polygon's point count set, a star's " +
+        "spikiness chosen and an ellipse cut into a pie or a ring; set_shape changes any of it afterwards. " +
+        '"triangle" is a polygon with 3 points and is accepted as a name for one. ' +
+        "Pass `points` instead of `kind` for an arbitrary polygon, in a 0-100 box; such a shape has no recipe, " +
+        "and set_shape then needs a `kind` to give it one. " +
         "A shape goes on a video track, so a lower-third bar needs a row between the picture and the text — " +
         Z_ORDER_NOTE,
       inputSchema: {
         kind: z
-          .enum(["rectangle", "ellipse", "triangle"])
+          .enum([...SHAPE_GEOMETRY_KINDS, "triangle"])
           .optional()
           .default("rectangle"),
+        ...shapeGeometryFields,
         points: z
           .array(z.array(z.number()).length(2))
           .optional()

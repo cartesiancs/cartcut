@@ -27,6 +27,7 @@ import "./commands/appearance";
 import "./commands/lut";
 import "./commands/adjust";
 import "./commands/mask";
+import "./commands/shape";
 import "./commands/rasterize";
 import "./commands/animation";
 import "./commands/groups";

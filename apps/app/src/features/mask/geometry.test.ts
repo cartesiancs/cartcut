@@ -13,7 +13,7 @@ import {
   translateMat,
 } from "./geometry";
 import { maskNodesInElementSpace, maskStaticSample } from "./place";
-import { roundCorners } from "./round";
+import { roundCorners, roundCornersEach } from "./round";
 import { templateNodes } from "./templates";
 import { defaultMask } from "./maskShape";
 
@@ -289,6 +289,48 @@ describe("roundCorners", () => {
         expect(Number.isFinite(node.ce?.[0] ?? 0)).toBe(true);
       }
     }
+  });
+});
+
+/**
+ * The per-corner form, which `roundCorners` is now a constant application of.
+ *
+ * It exists for a rectangle's four independent radii, which is Figma's
+ * arrangement and which one radius for a whole node list cannot express.
+ */
+describe("roundCornersEach", () => {
+  it("is what roundCorners does, with a constant", () => {
+    expect(roundCornersEach(SQUARE, () => 0.1)).toEqual(roundCorners(SQUARE, 0.1));
+  });
+
+  it("declines by identity when every radius is nothing to do", () => {
+    expect(roundCornersEach(SQUARE, () => 0)).toBe(SQUARE);
+    expect(roundCornersEach(SQUARE, () => -1)).toBe(SQUARE);
+    expect(roundCornersEach(SQUARE, () => NaN)).toBe(SQUARE);
+  });
+
+  /**
+   * The index is the node's position in the list as passed in. That is only a
+   * usable contract because every generator in `features/shape/` winds the same
+   * way from the same place, which `shapeOutline.test.ts` pins.
+   */
+  it("rounds only the corners it is given a radius for", () => {
+    const rounded = roundCornersEach(SQUARE, (index) => (index === 0 ? 0.1 : 0));
+    // One corner became two tangent nodes; the other three are untouched, and
+    // untouched means the very same object.
+    expect(rounded).toHaveLength(5);
+    expect(rounded[2]).toBe(SQUARE[1]);
+    expect(rounded[3]).toBe(SQUARE[2]);
+    expect(rounded[4]).toBe(SQUARE[3]);
+  });
+
+  it("gives each corner its own radius", () => {
+    const rounded = roundCornersEach(SQUARE, (index) => (index === 0 ? 0.4 : 0.05));
+    // The first corner was trimmed further, so its two tangent nodes sit
+    // further from where the corner was than the second corner's do.
+    const spread = (a: MaskNode, b: MaskNode) =>
+      Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1]);
+    expect(spread(rounded[0], rounded[1])).toBeGreaterThan(spread(rounded[2], rounded[3]));
   });
 });
 

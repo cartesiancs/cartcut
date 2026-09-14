@@ -226,7 +226,7 @@ export const MASK_SHAPES = ["rectangle", "star", "heart", "pen"] as const;
 export type MaskShape = (typeof MASK_SHAPES)[number];
 
 /**
- * One node of a closed cubic path, in the mask's own unit square.
+ * One node of a closed cubic path, in whatever space its owner works in.
  *
  * `p` / `cs` / `ce` deliberately echo `CubicKeyframeType` above, so the codebase
  * has one vocabulary for "an anchor and its two handles" rather than two.
@@ -240,15 +240,26 @@ export type MaskShape = (typeof MASK_SHAPES)[number];
  * decide what round-corners applies to. A heart is all handles and never
  * rounds; a rectangle is all corners and rounds completely; a pen path rounds
  * exactly the vertices the user clicked rather than dragged.
+ *
+ * Two features are built on it: a mask, in the unit square `[-0.5, 0.5]²`, and
+ * a parametric shape, in that shape's own authoring box. The node itself is
+ * unitless, which is why `features/mask/geometry.ts` and `round.ts` serve both
+ * without a parameter saying which caller they have.
  */
-export type MaskNode = {
-  /** Anchor. The mask box is the unit square [-0.5, 0.5]². */
+export type PathNode = {
+  /** Anchor, in the owner's space. */
   p: [number, number];
   /** Incoming handle, as an offset from `p`. */
   cs?: [number, number];
   /** Outgoing handle, as an offset from `p`. */
   ce?: [number, number];
 };
+
+/**
+ * The mask's spelling of `PathNode`, kept so every existing reader and every
+ * `MaskType.path` in a saved project goes on meaning what it meant.
+ */
+export type MaskNode = PathNode;
 
 /**
  * The shape a clip's picture is cut to.
@@ -585,6 +596,74 @@ export type GifElementType = TimelinePlaced &
     filetype: "gif";
   };
 
+/**
+ * The parametric shapes, as a runtime list.
+ *
+ * A value for the reason `FILETYPES` is one: `electron/` cannot import this
+ * module, so `mcp/tools/define.ts` keeps a hand copy and `tools.test.ts` can
+ * only pin that copy against something it can actually import.
+ *
+ * There is no `"triangle"`. A triangle is `polygon` with three points, which is
+ * Figma's arrangement and the whole reason the vertex count is reachable at
+ * all: naming it separately would make "turn this triangle into a pentagon" a
+ * change of kind rather than a change of one number.
+ */
+export const SHAPE_GEOMETRY_KINDS = [
+  "rectangle",
+  "ellipse",
+  "polygon",
+  "star",
+] as const;
+
+export type ShapeGeometryKind = (typeof SHAPE_GEOMETRY_KINDS)[number];
+
+/** Corner radii in drawn pixels, clockwise from the top left. */
+export type CornerRadii = [number, number, number, number];
+
+/**
+ * How a shape's outline is generated, rather than the outline itself.
+ *
+ * Absent means the shape has no recipe and `shape` is all there is: a polygon
+ * clicked out with the polygon tool, or any shape made before this existed.
+ * Clearing deletes the key, so a project nobody has parameterised saves
+ * byte-identically to one written before the feature and `SCHEMA_VERSION` did
+ * not move. That is the rule `blend`, `lut`, `mask` and `adjust` all follow.
+ *
+ * **`shape` stays populated alongside it**, holding this recipe's outer
+ * boundary flattened to straight segments with the rounding left off. Three
+ * readers want that cheap form and none of them has to learn about recipes:
+ * the polygon tool's vertex overlay, the agent serialiser's `shapePointCount`,
+ * and `renderShape`'s own no-recipe branch. `features/shape/shapeOps.ts` is the
+ * only writer of the pair, which is what keeps them from disagreeing.
+ *
+ * **A field the kind does not use is dropped, not kept.**
+ * `normalizeShapeGeometry` canonicalises, the way `normalizeAdjustments` drops
+ * a slider at zero, so two equal settings stringify identically. Remembering a
+ * star's point count across a switch to rectangle is the panel's job, not the
+ * document's.
+ */
+export type ShapeGeometry = {
+  kind: ShapeGeometryKind;
+  /**
+   * Corner rounding in **drawn pixels**, one number for every corner or one per
+   * corner. Applied after the authoring box is scaled to the drawn size, so a
+   * stretched rectangle still has circular corners, which is what resizing a
+   * rectangle does everywhere else. Absent and 0 mean the same thing.
+   */
+  radius?: number | CornerRadii;
+  /** Points, for `polygon` and `star`. 3 to 60. Absent is 3 and 5. */
+  count?: number;
+  /** `star` only: inner radius over outer. Absent is the collinear ratio. */
+  innerRatio?: number;
+  /**
+   * `ellipse` only: the wedge, in degrees, `start` clockwise from 12 o'clock.
+   * Absent is the whole turn.
+   */
+  arc?: { start: number; sweep: number };
+  /** `ellipse` only: the hole, as a fraction of the radius. Absent is 0. */
+  hole?: number;
+};
+
 export type ShapeElementType = TimelinePlaced &
   Visual &
   Animatable &
@@ -596,6 +675,8 @@ export type ShapeElementType = TimelinePlaced &
     oWidth: number; // 원래 shape 사이즈
     oHeight: number;
     shape: number[][]; // [[x, y]...]
+    /** The recipe, when there is one. See `ShapeGeometry`. */
+    geometry?: ShapeGeometry;
     option: {
       fillColor: string;
     };

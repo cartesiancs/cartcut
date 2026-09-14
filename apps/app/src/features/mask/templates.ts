@@ -19,8 +19,15 @@
 import type { MaskNode, MaskShape } from "../../@types/timeline";
 import { boundsOf } from "./geometry";
 
-/** Fit a node list to `[-0.5, 0.5]²`, preserving nothing but the shape's form. */
-function normalized(nodes: MaskNode[]): MaskNode[] {
+/**
+ * Fit a node list to `[-0.5, 0.5]²`, preserving nothing but the shape's form.
+ *
+ * Exported for `features/shape/shapeOutline.ts`, which fits its generated
+ * shapes the same way and for the same reason: switching a shape from polygon
+ * to star should keep it the size it was, rather than shrinking it by however
+ * much empty room a star's circumscribed circle happens to leave.
+ */
+export function normalized(nodes: MaskNode[]): MaskNode[] {
   const bounds = boundsOf(nodes);
   if (bounds == null) {
     return nodes;
@@ -34,8 +41,27 @@ function normalized(nodes: MaskNode[]): MaskNode[] {
   const cx = (bounds.minX + bounds.maxX) / 2;
   const cy = (bounds.minY + bounds.maxY) / 2;
 
+  /**
+   * An anchor's coordinate, mapped so the extremes land **exactly** on ∓0.5.
+   *
+   * `(p - centre) * scale` is the same map and is out by an ulp or two at the
+   * ends, because the centre and the scale each carry their own rounding. Here
+   * `p === min` gives `0 - 0.5` and `p === max` gives `1 - 0.5`, both exact, so
+   * a generated triangle's base sits on the bottom of its box rather than
+   * 3e-14 above it. That is not pedantry: the drift is a fraction of a pixel of
+   * antialiasing along one edge, which is enough to make a generated polygon
+   * and the hand-written point list of the same shape render differently.
+   */
+  const fit = (value: number, min: number, span: number, centre: number, scale: number) =>
+    span > 1e-9 ? (value - min) / span - 0.5 : (value - centre) * scale;
+
   return nodes.map((node) => {
-    const out: MaskNode = { p: [(node.p[0] - cx) * sx, (node.p[1] - cy) * sy] };
+    const out: MaskNode = {
+      p: [
+        fit(node.p[0], bounds.minX, width, cx, sx),
+        fit(node.p[1], bounds.minY, height, cy, sy),
+      ],
+    };
     if (node.cs !== undefined) {
       out.cs = [node.cs[0] * sx, node.cs[1] * sy];
     }

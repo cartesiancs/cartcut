@@ -38,6 +38,7 @@ import { isMirrorable, mirrorOf } from "../timeline/mirrorOps";
 import { isReversed } from "../timeline/reverseOps";
 import { isGradable } from "../timeline/lutOps";
 import { maskOf } from "../mask/maskShape";
+import { shapeGeometryOf } from "../shape/shapeGeometry";
 import { revealOf } from "../text/reveal";
 import { isRevealable } from "../timeline/textRevealOps";
 import { isMaskable } from "../timeline/maskOps";
@@ -450,6 +451,14 @@ export function clipDetail(
     // The point list itself is never sent — `previewCanvas.addShapePoint` grows
     // it without bound, and `serialize.test.ts` pins its absence.
     detail.shapePointCount = Array.isArray(element.shape) ? element.shape.length : 0;
+    // The recipe is sent whole, unlike the point list, because it is six fields
+    // with a fixed ceiling rather than something that grows with the clicking.
+    // Absent means the shape was drawn by hand, which is what `set_shape`
+    // refuses without a `kind`.
+    const geometry = shapeGeometryOf(element);
+    if (geometry != null) {
+      detail.geometry = geometry;
+    }
   }
 
   if (element.filetype === "group") {

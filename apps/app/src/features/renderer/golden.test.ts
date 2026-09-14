@@ -18,6 +18,8 @@ vi.mock("../asset/loadedAssetStore", () => ({
 const { renderTimelineAtTime } = await import("./timeline");
 const { renderImage } = await import("./image");
 const { renderShape } = await import("./shape");
+const { normalizeShapeGeometry } = await import("../shape/shapeGeometry");
+const { flattenOutline } = await import("../shape/shapeOutline");
 
 /**
  * Golden frames — the regression net for the renderer.
@@ -127,7 +129,14 @@ function digest(data: Uint8ClampedArray): string {
   return h.toString(16).padStart(8, "0");
 }
 
-function frameDigest(timeInMs: number, scene: Timeline = timeline()): string {
+/**
+ * One composited frame's raw pixels.
+ *
+ * Split out of `frameDigest` for the cases that have to compare two frames
+ * *quantitatively* rather than by digest: a digest says only same or different,
+ * and antialiasing differences of a few channels need a measurement.
+ */
+function frameData(timeInMs: number, scene: Timeline = timeline()): Uint8ClampedArray {
   const canvas = createCanvas(SIZE, SIZE);
   const ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
   renderTimelineAtTime(
@@ -139,7 +148,11 @@ function frameDigest(timeInMs: number, scene: Timeline = timeline()): string {
     SIZE,
     SIZE,
   );
-  return digest(canvas.getContext("2d").getImageData(0, 0, SIZE, SIZE).data);
+  return canvas.getContext("2d").getImageData(0, 0, SIZE, SIZE).data;
+}
+
+function frameDigest(timeInMs: number, scene: Timeline = timeline()): string {
+  return digest(frameData(timeInMs, scene));
 }
 
 /**
@@ -318,6 +331,110 @@ describe("golden frames, scaled", () => {
     } as Timeline;
     for (const t of [0, 1000, 2000, 3000]) {
       expect(frameDigest(t, explicit)).toBe(frameDigest(t));
+    }
+  });
+});
+
+/**
+ * The same scene with a **shape recipe** on the badge.
+ *
+ * The badge is the fixture's shape, and it is a triangle drawn from a stored
+ * point list, so this feature's blast radius already runs through the plain
+ * digests above. Those digests not moving is the proof that a project nobody
+ * has parameterised renders exactly as it did before recipes existed; this
+ * block is the other half, and pins that a recipe reaches the picture at all.
+ *
+ * It reaches it through one branch in `renderShape` and through nothing else,
+ * which is why a mistake here would be invisible until someone looked at a
+ * frame.
+ */
+/** The points a default `polygon` recipe generates in the badge's own box. */
+const DEFAULT_TRIANGLE = flattenOutline(normalizeShapeGeometry("polygon", {}), {
+  width: 60,
+  height: 60,
+});
+
+function shapedTimeline(
+  shape?: number[][],
+  geometry: Record<string, unknown> | null = { kind: "star", count: 6, radius: 4 },
+): Timeline {
+  const base = timeline();
+  return {
+    ...base,
+    badge: {
+      ...base.badge,
+      ...(shape == null ? {} : { shape }),
+      ...(geometry == null ? {} : { geometry }),
+    },
+  } as Timeline;
+}
+
+describe("golden frames, with a shape recipe", () => {
+  it("composites a stable frame at each sampled timecode", () => {
+    const frames = Object.fromEntries(
+      [0, 1000, 2000, 3000, 3999].map((t) => [
+        t,
+        frameDigest(t, shapedTimeline()),
+      ]),
+    );
+    expect(frames).toMatchSnapshot();
+  });
+
+  it("is deterministic: the same timecode digests identically", () => {
+    expect(frameDigest(2000, shapedTimeline())).toBe(
+      frameDigest(2000, shapedTimeline()),
+    );
+  });
+
+  it("differs from the same scene composited from the stored points", () => {
+    for (const t of [0, 1000, 2000, 3000]) {
+      expect(frameDigest(t, shapedTimeline())).not.toBe(frameDigest(t));
+    }
+  });
+
+  /**
+   * The byte-identity claim, as a picture.
+   *
+   * `shapeOps` deletes the `geometry` key rather than storing a default, and
+   * that is only invisible if a default recipe also *draws* what the shape drew
+   * without one. So this scene's badge holds the very points a default polygon
+   * generates, and the two are composited with the key and without it.
+   *
+   * It cannot be a digest match. Every edge in the recipe path is a cubic,
+   * including a straight one, and Skia shades a degenerate cubic a fraction
+   * differently from a line, which shows along the badge's three edges once it
+   * is rotated 30 degrees. The bound that carries the claim is the first one:
+   * **no channel moves by more than half.** Antialiasing along an edge cannot
+   * do that; a shape drawn in the wrong place, at the wrong size or the wrong
+   * way up can hardly avoid it. Measured against the fixture's own hand-drawn
+   * triangle, which points the other way, that count is over three thousand.
+   */
+  it("renders a default recipe as the shape its own point list draws", () => {
+    // `null`, not `undefined`: a default parameter fires on `undefined`, so
+    // passing that here asks for no recipe and silently gets the star above.
+    // The first draft did exactly that and compared a star with a triangle.
+    const asPoints = shapedTimeline(DEFAULT_TRIANGLE, null);
+    const asRecipe = shapedTimeline(DEFAULT_TRIANGLE, { kind: "polygon" });
+
+    for (const t of [0, 1000, 2000, 3000]) {
+      const a = frameData(t, asPoints);
+      const b = frameData(t, asRecipe);
+      let differing = 0;
+      let worst = 0;
+      let solid = 0;
+      for (let i = 0; i < a.length; i++) {
+        const delta = Math.abs(a[i] - b[i]);
+        if (delta > 0) {
+          differing++;
+          worst = Math.max(worst, delta);
+        }
+        if (delta > 128) {
+          solid++;
+        }
+      }
+      expect(solid, `t=${t}: a channel moved by more than half`).toBe(0);
+      expect(differing, `t=${t}`).toBeLessThan(1200);
+      expect(worst, `t=${t}`).toBeLessThan(60);
     }
   });
 });
