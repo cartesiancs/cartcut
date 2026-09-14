@@ -12,7 +12,12 @@ import { createStore } from "zustand/vanilla";
  * hundred pixels of width, and none of them has had it. Two mechanisms is the
  * intended state until they do.
  */
-type ActiveStringType = "record" | "" | "audioRecord" | "proxy" | "autoTrack";
+export type ActiveStringType =
+  | "record"
+  | ""
+  | "audioRecord"
+  | "proxy"
+  | "autoTrack";
 
 export interface IControlPanelStore {
   /** Panels with a tab in the preview top bar, in the order they were opened. */
