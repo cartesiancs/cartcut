@@ -78,7 +78,14 @@ export class ElementTimelineLeftOption extends LitElement {
       this.requestUpdate();
     });
 
+    // `resize` is the only field of this store the component renders, and it
+    // keeps its reference across writes that do not touch it. The update was
+    // unconditional, so every `topBarTitle` or `isOptionPanelActive` write
+    // scheduled a re-render that produced identical markup.
     uiStore.subscribe((state) => {
+      if (state.resize === this.resize) {
+        return;
+      }
       this.resize = state.resize;
       this.requestUpdate();
     });

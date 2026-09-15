@@ -107,3 +107,50 @@ describe("uiStore track-header width", () => {
     expect(leftOption()).toBe(TIMELINE_LEFT_OPTION_LIMITS.min);
   });
 });
+
+describe("uiStore option-panel flag", () => {
+  beforeEach(() => {
+    reset();
+    uiStore.setState({ isOptionPanelActive: false });
+  });
+
+  const countNotifications = (run: () => void) => {
+    let notifications = 0;
+    const unsubscribe = uiStore.subscribe(() => {
+      notifications += 1;
+    });
+    run();
+    unsubscribe();
+    return notifications;
+  };
+
+  it("does not wake its subscribers when the flag is already what it should be", () => {
+    const setActive = uiStore.getState().setOptionPanelActive;
+
+    setActive(true);
+
+    expect(countNotifications(() => setActive(true))).toBe(0);
+    expect(uiStore.getState().isOptionPanelActive).toBe(true);
+  });
+
+  // The other half of the claim. Without this the test above passes just as
+  // well against a store that never notifies anybody at all.
+  it("still wakes them on a real change, in both directions", () => {
+    const setActive = uiStore.getState().setOptionPanelActive;
+
+    expect(countNotifications(() => setActive(true))).toBe(1);
+    expect(countNotifications(() => setActive(false))).toBe(1);
+  });
+
+  // `hideAllOptions` used to write false and `showOption` true right after, so
+  // re-showing the panel already on screen cost two rounds of notifications to
+  // land back where it started. `optionGroup` no longer makes that pair, and
+  // this is the store-side half of why it is cheap when something does.
+  it("leaves the resize object alone, so resize-guarded subscribers can skip", () => {
+    const before = uiStore.getState().resize;
+
+    uiStore.getState().setOptionPanelActive(true);
+
+    expect(uiStore.getState().resize).toBe(before);
+  });
+});

@@ -81,3 +81,30 @@
   z-index: 6001;
   min-width: 9rem;
 }
+
+// ------------------------------------------------------- the context menu
+
+// `features/menu/menuDropdown.ts` dresses these three custom elements
+// directly instead of wrapping them in a `<ul>` and `<li>`s. A custom element
+// with no styles is `display: inline`, where width and height do nothing, so
+// the menu would measure its own children at zero and place itself against a
+// box that is not the one on screen.
+menu-dropdown-body,
+menu-dropdown-item,
+menu-dropdown-sub {
+  display: block;
+}
+
+// The timeline canvas is the one surface a menu opens over that is repainting
+// underneath it, for the selection outline the same click just changed. A
+// backdrop blur there costs the compositor a readback of that canvas every
+// frame the menu is up, to show eight pixels of something already being
+// redrawn. The other dropdowns keep theirs.
+menu-dropdown-body.dropdown-menu {
+  // Qualified, so it outranks Bootstrap's `.dropdown-menu { display: none }`
+  // without relying on `.show` being present.
+  display: block;
+  background-color: #25262b;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}

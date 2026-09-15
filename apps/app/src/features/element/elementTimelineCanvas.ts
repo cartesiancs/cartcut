@@ -49,6 +49,7 @@ import { mirrorToggleTarget, type MirrorAxis } from "../timeline/mirrorOps";
 import { isReversed, isReversible } from "../timeline/reverseOps";
 import { mirrorClips } from "../editor/actions";
 import { refusesEdit } from "../editor/timelineLock";
+import { afterPaint } from "../../functions/afterPaint";
 import {
   canReverseHere,
   isReversePending,
@@ -1627,7 +1628,7 @@ export class elementTimelineCanvas extends LitElement {
       } else if (!this.targetId.includes(hit.elementId)) {
         this.targetId = [hit.elementId];
       }
-      this.showSideOption(hit.elementId);
+      this.sideOptionFor(hit.elementId, e.button);
     }
 
     if (hit.kind === "transition") {
@@ -1636,7 +1637,7 @@ export class elementTimelineCanvas extends LitElement {
       // nothing in common with a multi-clip selection, and the ops that act on
       // one take a single id.
       this.targetId = [hit.transitionId];
-      this.showSideOption(hit.transitionId);
+      this.sideOptionFor(hit.transitionId, e.button);
     }
 
     // Everything above settles the selection, and looking at a clip is not
@@ -2161,6 +2162,40 @@ export class elementTimelineCanvas extends LitElement {
   }
 
   // ------------------------------------------------------------ side panel
+
+  /** A deferred side-panel update is already queued. */
+  private sideOptionPending = false;
+
+  /**
+   * Point the option column at `elementId`, but never in front of a menu.
+   *
+   * A right press is a request for a context menu, and `mousedown` fires for
+   * the right button before `contextmenu` does. Swapping the column here put
+   * a store write every subscriber sees, two forced layouts and a re-render of
+   * the whole editor between the press and the menu's first paint, which is
+   * the entire reason the menu felt slow. The column still follows the
+   * selection; it just does it on the other side of the frame.
+   *
+   * The deferred call re-reads `targetId` rather than closing over the id it
+   * was given. By the time it runs the user may have picked Remove off the
+   * menu, and `syncSideOption` declines on an empty selection while
+   * `showSideOption` declines on an element that is gone.
+   */
+  private sideOptionFor(elementId: string, button: number) {
+    if (button === 0) {
+      this.showSideOption(elementId);
+      return;
+    }
+
+    if (this.sideOptionPending) {
+      return;
+    }
+    this.sideOptionPending = true;
+    afterPaint(() => {
+      this.sideOptionPending = false;
+      this.syncSideOption();
+    });
+  }
 
   /**
    * Point the option column at whatever is selected now.

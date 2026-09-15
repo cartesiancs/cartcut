@@ -63,63 +63,52 @@ export class MenuDropdownBody extends LitElement {
     this.leftPx = Number(this.getAttribute("left") ?? 0);
   }
 
-  render() {
-    const innerElements = this.innerHTML;
-
-    this.innerHTML = this.template();
-    this.style.display = "inline-block";
-    const ul = this.querySelector("ul") as HTMLElement;
-    ul.innerHTML = innerElements;
+  private dismiss() {
+    this.remove();
   }
 
   /**
-   * The menu, hidden and unpositioned.
+   * Dress the host as the menu, then measure and place it.
+   *
+   * **The host is the `.dropdown-menu`.** There used to be a `<ul>` inside it,
+   * which meant reading `this.innerHTML` back out as a string, discarding the
+   * children the parser had just built, and reparsing that string into the new
+   * `<ul>`. The caller writes this markup with one `innerHTML` assignment
+   * already; doing it a second time bought nothing but a second parse and a
+   * second box to lay out.
    *
    * `position: fixed` rather than Bootstrap's `position-absolute`: the
    * coordinates handed in are `clientX`/`clientY`, which are viewport
-   * coordinates. Absolute positioning only agreed with them by accident —
-   * `#menuRightClick` is a child of `<body>` and the document never scrolls, so
-   * the initial containing block happened to line up.
+   * coordinates. Absolute positioning only agreed with them by accident,
+   * because `#menuRightClick` is a child of `<body>` and the document never
+   * scrolls, so the initial containing block happened to line up.
    *
-   * `visibility: hidden` because the menu has to be laid out before it can be
-   * measured, and measuring is what decides whether it opens up or down.
-   * Without it the menu paints once at the wrong place and jumps.
+   * `visibility: hidden` first because the menu has to be laid out before it
+   * can be measured, and measuring is what decides whether it opens up or
+   * down. Without it the menu paints once at the wrong place and jumps.
+   *
+   * All of it runs here and not from a Lit lifecycle hook: this class never
+   * calls `super.connectedCallback()`, so Lit's reactive update cycle does not
+   * run and `updated()` would never fire. The items are already in the DOM at
+   * this point, so `offsetHeight` is the real height.
    */
-  template() {
-    return `
-        <ul class="dropdown-menu show" style="position: fixed; top: 0px; left: 0px; z-index: 6000; visibility: hidden;">
-
-        </ul>`;
-  }
-
-  private dismiss() {
-    setTimeout(() => {
-      this.remove();
-    }, 200);
-  }
-
   connectedCallback() {
-    this.render();
+    this.classList.add("dropdown-menu", "show");
+    this.style.cssText =
+      "position: fixed; top: 0px; left: 0px; z-index: 6000; visibility: hidden;";
 
-    // Synchronously, and not from a Lit lifecycle hook: this class never calls
-    // `super.connectedCallback()`, so Lit's reactive update cycle does not run
-    // and `updated()` would never fire. The items are already in the DOM at
-    // this point, so `offsetHeight` is the real height.
-    const ul = this.querySelector("ul") as HTMLElement | null;
-    if (ul != null) {
-      applyMenuPlacement(ul, { x: this.leftPx, y: this.topPx });
-      ul.style.visibility = "visible";
-    }
+    applyMenuPlacement(this, { x: this.leftPx, y: this.topPx });
+    this.style.visibility = "visible";
 
     document.addEventListener("click", this.onDocumentClick);
     this.addEventListener("mouseover", this.onPointerOver);
-    ul?.addEventListener("scroll", this.onScroll);
+    this.addEventListener("scroll", this.onScroll);
   }
 
   disconnectedCallback() {
     document.removeEventListener("click", this.onDocumentClick);
     this.removeEventListener("mouseover", this.onPointerOver);
-    this.querySelector("ul")?.removeEventListener("scroll", this.onScroll);
+    this.removeEventListener("scroll", this.onScroll);
   }
 }
 
@@ -145,7 +134,10 @@ export class MenuDropdownItem extends LitElement {
     const icon = this.icon
       ? `<span class="material-symbols-outlined icon-xs">${this.icon}</span>`
       : "";
-    return `<li><a class="dropdown-item dropdown-item-sm dropdown-item-icon">${icon}${this.name}</a></li>`;
+    // No `<li>`: the menu is the host element now, not a `<ul>`, and a list
+    // item outside a list is both invalid and a `display: list-item` box for
+    // no reason. `_dropdown.scss` gives the host element its block display.
+    return `<a class="dropdown-item dropdown-item-sm dropdown-item-icon">${icon}${this.name}</a>`;
   }
 
   connectedCallback() {
@@ -169,12 +161,11 @@ export class MenuDropdownItem extends LitElement {
  * </menu-dropdown-sub>
  * ```
  *
- * **The panel is portalled to `<body>`.** `.dropdown-menu` carries a
- * `backdrop-filter`, which makes the parent menu the containing block for
- * fixed-position descendants *and* clips them to its own scrolling box — so a
- * submenu nested inside it would be positioned against the wrong origin and
- * then cut off at the parent's edge. Living next to the menu rather than
- * inside it also means the parent's `max-height` never applies to it.
+ * **The panel is portalled to `<body>`.** The parent menu carries the
+ * `max-height` and `overflow-y: auto` that `menuPlacement` gives it, so a
+ * submenu nested inside would be clipped at the parent's edge and would
+ * scroll with it. Living beside the menu rather than inside it is what keeps
+ * the parent's height off it.
  */
 @customElement("menu-dropdown-sub")
 export class MenuDropdownSub extends LitElement {
@@ -196,7 +187,7 @@ export class MenuDropdownSub extends LitElement {
     const icon = this.icon
       ? `<span class="material-symbols-outlined icon-xs">${this.icon}</span>`
       : "";
-    return `<li><a class="dropdown-item dropdown-item-sm dropdown-item-icon dropdown-sub-trigger">${icon}<span class="dropdown-sub-label">${this.name}</span><span class="material-symbols-outlined icon-xs dropdown-sub-chevron">chevron_right</span></a></li>`;
+    return `<a class="dropdown-item dropdown-item-sm dropdown-item-icon dropdown-sub-trigger">${icon}<span class="dropdown-sub-label">${this.name}</span><span class="material-symbols-outlined icon-xs dropdown-sub-chevron">chevron_right</span></a>`;
   }
 
   connectedCallback() {

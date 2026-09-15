@@ -31,6 +31,15 @@ import { projectFps } from "../editor/frameRate";
 @customElement("screen-record-panel")
 export class ScreenRecordPanel extends LitElement {
   canvasMaxHeight: any;
+  /**
+   * The `resize` object this component last measured against.
+   *
+   * Seeded null rather than from `uiStore.getInitialState()`, so the first
+   * notification always measures once whatever field it carried: the
+   * constructor leaves `canvasMaxHeight` at the string "100%", which is not a
+   * height anything can use.
+   */
+  private resize: any = null;
   video: HTMLVideoElement;
   isRecord: boolean;
   mediaRecorder: MediaRecorder | any;
@@ -320,7 +329,17 @@ export class ScreenRecordPanel extends LitElement {
       this.control = state.control;
     });
 
+    // Guarded on `resize` alone. `uiStore` carries `topBarTitle` and
+    // `isOptionPanelActive` too, every subscriber here is unfiltered, and
+    // `clientHeight` forces a synchronous layout of the whole document. Each
+    // panel swap in the option column used to buy two of those from this
+    // callback, for a store field this component does not read. `resize` keeps
+    // its reference across writes that do not touch it, so identity is enough.
     uiStore.subscribe((state) => {
+      if (state.resize === this.resize) {
+        return;
+      }
+      this.resize = state.resize;
       this.canvasMaxHeight =
         document.querySelector("#split_col_2").clientHeight;
     });

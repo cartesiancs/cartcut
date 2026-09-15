@@ -90,8 +90,22 @@ export const uiStore = createStore<IUIStore>((set) => ({
   topBarTitle: "CartCut",
   isOptionPanelActive: false,
 
+  /**
+   * Returns the state object itself when the flag is already what it should be.
+   *
+   * zustand skips the notify only on `Object.is(nextState, state)`, so a
+   * partial is never equal and `{}` still wakes every listener. Twelve
+   * components subscribe here with no selector, two of them reading
+   * `clientHeight` inside the callback, so one pointless write costs a forced
+   * layout of the whole document. `optionGroup.showOption` used to make that
+   * write on every click, selection or not.
+   */
   setOptionPanelActive: (isOptionPanelActive) =>
-    set(() => ({ isOptionPanelActive })),
+    set((state) =>
+      state.isOptionPanelActive === isOptionPanelActive
+        ? state
+        : { isOptionPanelActive },
+    ),
 
   setChatSidebar: (width) =>
     set((state) => ({
