@@ -37,6 +37,7 @@ import { ipcMedia } from "./ipc/ipcMedia.js";
 import { ipcProxy } from "./ipc/ipcProxy.js";
 import { ipcReverse } from "./ipc/ipcReverse.js";
 import { ipcTranscribe } from "./ipc/ipcTranscribe.js";
+import { ipcTts } from "./ipc/ipcTts.js";
 import { ipcAnalyze } from "./ipc/ipcAnalyze.js";
 import { runServer } from "./webServer.js";
 import { ipcSelfhosted } from "./ipc/ipcSelfhosted.js";
@@ -176,6 +177,15 @@ ipcMain.handle("reverse:cancel", ipcReverse.cancel);
 ipcMain.handle("transcribe:locales", ipcTranscribe.locales);
 ipcMain.handle("transcribe:start", ipcTranscribe.start);
 ipcMain.handle("transcribe:cancel", ipcTranscribe.cancel);
+// Text-to-speech. The model is roughly 400MB and is fetched on first use, so
+// `download` is its own call rather than a side effect of `start`. Both report
+// on `tts:progress`, under different stages.
+ipcMain.handle("tts:availability", ipcTts.availability);
+ipcMain.handle("tts:download", ipcTts.download);
+ipcMain.handle("tts:cancelDownload", ipcTts.cancelDownload);
+ipcMain.handle("tts:start", ipcTts.start);
+ipcMain.handle("tts:cancel", ipcTts.cancel);
+
 ipcMain.handle("analyze:silences", ipcAnalyze.silences);
 
 ipcMain.handle("app:getResourcesPath", ipcApp.getResourcesPath);

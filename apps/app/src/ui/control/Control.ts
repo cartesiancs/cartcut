@@ -12,6 +12,7 @@ import "../../features/preview/previewBottomBar";
 import "../../features/record/screenRecord";
 import "../../features/record/audioRecord";
 import "../../features/track/autoTrackPanel";
+import "../../features/tts/ttsPanel";
 import "../../features/window/windowHost";
 
 import "../../../../automatic-caption/src/automaticCaption";
@@ -331,6 +332,12 @@ export class Control extends LitElement {
    */
   private _windowPanels(): WindowPanel[] {
     return [
+      {
+        id: "textToSpeech",
+        label: this.lc.t("window.text_to_speech") || "Text to Speech",
+        icon: "record_voice_over",
+        content: html`<tts-panel></tts-panel>`,
+      },
       {
         id: "automaticCaption",
         label: this.lc.t("window.automatic_caption") || "Automatic Caption",

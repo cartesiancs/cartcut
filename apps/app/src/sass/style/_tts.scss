@@ -1,0 +1,29 @@
+// The Text to Speech window.
+//
+// One rule, for the one thing the panel needs that Bootstrap does not give it:
+// a spinner for the stretch where there is no honest fraction to draw. Loading
+// 400MB of weights reports nothing until it is done, and a bar sitting at zero
+// through it reads as a hang.
+@keyframes tts-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tts-spin {
+  display: inline-block;
+  animation: tts-spin 1s linear infinite;
+}
+
+// The panel is a docked window, so it can be dragged narrow. Bootstrap's
+// `form-select` has no minimum of its own and collapses to its arrow, which
+// leaves two unreadable boxes side by side rather than a wrapped pair.
+tts-panel {
+  select.form-select {
+    min-width: 5rem;
+  }
+
+  textarea.form-control {
+    min-height: 6rem;
+  }
+}

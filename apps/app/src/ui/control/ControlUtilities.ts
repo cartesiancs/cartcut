@@ -58,6 +58,23 @@ export class ControlText extends LitElement {
     window.electronAPI.req.overlayRecord.show();
   }
 
+  /**
+   * Open Text to Speech as a window docked beside the preview.
+   *
+   * A window rather than a tab, for the reason captioning is one: narration is
+   * written while watching the footage, and a panel that replaced the preview
+   * would cover the thing being narrated.
+   */
+  _handleClickTextToSpeech() {
+    windowStore.getState().open({
+      id: "textToSpeech",
+      hostId: "preview",
+      placement: { mode: "docked", side: "right", sizePct: DEFAULT_DOCK_PCT },
+      // Under this the voice and language selects stop sharing a line.
+      minSize: { width: 320, height: 280 },
+    });
+  }
+
   private toast(message: string) {
     (document.querySelector("toast-box") as any)?.showToast({
       message,
@@ -173,6 +190,17 @@ export class ControlText extends LitElement {
           <b class="align-self-center text-light text-center"
             >Export Template</b
           >
+        </div>
+
+        <div
+          class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
+          aria-event="text-to-speech"
+          @click=${() => this._handleClickTextToSpeech()}
+        >
+          <span class="material-symbols-outlined icon-lg align-self-center">
+            record_voice_over
+          </span>
+          <b class="align-self-center text-light text-center">Text to Speech</b>
         </div>
 
         <div

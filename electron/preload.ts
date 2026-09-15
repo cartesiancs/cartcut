@@ -309,6 +309,34 @@ const request = {
     },
   },
   /**
+   * Text-to-speech, on this machine.
+   *
+   * `availability()` answers before anything is spawned, with a reason code
+   * when the model is not installed. `download(jobId)` fetches roughly 400MB
+   * and is deliberately separate from `start`, so a metered connection is
+   * never billed as a side effect of pressing Generate.
+   *
+   * `start(jobId, { text, voice, lang, speed, steps })` resolves with the path
+   * of a finished wav, or `{ ok: false, cancelled }`. Both it and the download
+   * report `{ jobId, fraction, stage }` on one channel, so the panel keeps one
+   * subscription.
+   *
+   * The job id is minted by the caller so it can cancel the download before
+   * `download` resolves.
+   */
+  tts: {
+    availability: () => ipcRenderer.invoke("tts:availability"),
+    download: (jobId) => ipcRenderer.invoke("tts:download", jobId),
+    cancelDownload: (jobId) => ipcRenderer.invoke("tts:cancelDownload", jobId),
+    start: (jobId, request) => ipcRenderer.invoke("tts:start", jobId, request),
+    cancel: (jobId) => ipcRenderer.invoke("tts:cancel", jobId),
+    onProgress: (handler) => {
+      const wrapped = (_event, payload) => handler(payload);
+      ipcRenderer.on("tts:progress", wrapped);
+      return () => ipcRenderer.removeListener("tts:progress", wrapped);
+    },
+  },
+  /**
    * Where a file goes quiet, in source milliseconds.
    *
    * One call, no job id and no progress: the measurement is cached on disk by

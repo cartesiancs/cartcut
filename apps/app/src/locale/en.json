@@ -95,6 +95,7 @@
     "reset_hint": "Double-click a name to reset it."
   },
   "window": {
-    "automatic_caption": "Automatic Caption"
+    "automatic_caption": "Automatic Caption",
+    "text_to_speech": "Text to Speech"
   }
 }
