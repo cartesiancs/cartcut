@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { captionRowMenu, rowMenuPlacement } from "./rowMenu";
+import {
+  captionPlacementButton,
+  captionPlacementMenu,
+  captionRowMenu,
+  menuPlacement,
+} from "./menus";
 
 describe("captionRowMenu", () => {
   it("always offers the same two entries in the same order", () => {
@@ -52,13 +57,13 @@ describe("captionRowMenu", () => {
   });
 });
 
-describe("rowMenuPlacement", () => {
+describe("menuPlacement", () => {
   const anchor = { x: 40, y: 200, width: 28, height: 24 };
   const menu = { width: 260, height: 80 };
   const viewport = { width: 1440, height: 900 };
 
   it("opens below the button, left edges aligned", () => {
-    expect(rowMenuPlacement(anchor, menu, viewport)).toEqual({
+    expect(menuPlacement(anchor, menu, viewport)).toEqual({
       x: 40,
       y: 200 + 24 + 4,
     });
@@ -68,7 +73,7 @@ describe("rowMenuPlacement", () => {
     // The last row of a scrolled transcript: 40px of room under the button and
     // a menu twice that tall.
     const low = { ...anchor, y: 830 };
-    expect(rowMenuPlacement(low, menu, viewport).y).toBe(830 - 4 - 80);
+    expect(menuPlacement(low, menu, viewport).y).toBe(830 - 4 - 80);
   });
 
   it("stays on screen when neither side has room", () => {
@@ -76,7 +81,7 @@ describe("rowMenuPlacement", () => {
     // its own button rather than hanging off an edge.
     const short = { width: 1440, height: 120 };
     const middle = { ...anchor, y: 40 };
-    const at = rowMenuPlacement(middle, menu, short);
+    const at = menuPlacement(middle, menu, short);
     expect(at.y).toBe(8);
     expect(at.y + menu.height).toBeLessThanOrEqual(120);
   });
@@ -85,24 +90,70 @@ describe("rowMenuPlacement", () => {
     // A viewport shorter than the menu itself, which is the one case where the
     // clamp and the margin disagree.
     const tiny = { width: 1440, height: 60 };
-    expect(rowMenuPlacement(anchor, menu, tiny).y).toBe(8);
+    expect(menuPlacement(anchor, menu, tiny).y).toBe(8);
   });
 
   it("pulls the menu in from the right edge", () => {
     const right = { ...anchor, x: 1300 };
-    expect(rowMenuPlacement(right, menu, viewport).x).toBe(1440 - 8 - 260);
+    expect(menuPlacement(right, menu, viewport).x).toBe(1440 - 8 - 260);
   });
 
   it("starts at the left margin when the menu is wider than the viewport", () => {
     const narrow = { width: 200, height: 900 };
-    expect(rowMenuPlacement(anchor, menu, narrow).x).toBe(8);
+    expect(menuPlacement(anchor, menu, narrow).x).toBe(8);
   });
 
   it("measures something: the flip depends on the menu's own height", () => {
     const low = { ...anchor, y: 830 };
-    const tall = rowMenuPlacement(low, { width: 260, height: 400 }, viewport);
-    const flat = rowMenuPlacement(low, { width: 260, height: 20 }, viewport);
+    const tall = menuPlacement(low, { width: 260, height: 400 }, viewport);
+    const flat = menuPlacement(low, { width: 260, height: 20 }, viewport);
     expect(flat.y).toBe(830 + 24 + 4);
     expect(tall.y).not.toBe(flat.y);
+  });
+});
+
+describe("captionPlacementMenu", () => {
+  it("offers both placements, in the same order either way", () => {
+    for (const current of ["center", "lowerThird"] as const) {
+      expect(captionPlacementMenu(current).map((i) => i.placement)).toEqual([
+        "center",
+        "lowerThird",
+      ]);
+    }
+  });
+
+  it("marks exactly the current one", () => {
+    expect(
+      captionPlacementMenu("center").filter((i) => i.selected),
+    ).toHaveLength(1);
+    expect(captionPlacementMenu("center")[0].selected).toBe(true);
+    expect(captionPlacementMenu("lowerThird")[1].selected).toBe(true);
+  });
+
+  it("labels every entry, since the icons carry no words", () => {
+    for (const item of captionPlacementMenu("center")) {
+      expect(item.label.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("captionPlacementButton", () => {
+  it("shows the placement the captions are at, not a fixed glyph", () => {
+    // The bar this replaced lit the selected button. The trigger is the only
+    // thing left that can say where the captions are without being opened.
+    expect(captionPlacementButton("center").icon).not.toBe(
+      captionPlacementButton("lowerThird").icon,
+    );
+  });
+
+  it("draws its glyph from the same table as the menu", () => {
+    for (const current of ["center", "lowerThird"] as const) {
+      const selected = captionPlacementMenu(current).find((i) => i.selected);
+      expect(captionPlacementButton(current).icon).toBe(selected?.icon);
+    }
+  });
+
+  it("names the placement in words, for an icon-only button", () => {
+    expect(captionPlacementButton("lowerThird").label).toContain("lower third");
   });
 });

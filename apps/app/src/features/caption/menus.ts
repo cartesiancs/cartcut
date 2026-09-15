@@ -1,22 +1,24 @@
 /**
- * The per-line menu in the auto-caption panel's transcript, and where it opens.
+ * The auto-caption panel's two menus, and where either of them opens.
  *
- * The two actions used to be two icon buttons on every row, sitting beside the
- * text input and visible on all of them at once. With a merge button, a cut
- * button and a full-width input on every line, a row was tall enough that only
- * a handful fitted in the panel, and a transcript of any length cost more to
- * scroll than to read. They are one `more_vert` button now, and the menu is
- * what finally carries the words the two icons never had.
+ * Both replaced rows of always-visible buttons, and for the same reason. Every
+ * line carried a merge button and a cut button beside its text input, which
+ * made a row tall enough that a transcript of any length cost more to scroll
+ * than to read; the two placement buttons sat in a bar of their own under the
+ * transcript, spending a strip of a docked panel on a choice made once. They
+ * are two icon buttons now, and the menus carry the words the icons never had.
  *
  * Here rather than in the panel for the reason `silenceButton.ts` gives:
  * `apps/automatic-caption/` is outside every vitest include pattern, so a rule
- * written there is a rule nothing can assert about. The placement half is the
- * part that earns it. The transcript scrolls inside `overflow-y: auto`, so the
+ * written there is a rule nothing can assert about. `menuPlacement` is the part
+ * that earns it most. The transcript scrolls inside `overflow-y: auto`, so a
  * menu has to be `position: fixed` to escape the clip, and a fixed menu is
  * placed against the viewport rather than by the layout: get it wrong near the
  * bottom of the screen and the menu opens off-screen, which looks exactly like
  * a button that does nothing.
  */
+
+import type { CaptionPlacement } from "./layout";
 
 export type CaptionRowAction = "merge" | "remove" | "restore";
 
@@ -97,17 +99,18 @@ const GAP = 4;
 const MARGIN = 8;
 
 /**
- * Where to put the menu, in viewport pixels, for `position: fixed`.
+ * Where to put a menu, in viewport pixels, for `position: fixed`.
  *
  * Below the button and left-aligned with it by default; above when below would
- * run off the bottom, which is the common case, because the row whose menu is
- * hardest to reach is the one at the end of a scrolled transcript.
+ * run off the bottom. That is not the rare case: the line menu's trigger sits
+ * at the end of a scrolled transcript and the footer's sits at the bottom of
+ * the panel, so the flip is what the footer's menu does every time.
  *
  * Clamped rather than flipped when neither side has room: a menu overlapping
  * its own button is usable, and one whose first entry is above the top of the
  * screen is not.
  */
-export function rowMenuPlacement(
+export function menuPlacement(
   anchor: MenuAnchor,
   menu: MenuSize,
   viewport: MenuViewport,
@@ -129,4 +132,72 @@ export function rowMenuPlacement(
   const x = Math.max(MARGIN, Math.min(anchor.x, rightmost));
 
   return { x, y };
+}
+
+/**
+ * Where the captions sit in the frame, as a menu entry each.
+ *
+ * It was two buttons in a sticky bar under the transcript, the current one
+ * lit blue. A menu has no room for that trick, so the choice is carried by a
+ * check on the entry and by the trigger's own glyph; `captionPlacementButton`
+ * is the other half and the two have to agree, which is why they are here
+ * together rather than one in a template.
+ */
+export type CaptionPlacementMenuItem = {
+  placement: CaptionPlacement;
+  /** A material-symbols ligature. */
+  icon: string;
+  label: string;
+  /** Whether this is where the captions are now. Exactly one entry is. */
+  selected: boolean;
+};
+
+/**
+ * The glyph for each placement. The trigger and the menu read from one table.
+ *
+ * `align_vertical_*` and not `vertical_align_*`: the latter pair is the text
+ * cursor's, and its bottom variant is an arrow onto a line, which at 17px in a
+ * footer beside Apply reads as a download button. These two draw blocks resting
+ * on a line and blocks centred on one, which is what the setting does.
+ */
+const PLACEMENT_ICON: Record<CaptionPlacement, string> = {
+  center: "align_vertical_center",
+  lowerThird: "align_vertical_bottom",
+};
+
+const PLACEMENT_LABEL: Record<CaptionPlacement, string> = {
+  center: "Centre of the frame",
+  lowerThird: "Lower third",
+};
+
+export function captionPlacementMenu(
+  current: CaptionPlacement,
+): CaptionPlacementMenuItem[] {
+  // Order fixed, and not by which one is selected: an entry that moves under
+  // the pointer between two openings is an entry nobody can aim at twice.
+  return (["center", "lowerThird"] as const).map((placement) => ({
+    placement,
+    icon: PLACEMENT_ICON[placement],
+    label: PLACEMENT_LABEL[placement],
+    selected: placement === current,
+  }));
+}
+
+/**
+ * The footer button that opens that menu. Icon and tooltip, nothing else.
+ *
+ * The glyph is the *current* placement rather than a fixed one, because the
+ * bar this replaced showed the answer without being asked: the selected button
+ * was lit, and a stable icon would have made the panel stop saying where the
+ * captions are. The tooltip says it in words, which for an icon-only button is
+ * the only name it has.
+ */
+export function captionPlacementButton(current: CaptionPlacement): {
+  icon: string;
+  label: string;
+} {
+  return {
+    icon: PLACEMENT_ICON[current],
+    label: `Caption placement: ${PLACEMENT_LABEL[current].toLowerCase()}`,
+  };
 }
