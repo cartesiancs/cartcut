@@ -940,7 +940,13 @@ export class AutomaticCaption extends LitElement {
           font-size: 0.8rem;
         }
 
+        /* Every word keeps the same box whether or not it is the active one.
+           The highlight used to be a 2px border, which added 4px to the active
+           word and shoved the rest of the line sideways on every playhead
+           step. It is a pseudo-element now: an overlay takes no space. */
         .caption-part {
+          position: relative;
+          z-index: 0;
           background-color: #1b1a1c;
           color: #ffffff;
           margin-bottom: 0.1rem;
@@ -949,22 +955,82 @@ export class AutomaticCaption extends LitElement {
           height: fit-content;
           width: fit-content;
           display: inline-block;
+          cursor: pointer;
+          padding: 0 0.15rem;
+          transition: outline-color 120ms ease-in;
+        }
+
+        /* A negative z-index child paints over the element's own background
+           and under its text, so the word stays readable on the fill. */
+        .caption-part::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          z-index: -1;
+          border-radius: 8px;
+          background-color: #3838d3;
+          transform-origin: center;
+          transform: scale(0.72);
+          opacity: 0;
+          /* Leaving: short and plain, so the highlight is gone before the next
+             word's springs in. */
+          transition:
+            transform 120ms ease-in,
+            opacity 110ms ease-in;
         }
 
         .caption-part.active {
-          background-color: #423d47;
-          color: #ffffff;
-          margin-bottom: 0.1rem;
-          border: 2px solid #3838d3;
-          border-radius: 8px;
-          height: fit-content;
-          width: fit-content;
-          display: inline-block;
+          outline-color: transparent;
         }
 
-        .caption-part {
-          cursor: pointer;
-          padding: 0 0.15rem;
+        /* Arriving: a damped spring, zeta 0.66, settling in 420ms with about
+           6% overshoot. The opacity leads it so the fill is there before the
+           scale finishes. */
+        .caption-part.active::before {
+          transform: scale(1);
+          opacity: 1;
+          transition:
+            transform 420ms
+              linear(
+                0,
+                0.055,
+                0.186,
+                0.35,
+                0.519,
+                0.672,
+                0.802,
+                0.902,
+                0.975,
+                1.022,
+                1.05,
+                1.062,
+                1.063,
+                1.057,
+                1.048,
+                1.037,
+                1.027,
+                1.017,
+                1.01,
+                1.004,
+                1,
+                0.998,
+                0.996,
+                0.996,
+                0.996,
+                0.997,
+                0.997,
+                0.998,
+                1
+              ),
+            opacity 90ms linear;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .caption-part::before,
+          .caption-part.active::before {
+            transition-duration: 1ms;
+            transform: none;
+          }
         }
 
         /* The read-only timing ribbon. Clicking a word seeks to it; the text
