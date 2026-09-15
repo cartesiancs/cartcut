@@ -6,16 +6,19 @@
  * node environment. It is also the seam a test injects at — `MediaProber` is an
  * interface, and `domProber` is only the default.
  *
- * Two differences from the path `AssetController.add` takes:
+ * Two differences from the blob-and-callback path the asset panel used to
+ * take, through `elementControl.addVideo` and its siblings:
  *
- *  - **No blob.** That code fetches the whole file into memory and mints an
+ *  - **No blob.** That code fetched the whole file into memory and minted an
  *    object URL for `element.blob`. Nothing reads `element.blob`: the preview
  *    and both export paths load from `localpath` through `loadedAssetStore`.
- *    So the round trip is a full-file read and a permanently leaked object URL
+ *    So the round trip was a full-file read and a permanently leaked object URL
  *    in exchange for a field nobody consults.
- *  - **Failures are failures.** The originals attach `onloadedmetadata` and
- *    nothing else, so an unreadable file hangs the import forever with no
- *    error. Every probe here rejects on `error` and on a timeout.
+ *  - **Failures are failures.** The originals attached `onloadedmetadata` and
+ *    nothing else, so an unreadable file hung the import forever with no error,
+ *    and a file that stated no length was placed with `duration: Infinity`.
+ *    Every probe here rejects on `error` and on a timeout, and
+ *    `measureDurationMs` below is what answers the second case.
  */
 
 import { parseGIF, decompressFrames } from "gifuct-js";

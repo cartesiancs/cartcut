@@ -2,14 +2,15 @@
  * Importing files onto the timeline: the half that is I/O, and the half that
  * is a pure transform.
  *
- * The asset panel's original path — `AssetController.add` calling
- * `elementControl.addImage/addVideo/...` — is callback-based with no promise
- * and no returned id, which makes it impossible to place several files as one
+ * The asset panel's original path, `AssetController.add` calling
+ * `elementControl.addImage/addVideo/...`, was callback-based with no promise
+ * and no returned id, which made it impossible to place several files as one
  * run. It coped by leaving the drop position on a shared `control.dropHint`
- * field for the next add to pick up, which races the moment two files are
- * dropped together (whichever probe finishes first takes the hint) and leaves a
- * stale hint behind when one fails, so the *next* thing added anywhere in the
- * app lands at a position nobody asked for.
+ * field for the next add to pick up, which raced the moment two files were
+ * dropped together (whichever probe finished first took the hint) and left a
+ * stale hint behind when one failed, so the *next* thing added anywhere in the
+ * app landed at a position nobody asked for. Both are gone; this is the only
+ * way media reaches the timeline.
  *
  * `mediaProbe.ts` and `mediaElement.ts` already exist to replace that path, and
  * `agent/commands/media.ts` already composes them into exactly the batch this

@@ -1,6 +1,6 @@
 import { LitElement, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { AssetController } from "../../controllers/asset";
+import { atPlayhead, importPathsAt } from "./importDrop";
 import { getLocationEnv } from "../../functions/getLocationEnv";
 import { IAssetStore, assetStore } from "../../states/assetStore";
 import { projectStore } from "../../states/projectStore";
@@ -86,7 +86,6 @@ export class AssetBrowser extends LitElement {
   showType = assetStore.getState().showType;
 
   private lc = new LocaleController(this);
-  private assetControl = new AssetController();
   private unsubscribe?: () => void;
   private loadedRevision = assetStore.getState().directoryRevision;
 
@@ -231,8 +230,19 @@ export class AssetBrowser extends LitElement {
     assetStore.getState().setDirectory(target);
   }
 
+  /**
+   * Opening an asset puts it on the timeline at the playhead.
+   *
+   * `importPathsAt` is where the drag out of this same panel already lands
+   * (`elementTimelineCanvas`'s `"asset"` drop intent), and clicking has to
+   * agree with dragging. It also has to go through `probeMedia`, because that
+   * is the only reader that measures a file whose container states no length: a
+   * `MediaRecorder` capture answers `duration: Infinity`, and a clip with an
+   * infinite span is drawn by nothing, since every Canvas2D call with a
+   * non-finite argument is a silent no-op.
+   */
   private handleOpen(event: CustomEvent) {
-    this.assetControl.add(event.detail.path);
+    void importPathsAt([event.detail.path], atPlayhead());
   }
 
   private handleClickPrevDirectory() {

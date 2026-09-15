@@ -136,6 +136,23 @@ describe("buildMediaElement", () => {
     ).toBe(4_000);
   });
 
+  it("refuses a still length nothing could draw", () => {
+    // The symptom is specific and was real for audio and video before the
+    // legacy builders went: a clip with a non-finite span reaches the painter
+    // as a rect of infinite width, every Canvas2D call with a non-finite
+    // argument is a silent no-op, and the clip sits in the document drawing
+    // nothing. `add_media` can be handed one over the wire, because zod's
+    // `z.number()` admits Infinity and JSON `1e309` parses to it.
+    for (const bad of [Infinity, -Infinity, NaN, 0, -500]) {
+      expect(
+        buildMediaElement(probe({ kind: "image" }), { durationMs: bad }).duration,
+      ).toBe(DEFAULT_STILL_MS);
+      expect(
+        buildMediaElement(probe({ kind: "gif" }), { durationMs: bad }).duration,
+      ).toBe(DEFAULT_STILL_MS);
+    }
+  });
+
   it("takes video length from the file, ignoring durationMs", () => {
     const element = buildMediaElement(probe({ kind: "video", durationMs: 5_000 }), {
       durationMs: 999,

@@ -3,6 +3,7 @@ import { customElement, property, query } from "lit/decorators.js";
 import { LocaleController } from "../../controllers/locale";
 import axios from "axios";
 import { Buffer } from "buffer";
+import { atPlayhead, importPathsAt } from "../asset/importDrop";
 
 // A Giphy proxy that no bundled server provides — nothing under electron/server
 // answers /api/gif, so this is only reachable against a separately run backend.
@@ -35,21 +36,28 @@ export class ControlText extends LitElement {
 
   async _handleClickGif(gifurl) {
     const response = await fetch(gifurl);
-    const control = document.querySelector("element-control");
 
     if (!response.ok) {
       throw new Error(`Failed to fetch audio file: ${response.statusText}`);
     }
 
-    const fileBlob = await response.blob();
-    const arrayBuffer = await fileBlob.arrayBuffer();
+    const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    window.electronAPI.req.stream
-      .saveBufferToTempFile(buffer, "gif")
-      .then((path) => {
-        control.addGif(fileBlob, path.path);
-      });
+    const saved = await window.electronAPI.req.stream.saveBufferToTempFile(
+      buffer,
+      "gif",
+    );
+    if (!saved?.path) {
+      return;
+    }
+
+    // The same import path the asset panel and an OS drop take. This used to
+    // call `elementControl.addGif`, which fetched the bare filesystem path it
+    // is handed here; that is a URL the renderer cannot resolve, so the clip
+    // never arrived. `probeMedia` builds the `file://` form in the one place
+    // that knows the rule.
+    await importPathsAt([saved.path], atPlayhead());
   }
 
   async getGif() {

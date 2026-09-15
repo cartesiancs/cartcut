@@ -61,9 +61,9 @@ export function mediaKindOf(filepath: string): MediaKind | null {
 /**
  * Fit a source's pixel size inside the project's frame, keeping its aspect.
  *
- * Lifted from `ElementControl.fitElementSizeOnPreview`, which now delegates
- * here — the agent and the mouse have to land the same size or the same file
- * added two ways looks different.
+ * Lifted from `ElementControl.fitElementSizeOnPreview`, which is gone: the
+ * agent and the mouse have to land the same size, or the same file added two
+ * ways looks different.
  */
 export function fitToPreview(
   width: number,
@@ -119,6 +119,27 @@ export function buildMediaElement(
     default:
       return buildImage(probe, startTime, options);
   }
+}
+
+/**
+ * A still's length, at the one point a caller gets to choose one.
+ *
+ * `Infinity` is not a theoretical input here. Zod's `z.number()` admits it and
+ * JSON `1e309` parses to it, so `add_media` can be handed one over the wire,
+ * and a clip with a non-finite span is drawn by nothing: `layout.ts` gives the
+ * painter a rect of infinite width, and every Canvas2D call with a non-finite
+ * argument is a silent no-op. The clip would sit in the document invisible to
+ * the eye and to the hit test.
+ *
+ * Video and audio are already covered, one layer up, by
+ * `mediaProbe.ts#resolveDurationMs`. This is the same rule for the one length
+ * that does not come from a file: absent means default, and unusable means
+ * absent.
+ */
+function stillDurationMs(requested: number | undefined): number {
+  return requested != null && Number.isFinite(requested) && requested > 0
+    ? requested
+    : DEFAULT_STILL_MS;
 }
 
 function buildVideo(probe: MediaProbe, startTime: number): VideoElementType {
@@ -185,7 +206,7 @@ function buildImage(
     priority: 0,
     blob: "",
     startTime,
-    duration: options.durationMs ?? DEFAULT_STILL_MS,
+    duration: stillDurationMs(options.durationMs),
     opacity: 100,
     location: { x: 0, y: 0 },
     rotation: 0,
@@ -209,7 +230,7 @@ function buildGif(
     priority: 0,
     blob: "",
     startTime,
-    duration: options.durationMs ?? DEFAULT_STILL_MS,
+    duration: stillDurationMs(options.durationMs),
     opacity: 100,
     location: { x: 0, y: 0 },
     rotation: 0,

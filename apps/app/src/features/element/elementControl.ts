@@ -1,4 +1,3 @@
-import { emptyAnimation } from "../animation/keyframes";
 import { resumeAudioContext } from "../asset/audioContext";
 import { LitElement, html } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
@@ -9,20 +8,16 @@ import {
   IRenderOptionStore,
   renderOptionStore,
 } from "../../states/renderOptionStore";
-import { decompressFrames, parseGIF } from "gifuct-js";
-import { getLocationEnv } from "../../functions/getLocationEnv";
 import { placeNewElement } from "../timeline/placement";
 import {
   createTextElement,
   type TextElementOptions,
 } from "./textElement";
-import { fitToPreview } from "./mediaElement";
 import { affectsTextBlock, withFittedTextHeights } from "./textFit";
 import { setIn } from "../../utils/immutable";
 import { cursorAtElapsed } from "../timeline/playbackClock";
 import { projectFps } from "../editor/frameRate";
 import { mark as perfMark } from "../debug/frameStats";
-import { beginMediaLoad } from "../../states/mediaLoadStore";
 
 @customElement("element-control")
 export class ElementControl extends LitElement {
@@ -263,20 +258,6 @@ export class ElementControl extends LitElement {
   }
 
   /**
-   * Delegates to `mediaElement.fitToPreview`.
-   *
-   * The arithmetic moved there when `add_media` needed it: an image added by
-   * the agent and the same image added by a click have to come out the same
-   * size, and two copies of this calculation is how that stops being true.
-   * The store lookup it used to do lives there too — the preview canvas is a
-   * viewport, so its backing store is the visible area in device pixels rather
-   * than the project resolution, and the resolution has to come from the store.
-   */
-  fitElementSizeOnPreview(width, height) {
-    return fitToPreview(width, height);
-  }
-
-  /**
    * Hand a freshly built element to the timeline.
    *
    * Every factory used to finish with `patchTimeline` + `checkPointTimeline`,
@@ -307,158 +288,6 @@ export class ElementControl extends LitElement {
     this.timeline = useTimelineStore.getState().timeline;
   }
 
-  addImage(blob, path) {
-    const elementId = this.generateUUID();
-    const img = document.createElement("img");
-    const release = beginMediaLoad();
-
-    img.onerror = release;
-    img.src = blob;
-    img.onload = () => {
-      release();
-
-      let resize = this.fitElementSizeOnPreview(img.width, img.height);
-      let width = resize.width;
-      let height = resize.height; // /division
-
-      const nowEnv = getLocationEnv();
-      const filepath = nowEnv == "electron" ? path : `/api/file?path=${path}`;
-
-      this.timeline[elementId] = {
-        blob: blob,
-        startTime: 0,
-        duration: 1000,
-        opacity: 100,
-        location: { x: 0, y: 0 },
-        rotation: 0,
-        width: width,
-        height: height,
-        localpath: path,
-        filetype: "image",
-        ratio: img.width / img.height,
-        animation: emptyAnimation("image"),
-        timelineOptions: {
-          color: "rgb(134, 41, 143)",
-        },
-      };
-
-      this.commitNewElement(elementId);
-    };
-  }
-
-  addGif(blob, path) {
-    const elementId = this.generateUUID();
-    const img = document.createElement("img");
-    const release = beginMediaLoad();
-
-    const nowEnv = getLocationEnv();
-    const filepath = nowEnv == "electron" ? path : `/api/file?path=${path}`;
-
-    fetch(filepath)
-      .then((resp) => resp.arrayBuffer())
-      .then((buff) => {
-        release();
-        let gif = parseGIF(buff);
-        let frames = decompressFrames(gif, true);
-        this.timeline[elementId] = {
-          blob: blob,
-          startTime: 0,
-          duration: 1000,
-          opacity: 100,
-          location: { x: 0, y: 0 },
-          rotation: 0,
-          width: frames[0].dims.width,
-          height: frames[0].dims.height,
-          localpath: path,
-          filetype: "gif",
-          ratio: frames[0].dims.width / frames[0].dims.height,
-          timelineOptions: {
-            color: "rgb(134, 41, 143)",
-          },
-        };
-
-        this.commitNewElement(elementId);
-      })
-      .catch(release);
-  }
-
-  addVideo(blob, path) {
-    const elementId = this.generateUUID();
-    const video = document.createElement("video");
-    // Every way out of the probe below has to lower the indicator, including
-    // the two this method never handled: a file the element cannot decode, and
-    // an ffprobe call that rejects.
-    const release = beginMediaLoad();
-
-    video.src = blob;
-    video.preload = "metadata";
-
-    video.onerror = release;
-
-    video.onloadedmetadata = () => {
-      let width = video.videoWidth;
-      let height = video.videoHeight;
-      let duration = video.duration * 1000;
-
-      window.electronAPI.req.ffmpeg.getMetadata(blob, path).then((result) => {
-        let blobdata = result.blobdata;
-        let metadata = result.metadata;
-
-        let isExist = false;
-
-        release();
-
-        metadata.streams.forEach((element) => {
-          if (element.codec_type == "audio") {
-            isExist = true;
-          }
-        });
-
-        const nowEnv = getLocationEnv();
-        const filepath = nowEnv == "electron" ? path : `/api/file?path=${path}`;
-
-        this.timeline[elementId] = {
-          blob: blob,
-          startTime: 0,
-          duration: duration,
-          opacity: 100,
-          location: { x: 0, y: 0 },
-          trim: { startTime: 0, endTime: duration },
-          sourceDuration: duration,
-          rotation: 0,
-          width: width,
-          height: height,
-          ratio: width / height,
-          localpath: path,
-          isExistAudio: isExist,
-          filetype: "video",
-          codec: { video: "default", audio: "default" },
-          speed: 1,
-          filter: {
-            enable: false,
-            list: [],
-          },
-          origin: {
-            width: width,
-            height: height,
-          },
-          animation: emptyAnimation("video"),
-          timelineOptions: {
-            color: "rgb(71, 59, 179)",
-          },
-        };
-
-        this.commitNewElement(elementId);
-
-        // this.showVideo(elementId);
-      }).catch(release);
-
-      // ffmpeg.ffprobe(path, (err, metadata) => {
-
-      // })
-    };
-  }
-
   addText(options: TextElementOptions) {
     const elementId = this.generateUUID();
 
@@ -470,43 +299,6 @@ export class ElementControl extends LitElement {
 
     // this.showText(elementId);
     // this.elementTimeline.addElementBar(elementId);
-  }
-
-  addAudio(blob, path) {
-    const elementId = this.generateUUID();
-    const audio = document.createElement("audio");
-    const release = beginMediaLoad();
-
-    const nowEnv = getLocationEnv();
-    const filepath = nowEnv == "electron" ? path : `/api/file?path=${path}`;
-
-    audio.onerror = release;
-    audio.src = blob;
-
-    audio.onloadedmetadata = () => {
-      release();
-      let duration = audio.duration * 1000;
-
-      this.timeline[elementId] = {
-        blob: blob,
-        startTime: 0,
-        duration: duration,
-        location: { x: 0, y: 0 }, // NOT USING
-        trim: { startTime: 0, endTime: duration },
-        sourceDuration: duration,
-        localpath: path,
-        filetype: "audio",
-        speed: 1,
-        timelineOptions: {
-          color: "rgb(133, 179, 59)",
-        },
-      };
-
-      this.commitNewElement(elementId);
-
-      // this.showAudio(elementId);
-      // this.elementTimeline.addElementBar(elementId);
-    };
   }
 
   // showAnimation(elementId, animationType) {
