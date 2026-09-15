@@ -22,6 +22,13 @@ import {
 } from "../../app/src/features/caption/editor";
 import { silenceButtonState } from "../../app/src/features/caption/silenceButton";
 import {
+  captionRowMenu,
+  rowMenuPlacement,
+  type CaptionRowAction,
+  type MenuAnchor,
+  type MenuPoint,
+} from "../../app/src/features/caption/rowMenu";
+import {
   captionPhaseView,
   type CaptionPhase,
 } from "../../app/src/features/caption/captionPhase";
@@ -204,6 +211,10 @@ export class AutomaticCaption extends LitElement {
     this._unsubscribeProgress = null;
     this._unsubscribePlayhead?.();
     this._unsubscribePlayhead = null;
+    // Four window listeners, live only while a line's menu is open. Closing the
+    // window with one open would otherwise leave them holding this panel.
+    this._unbindRowMenuDismiss();
+    this._rowMenu = null;
 
     // These are new obligations, and they are new because the panel can now be
     // unmounted at all: as a tab pane it was built once and stayed in the DOM
@@ -707,6 +718,10 @@ export class AutomaticCaption extends LitElement {
       this.requestUpdate();
     }
 
+    // After the template, so the menu it may have just rendered is in the DOM
+    // and can be measured.
+    this._placeRowMenu();
+
     this.hasUpdatedOnce = true;
   }
 
@@ -798,6 +813,124 @@ export class AutomaticCaption extends LitElement {
     this._undo = editor.undo;
     this._emitChange();
     this.requestUpdate();
+  }
+
+  // ------------------------------------------------- the per-line menu
+
+  /**
+   * Which line's menu is open, where its button is, and where the menu landed.
+   *
+   * `position` is null for exactly one frame. The menu has to be in the DOM
+   * before its height can be measured, and `rowMenuPlacement` needs that height
+   * to decide whether it opens downwards; the template keeps it hidden until
+   * `updated` has answered rather than letting it flash at the wrong place.
+   */
+  private _rowMenu: {
+    index: number;
+    anchor: MenuAnchor;
+    position: MenuPoint | null;
+  } | null = null;
+
+  /**
+   * Open the menu for a line, or close the one already open on it.
+   *
+   * The anchor is read here, once, rather than on every placement: the button
+   * is inside a scroller and the menu is `position: fixed`, so a rect captured
+   * later would be a different rect. A scroll closes the menu for the same
+   * reason.
+   */
+  private _toggleRowMenu(event: MouseEvent, index: number) {
+    // The window-level listener that dismisses the menu would otherwise see the
+    // very click that opened it.
+    event.stopPropagation();
+
+    if (this._rowMenu?.index === index) {
+      this._closeRowMenu();
+      return;
+    }
+
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const wasOpen = this._rowMenu != null;
+    this._rowMenu = {
+      index,
+      anchor: {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      },
+      position: null,
+    };
+    if (!wasOpen) {
+      this._bindRowMenuDismiss();
+    }
+    this.requestUpdate();
+  }
+
+  /** An arrow property because it is added to and removed from `window`. */
+  private readonly _closeRowMenu = () => {
+    if (this._rowMenu == null) {
+      return;
+    }
+    this._rowMenu = null;
+    this._unbindRowMenuDismiss();
+    this.requestUpdate();
+  };
+
+  private readonly _closeRowMenuOnEscape = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      this._closeRowMenu();
+    }
+  };
+
+  private _bindRowMenuDismiss() {
+    window.addEventListener("click", this._closeRowMenu);
+    window.addEventListener("resize", this._closeRowMenu);
+    window.addEventListener("keydown", this._closeRowMenuOnEscape);
+    // Capture, because a scroll does not bubble: the transcript scrolls in its
+    // own `overflow-y: auto` box, and a menu placed against the viewport does
+    // not follow the row it belongs to.
+    window.addEventListener("scroll", this._closeRowMenu, true);
+  }
+
+  private _unbindRowMenuDismiss() {
+    window.removeEventListener("click", this._closeRowMenu);
+    window.removeEventListener("resize", this._closeRowMenu);
+    window.removeEventListener("keydown", this._closeRowMenuOnEscape);
+    window.removeEventListener("scroll", this._closeRowMenu, true);
+  }
+
+  /**
+   * Measure the menu and place it, the frame after it is rendered.
+   *
+   * Idempotent: it does nothing once `position` is set, which is what stops the
+   * `requestUpdate` below from looping.
+   */
+  private _placeRowMenu() {
+    const open = this._rowMenu;
+    if (open == null || open.position != null) {
+      return;
+    }
+    const el = this.querySelector(".caption-row-menu") as HTMLElement | null;
+    if (el == null) {
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    open.position = rowMenuPlacement(
+      open.anchor,
+      { width: rect.width, height: rect.height },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    this.requestUpdate();
+  }
+
+  private _runRowMenu(action: CaptionRowAction, index: number) {
+    this._closeRowMenu();
+    if (action === "merge") {
+      this.mergeLine(index);
+      return;
+    }
+    this.toggleLineRemoved(index, action === "remove");
   }
 
   /**
@@ -915,8 +1048,7 @@ export class AutomaticCaption extends LitElement {
           background-color: #19181a;
           color: #ffffff;
           padding: 0.5rem;
-          border: 1px solid #26262b;
-          border-radius: 8px;
+          border-radius: 10px;
           cursor: text;
         }
 
@@ -1042,15 +1174,88 @@ export class AutomaticCaption extends LitElement {
           user-select: none;
         }
 
+        /* The !important is not decoration: devent-designsystem.css sets
+           .btn padding to .7rem 1.55rem !important, which is what made these
+           icon buttons as wide as a word of text. */
         .caption-merge {
           flex: 0 0 auto;
           line-height: 1;
-          padding: 0.25rem 0.4rem;
+          padding: 0.25rem 0.35rem !important;
         }
 
         .caption-merge .material-symbols-outlined {
           font-size: 1rem;
           vertical-align: middle;
+        }
+
+        /* ------------------------------------------- the per-line menu */
+
+        /*
+         * Fixed, not absolute: the transcript scrolls inside the panel body's
+         * overflow-y: auto, which would clip an absolutely positioned menu at
+         * the row it belongs to. The price is that it does not move with its
+         * row, which is why a scroll closes it.
+         *
+         * Placed by caption/rowMenu.ts#rowMenuPlacement, from a measurement
+         * taken in updated(). Nothing here may set left or top, or the menu is
+         * in two places at once and the one that wins depends on which rule
+         * the browser saw last.
+         */
+        .caption-row-menu {
+          position: fixed;
+          z-index: 9100;
+          display: flex;
+          flex-direction: column;
+          gap: 0.1rem;
+          min-width: 13rem;
+          max-width: 19rem;
+          padding: 0.25rem;
+          background-color: #19181a;
+          border: 1px solid #26262b;
+          border-radius: 8px;
+          box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.5);
+        }
+
+        .caption-row-menu-item {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          width: 100%;
+          padding: 0.35rem 0.5rem;
+          border: none;
+          border-radius: 6px;
+          background-color: transparent;
+          color: #ffffff;
+          font-size: 0.8rem;
+          line-height: 1.2;
+          text-align: left;
+          cursor: pointer;
+        }
+
+        .caption-row-menu-label {
+          flex: 1 1 auto;
+        }
+
+        /* Pushed to the far edge and dimmed: it names a key, and reading it as
+           part of the sentence would make the entry say two things. */
+        .caption-row-menu-hint {
+          flex: 0 0 auto;
+          margin-left: 0.75rem;
+          color: #8a8a94;
+          font-size: 0.7rem;
+        }
+
+        .caption-row-menu-item:hover:not(:disabled) {
+          background-color: #26262b;
+        }
+
+        .caption-row-menu-item:disabled {
+          opacity: 0.4;
+          cursor: default;
+        }
+
+        .caption-row-menu-item .material-symbols-outlined {
+          font-size: 1.05rem;
         }
         /* ---------------------------------------------- the window's shape */
 
@@ -1210,9 +1415,7 @@ export class AutomaticCaption extends LitElement {
         @focusin=${this._handlePanelFocusIn}
         @focusout=${this._handlePanelFocusOut}
       >
-        <div class="caption-panel-body">
-          ${this.renderBody()}
-        </div>
+        <div class="caption-panel-body">${this.renderBody()}</div>
 
         ${this.phase === "live" ? this.renderFooter() : nothing}
       </div>
@@ -1320,7 +1523,6 @@ export class AutomaticCaption extends LitElement {
               >progress_activity</span
             >`
           : html`<progress-bar percent="${view.percent}"></progress-bar>`}
-
         ${view.cancellable
           ? html`<button
               type="button"
@@ -1346,67 +1548,68 @@ export class AutomaticCaption extends LitElement {
   /** Pick a method, pick a language, pick a clip. What the window opens on. */
   renderSetup() {
     return html`<div class="caption-setup">
-        <!--
+      <!--
           No Bootstrap col here. In a column flex, col is flex: 1 0 0%, so this
           row grew to fill the whole panel and stretched both buttons the full
           height of the window. Survivable in a full-screen modal that had more
           height than content; obvious the moment the panel is docked.
         -->
-        <div class="d-flex gap-2 justify-content-center">
-          <button
-            @click=${() => this.setSttMethod("apple")}
-            ?disabled=${!this.speechAvailable}
-            class="btn btn-sm ${this.sttMethod == "apple"
-              ? "btn-primary"
-              : "btn-default"} text-light"
-          >
-            On-device
-          </button>
-          <button
-            @click=${() => this.setSttMethod("openai")}
-            class="btn btn-sm ${this.sttMethod == "openai"
-              ? "btn-primary"
-              : "btn-default"} text-light"
-          >
-            OpenAI
-          </button>
-        </div>
+      <div class="d-flex gap-2 justify-content-center">
+        <button
+          @click=${() => this.setSttMethod("apple")}
+          ?disabled=${!this.speechAvailable}
+          class="btn btn-sm ${this.sttMethod == "apple"
+            ? "btn-primary"
+            : "btn-default"} text-light"
+        >
+          On-device
+        </button>
+        <button
+          @click=${() => this.setSttMethod("openai")}
+          class="btn btn-sm ${this.sttMethod == "openai"
+            ? "btn-primary"
+            : "btn-default"} text-light"
+        >
+          OpenAI
+        </button>
+      </div>
 
-        ${this.speechAvailable
-          ? html``
-          : html`<span class="text-secondary" style="font-size: 0.75rem;"
-              >${this.speechReason}</span
-            >`}
+      ${this.speechAvailable
+        ? html``
+        : html`<span class="text-secondary" style="font-size: 0.75rem;"
+            >${this.speechReason}</span
+          >`}
 
-        <div class="input-group ${this.sttMethod == "apple" ? "" : "d-none"}">
-          <span class="input-group-text bg-dark text-light">Language</span>
-          <select
-            id="CartcutSttLocale"
-            class="form-select form-control bg-default bg-dark text-light"
-            @change=${(e) => {
-              this.selectedLocale = e.target.value;
-              this.requestUpdate();
-            }}
-          >
-            ${this.locales.map(
-              (locale) => html`<option
+      <div class="input-group ${this.sttMethod == "apple" ? "" : "d-none"}">
+        <span class="input-group-text bg-dark text-light">Language</span>
+        <select
+          id="CartcutSttLocale"
+          class="form-select form-control bg-default bg-dark text-light"
+          @change=${(e) => {
+            this.selectedLocale = e.target.value;
+            this.requestUpdate();
+          }}
+        >
+          ${this.locales.map(
+            (locale) =>
+              html`<option
                 value=${locale.id}
                 ?selected=${locale.id === this.selectedLocale}
               >
                 ${localeLabel(locale)}
               </option>`,
-            )}
-          </select>
-        </div>
+          )}
+        </select>
+      </div>
 
-        <button
-          class="btn btn-sm btn-default text-light mt-1 ${this.isLoadVideo
-            ? "d-none"
-            : ""}"
-          @click=${this.handleClickLoadVideo}
-        >
-          Load video
-        </button>
+      <button
+        class="btn btn-sm btn-default text-light mt-1 ${this.isLoadVideo
+          ? "d-none"
+          : ""}"
+        @click=${this.handleClickLoadVideo}
+      >
+        Load video
+      </button>
     </div>`;
   }
 
@@ -1438,56 +1641,51 @@ export class AutomaticCaption extends LitElement {
     return html`
       <div class="caption-editor-lines">
         ${this.lines.map(
-          (line, index) => html`<div
-            class="text-light caption ${line.removed === true
-              ? "caption-cut"
-              : ""}"
-          >
-            <div class="caption-ribbon">
-              ${line.words.map(
-                (word, wordIndex) => html`<span
-                  @click=${() => this.clickCaptionText(word.start)}
-                  class="${activeLine === index && activeWord === wordIndex
-                    ? "caption-part active"
-                    : "caption-part"}"
-                  >${word.word}</span
-                >`,
-              )}
-            </div>
+          (line, index) =>
+            html`<div
+              class="text-light caption ${line.removed === true
+                ? "caption-cut"
+                : ""}"
+            >
+              <div class="caption-ribbon">
+                ${line.words.map(
+                  (word, wordIndex) =>
+                    html`<span
+                      @click=${() => this.clickCaptionText(word.start)}
+                      class="${activeLine === index && activeWord === wordIndex
+                        ? "caption-part active"
+                        : "caption-part"}"
+                      >${word.word}</span
+                    >`,
+                )}
+              </div>
 
-            <div class="d-flex gap-1 mt-2 align-items-center">
-              <button
-                class="btn btn-sm btn-secondary caption-merge"
-                ?disabled=${index === 0 || line.removed === true}
-                title="Merge into the line above (Backspace at the start of the line)"
-                @click=${() => this.mergeLine(index)}
-              >
-                <span class="material-symbols-outlined icon-white">merge</span>
-              </button>
-              <button
-                class="btn btn-sm btn-secondary caption-merge"
-                title=${line.removed === true
-                  ? "Keep this line, and its footage"
-                  : "Delete this line and cut its footage out of the video"}
-                @click=${() =>
-                  this.toggleLineRemoved(index, line.removed !== true)}
-              >
-                <span class="material-symbols-outlined icon-white"
-                  >${line.removed === true ? "undo" : "content_cut"}</span
+              <div class="d-flex gap-1 mt-1 align-items-center">
+                <button
+                  class="btn btn-sm btn-secondary caption-merge caption-row-more"
+                  title="Line actions"
+                  aria-haspopup="menu"
+                  aria-expanded=${this._rowMenu?.index === index
+                    ? "true"
+                    : "false"}
+                  @click=${(e: MouseEvent) => this._toggleRowMenu(e, index)}
                 >
-              </button>
-              <input
-                @input=${(e: Event) => this._handleChangeInput(e, index)}
-                @keydown=${(e: KeyboardEvent) =>
-                  this._handleCaptionKeydown(e, index)}
-                class="form-control bg-dark text-light"
-                type="text"
-                id="analyzedEditCaption_${index}"
-                ?disabled=${line.removed === true}
-                .value=${line.text}
-              />
-            </div>
-          </div>`,
+                  <span class="material-symbols-outlined icon-white"
+                    >more_vert</span
+                  >
+                </button>
+                <input
+                  @input=${(e: Event) => this._handleChangeInput(e, index)}
+                  @keydown=${(e: KeyboardEvent) =>
+                    this._handleCaptionKeydown(e, index)}
+                  class="form-control form-control-sm bg-dark text-light"
+                  type="text"
+                  id="analyzedEditCaption_${index}"
+                  ?disabled=${line.removed === true}
+                  .value=${line.text}
+                />
+              </div>
+            </div>`,
         )}
       </div>
 
@@ -1509,7 +1707,57 @@ export class AutomaticCaption extends LitElement {
           align bottom
         </button>
       </div>
+
+      ${this.renderRowMenu()}
     `;
+  }
+
+  /**
+   * The open line's menu, or nothing.
+   *
+   * Rendered once, outside the rows, so that the element Lit patches is the
+   * same one from open to close: the placement is written onto it after it is
+   * measured, and a menu that moved in the template on every playhead tick
+   * would be measured again on every tick.
+   */
+  renderRowMenu() {
+    const open = this._rowMenu;
+    if (open == null) {
+      return nothing;
+    }
+    const line = this.lines[open.index];
+    if (line == null) {
+      return nothing;
+    }
+
+    const position = open.position;
+    return html`<div
+      class="caption-row-menu"
+      role="menu"
+      style=${position == null
+        ? "visibility:hidden;left:0px;top:0px;"
+        : `left:${position.x}px;top:${position.y}px;`}
+      @click=${(event: Event) => event.stopPropagation()}
+    >
+      ${captionRowMenu({
+        index: open.index,
+        removed: line.removed === true,
+      }).map(
+        (item) =>
+          html`<button
+            class="caption-row-menu-item"
+            role="menuitem"
+            ?disabled=${item.disabled}
+            @click=${() => this._runRowMenu(item.action, open.index)}
+          >
+            <span class="material-symbols-outlined">${item.icon}</span>
+            <span class="caption-row-menu-label">${item.label}</span>
+            ${item.hint == null
+              ? nothing
+              : html`<span class="caption-row-menu-hint">${item.hint}</span>`}
+          </button>`,
+      )}
+    </div>`;
   }
 
   /**
@@ -1555,7 +1803,6 @@ export class AutomaticCaption extends LitElement {
             : html`<span class="caption-summary text-light">
                 ${(removedMs / 1000).toFixed(1)}s cut out.
               </span>`}
-
         ${silence == null
           ? nothing
           : html`<button
@@ -1594,7 +1841,11 @@ export class AutomaticCaption extends LitElement {
       (row) => html`
         <tr @click=${() => this.handleRowSelection(row)}>
           <th scope="row">${row.id}</th>
-          <td class="text-truncate" style="max-width: 26rem;" title=${row.localpath}>
+          <td
+            class="text-truncate"
+            style="max-width: 26rem;"
+            title=${row.localpath}
+          >
             ${sourceDisplayName(row.localpath)}
           </td>
           <td>
