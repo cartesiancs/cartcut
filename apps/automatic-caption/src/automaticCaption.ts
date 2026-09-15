@@ -831,15 +831,13 @@ export class AutomaticCaption extends LitElement {
    * decide whether it opens downwards; the template keeps it hidden until
    * `updated` has answered rather than letting it flash at the wrong place.
    */
-  private _menu:
-    | {
-        kind: "line" | "placement";
-        /** The line, for `"line"`. Ignored otherwise. */
-        index: number;
-        anchor: MenuAnchor;
-        position: MenuPoint | null;
-      }
-    | null = null;
+  private _menu: {
+    kind: "line" | "placement";
+    /** The line, for `"line"`. Ignored otherwise. */
+    index: number;
+    anchor: MenuAnchor;
+    position: MenuPoint | null;
+  } | null = null;
 
   /**
    * Open a menu, or close the one this trigger already has open.
@@ -1629,7 +1627,7 @@ export class AutomaticCaption extends LitElement {
           : ""}"
         @click=${this.handleClickLoadVideo}
       >
-        Load video
+        Select
       </button>
     </div>`;
   }
@@ -1759,18 +1757,19 @@ export class AutomaticCaption extends LitElement {
     }
 
     return captionRowMenu({ index, removed: line.removed === true }).map(
-      (item) => html`<button
-        class="caption-menu-item"
-        role="menuitem"
-        ?disabled=${item.disabled}
-        @click=${() => this._runRowMenu(item.action, index)}
-      >
-        <span class="material-symbols-outlined">${item.icon}</span>
-        <span class="caption-menu-label">${item.label}</span>
-        ${item.hint == null
-          ? nothing
-          : html`<span class="caption-menu-hint">${item.hint}</span>`}
-      </button>`,
+      (item) =>
+        html`<button
+          class="caption-menu-item"
+          role="menuitem"
+          ?disabled=${item.disabled}
+          @click=${() => this._runRowMenu(item.action, index)}
+        >
+          <span class="material-symbols-outlined">${item.icon}</span>
+          <span class="caption-menu-label">${item.label}</span>
+          ${item.hint == null
+            ? nothing
+            : html`<span class="caption-menu-hint">${item.hint}</span>`}
+        </button>`,
     );
   }
 
@@ -1784,20 +1783,21 @@ export class AutomaticCaption extends LitElement {
    */
   private renderPlacementEntries() {
     return captionPlacementMenu(this._verticalPlacement).map(
-      (item) => html`<button
-        class="caption-menu-item"
-        role="menuitemradio"
-        aria-checked=${item.selected ? "true" : "false"}
-        @click=${() => this._runPlacementMenu(item.placement)}
-      >
-        <span class="material-symbols-outlined">${item.icon}</span>
-        <span class="caption-menu-label">${item.label}</span>
-        ${item.selected
-          ? html`<span class="material-symbols-outlined caption-menu-check"
-              >check</span
-            >`
-          : nothing}
-      </button>`,
+      (item) =>
+        html`<button
+          class="caption-menu-item"
+          role="menuitemradio"
+          aria-checked=${item.selected ? "true" : "false"}
+          @click=${() => this._runPlacementMenu(item.placement)}
+        >
+          <span class="material-symbols-outlined">${item.icon}</span>
+          <span class="caption-menu-label">${item.label}</span>
+          ${item.selected
+            ? html`<span class="material-symbols-outlined caption-menu-check"
+                >check</span
+              >`
+            : nothing}
+        </button>`,
     );
   }
 
