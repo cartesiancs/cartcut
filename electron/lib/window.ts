@@ -1,6 +1,5 @@
 import { BrowserWindow, Menu, screen } from "electron";
 import { installMenu } from "./menu.js";
-import { autoUpdater } from "electron-updater";
 import { installDisplayMediaHandler } from "./displayMedia.js";
 
 import isDev from "electron-is-dev";
@@ -30,11 +29,8 @@ const window = {
       show: show,
     });
 
-    // Not `checkForUpdatesAndNotify`: that raises a native notification once
-    // the download finishes, which would land alongside the "Update ready"
-    // dialog in `lib/autoUpdater.ts`. Development is already a no-op — the
-    // updater bails on `app.isPackaged`.
-    autoUpdater.checkForUpdates();
+    // The update check is `installUpdater` in `electron/main.ts`, which needs
+    // this window's `webContents` to report to.
     installMenu();
 
     // The handler moved to `lib/displayMedia.ts`. The one that used to be

@@ -275,10 +275,12 @@ features/adjust/       15 sliders: tone bakes into a LUT, effects run a finish p
 features/template/     a whole edit standing in for one clip (.cttpl)
 features/record/       the screen recorder's pure logic; the windows are apps/overlay-record
 features/reverse/      reversed media files, made by electron/lib/reversePipeline.ts
+features/update/       the update card; main's half is electron/lib/updateSession.ts
 features/editor/       actions, menuCommands, shortcuts, frameRate
 electron/mcp/          the MCP server, the tools, the bridge to the renderer
 electron/render/       ffmpegArgs, the frame pipe, the audio envelope expression
-electron/lib/          ffmpeg, menus, autosave cache, recorder, speech, templates
+electron/lib/          ffmpeg, menus, autosave cache, recorder, speech, templates,
+                       the updater
 ```
 
 The handful of facts inside those that are worth stating up front:

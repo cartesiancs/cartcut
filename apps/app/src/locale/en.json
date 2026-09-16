@@ -98,5 +98,17 @@
   "window": {
     "automatic_caption": "Automatic Caption",
     "text_to_speech": "Text to Speech"
+  },
+  "update": {
+    "available": "A new version is available. Download it?",
+    "download": "Download",
+    "downloading": "Downloading the update",
+    "preparing": "Preparing to install",
+    "ready": "The update is ready to install.",
+    "restart": "Restart to update",
+    "failed": "The update could not be downloaded.",
+    "retry": "Try again",
+    "unsaved_confirm": "You have unsaved changes. Restart anyway?",
+    "close": "Close"
   }
 }

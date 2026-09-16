@@ -1,8 +1,7 @@
 import { Menu, app, ipcMain } from "electron";
-import { autoUpdater } from "electron-updater";
 import { renderMain } from "./lib/render.js";
 import { window } from "./lib/window.js";
-import { updater } from "./lib/autoUpdater.js";
+import { installUpdater, isQuittingForUpdate } from "./lib/autoUpdater.js";
 
 import config from "./config.json";
 
@@ -69,13 +68,6 @@ if (isDev) {
 // const FFMPEG_BIN_PATH = ffmpegConfig.FFMPEG_BIN_PATH;
 // const FFMPEG_PATH = ffmpegConfig.FFMPEG_PATH;
 // const FFPROBE_PATH = ffmpegConfig.FFPROBE_PATH;
-
-autoUpdater.on("checking-for-update", updater.checkingForUpdate);
-autoUpdater.on("update-available", updater.updateAvailable);
-autoUpdater.on("update-not-available", updater.updateNotAvailable);
-autoUpdater.on("error", updater.error);
-autoUpdater.on("download-progress", updater.downloadProgress);
-autoUpdater.on("update-downloaded", updater.updateDownloaded);
 
 // const createFfmpegDir = async () => {
 //   let mkdir = await fsp.mkdir(FFMPEG_BIN_PATH, { recursive: true });
@@ -356,6 +348,11 @@ if (!gotTheLock) {
     // tool call fails with "editor window is not available".
     attachBridge(mainWindow.webContents);
 
+    // Checks once, now, and reports to the update card in this window. It may
+    // answer before the page has loaded; the card asks for the last answer
+    // when it mounts.
+    installUpdater(mainWindow.webContents);
+
     // Reads the recovery cache and sweeps last run's debris, then draws the
     // File → Auto Save submenu. Not awaited: a slow or unreadable cache must
     // not hold up the editor, and the menu rebuilds itself when the list
@@ -404,6 +401,13 @@ function watchMenuOpen(): void {
 }
 
 mainWindow.on("close", function (e) {
+      // `quitAndInstall` closes every window and relaunches once they are all
+      // gone. Cancelled here, the close would go to the renderer, which ends
+      // in `app.exit(0)`: the update installs and the app never comes back.
+      // The card has already asked about unsaved work.
+      if (isQuittingForUpdate()) {
+        return;
+      }
       e.preventDefault();
       mainWindow.webContents.send("WHEN_CLOSE_EVENT", "message");
     });

@@ -42,6 +42,7 @@ import "./features/keyframe/keyframeEditor";
 import "./features/proxy/proxyPanel";
 import "./features/menu/menuDropdown";
 import "./features/onboarding/onboardingOverlay";
+import "./features/update/updatePrompt";
 
 
 import "./features/option/optionGroup";

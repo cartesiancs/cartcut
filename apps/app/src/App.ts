@@ -123,6 +123,7 @@ export class App extends LitElement {
 
         <warning-demo></warning-demo>
         <onboarding-overlay></onboarding-overlay>
+        <update-prompt></update-prompt>
       </body>
     `;
   }

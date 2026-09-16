@@ -126,7 +126,8 @@
     },
     "files": [
       "!src/**/*",
-      "!electron/**/*"
+      "!electron/**/*",
+      "!dev-app-update.yml"
     ],
     "publish": {
       "provider": "github",

@@ -337,6 +337,23 @@ const request = {
     },
   },
   /**
+   * The update card's end of `electron/lib/autoUpdater.ts`.
+   *
+   * `getState` answers the last event main sent, or `null`, because the check
+   * can finish before the page loads. `install` answers `false` unless the
+   * update is ready to install.
+   */
+  update: {
+    getState: () => ipcRenderer.invoke("update:getState"),
+    download: () => ipcRenderer.invoke("update:download"),
+    install: () => ipcRenderer.invoke("update:install"),
+    onEvent: (handler) => {
+      const wrapped = (_event, payload) => handler(payload);
+      ipcRenderer.on("update:event", wrapped);
+      return () => ipcRenderer.removeListener("update:event", wrapped);
+    },
+  },
+  /**
    * Where a file goes quiet, in source milliseconds.
    *
    * One call, no job id and no progress: the measurement is cached on disk by

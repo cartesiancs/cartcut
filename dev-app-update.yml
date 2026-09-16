@@ -1,0 +1,10 @@
+# Read only when CARTCUT_UPDATE_DEV=1 (electron/lib/autoUpdater.ts), to drive
+# the update card from `npm run start`. A packaged app reads the app-update.yml
+# electron-builder writes into Resources instead.
+#
+# Its own cache directory, so a development download never replaces the
+# update.zip an installed Cartcut keeps for differential downloads.
+provider: github
+owner: cartesiancs
+repo: cartcut
+updaterCacheDirName: cartcut-app-updater-dev

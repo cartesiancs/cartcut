@@ -98,5 +98,17 @@
   "window": {
     "automatic_caption": "자동 자막",
     "text_to_speech": "음성 합성"
+  },
+  "update": {
+    "available": "새 버전이 있습니다. 다운로드하시겠습니까?",
+    "download": "다운로드",
+    "downloading": "업데이트 다운로드 중",
+    "preparing": "설치 준비 중",
+    "ready": "업데이트를 설치할 준비가 됐습니다.",
+    "restart": "재시작하여 업데이트",
+    "failed": "업데이트를 받지 못했습니다.",
+    "retry": "다시 시도",
+    "unsaved_confirm": "저장하지 않은 변경사항이 있습니다. 그래도 재시작할까요?",
+    "close": "닫기"
   }
 }
