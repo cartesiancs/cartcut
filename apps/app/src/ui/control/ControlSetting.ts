@@ -37,6 +37,11 @@ import {
   type PresetName,
 } from "../../features/export/settings";
 import { IS_MAC } from "../../utils/platform";
+import {
+  ONBOARDING_RESTART_EVENT,
+  browserOnboardingFlagPort,
+  resetOnboarding,
+} from "../../features/onboarding/onboardingFlag";
 
 /**
  * The two halves of the settings panel.
@@ -68,8 +73,20 @@ const RESOLUTION_PRESETS: {
 }[] = [
   { w: 1920, h: 1080, ratio: "16:9", tag: "FHD", title: "1920×1080 (desktop)" },
   { w: 3840, h: 2160, ratio: "16:9", tag: "4K", title: "3840×2160 (4K)" },
-  { w: 1080, h: 1080, ratio: "1:1", tag: "Square", title: "1080×1080 (square)" },
-  { w: 1080, h: 1920, ratio: "9:16", tag: "Mobile", title: "1080×1920 (mobile)" },
+  {
+    w: 1080,
+    h: 1080,
+    ratio: "1:1",
+    tag: "Square",
+    title: "1080×1080 (square)",
+  },
+  {
+    w: 1080,
+    h: 1920,
+    ratio: "9:16",
+    tag: "Mobile",
+    title: "1080×1920 (mobile)",
+  },
 ];
 
 /** Longest side of a preset's glyph, in px. */
@@ -208,6 +225,19 @@ export class ControlSetting extends LitElement {
     } else {
       this.lc.changeLanguage("ko");
     }
+  }
+
+  /**
+   * Clears the "tour is done" flag and puts the tour back on screen.
+   *
+   * Two steps rather than one call into the overlay: this panel does not know
+   * the overlay's tag, and the event still shows the tour on a build where the
+   * flag could not be cleared. No confirmation — the tour is a handful of Next
+   * clicks and a Skip, and it writes the flag again on the way out.
+   */
+  private async _handleClickResetOnboarding() {
+    await resetOnboarding(browserOnboardingFlagPort);
+    window.dispatchEvent(new CustomEvent(ONBOARDING_RESTART_EVENT));
   }
 
   _handleClickResolution(w, h) {
@@ -525,9 +555,9 @@ export class ControlSetting extends LitElement {
               <span class="resolution-preset-glyph-box">
                 <span
                   class="resolution-preset-glyph"
-                  style="width: ${Math.round(preset.w * scale)}px; height: ${Math.round(
-                    preset.h * scale,
-                  )}px;"
+                  style="width: ${Math.round(
+                    preset.w * scale,
+                  )}px; height: ${Math.round(preset.h * scale)}px;"
                 ></span>
               </span>
               <span>${preset.ratio}</span>
@@ -783,11 +813,15 @@ export class ControlSetting extends LitElement {
   }
 
   /**
-   * The two modal buttons and the version, below both panes.
+   * The two modal buttons, the tour reset and the version, below both panes.
    *
    * Not in either tab because they belong to neither. Save and Load used to sit
    * here too; they are File → Save Project (⌘S) and Open Project (⌘O), and a
    * second copy of a menu command is the thing that goes stale.
+   *
+   * The reset carries its label rather than joining the icon row above it: the
+   * other two are conventional glyphs, and nothing about an icon says which of
+   * the app's several things it would put back.
    */
   private renderCommonSection() {
     return html`
@@ -808,6 +842,15 @@ export class ControlSetting extends LitElement {
       >
         <span class="material-symbols-outlined"> language </span>
       </button>
+
+      <!-- <button
+        type="button"
+        class="btn btn-sm btn-default text-light w-100 mt-2 d-flex justify-content-between align-items-center"
+        @click=${this._handleClickResetOnboarding}
+      >
+        <span>${this.lc.t("setting.reset_onboarding")}</span>
+        <span class="material-symbols-outlined"> restart_alt </span>
+      </button> -->
 
       <p class="text-secondary mt-3 mb-0" ref="appVersion">
         ${this.appVersion}

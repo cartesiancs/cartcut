@@ -1,6 +1,6 @@
 /**
- * The four cards a first-run user pages through, transcribed from the Figma
- * frames `1090:2`, `1090:14`, `1099:111` and `1099:208`.
+ * The five cards a first-run user pages through, transcribed from the Figma
+ * frames `1090:2`, `1090:14`, `1099:111`, `1338:7` and `1099:208`.
  *
  * Kept free of DOM and of Lit so the sequencing can be tested under
  * `environment: "node"` — the overlay component is then only markup and event
@@ -8,11 +8,25 @@
  */
 
 /**
- * An illustration, sized the way it was drawn.
+ * The card, at the literal pixels it is drawn at rather than scaled to the
+ * window. `sass/style/_onboarding.scss` carries the same two numbers; they are
+ * here so a placement below can be stated as "reaches the edge" and checked.
+ */
+export const ONBOARDING_CARD = { width: 657, height: 465 } as const;
+
+/**
+ * An illustration, sized and placed the way it was drawn.
  *
- * The undraw source files are ~960px wide, so both dimensions are pinned here
- * rather than left to `auto`: the art has to occupy the box the designer gave
- * it, and each of the three has a different aspect ratio.
+ * Both dimensions are pinned here rather than left to `auto`: the art has to
+ * occupy the box the designer gave it, and no two of the five share an aspect
+ * ratio.
+ *
+ * The Figma file places the three screenshots as whole app windows that run
+ * off the card, and the committed `.webp`s are already cropped to the part
+ * that survives. So each one is placed at the *visible* box, which reaches the
+ * card's right and bottom edges, and not at the much larger window the file
+ * draws. `object-fit: cover` in the stylesheet absorbs the half-pixel the two
+ * aspect ratios differ by.
  */
 export interface OnboardingArt {
   src: string;
@@ -20,6 +34,40 @@ export interface OnboardingArt {
   height: number;
   /** Distance from the top of the card, in px. */
   top: number;
+  /**
+   * Distance from the card's left edge, in px. Absent centres the art, which
+   * is how the wordmark and the trophy are drawn; the screenshots are placed
+   * off-centre and run to the card's far corner instead.
+   */
+  left?: number;
+  /**
+   * Which edge the art travels in from when its card arrives.
+   *
+   * Absent means it only fades up, which is what the two drawings do. The two
+   * screenshots cut off at a side come in from that side, so the motion
+   * continues the picture rather than contradicting it; the one drawn whole
+   * rises from below instead. Leaving is always a plain fade, whatever the
+   * arrival was.
+   *
+   * `motion.ts` holds the distances and the springs; `_onboarding.scss` has
+   * one rule per direction, and `motion.test.ts` pins the two lists together.
+   */
+  enter?: "bottom" | "right" | "left";
+}
+
+/**
+ * The gradient that sinks a screenshot into the card, so the title above it
+ * and the buttons over it have something to sit on.
+ *
+ * It always reaches the card's bottom edge, so `top` is the only geometry it
+ * needs. `fadeFrom` is a percentage of the band `top` opens, not of the card,
+ * which is why the card whose art starts highest also fades earliest.
+ */
+export interface OnboardingScrim {
+  /** Distance from the top of the card, in px. */
+  top: number;
+  /** Percent down the band at which the card colour starts taking over. */
+  fadeFrom: number;
 }
 
 export interface OnboardingStep {
@@ -27,6 +75,8 @@ export interface OnboardingStep {
   titleKey?: string;
   subtitleKey?: string;
   art: OnboardingArt;
+  /** Absent on the two cards whose art is an illustration with nothing to sink. */
+  scrim?: OnboardingScrim;
   /** The last card swaps Skip/Next for a single full-width Finish. */
   isLast: boolean;
 }
@@ -58,21 +108,40 @@ export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
   {
     titleKey: "onboarding.free_open_source",
     art: {
-      src: `${IMAGE_DIR}/undraw_organizing-work_gmo9.svg`,
-      width: 236,
-      height: 208,
-      top: 145,
+      src: `${IMAGE_DIR}/onboarding-1.webp`,
+      width: 517,
+      height: 312,
+      top: 133,
+      left: 70,
+      enter: "bottom",
     },
+    scrim: { top: 139, fadeFrom: 29.523 },
     isLast: false,
   },
   {
-    titleKey: "onboarding.ai_edit_mcp",
+    titleKey: "onboarding.utilities",
     art: {
-      src: `${IMAGE_DIR}/undraw_progress-bar_o44f.svg`,
-      width: 298,
-      height: 172,
-      top: 146,
+      src: `${IMAGE_DIR}/onboarding-2.webp`,
+      width: 584,
+      height: 337,
+      top: 128,
+      left: 73,
+      enter: "right",
     },
+    scrim: { top: 139, fadeFrom: 14.824 },
+    isLast: false,
+  },
+  {
+    titleKey: "onboarding.ai_transcription",
+    art: {
+      src: `${IMAGE_DIR}/onboarding-3.webp`,
+      width: 657,
+      height: 359,
+      top: 106,
+      left: 0,
+      enter: "left",
+    },
+    scrim: { top: 123, fadeFrom: 9.675 },
     isLast: false,
   },
   {
@@ -93,9 +162,3 @@ export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
  */
 export const nextStep = (index: number): number =>
   Math.min(index + 1, ONBOARDING_STEPS.length - 1);
-
-/** Clamps at the first card, which offers Skip rather than Prev. */
-export const prevStep = (index: number): number => Math.max(index - 1, 0);
-
-/** The key the completion flag is stored under, via `store:set`/`store:get`. */
-export const ONBOARDING_STORE_KEY = "ONBOARDING_COMPLETED";

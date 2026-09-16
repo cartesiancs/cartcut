@@ -21,6 +21,7 @@
     "preset_medium": "Medium",
     "preset_low": "Low",
     "preset_custom": "Custom",
+    "reset_onboarding": "Reset onboarding",
     "advanced_settings": "Advanced settings",
     "container": "Container",
     "video_codec": "Video codec",
@@ -63,10 +64,10 @@
   "onboarding": {
     "welcome_subtitle": "welcome to cartcut. a powerful video editor.",
     "free_open_source": "Free & Open Source",
-    "ai_edit_mcp": "AI Edit & MCP",
+    "utilities": "Powerful Utilities",
+    "ai_transcription": "AI Transcription",
     "lets_start": "Let’s start",
     "skip": "Skip",
-    "prev": "Prev",
     "next": "Next",
     "finish": "Finish"
   },

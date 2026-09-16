@@ -1,24 +1,24 @@
 import { LitElement, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { LocaleController } from "../../controllers/locale";
+import { ONBOARDING_STEPS, nextStep } from "./steps";
 import {
-  ONBOARDING_STEPS,
-  ONBOARDING_STORE_KEY,
-  nextStep,
-  prevStep,
-} from "./steps";
+  ONBOARDING_RESTART_EVENT,
+  browserOnboardingFlagPort,
+  isOnboardingComplete,
+  markOnboardingComplete,
+} from "./onboardingFlag";
+import { FADE_MS, ONBOARDING_MOTION, onboardingMotionStyle } from "./motion";
 
 /**
- * How long a fade lasts, in ms.
- *
- * The stylesheet does not hardcode this: it is handed to the CSS as
- * `--onboarding-fade` on the scrim, so the transitions and the timers that
- * wait for them cannot drift apart.
+ * Every duration and curve is `motion.ts`, handed to the stylesheet as custom
+ * properties on the scrim. Nothing here hardcodes a time that CSS also knows:
+ * the transitions and the timers that wait for them cannot drift apart.
  */
-const FADE_MS = 200;
+const MOTION_STYLE = onboardingMotionStyle();
 
 /**
- * The first-run tour: four cards over a dimmed editor, shown once and then
+ * The first-run tour: five cards over a dimmed editor, shown once and then
  * remembered.
  *
  * Light DOM, like the rest of the app's components — the styles live in
@@ -43,10 +43,46 @@ export class OnboardingOverlay extends LitElement {
   @state()
   private leaving = false;
 
+  /**
+   * Set for one step's worth of arrival, which is what puts the art's entrance
+   * animation on it.
+   *
+   * A CSS animation restarts when the class carrying it is taken off and put
+   * back, so this has to be false between steps rather than simply true on
+   * every one. `_goTo` clears it as the outgoing card starts to fade, which is
+   * both far enough ahead of the next render to count as a separate frame and
+   * behind a fade that is already underway.
+   */
+  @state()
+  private entering = false;
+
   private swapTimer: number | null = null;
   private leaveTimer: number | null = null;
+  private enterTimer: number | null = null;
 
   private boundKeydown = this._handleKeydown.bind(this);
+
+  /**
+   * Puts the tour back from the first card, whatever it was doing.
+   *
+   * Settings ▸ Reset onboarding clears the flag and fires this; the two are
+   * separate so neither has to know the other happened, and firing it on a
+   * build where the flag could not be cleared still shows the tour.
+   *
+   * An arrow property, not a method: `removeEventListener` needs the same
+   * reference `addEventListener` was given.
+   */
+  private handleRestart = () => {
+    this._clearTimers();
+    this.swapping = false;
+    this.leaving = false;
+    this.entering = false;
+    this.stepIndex = 0;
+    // From false, this re-inserts the scrim, which is what re-runs its
+    // fade-in animation.
+    this.visible = true;
+    this._beginEntrance();
+  };
 
   createRenderRoot() {
     return this;
@@ -59,11 +95,13 @@ export class OnboardingOverlay extends LitElement {
     // `elementTimelineCanvas`, `Timeline`). While the tour is up, space must
     // not start playback behind it.
     window.addEventListener("keydown", this.boundKeydown, true);
+    window.addEventListener(ONBOARDING_RESTART_EVENT, this.handleRestart);
     this._decideVisibility();
   }
 
   disconnectedCallback() {
     window.removeEventListener("keydown", this.boundKeydown, true);
+    window.removeEventListener(ONBOARDING_RESTART_EVENT, this.handleRestart);
     this._clearTimers();
     super.disconnectedCallback();
   }
@@ -71,54 +109,36 @@ export class OnboardingOverlay extends LitElement {
   private _clearTimers() {
     if (this.swapTimer !== null) window.clearTimeout(this.swapTimer);
     if (this.leaveTimer !== null) window.clearTimeout(this.leaveTimer);
+    if (this.enterTimer !== null) window.clearTimeout(this.enterTimer);
     this.swapTimer = null;
     this.leaveTimer = null;
+    this.enterTimer = null;
   }
 
   /**
-   * `electron-store` is the record that matters, but the web and demo builds
-   * stub `store.get` out to a string, so the flag is mirrored into
-   * `localStorage`. Either one saying "done" is enough; a browser that refuses
-   * storage just means the tour shows again, never a crash.
+   * Arms the arriving card's entrance for exactly as long as it runs.
+   *
+   * One timer for all three directions: `enterMs` is the longest of them, and
+   * the class only has to outlast whichever animation is actually playing.
    */
-  private async _decideVisibility() {
-    if (this._readLocalFlag()) return;
+  private _beginEntrance() {
+    if (this.enterTimer !== null) window.clearTimeout(this.enterTimer);
 
-    try {
-      const stored = await window.electronAPI.req.store.get(
-        ONBOARDING_STORE_KEY,
-      );
-      if (stored?.value === true) return;
-    } catch (error) {
-      console.warn("onboarding: could not read the completion flag", error);
-    }
+    this.entering = true;
+    this.enterTimer = window.setTimeout(() => {
+      this.entering = false;
+      this.enterTimer = null;
+    }, ONBOARDING_MOTION.enterMs);
+  }
+
+  /** Where the flag lives, and what a refused store means, is `onboardingFlag.ts`. */
+  private async _decideVisibility() {
+    if (await isOnboardingComplete(browserOnboardingFlagPort)) return;
 
     // The scrim fades itself in: it carries a CSS animation that runs the
     // moment it is inserted, which is right now.
     this.visible = true;
-  }
-
-  private _readLocalFlag(): boolean {
-    try {
-      return window.localStorage.getItem(ONBOARDING_STORE_KEY) === "true";
-    } catch {
-      return false;
-    }
-  }
-
-  private _persist() {
-    try {
-      window.localStorage.setItem(ONBOARDING_STORE_KEY, "true");
-    } catch {
-      // A build without storage still gets a working tour, just not a
-      // remembered one.
-    }
-
-    window.electronAPI.req.store
-      .set(ONBOARDING_STORE_KEY, true)
-      ?.catch?.((error) =>
-        console.warn("onboarding: could not persist the completion flag", error),
-      );
+    this._beginEntrance();
   }
 
   /**
@@ -130,10 +150,13 @@ export class OnboardingOverlay extends LitElement {
     if (this.swapping || this.leaving || index === this.stepIndex) return;
 
     this.swapping = true;
+    // Cleared here, not on arrival: see the field's note.
+    this.entering = false;
     this.swapTimer = window.setTimeout(() => {
       this.stepIndex = index;
       this.swapping = false;
       this.swapTimer = null;
+      this._beginEntrance();
     }, FADE_MS);
   }
 
@@ -144,7 +167,8 @@ export class OnboardingOverlay extends LitElement {
   private _complete() {
     if (this.leaving) return;
 
-    this._persist();
+    // Never rejects, so there is nothing here to catch.
+    void markOnboardingComplete(browserOnboardingFlagPort);
     this.leaving = true;
     this.leaveTimer = window.setTimeout(() => {
       this.visible = false;
@@ -159,10 +183,6 @@ export class OnboardingOverlay extends LitElement {
       return;
     }
     this._goTo(nextStep(this.stepIndex));
-  }
-
-  private _handlePrev() {
-    this._goTo(prevStep(this.stepIndex));
   }
 
   private _handleKeydown(event: KeyboardEvent) {
@@ -186,11 +206,12 @@ export class OnboardingOverlay extends LitElement {
     if (!this.visible) return nothing;
 
     const step = ONBOARDING_STEPS[this.stepIndex];
+    const isLast = step.isLast;
 
     return html`
       <div
         class="onboarding-scrim ${this.leaving ? "is-leaving" : ""}"
-        style="--onboarding-fade: ${FADE_MS}ms;"
+        style=${MOTION_STYLE}
       >
         <div
           class="onboarding-card"
@@ -198,18 +219,21 @@ export class OnboardingOverlay extends LitElement {
           aria-modal="true"
           aria-label="Cartcut onboarding"
         >
+          <!-- Drawn in the order the design stacks them: the art first, the
+               gradient that sinks it into the card over that, and the words on
+               top of both. -->
           <div
             class="onboarding-content ${this.swapping ? "is-swapping" : ""}"
           >
-            ${step.titleKey
-              ? html`<h2 class="onboarding-title">
-                  ${this.lc.t(step.titleKey)}
-                </h2>`
-              : nothing}
-
             <img
-              class="onboarding-art"
-              style="top: ${step.art.top}px;"
+              class="onboarding-art ${step.art.left === undefined
+                ? ""
+                : "onboarding-art--placed"} ${step.art.enter
+                ? `onboarding-art--from-${step.art.enter}`
+                : ""} ${this.entering ? "is-entering" : ""}"
+              style="top: ${step.art.top}px;${step.art.left === undefined
+                ? ""
+                : ` left: ${step.art.left}px;`}"
               src="${step.art.src}"
               width="${step.art.width}"
               height="${step.art.height}"
@@ -217,41 +241,58 @@ export class OnboardingOverlay extends LitElement {
               draggable="false"
             />
 
+            ${step.scrim
+              ? html`<div
+                  class="onboarding-art-fade"
+                  style="top: ${step.scrim.top}px; --onboarding-art-fade-from: ${step
+                    .scrim.fadeFrom}%;"
+                ></div>`
+              : nothing}
+            ${step.titleKey
+              ? html`<h2 class="onboarding-title">
+                  ${this.lc.t(step.titleKey)}
+                </h2>`
+              : nothing}
             ${step.subtitleKey
               ? html`<p class="onboarding-subtitle">
                   ${this.lc.t(step.subtitleKey)}
                 </p>`
               : nothing}
+          </div>
 
-            <div class="onboarding-actions">
-              ${step.isLast
-                ? html`<button
-                    class="onboarding-next onboarding-next--wide"
-                    @click=${this._handleNext}
-                  >
-                    ${this.lc.t("onboarding.finish")}
-                  </button>`
-                : html`
-                    <!-- The first card has nothing to go back to, so it offers
-                         the way out instead. -->
-                    ${this.stepIndex === 0
-                      ? html`<button
-                          class="onboarding-secondary"
-                          @click=${this._complete}
-                        >
-                          ${this.lc.t("onboarding.skip")}
-                        </button>`
-                      : html`<button
-                          class="onboarding-secondary"
-                          @click=${this._handlePrev}
-                        >
-                          ${this.lc.t("onboarding.prev")}
-                        </button>`}
-                    <button class="onboarding-next" @click=${this._handleNext}>
-                      ${this.lc.t("onboarding.next")}
-                    </button>
-                  `}
-            </div>
+          <!--
+            Outside the crossfading content on purpose: the buttons hold still
+            while what is above them is swapped.
+
+            Both buttons and both labels are always rendered, and the last card
+            only changes their classes. That is what lets the pair *become* the
+            Finish button rather than being replaced by it: Lit keeps the same
+            elements, so Skip has an opacity to fade, Next has a width to
+            spring open, and its two labels have something to cross-fade
+            between. Rendering one branch or the other would swap the DOM out
+            and there would be nothing left to animate.
+          -->
+          <div class="onboarding-actions">
+            <button
+              class="onboarding-secondary ${isLast ? "is-gone" : ""}"
+              tabindex=${isLast ? -1 : 0}
+              aria-hidden=${isLast ? "true" : "false"}
+              @click=${this._complete}
+            >
+              ${this.lc.t("onboarding.skip")}
+            </button>
+
+            <button
+              class="onboarding-next ${isLast ? "onboarding-next--wide" : ""}"
+              @click=${this._handleNext}
+            >
+              <span class="onboarding-next-label ${isLast ? "is-hidden" : ""}">
+                ${this.lc.t("onboarding.next")}
+              </span>
+              <span class="onboarding-next-label ${isLast ? "" : "is-hidden"}">
+                ${this.lc.t("onboarding.finish")}
+              </span>
+            </button>
           </div>
         </div>
       </div>
