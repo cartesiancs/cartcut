@@ -8,7 +8,7 @@ import {
 /**
  * What an export looks like from the outside.
  *
- * The numbers only — the strings ("Estimating…", "40s left") belong to the
+ * The numbers only: the strings ("42%", "Finalizing…") belong to the
  * component that draws them, which is the half that can reach a
  * `LocaleController`. This replaces the `#progress` / `#remainingTime` nodes
  * `exportProgress` used to write into: those lived inside a Bootstrap modal,

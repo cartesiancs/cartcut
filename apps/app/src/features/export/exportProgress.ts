@@ -71,10 +71,9 @@ function tick(): void {
   const estimate = reading.kind === "remaining" ? reading.ms : null;
   countdown = tickCountdown(countdown, estimate, now);
 
-  // `null` is "no number to show": the component draws "Estimating…" before
-  // the first real reading and "Finalizing…" once the tail has begun. Both
-  // strings belong to the component, which is the half that can reach a
-  // `LocaleController`.
+  // `null` is "no number yet": warming up, or the tail has begun. The button
+  // shows the percentage instead, so this only reaches the store and the e2e
+  // harness.
   const remainingMs =
     reading.kind === "finalizing" || !countdown.primed
       ? null
@@ -177,7 +176,6 @@ export const exportProgress = {
     }
     clearTimer();
     lastPercent = 100;
-    // `null` remaining is what the button draws as "Finalizing…".
     exportStore.getState().report(100, null);
     exportStore.getState().dispatch("frameLoopDone");
   },

@@ -17,7 +17,6 @@ import { customElement, property, state } from "lit/decorators.js";
 
 import { exportStore, type IExportStore } from "../../states/exportStore";
 import { applyMenuPlacement } from "../menu/menuPlacement";
-import { formatRemaining } from "../../utils/time";
 import { cancelExport, startExport } from "./exportSession";
 import { RING_RADIUS, RING_SIZE, RING_STROKE, ringDash } from "./exportRing";
 
@@ -124,13 +123,19 @@ export class ExportButton extends LitElement {
     panel.style.visibility = "visible";
   }
 
-  /** What the remaining-time line says, given the numbers in the store. */
-  private get remainingLabel(): string {
-    const { phase, remainingMs } = this.exportState;
+  /**
+   * What the status line says, given the numbers in the store.
+   *
+   * A percentage rather than the remaining time. `exportProgress` still
+   * publishes `remainingMs` (the e2e harness records it); nothing here reads it.
+   * Capped at 99 while running because `report` rounds, so the last half
+   * percent would otherwise read 100% with frames still to draw.
+   */
+  private get statusLabel(): string {
+    const { phase, percent } = this.exportState;
     if (phase === "cancelling") return "Stopping…";
     if (phase === "finalizing") return "Finalizing…";
-    if (remainingMs == null) return "Estimating…";
-    return formatRemaining(remainingMs);
+    return `${Math.min(99, Math.round(percent))}%`;
   }
 
   private renderRing(): TemplateResult {
@@ -199,7 +204,7 @@ export class ExportButton extends LitElement {
           ></div>
         </div>
         <div class="export-popover-foot">
-          <span class="export-remaining">${this.remainingLabel}</span>
+          <span class="export-status">${this.statusLabel}</span>
           <button
             class="export-stop"
             ?disabled=${phase === "cancelling"}
@@ -318,8 +323,9 @@ export class ExportButton extends LitElement {
           align-items: center;
           justify-content: space-between;
         }
-        .export-remaining {
+        .export-status {
           font-size: 11px;
+          font-variant-numeric: tabular-nums;
           color: #8b9096;
         }
         .export-stop {
