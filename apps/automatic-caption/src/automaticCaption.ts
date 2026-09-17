@@ -1247,6 +1247,22 @@ export class AutomaticCaption extends LitElement {
           vertical-align: middle;
         }
 
+        /* The line menu trigger is an outline and nothing else, in the border
+           colour the fields and panel dividers use. Qualified with .btn because
+           devent-designsystem.css sets .btn border-color to transparent, which
+           is also why btn-outline-secondary draws no outline in this app. Hover
+           and an open menu brighten the line rather than filling the box. */
+        .btn.caption-row-more {
+          background-color: transparent;
+          border-color: #3a3f44;
+        }
+
+        .btn.caption-row-more:hover,
+        .btn.caption-row-more[aria-expanded="true"] {
+          background-color: transparent;
+          border-color: #6c757d;
+        }
+
         /* ------------------------------------------- the per-line menu */
 
         /*
@@ -1722,7 +1738,7 @@ export class AutomaticCaption extends LitElement {
 
               <div class="d-flex gap-1 mt-1 align-items-start">
                 <button
-                  class="btn btn-sm btn-secondary caption-merge caption-row-more"
+                  class="btn btn-sm caption-merge caption-row-more"
                   title="Line actions"
                   aria-haspopup="menu"
                   aria-expanded=${this._menu?.kind === "line" &&
