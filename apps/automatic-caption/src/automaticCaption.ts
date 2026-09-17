@@ -17,6 +17,8 @@ import {
   captionKeyIntent,
   capturesKey,
   editText,
+  flattenCaptionField,
+  rejectsCaptionInput,
   type CaptionEditor,
   type CaptionKeyIntent,
 } from "../../app/src/features/caption/editor";
@@ -996,28 +998,28 @@ export class AutomaticCaption extends LitElement {
   /** Put the caret back where the gesture left it, after Lit has re-rendered. */
   private focusLine(index: number, caretOffset: number) {
     void this.updateComplete.then(() => {
-      const input = this.querySelector<HTMLInputElement>(
+      const field = this.querySelector<HTMLTextAreaElement>(
         `#analyzedEditCaption_${index}`,
       );
-      if (input == null) {
+      if (field == null) {
         return;
       }
-      input.focus();
-      const at = Math.min(caretOffset, input.value.length);
-      input.setSelectionRange(at, at);
+      field.focus();
+      const at = Math.min(caretOffset, field.value.length);
+      field.setSelectionRange(at, at);
     });
   }
 
   /**
-   * A keystroke in a caption's input.
+   * A keystroke in a caption's field.
    *
-   * The whole matrix — the IME guard, Enter, Backspace, Delete, Cmd+Z — is
+   * The whole matrix (the IME guard, Enter, Backspace, Delete, Cmd+Z) is
    * `caption/editor.ts#captionKeyIntent`, and `capturesKey` decides whether the
    * keystroke is cancelled. This is a dispatcher over plain numbers, which is
    * what makes the matrix testable without a DOM.
    */
   _handleCaptionKeydown(event: KeyboardEvent, index: number) {
-    const input = event.target as HTMLInputElement;
+    const field = event.target as HTMLTextAreaElement;
     // Named explicitly, not spread: a DOM event's properties are prototype
     // getters rather than own enumerable ones, so `{ ...event }` is `{}` and
     // every branch below would see an undefined `key`.
@@ -1030,9 +1032,9 @@ export class AutomaticCaption extends LitElement {
         ctrlKey: event.ctrlKey,
       },
       {
-        selectionStart: input.selectionStart,
-        selectionEnd: input.selectionEnd,
-        valueLength: input.value.length,
+        selectionStart: field.selectionStart,
+        selectionEnd: field.selectionEnd,
+        valueLength: field.value.length,
       },
       index,
       this.lines.length,
@@ -1045,10 +1047,34 @@ export class AutomaticCaption extends LitElement {
     this._applyIntent(intent);
   }
 
+  /** Stops the line break an Enter the IME guard let through would type. */
+  _handleCaptionBeforeInput(event: InputEvent) {
+    if (rejectsCaptionInput(event.inputType)) {
+      event.preventDefault();
+    }
+  }
+
   _handleChangeInput(event: Event, index: number) {
-    const value = (event.target as HTMLInputElement).value;
-    // Straight to state, no snapshot: typing is the input's own undo to manage.
-    const next = editText(this._editorState(), index, value).lines;
+    const field = event.target as HTMLTextAreaElement;
+    const typed = {
+      value: field.value,
+      selectionStart: field.selectionStart,
+      selectionEnd: field.selectionEnd,
+    };
+    const flat = flattenCaptionField(typed);
+    if (flat !== typed) {
+      // Into the field before the state. Lit compares `.value` with what it
+      // last committed, not with the field, so a state the field disagreed with
+      // would be written back and throw the caret to the end.
+      field.value = flat.value;
+      field.setSelectionRange(
+        flat.selectionStart ?? flat.value.length,
+        flat.selectionEnd ?? flat.value.length,
+      );
+    }
+
+    // Straight to state, no snapshot: typing is the field's own undo to manage.
+    const next = editText(this._editorState(), index, flat.value).lines;
     if (next === this.lines) {
       return;
     }
@@ -1073,9 +1099,24 @@ export class AutomaticCaption extends LitElement {
         /* Struck out, not gone: what was deleted stays readable and can be put
            back. A row that vanished would leave nothing to name. */
         .caption-cut .caption-ribbon,
-        .caption-cut input {
+        .caption-cut .caption-text {
           text-decoration: line-through;
           opacity: 0.45;
+        }
+
+        /* One caption, wrapped instead of scrolled sideways, and as tall as its
+           text. field-sizing needs Chromium 123 and Electron 33 ships 130. At
+           one line it is the old input's height, because Bootstrap gives
+           textarea.form-control-sm the min-height .form-control-sm has.
+           A zero basis and min-width keep a long unbroken word from widening
+           the row past the panel. Bootstrap sets textarea resize: vertical,
+           and a drag handle would fight the content for the height. */
+        .caption-text {
+          field-sizing: content;
+          flex: 1 1 0;
+          min-width: 0;
+          resize: none;
+          overflow: hidden;
         }
 
         .caption-cut {
@@ -1679,7 +1720,7 @@ export class AutomaticCaption extends LitElement {
                 )}
               </div>
 
-              <div class="d-flex gap-1 mt-1 align-items-center">
+              <div class="d-flex gap-1 mt-1 align-items-start">
                 <button
                   class="btn btn-sm btn-secondary caption-merge caption-row-more"
                   title="Line actions"
@@ -1695,16 +1736,18 @@ export class AutomaticCaption extends LitElement {
                     >more_vert</span
                   >
                 </button>
-                <input
+                <textarea
+                  @beforeinput=${(e: InputEvent) =>
+                    this._handleCaptionBeforeInput(e)}
                   @input=${(e: Event) => this._handleChangeInput(e, index)}
                   @keydown=${(e: KeyboardEvent) =>
                     this._handleCaptionKeydown(e, index)}
-                  class="form-control form-control-sm bg-dark text-light"
-                  type="text"
+                  class="form-control form-control-sm bg-dark text-light caption-text"
+                  rows="1"
                   id="analyzedEditCaption_${index}"
                   ?disabled=${line.removed === true}
                   .value=${line.text}
-                />
+                ></textarea>
               </div>
             </div>`,
         )}

@@ -27,11 +27,7 @@ import { live } from "lit/directives/live.js";
 
 import { speak } from "./ttsSession";
 import { ttsBridge, type TtsAvailabilityReply, type TtsPort } from "./ttsPort";
-import {
-  downloadPrompt,
-  ttsPhaseView,
-  type TtsPhaseName,
-} from "./ttsPhase";
+import { downloadPrompt, ttsPhaseView, type TtsPhaseName } from "./ttsPhase";
 
 /** Denoising steps. Four never clips; two does, on a handful of samples. */
 const QUALITY = [
@@ -406,9 +402,6 @@ export class TtsPanel extends LitElement {
         >
           Generate
         </button>
-        <p class="text-secondary" style="font-size: 0.7rem;">
-          The clip lands on an audio track at the playhead.
-        </p>
       </div>
     `;
   }

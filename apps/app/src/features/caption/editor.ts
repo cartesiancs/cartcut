@@ -17,10 +17,10 @@
  *
  * ## Nothing here touches the DOM
  *
- * The ports are plain records, not `KeyboardEvent` and `HTMLInputElement`.
- * Those types resolve under `environment: "node"` but cannot be *constructed*
- * there, so typing against them would make the suite unwritable — the same
- * narrowing `ui/transientModal.ts` does to `bootstrap.Modal`.
+ * The ports are plain records, not `KeyboardEvent`, `InputEvent` and
+ * `HTMLTextAreaElement`. Those types resolve under `environment: "node"` but
+ * cannot be *constructed* there, so typing against them would make the suite
+ * unwritable. `ui/transientModal.ts` narrows `bootstrap.Modal` the same way.
  *
  * ## One gesture, at most one undo step
  *
@@ -57,7 +57,7 @@ export type CaptionKeyEvent = {
   ctrlKey?: boolean;
 };
 
-/** The part of the `<input>` the editor reads. A collapsed caret has both equal. */
+/** The part of the `<textarea>` the editor reads. A collapsed caret has both equal. */
 export type CaptionField = {
   selectionStart: number | null;
   selectionEnd: number | null;
@@ -69,7 +69,7 @@ export type CaptionField = {
  *
  * `"none"` is distinct from "did nothing" on purpose: the panel calls
  * `preventDefault()` for every other kind and must *not* for this one, so the
- * keystroke reaches the input and types a character. That is the whole
+ * keystroke reaches the field and types a character. That is the whole
  * difference between an editor and a dead text box.
  */
 export type CaptionKeyIntent =
@@ -110,7 +110,7 @@ export function capturesKey(intent: CaptionKeyIntent): boolean {
 }
 
 /**
- * What a keystroke in a caption's input means.
+ * What a keystroke in a caption's field means.
  *
  * Order matters and is preserved from the original, which has two consequences
  * nobody would choose but which are the behaviour today: the IME guard
@@ -129,9 +129,11 @@ export function captionKeyIntent(
   lineCount: number,
 ): CaptionKeyIntent {
   // A Korean IME fires Enter to commit a composition. Splitting on it would cut
-  // the line in half every time someone finished typing a word — the reason the
-  // panel uses an <input> and not a contenteditable. `keyCode === 229` is the
-  // same event as seen by browsers that do not set `isComposing`.
+  // the line in half every time someone finished typing a word, which is why the
+  // panel uses a plain text field and not a contenteditable. The keystroke is let
+  // through, and `rejectsCaptionInput` stops the line break it would type.
+  // `keyCode === 229` is the same event as seen by browsers that do not set
+  // `isComposing`.
   if (event.isComposing === true || event.keyCode === 229) {
     return { kind: "none" };
   }
@@ -166,6 +168,56 @@ export function captionKeyIntent(
   }
 
   return { kind: "none" };
+}
+
+/**
+ * Whether the field cancels an edit before it lands, by `InputEvent.inputType`.
+ *
+ * Enter is already a split, cancelled in `keydown`. This catches the Enter the
+ * IME guard lets through: a textarea's default action for it is a line break,
+ * and a caption committed from a Korean composition would gain one every time.
+ */
+export function rejectsCaptionInput(inputType: string): boolean {
+  return inputType === "insertLineBreak" || inputType === "insertParagraph";
+}
+
+/** The part of the `<textarea>` `flattenCaptionField` reads and hands back. */
+export type CaptionFieldText = {
+  value: string;
+  selectionStart: number | null;
+  selectionEnd: number | null;
+};
+
+// Not global: a global pattern's `test` keeps `lastIndex` between calls and
+// would miss a break in the next value it is asked about.
+const HAS_LINE_BREAK = /[\r\n]/;
+const LINE_BREAK_RUN = /(?:\r\n?|\n)+/g;
+
+/**
+ * Keep a caption on one line.
+ *
+ * `rejectsCaptionInput` stops a typed break, but a paste or a drop still brings
+ * one in, and `text/lines.ts` would draw it as a second line of the caption. Each
+ * run of breaks becomes one space.
+ *
+ * Returns its input **by identity** when there is no break, so the panel knows
+ * the field needs no write. Each end of the selection is mapped by flattening
+ * the text before it, which keeps the caret after the same character.
+ */
+export function flattenCaptionField(field: CaptionFieldText): CaptionFieldText {
+  if (!HAS_LINE_BREAK.test(field.value)) {
+    return field;
+  }
+
+  const flatten = (text: string) => text.replace(LINE_BREAK_RUN, " ");
+  const offsetOf = (offset: number | null) =>
+    offset == null ? null : flatten(field.value.slice(0, offset)).length;
+
+  return {
+    value: flatten(field.value),
+    selectionStart: offsetOf(field.selectionStart),
+    selectionEnd: offsetOf(field.selectionEnd),
+  };
 }
 
 /**
@@ -238,7 +290,7 @@ export function applyLineRemoval(
     ? removeLine(editor.lines, index)
     : restoreLine(editor.lines, index);
 
-  // The caret is discarded: the row's input is disabled while the line is
+  // The caret is discarded: the row's field is disabled while the line is
   // struck out, so there is nowhere to put it and stealing focus would move it
   // off whatever the user was actually typing in.
   return commit(editor, lines, { index, caretOffset: 0 }).editor;
@@ -249,7 +301,7 @@ export function applyLineRemoval(
  *
  * Typing is not on this stack — see `editText`. Declines by identity on an empty
  * stack, which is also what the panel's Cmd+Z does today: it cancels the
- * keystroke either way, so the input's own native undo is never reached. That is
+ * keystroke either way, so the field's own native undo is never reached. That is
  * a defect, and it is preserved; the panel is where the `preventDefault` lives.
  */
 export function undoEdit(editor: CaptionEditor): CaptionEditor {

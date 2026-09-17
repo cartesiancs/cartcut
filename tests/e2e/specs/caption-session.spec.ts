@@ -190,11 +190,11 @@ test("a transcript takes the timeline, and only Apply keeps it", async ({
 
   await test.step("editing a caption reaches the timeline at once", async () => {
     await page.evaluate(() => {
-      const input = document.querySelector(
+      const field = document.querySelector(
         "app-window #analyzedEditCaption_0",
-      ) as HTMLInputElement;
-      input.value = "corrected line";
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+      ) as HTMLTextAreaElement;
+      field.value = "corrected line";
+      field.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
     await expect
@@ -203,6 +203,54 @@ test("a transcript takes the timeline, and only Apply keeps it", async ({
     // Still nothing on the undo stack. Typing is not an edit until Apply.
     const live = await state();
     expect(live.historyNow).toBe(live.historyLength - 1);
+  });
+
+  // The field was a single-line input, so a long caption scrolled sideways and
+  // could not be read whole. The node suites cannot see a layout, so the growth
+  // is measured here, in the real panel, against the height it has at one line.
+  await test.step("a long caption wraps and grows its field", async () => {
+    const measure = () =>
+      page.evaluate(async () => {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const field = document.querySelector(
+          "app-window #analyzedEditCaption_0",
+        ) as HTMLTextAreaElement;
+        return {
+          value: field.value,
+          height: field.offsetHeight,
+          clientWidth: field.clientWidth,
+          scrollWidth: field.scrollWidth,
+          clientHeight: field.clientHeight,
+          scrollHeight: field.scrollHeight,
+        };
+      });
+    const type = (value: string) =>
+      page.evaluate((next) => {
+        const field = document.querySelector(
+          "app-window #analyzedEditCaption_0",
+        ) as HTMLTextAreaElement;
+        field.value = next;
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      }, value);
+
+    const oneLine = await measure();
+    expect(oneLine.height).toBeGreaterThan(0);
+
+    await type("word ".repeat(80).trim());
+    const long = await measure();
+    expect(long.height).toBeGreaterThan(oneLine.height);
+    expect(long.scrollWidth).toBeLessThanOrEqual(long.clientWidth);
+    expect(long.scrollHeight).toBeLessThanOrEqual(long.clientHeight);
+
+    // A pasted break is a space, in the field and on the timeline alike, and
+    // the field is back to one line once the text fits on one.
+    await type("corrected\nline");
+    await expect
+      .poll(async () => (await state()).captions[0]?.text, { timeout: 5_000 })
+      .toBe("corrected line");
+    const pasted = await measure();
+    expect(pasted.value).toBe("corrected line");
+    expect(pasted.height).toBe(oneLine.height);
   });
 
   // Two things at once, and the second is the one that is easy to lose: a

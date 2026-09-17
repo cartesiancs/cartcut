@@ -6,13 +6,16 @@ import {
   captionKeyIntent,
   editText,
   editorFrom,
+  flattenCaptionField,
+  rejectsCaptionInput,
   undoEdit,
   type CaptionEditor,
   type CaptionField,
+  type CaptionFieldText,
   type CaptionKeyEvent,
   applyLineRemoval,
 } from "./editor";
-import { linesFromWordGroups, type CaptionWord } from "./lines";
+import { linesFromWordGroups, type CaptionLine, type CaptionWord } from "./lines";
 
 /**
  * The keystroke matrix and the undo stack.
@@ -267,6 +270,105 @@ describe("capturesKey", () => {
 
   it("lets the keystroke through when nothing happens, so typing works", () => {
     expect(capturesKey({ kind: "none" })).toBe(false);
+  });
+});
+
+// ------------------------------------------------------- one line of text
+
+describe("rejectsCaptionInput", () => {
+  it("cancels the line break an Enter would type", () => {
+    // insertLineBreak is what a textarea reports for Enter; insertParagraph is
+    // the same key in an editor that makes blocks.
+    expect(rejectsCaptionInput("insertLineBreak")).toBe(true);
+    expect(rejectsCaptionInput("insertParagraph")).toBe(true);
+  });
+
+  it("lets typing, composing, pasting and deleting through", () => {
+    for (const inputType of [
+      "insertText",
+      "insertCompositionText",
+      "insertFromPaste",
+      "insertFromDrop",
+      "deleteContentBackward",
+      "deleteContentForward",
+      "historyUndo",
+    ]) {
+      expect(rejectsCaptionInput(inputType)).toBe(false);
+    }
+  });
+});
+
+describe("flattenCaptionField", () => {
+  /** A collapsed caret at `at`. */
+  const typed = (value: string, at: number | null): CaptionFieldText => ({
+    value,
+    selectionStart: at,
+    selectionEnd: at,
+  });
+
+  it("returns a field with no break by identity", () => {
+    const field = typed("hello there world", 5);
+    expect(flattenCaptionField(field)).toBe(field);
+  });
+
+  it("returns an empty field by identity", () => {
+    const field = typed("", 0);
+    expect(flattenCaptionField(field)).toBe(field);
+  });
+
+  it("answers the same way twice in a row", () => {
+    // A global pattern's test() carries lastIndex into the next call, which
+    // would let every second pasted break through.
+    expect(flattenCaptionField(typed("a\nb", 3)).value).toBe("a b");
+    expect(flattenCaptionField(typed("c\nd", 3)).value).toBe("c d");
+  });
+
+  it("turns a break into a space and leaves the caret where it was", () => {
+    expect(flattenCaptionField(typed("hello\nworld", 11))).toEqual(
+      typed("hello world", 11),
+    );
+  });
+
+  it("counts a CRLF as one break, so the caret moves back by one", () => {
+    expect(flattenCaptionField(typed("hello\r\nworld", 12))).toEqual(
+      typed("hello world", 11),
+    );
+  });
+
+  it("turns a lone CR into a space", () => {
+    expect(flattenCaptionField(typed("hello\rworld", 3))).toEqual(
+      typed("hello world", 3),
+    );
+  });
+
+  it("collapses a run of breaks into one space", () => {
+    expect(flattenCaptionField(typed("one\n\n\r\ntwo", 10))).toEqual(
+      typed("one two", 7),
+    );
+  });
+
+  it("keeps the caret after the same character when a paste lands mid-line", () => {
+    // "start end" with "pasted\ntext " dropped in after "start ".
+    const value = "start pasted\ntext end";
+    const caret = "start pasted\ntext ".length;
+    const flat = flattenCaptionField(typed(value, caret));
+
+    expect(flat.value).toBe("start pasted text end");
+    expect(flat.value.slice(0, flat.selectionStart!)).toBe("start pasted text ");
+  });
+
+  it("maps each end of a selection on its own", () => {
+    expect(
+      flattenCaptionField({
+        value: "a\n\nb\r\nc",
+        selectionStart: 3,
+        selectionEnd: 7,
+      }),
+    ).toEqual({ value: "a b c", selectionStart: 2, selectionEnd: 5 });
+  });
+
+  it("leaves an unknown caret unknown", () => {
+    expect(flattenCaptionField(typed("a\nb", null))).toEqual(typed("a b", null));
   });
 });
 
@@ -619,8 +721,8 @@ describe("keystroke to result, end to end", () => {
 
 describe("applyLineRemoval", () => {
   const two = (): CaptionLine[] => [
-    { words: [], start: 0, end: 1, text: "first" },
-    { words: [], start: 1, end: 2, text: "second" },
+    { id: "line-a", words: [], start: 0, end: 1, text: "first" },
+    { id: "line-b", words: [], start: 1, end: 2, text: "second" },
   ];
 
   it("strikes a line out", () => {
