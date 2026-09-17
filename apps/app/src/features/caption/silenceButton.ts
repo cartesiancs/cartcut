@@ -59,6 +59,8 @@ export type SilenceButtonInput = {
   silenceOn: boolean;
   /** How many caption lines there are. Zero means nothing has been transcribed. */
   lineCount: number;
+  /** How many clips were swept. Absent means one. */
+  clipCount?: number;
 };
 
 /**
@@ -109,7 +111,10 @@ export function silenceButtonState(
       icon: SILENCE_ICON,
       variant: "secondary",
       disabled: true,
-      label: "No silent gaps were found in this clip",
+      label:
+        (input.clipCount ?? 1) > 1
+          ? "No silent gaps were found in these clips"
+          : "No silent gaps were found in this clip",
       action: "none",
       busy: false,
     };

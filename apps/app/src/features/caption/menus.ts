@@ -38,6 +38,11 @@ export type CaptionRowMenuInput = {
   index: number;
   /** Whether the line is struck out, and its footage cut. */
   removed: boolean;
+  /**
+   * Whether the line is the first of its clip. The line above belongs to
+   * another file, and `lines.ts#mergeLineWithPrevious` refuses that merge.
+   */
+  startsClip?: boolean;
 };
 
 /**
@@ -62,7 +67,9 @@ export function captionRowMenu(
       // The first line has nothing above it. A struck-out line is refused for a
       // different reason: merging it would fold text that is cut out of the
       // video into a line that is not.
-      disabled: input.index === 0 || input.removed,
+      // The first line of a clip is refused for a third: the line above it was
+      // spoken in another file, on another clock.
+      disabled: input.index === 0 || input.removed || input.startsClip === true,
     },
     input.removed
       ? {

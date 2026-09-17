@@ -185,3 +185,30 @@ describe("captionRows", () => {
     expect(captionRows(instant, "k", FRAME)[0].duration).toBe(1);
   });
 });
+
+describe("captionRows over several clips", () => {
+  it("takes each row's key from its own line, and the fallback otherwise", () => {
+    const [first, second] = twoLines();
+    const rows = captionRows(
+      [{ ...first, sourceKey: "clip-a" }, second],
+      "fallback",
+      FRAME,
+    );
+    expect(rows.map((row) => row.sourceKey)).toEqual(["clip-a", "fallback"]);
+  });
+
+  it("finds the key by line id, after an empty line has been dropped", () => {
+    const [first, second] = twoLines();
+    const rows = captionRows(
+      [
+        { ...setLineText([first], 0, "")[0], sourceKey: "clip-a" },
+        { ...second, sourceKey: "clip-b" },
+      ],
+      null,
+      FRAME,
+    );
+    expect(rows.map((row) => [row.text, row.sourceKey])).toEqual([
+      ["again", "clip-b"],
+    ]);
+  });
+});

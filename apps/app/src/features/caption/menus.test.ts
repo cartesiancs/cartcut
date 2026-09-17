@@ -157,3 +157,24 @@ describe("captionPlacementButton", () => {
     expect(captionPlacementButton("lowerThird").label).toContain("lower third");
   });
 });
+
+describe("captionRowMenu at a clip boundary", () => {
+  // The line above belongs to another file. The merge would be refused by
+  // `lines.ts`, so the menu says so rather than offering a no-op.
+  it("disables Merge on the first line of a clip, wherever it sits", () => {
+    const [merge] = captionRowMenu({ index: 4, removed: false, startsClip: true });
+    expect(merge.action).toBe("merge");
+    expect(merge.disabled).toBe(true);
+  });
+
+  it("leaves Merge alone inside a clip", () => {
+    const [merge] = captionRowMenu({ index: 4, removed: false, startsClip: false });
+    expect(merge.disabled).toBe(false);
+  });
+
+  it("keeps the same two entries either way", () => {
+    const actions = (startsClip: boolean) =>
+      captionRowMenu({ index: 2, removed: false, startsClip }).map((i) => i.action);
+    expect(actions(true)).toEqual(actions(false));
+  });
+});

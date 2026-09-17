@@ -112,3 +112,66 @@ describe("sourceDisplayName", () => {
     expect(sourceDisplayName("clip.mp4")).toBe("clip.mp4");
   });
 });
+
+describe("captionSources, in timeline order", () => {
+  it("sorts by where each clip starts, and numbers after sorting", () => {
+    const rows = captionSources({
+      late: clip({ startTime: 9000 }),
+      early: clip({ startTime: 1000 }),
+      middle: clip({ startTime: 4000 }),
+    });
+    expect(rows.map((r) => [r.id, r.key])).toEqual([
+      [1, "early"],
+      [2, "middle"],
+      [3, "late"],
+    ]);
+  });
+
+  it("keeps the element map's order for clips starting together", () => {
+    const rows = captionSources({ b: clip(), a: clip(), c: clip() });
+    expect(rows.map((r) => r.key)).toEqual(["b", "a", "c"]);
+  });
+
+  it("reports the timeline length of a sped-up clip, apart from its source length", () => {
+    const [row] = captionSources({
+      fast: clip({
+        startTime: 2000,
+        duration: 6000,
+        speed: 2,
+        trim: { startTime: 1000, endTime: 7000 },
+        trackId: "v1",
+      }),
+    });
+    expect(row).toMatchObject({
+      startMs: 2000,
+      durationMs: 6000,
+      spanMs: 3000,
+      trimStartMs: 1000,
+      trimEndMs: 7000,
+      speed: 2,
+      trackId: "v1",
+    });
+  });
+
+  it("reads a missing or broken speed as 1x and a missing trim as the whole clip", () => {
+    const [row] = captionSources({ x: clip({ speed: 0 }) });
+    expect(row).toMatchObject({
+      speed: 1,
+      spanMs: 5000,
+      trimStartMs: 0,
+      trimEndMs: 5000,
+      trackId: "",
+    });
+  });
+
+  it("takes the picture's shape from the decoded frame first", () => {
+    const [portrait, squashed, unknown] = captionSources({
+      p: clip({ origin: { width: 1080, height: 1920 }, width: 500, height: 500 }),
+      s: clip({ width: 400, height: 100 }),
+      u: clip({ filetype: "audio" }),
+    });
+    expect(portrait.aspect).toBeCloseTo(1080 / 1920);
+    expect(squashed.aspect).toBe(4);
+    expect(unknown.aspect).toBeCloseTo(16 / 9);
+  });
+});

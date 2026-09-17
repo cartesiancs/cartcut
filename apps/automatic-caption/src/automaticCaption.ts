@@ -7,8 +7,8 @@ import {
 } from "../../app/src/features/caption/locale";
 import { type CaptionPlacement } from "../../app/src/features/caption/layout";
 import {
-  removedSpans,
   activeAt,
+  startsClip,
   type CaptionLine,
 } from "../../app/src/features/caption/lines";
 import {
@@ -37,32 +37,49 @@ import {
   type CaptionPhase,
 } from "../../app/src/features/caption/captionPhase";
 import type { CaptionSessionPhase } from "../../app/src/features/caption/captionSession";
-import type { CaptionPlayheadPort } from "../../app/src/features/caption/playheadPort";
-import {
-  DEFAULT_SILENCE_OPTIONS,
-  silenceCuts,
-  wordGaps,
-} from "../../app/src/features/caption/silence";
+import type {
+  CaptionPlayheadPort,
+  CaptionSourcePosition,
+} from "../../app/src/features/caption/playheadPort";
 import { sourceWindowOf } from "../../app/src/features/caption/cuts";
 import {
   ChromeGate,
-  chromeStateOf,
+  chromeKeyAt,
+  type ChromePosition,
 } from "../../app/src/features/caption/previewLoop";
 import {
   captionSources,
   sourceDisplayName,
   type CaptionSource,
 } from "../../app/src/features/caption/sources";
+import {
+  clipFollows,
+  clipRanges,
+  clipSections,
+  joinClipLines,
+  removedTotalOf,
+  sweepClips,
+  transcribeClips,
+  type ClipJob,
+  type ClipRanges,
+} from "../../app/src/features/caption/clips";
+import {
+  initialPick,
+  pickedSources,
+  reconcilePick,
+  type ClipPick,
+} from "../../app/src/features/caption/clipPick";
+import type { TimeRange } from "../../app/src/features/timeline/clipOps";
 import { TranscribeSession } from "../../app/src/features/caption/transcribeSession";
 import "./progress";
+import "./clipPicker";
+
+/** One chosen clip, as the panel keeps it for the length of a run. */
+type PanelClip = ClipJob & { name: string; filetype: "video" | "audio" };
 
 @customElement("automatic-caption")
 export class AutomaticCaption extends LitElement {
   isLoadVideo: boolean;
-  videoPath: string;
-  selectVideoModal: any;
-  videoRows: any;
-  hasUpdatedOnce: boolean;
 
   /**
    * What the panel is doing, and therefore which of three bodies it draws.
@@ -81,14 +98,14 @@ export class AutomaticCaption extends LitElement {
   private _failMessage: string | null = null;
 
   /**
-   * The silences the sweep found, in source ms.
+   * The silences the sweep found, in source ms, by clip.
    *
    * Kept whole and kept for the whole session, because the toggle needs them
    * back. Turning the cuts off does not put a cut back, which has no inverse:
-   * it sends a shorter list of ranges and the session rebuilds from its
-   * baseline. So this list is the thing that has to survive, not the cuts.
+   * it sends shorter lists of ranges and the session rebuilds from its
+   * baseline. So these lists are the thing that has to survive, not the cuts.
    */
-  private _silenceRanges: Array<{ startMs: number; endMs: number }> = [];
+  private _silenceByKey: Record<string, TimeRange[]> = {};
 
   /** Whether those gaps are currently cut out of the timeline. */
   private _silenceOn = true;
@@ -96,22 +113,41 @@ export class AutomaticCaption extends LitElement {
   /** A decode is running. One ffmpeg pass, so a spinner rather than a bar. */
   private _silenceBusy = false;
 
-  /** Why the last sweep found nothing, shown rather than swallowed. */
-  private _silenceError: string | null = null;
+  /** Why a clip's sweep found nothing, by clip, shown rather than swallowed. */
+  private _silenceErrors: Record<string, string> = {};
 
   /**
-   * The clip's window into its source file, read when the transcript landed.
+   * The clips being captioned, in the order the user chose, each with its
+   * window into its source file as it was when the last transcript landed.
    *
    * Held rather than looked up, and that is the same rule `applyCaptions.ts`
-   * states: the session cuts the clip within a second of this being set, and
-   * `removeRanges` does not always leave the original id behind. Asking
-   * `this.timeline[selectedKey]` afterwards gets `undefined` for an entirely
+   * states: the session cuts the clips within a second of the windows being
+   * read, and `removeRanges` does not always leave the original id behind.
+   * Asking `this.timeline[key]` afterwards gets `undefined` for an entirely
    * ordinary case, and `wordGaps` would then be bounded by nothing.
    */
-  private _sourceWindow: { startMs: number; endMs: number } | null = null;
+  private _clips: PanelClip[] = [];
 
-  /** The element key of the chosen clip. Identifies the row and the source. */
-  selectedKey: string | null;
+  /**
+   * The picker's choice: element keys, in order. Kept after a run, so reopening
+   * the picker after a failure or a cancel does not mean choosing again.
+   */
+  private _pick: ClipPick = [];
+  private _pickerOpen = false;
+  /** The rows the picker was opened on. */
+  private _pickerRows: CaptionSource[] = [];
+
+  /** Which of the chosen clips is being transcribed, for the progress screen. */
+  private _transcribing: { index: number; total: number; name: string } | null =
+    null;
+
+  /**
+   * Which run is current. A cancel, a close and a new run each move it on, so a
+   * run still awaiting its transcript can tell that nobody is waiting for it
+   * any more and stop instead of starting its next clip.
+   */
+  private _runId = 0;
+
   sttMethod: "apple" | "openai";
 
   /**
@@ -136,8 +172,12 @@ export class AutomaticCaption extends LitElement {
   /** What the template last showed, so a 60Hz playhead does not re-render it. */
   private readonly _chrome = new ChromeGate();
 
-  /** Where the playhead is, in source seconds. Fed by the `playhead` port. */
-  private _progressSec = 0;
+  /**
+   * Every chosen clip under the playhead, and where in its file. Fed by the
+   * `playhead` port. Empty between clips; two entries where two chosen clips
+   * play at once on two tracks.
+   */
+  private _positions: CaptionSourcePosition[] = [];
 
   private _unsubscribePlayhead: (() => void) | null = null;
 
@@ -155,13 +195,8 @@ export class AutomaticCaption extends LitElement {
     super();
 
     this.isLoadVideo = false;
-    this.videoPath = "";
     this.lines = [];
     this._undo = [];
-
-    this.selectedKey = null;
-
-    this.hasUpdatedOnce = false;
 
     this.locales = [];
     this.selectedLocale = "";
@@ -224,10 +259,13 @@ export class AutomaticCaption extends LitElement {
     // unmounted at all: as a tab pane it was built once and stayed in the DOM
     // for the life of the app, so nothing it held had to be given back. Closing
     // the window destroys it, and reopening builds a fresh one, so anything
-    // left behind accumulates once per open.
-    this.selectVideoModal?.dispose?.();
+    // left behind accumulates once per open. The clip picker gives back its own
+    // listener and frame cache when it is removed with the panel.
+    //
     // A transcription nobody is waiting for. `requestCancel` is a no-op with no
-    // job in flight, so this needs no guard of its own.
+    // job in flight, so this needs no guard of its own; moving the run on stops
+    // the clips after it from starting.
+    this._runId += 1;
     this._session?.requestCancel();
 
     // The session itself is *not* cancelled here. An event dispatched from a
@@ -287,6 +325,15 @@ export class AutomaticCaption extends LitElement {
   playhead: CaptionPlayheadPort | null = null;
 
   /**
+   * The timeline's selection, read once when the clip picker opens, so clips
+   * selected on the timeline arrive already chosen. A function, from
+   * `Control`, for the reason the playhead is a port: the panel cannot read
+   * the store.
+   */
+  @property({ attribute: false })
+  timelineSelection: (() => readonly string[]) | null = null;
+
+  /**
    * What the session is doing, from `Control`.
    *
    * The panel cannot tell when the reveal has finished; only the session can,
@@ -321,36 +368,97 @@ export class AutomaticCaption extends LitElement {
     }
     const port = this.playhead;
     this._unsubscribePlayhead = port.subscribe(() => {
-      this._progressSec = port.sourceSeconds();
+      this._positions = port.sourcePositions();
       this._syncChrome();
     });
-    this._progressSec = port.sourceSeconds();
+    this._positions = port.sourcePositions();
   }
 
   private _syncChrome(): void {
-    // Gated on the string the template actually shows, not on a rounded second.
-    // The duration is no longer part of it: the readout that needed one went
-    // with the preview column, and the app's own transport shows the time.
-    const { active, label } = chromeStateOf(this.lines, this._progressSec, 0);
-    if (this._chrome.changed(active, label)) {
+    // Gated on what the template actually shows: which line and word are lit,
+    // for every clip under the playhead. The duration readout that once shared
+    // this gate went with the preview column, so its half is always empty.
+    if (this._chrome.changed(this._activeKey(), "")) {
       this.requestUpdate();
     }
   }
 
   /**
-   * `key` identifies the row, not the path.
+   * The positions a line is matched against.
    *
-   * Two clips cut from one file share a `localpath`, and comparing on that lit
-   * up both radio buttons and transcribed whichever came first.
+   * A line list nobody tagged (one clip, seeded by hand) is matched by the
+   * first position alone and without a key, which is how it was matched
+   * before clips had keys at all.
    */
-  handleRowSelection(row: CaptionSource) {
-    this.selectedKey = row.key;
-    this.videoPath = row.localpath;
-    // `filetype` and `durationMs` used to be kept here, for a hidden media
-    // element and a playback readout that are both gone. The panel does not
-    // play anything any more, so a row is a key and a path and nothing else.
+  private _matchPositions(): ChromePosition[] {
+    if (this.lines.some((line) => line.sourceKey != null)) {
+      return this._positions;
+    }
+    return this._positions
+      .slice(0, 1)
+      .map((position) => ({ seconds: position.seconds }));
+  }
+
+  /** The lit line and word for every clip under the playhead, as one key. */
+  private _activeKey(): string {
+    return chromeKeyAt(this.lines, this._matchPositions());
+  }
+
+  /** Line index to lit word index, for every clip under the playhead. */
+  private _activeLines(): Map<number, number | null> {
+    const lit = new Map<number, number | null>();
+    for (const position of this._matchPositions()) {
+      const { lineIndex, wordIndex } = activeAt(
+        this.lines,
+        position.seconds,
+        position.key,
+      );
+      if (lineIndex != null) {
+        lit.set(lineIndex, wordIndex);
+      }
+    }
+    return lit;
+  }
+
+  // -------------------------------------------------------- the clip picker
+
+  /**
+   * Open the picker on the clips the timeline holds now.
+   *
+   * Rows are keyed by element, not by path: two clips cut from one file share
+   * a `localpath`, and comparing on that selected both and transcribed
+   * whichever came first.
+   */
+  openPicker() {
+    const rows = captionSources(this.timeline);
+    this._pickerRows = rows;
+    this._pick = initialPick({
+      previous: this._pick,
+      timelineSelection: this.timelineSelection?.() ?? [],
+      rows,
+    });
+    this._pickerOpen = true;
     this.requestUpdate();
   }
+
+  // Arrow properties, like every handler handed to another element's events.
+  private readonly _onPickChange = (event: CustomEvent<{ pick: ClipPick }>) => {
+    this._pick = event.detail.pick;
+    this.requestUpdate();
+  };
+
+  private readonly _onPickClose = () => {
+    this._pickerOpen = false;
+    this.requestUpdate();
+  };
+
+  private readonly _onPickStart = (event: CustomEvent<{ pick: ClipPick }>) => {
+    this._pick = event.detail.pick;
+    this._pickerOpen = false;
+    // The picker closes whether or not the run gets as far as a repaint.
+    this.requestUpdate();
+    void this.startChosenClips();
+  };
 
   // 이벤트 처리
   applyCursorEvent(type) {
@@ -366,74 +474,108 @@ export class AutomaticCaption extends LitElement {
   }
 
   /**
-   * Transcribe the selected clip.
+   * Transcribe the chosen clips, one after another, in the chosen order.
    *
-   * One call into main, which extracts the audio and runs the recogniser. The
-   * panel used to do the first half itself through the legacy fluent-ffmpeg IPC
-   * and the second half with `axios`, against a server the user had to run and
-   * whose URL lived in a DOM input. Both halves are gone: main's `transcribeFile`
-   * is the same function the MCP `get_transcript` tool calls, so the two share
-   * one disk cache and a clip the agent has already read opens instantly here.
+   * One call into main per clip, which extracts the audio and runs the
+   * recogniser. The panel used to do the first half itself through the legacy
+   * fluent-ffmpeg IPC and the second half with `axios`, against a server the
+   * user had to run and whose URL lived in a DOM input. Both halves are gone:
+   * main's `transcribeFile` is the same function the MCP `get_transcript` tool
+   * calls, so the two share one disk cache and a clip the agent has already
+   * read opens instantly here. Two clips cut from one file share it too.
    */
-  async transcribeSelectedClip() {
+  async transcribeChosenClips() {
     const session = this._session;
     if (session == null) {
       this._failAnalysis("Transcription needs the desktop app.");
       return;
     }
 
-    const outcome = await session.run(
-      {
-        source: this.videoPath,
-        method: this.sttMethod,
-        // The session withholds this for OpenAI, which detects the language.
-        locale: this.selectedLocale,
+    const run = ++this._runId;
+    const stale = () => run !== this._runId;
+    const clips = this._clips;
+
+    const outcome = await transcribeClips(clips, {
+      cancelled: stale,
+      run: (clip, index, total) => {
+        this._transcribing = {
+          index,
+          total,
+          name: clips.find((c) => c.key === clip.key)?.name ?? "",
+        };
+        return session.run(
+          {
+            source: clip.localpath,
+            method: this.sttMethod,
+            // The session withholds this for OpenAI, which detects the language.
+            locale: this.selectedLocale,
+          },
+          () => this.requestUpdate(),
+        );
       },
-      () => this.requestUpdate(),
-    );
+    });
+
+    // A cancel, a close or a newer run has taken over. Whatever this run
+    // would write now belongs to nobody.
+    if (stale()) {
+      return;
+    }
+    this._transcribing = null;
 
     if (outcome.kind === "cancelled") {
       this._endAnalysis();
       return;
     }
     if (outcome.kind === "failed") {
-      this._failAnalysis(outcome.message);
+      const clip = clips.find((c) => c.key === outcome.key);
+      this._failAnalysis(
+        clips.length > 1 && clip != null
+          ? `${clip.name}: ${outcome.message}`
+          : outcome.message,
+      );
       return;
     }
 
-    this.lines = outcome.lines;
+    // Every window is read now, after the last transcript and before anything
+    // cuts. The timeline stays editable while the clips are transcribed, which
+    // can take minutes, and a window read before the first clip could be stale
+    // by the last.
+    this._clips = clips.map((clip) => ({
+      ...clip,
+      window: sourceWindowOf(this.timeline?.[clip.key]) ?? null,
+    }));
+    this.lines = joinClipLines(outcome.byKey, this._clips, uuidv4);
     this._undo = [];
-
-    // Read the clip's window now, before the session cuts it. After that the
-    // original id may name a piece or nothing at all.
-    this._sourceWindow = sourceWindowOf(this.selectedSource()) ?? null;
 
     // The sweep used to be a button the user pressed, and pressing it was the
     // only way to find out whether there was anything to cut. It is part of the
     // same run now: one press gets a transcript, the silences gone and the
     // words on the timeline, which is the whole gesture anybody wanted.
     await this.sweepSilence();
+    if (stale()) {
+      return;
+    }
 
     this._startSession();
   }
 
   /**
-   * Find the silences worth cutting.
+   * Find the silences worth cutting, clip by clip.
    *
    * Both halves must agree: the signal (an absolute dBFS threshold over an RMS
-   * envelope, from `analyze:silences`) and the **words**. The signal alone cuts
-   * a word quiet enough to dip under the threshold and keeps laughter; the
-   * words alone call every wordless gap dead air, sting included.
+   * envelope, from `analyze:silences`) and the **words**, each clip's own. The
+   * signal alone cuts a word quiet enough to dip under the threshold and keeps
+   * laughter; the words alone call every wordless gap dead air, sting included.
    *
    * `analyzeSilences` is cached on disk by file identity and deduped while it
-   * runs, so this is one ffmpeg decode the first time and nothing after. A
-   * failure leaves the list empty and the reason on the footer: there is still
-   * a transcript to place, so it is a part of the run that can fail on its own.
+   * runs, so this is one ffmpeg decode per file the first time and nothing
+   * after. A failure leaves that clip's list empty and the reason on the
+   * footer: there is still a transcript to place, so it is a part of the run
+   * that can fail on its own.
    */
   private async sweepSilence(): Promise<void> {
     const api = this._analyzeApi();
-    const window = this._sourceWindow;
-    if (api == null || window == null) {
+    if (api == null) {
       return;
     }
 
@@ -442,26 +584,38 @@ export class AutomaticCaption extends LitElement {
     this.requestUpdate();
 
     try {
-      const response = await api.silences({ source: this.videoPath });
-      if (response?.ok !== true) {
-        this._silenceError =
-          response?.error ?? "Could not read the audio for this clip.";
-        return;
-      }
-
-      this._silenceError = null;
-      this._silenceRanges = silenceCuts(
-        response.silences,
-        wordGaps(this.lines, window),
-        DEFAULT_SILENCE_OPTIONS,
+      const swept = await sweepClips(this._clips, this.lines, (localpath) =>
+        api.silences({ source: localpath }),
       );
-    } catch (error) {
-      this._silenceError =
-        error instanceof Error ? error.message : String(error);
+      this._silenceByKey = swept.byKey;
+      this._silenceErrors = swept.errors;
     } finally {
       this._silenceBusy = false;
       this.requestUpdate();
     }
+  }
+
+  /** The footer's warning, or null. Names the clip when there are several. */
+  private _silenceErrorText(): string | null {
+    const failed = Object.entries(this._silenceErrors);
+    if (failed.length === 0) {
+      return null;
+    }
+    const [key, message] = failed[0];
+    if (this._clips.length <= 1) {
+      return message;
+    }
+    const name = this._clips.find((clip) => clip.key === key)?.name ?? key;
+    const more = failed.length > 1 ? ` (+${failed.length - 1})` : "";
+    return `${name}: ${message}${more}`;
+  }
+
+  /** How many gaps the sweep found, across the clips that were swept. */
+  private _silenceGapCount(): number {
+    return Object.values(this._silenceByKey).reduce(
+      (total, ranges) => total + ranges.length,
+      0,
+    );
   }
 
   /**
@@ -482,9 +636,8 @@ export class AutomaticCaption extends LitElement {
       new CustomEvent("captionSessionStart", {
         detail: {
           lines: this.lines,
-          sourceKey: this.selectedKey,
+          clips: this._clipRanges(),
           placement: this._verticalPlacement,
-          sourceRanges: this._sourceRanges(),
         },
         bubbles: true,
         composed: true,
@@ -493,18 +646,21 @@ export class AutomaticCaption extends LitElement {
   }
 
   /**
-   * Every range the session should cut, in source ms.
+   * Every range the session should cut, in source ms, clip by clip.
    *
-   * Two gestures, one list, and they are the same thing by the time they get
-   * here: a struck-out caption line contributes its own span, and the sweep
-   * contributes what the signal and the words agreed on. The toggle decides
-   * only whether the second half is included.
+   * Two gestures, one list per clip, and they are the same thing by the time
+   * they get here: a struck-out caption line contributes its own span, and the
+   * sweep contributes what the signal and the words agreed on. The toggle
+   * decides only whether the second half is included. A twin takes both from
+   * the clip it follows (`clips.ts`).
    */
-  private _sourceRanges(): Array<{ startMs: number; endMs: number }> {
-    return [
-      ...removedSpans(this.lines),
-      ...(this._silenceOn ? this._silenceRanges : []),
-    ];
+  private _clipRanges(): ClipRanges[] {
+    return clipRanges(
+      this.lines,
+      this._clips,
+      this._silenceByKey,
+      this._silenceOn,
+    );
   }
 
   /**
@@ -525,7 +681,7 @@ export class AutomaticCaption extends LitElement {
         detail: {
           lines: this.lines,
           placement: this._verticalPlacement,
-          sourceRanges: this._sourceRanges(),
+          ranges: this._clipRanges(),
         },
         bubbles: true,
         composed: true,
@@ -551,9 +707,9 @@ export class AutomaticCaption extends LitElement {
     }
     this.phase = "setup";
     this.isLoadVideo = false;
-    this._silenceRanges = [];
-    this._silenceError = null;
-    this._sourceWindow = null;
+    this._silenceByKey = {};
+    this._silenceErrors = {};
+    this._clips = [];
     this.applyCursorEvent("pointer");
     this.requestUpdate();
 
@@ -594,6 +750,7 @@ export class AutomaticCaption extends LitElement {
   _endAnalysis() {
     this.phase = "setup";
     this.isLoadVideo = false;
+    this._transcribing = null;
     this._session?.clear();
     this.applyCursorEvent("pointer");
     this.requestUpdate();
@@ -611,6 +768,7 @@ export class AutomaticCaption extends LitElement {
   _failAnalysis(message: string) {
     this._session?.clear();
     this.isLoadVideo = false;
+    this._transcribing = null;
     this._failMessage = message;
     this.phase = "failed";
     this.applyCursorEvent("pointer");
@@ -618,6 +776,10 @@ export class AutomaticCaption extends LitElement {
   }
 
   cancelAnalysis() {
+    // Moving the run on stops the clips after this one from starting:
+    // `requestCancel` reaches only the job that is running, and between two
+    // jobs there is none.
+    this._runId += 1;
     // Reads the live job id, so it has to run *before* `_endAnalysis` clears it.
     // Reversed, main is sent nothing and silently ignores it, and Cancel appears
     // to work while the job runs on.
@@ -625,27 +787,40 @@ export class AutomaticCaption extends LitElement {
     this._endAnalysis();
   }
 
-  async handleClickLoadVideo() {
-    this.videoRows = captionSources(this.timeline);
-    this.requestUpdate();
-
-    this.selectVideoModal.show();
-  }
-
-  async handleClickSelectVideo() {
+  /**
+   * Start on the chosen clips.
+   *
+   * The choice is checked against the timeline as it is now, because the
+   * timeline stays editable while the picker is open.
+   */
+  async startChosenClips() {
     // No `lockKeyboard` here any more. The lock follows the caret instead, in
     // `_handlePanelFocusIn`, because the editor no longer covers the app.
-    this.selectVideoModal.hide();
+    const rows = captionSources(this.timeline);
+    this._pick = reconcilePick(this._pick, rows);
+    const picked = pickedSources(this._pick, rows);
+    if (picked.length === 0) {
+      this.requestUpdate();
+      return;
+    }
+
+    // Each clip carries its own path. The path used to be re-derived from the
+    // field that identifies the row, which was the path once and is the
+    // element key now, so this handed a key to ffmpeg and every transcription
+    // failed with "No such media file". One name for one value.
+    const follows = clipFollows(picked);
+    this._clips = picked.map((row) => ({
+      key: row.key,
+      localpath: row.localpath,
+      name: sourceDisplayName(row.localpath),
+      filetype: row.filetype,
+      window: null,
+      ...(follows.has(row.key) ? { follows: follows.get(row.key) } : {}),
+    }));
     this.isLoadVideo = true;
-    // `videoPath` is set by `handleRowSelection`, from the row's `localpath`.
-    // It used to be re-derived here from the field that identifies the row,
-    // which was the path once and is the element key now — so this handed a key
-    // to ffmpeg and every transcription failed with "No such media file". One
-    // name for one value is why the field is `selectedKey` and nothing else.
 
     // One path for video and audio alike: main runs ffmpeg over whatever it is
-    // handed. The panel used to skip extraction for audio and give the file
-    // straight to the recogniser, which was two flows and two ways to fail.
+    // handed.
     //
     // The progress used to be a Bootstrap dialog opened here, behind a 180ms
     // gate so a cached transcript would not flash one. There is no gate any
@@ -655,7 +830,7 @@ export class AutomaticCaption extends LitElement {
     this.phase = "transcribing";
     this.requestUpdate();
 
-    await this.transcribeSelectedClip();
+    await this.transcribeChosenClips();
   }
 
   /**
@@ -698,15 +873,6 @@ export class AutomaticCaption extends LitElement {
   }
 
   updated() {
-    if (this.hasUpdatedOnce == false) {
-      this.selectVideoModal = new bootstrap.Modal(
-        document.getElementById("SelectVideo"),
-        {
-          keyboard: false,
-        },
-      );
-    }
-
     // The port arrives as a property, so it cannot be subscribed to in the
     // constructor. `_watchPlayhead` is idempotent and cheap, so asking on every
     // update is simpler than a second flag to get wrong.
@@ -725,8 +891,6 @@ export class AutomaticCaption extends LitElement {
     // After the template, so the menu it may have just rendered is in the DOM
     // and can be measured.
     this._placeMenu();
-
-    this.hasUpdatedOnce = true;
   }
 
   /**
@@ -738,8 +902,13 @@ export class AutomaticCaption extends LitElement {
    * behind a canvas in this panel, which was a second copy of the same footage
    * playing on a second clock.
    */
-  clickCaptionText(timeSec: number) {
-    this.playhead?.seekToSource(timeSec);
+  clickCaptionText(key: string, timeSec: number) {
+    this.playhead?.seekToSource(key, timeSec);
+  }
+
+  /** The clip a line belongs to. An untagged line belongs to the first. */
+  private _keyOfLine(line: CaptionLine): string {
+    return line.sourceKey ?? this._clips[0]?.key ?? "";
   }
 
   setSttMethod(method: "apple" | "openai") {
@@ -967,22 +1136,12 @@ export class AutomaticCaption extends LitElement {
    * cuts off and on again lands on exactly the same document.
    */
   toggleSilence(on: boolean) {
-    if (this._silenceOn === on || this._silenceRanges.length === 0) {
+    if (this._silenceOn === on || this._silenceGapCount() === 0) {
       return;
     }
     this._silenceOn = on;
     this._emitChange();
     this.requestUpdate();
-  }
-
-  /**
-   * The clip the transcript came from, as it stands in the timeline now.
-   *
-   * `this.timeline` is the element map, kept fresh by `Control`'s store
-   * subscription, so this sees an edit made while the panel was open.
-   */
-  private selectedSource() {
-    return this.selectedKey ? this.timeline?.[this.selectedKey] : undefined;
   }
 
   /**
@@ -1479,6 +1638,111 @@ export class AutomaticCaption extends LitElement {
           width: 100%;
           max-width: 22rem;
         }
+
+        .caption-clips-btn {
+          display: inline-flex !important;
+          align-items: center;
+          justify-content: center;
+          gap: 0.4rem;
+        }
+
+        .caption-clips-btn.d-none {
+          display: none !important;
+        }
+
+        .caption-clips-btn .material-symbols-outlined {
+          font-size: 1.15rem;
+        }
+
+        .caption-clips-count {
+          min-width: 1.2rem;
+          height: 1.2rem;
+          padding: 0 0.3rem;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          background: #3838d3;
+          font-size: 0.7rem;
+          font-weight: 700;
+        }
+
+        /* A clip's header in the caption list, when there is more than one.
+           A button, because it seeks to the clip's first frame. */
+        .caption-section {
+          display: flex;
+          align-items: center;
+          gap: 0.4rem;
+          width: 100%;
+          margin-top: 0.4rem;
+          padding: 0.2rem 0.1rem;
+          border: none;
+          border-bottom: 1px solid #26262b;
+          background: transparent;
+          color: #d8d8de;
+          font-size: 0.8rem;
+          text-align: left;
+          cursor: pointer;
+        }
+
+        .caption-section:first-child {
+          margin-top: 0;
+        }
+
+        .caption-section:hover {
+          color: #ffffff;
+        }
+
+        .caption-section .material-symbols-outlined {
+          font-size: 1rem;
+          color: #8a8a94;
+        }
+
+        .caption-section-number {
+          min-width: 1.2rem;
+          height: 1.2rem;
+          padding: 0 0.3rem;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          background: #3838d3;
+          color: #ffffff;
+          font-size: 0.7rem;
+          font-weight: 700;
+        }
+
+        .caption-section-name {
+          flex: 1 1 auto;
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .caption-phase-clip {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 0.4rem;
+          font-size: 0.8rem;
+          color: #d8d8de;
+          min-width: 0;
+        }
+
+        .caption-phase-counter {
+          flex: 0 0 auto;
+          padding: 0.05rem 0.45rem;
+          border-radius: 999px;
+          background: #26262b;
+          font-variant-numeric: tabular-nums;
+        }
+
+        .caption-phase-name {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
       </style>
       <!--
         focusin and focusout rather than a lock held for as long as the editor
@@ -1496,61 +1760,14 @@ export class AutomaticCaption extends LitElement {
         ${this.phase === "live" ? this.renderFooter() : nothing}
       </div>
 
-      <div
-        class="modal fade"
-        id="SelectVideo"
-        data-bs-keyboard="false"
-        data-bs-backdrop="static"
-        tabindex="-1"
-      >
-        <div class="modal-dialog modal-dialog-centered modal-lg">
-          <div class="modal-content">
-            <div class="modal-body">
-              <h5 class="modal-title font-weight-lg">
-                Select video from Timeline
-              </h5>
-
-              <b class="text-secondary"
-                >Selecting the video layer entered on the timeline</b
-              >
-
-              <table class="table table-striped ">
-                <thead>
-                  <tr>
-                    <th scope="col">#</th>
-                    <th scope="col">Video</th>
-                    <th scope="col">Select</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${this.renderRows()}
-                </tbody>
-              </table>
-
-              <div class="mt-3">
-                <div class="flex row gap-2">
-                  <button
-                    type="button"
-                    class="col btn btn-secondary"
-                    data-bs-dismiss="modal"
-                  >
-                    Close
-                  </button>
-                  <button
-                    ?disabled=${this.selectedKey == null}
-                    type="button"
-                    class="col btn btn-primary"
-                    data-bs-dismiss="modal"
-                    @click=${this.handleClickSelectVideo}
-                  >
-                    Select
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <caption-clip-picker
+        .rows=${this._pickerRows}
+        .pick=${this._pick}
+        ?open=${this._pickerOpen}
+        @clipPickChange=${this._onPickChange}
+        @clipPickClose=${this._onPickClose}
+        @clipPickStart=${this._onPickStart}
+      ></caption-clip-picker>
     `;
   }
 
@@ -1569,6 +1786,7 @@ export class AutomaticCaption extends LitElement {
       stage: this._progress.stage,
       fraction: this._progress.fraction,
       message: this._failMessage ?? undefined,
+      clip: this._transcribing ?? undefined,
     });
 
     if (view != null) {
@@ -1588,6 +1806,12 @@ export class AutomaticCaption extends LitElement {
     return html`
       <div class="caption-phase">
         <h6 class="text-light m-0">${view.title}</h6>
+        ${view.counter != null && this._transcribing != null
+          ? html`<span class="caption-phase-clip">
+              <span class="caption-phase-counter">${view.counter}</span>
+              <span class="caption-phase-name">${this._transcribing.name}</span>
+            </span>`
+          : nothing}
         <b class="${view.failed ? "text-warning" : "text-secondary"}"
           >${view.note}</b
         >
@@ -1679,12 +1903,19 @@ export class AutomaticCaption extends LitElement {
       </div>
 
       <button
-        class="btn btn-sm btn-default text-light mt-1 ${this.isLoadVideo
+        class="btn btn-sm btn-default text-light mt-1 caption-clips-btn ${this
+          .isLoadVideo
           ? "d-none"
           : ""}"
-        @click=${this.handleClickLoadVideo}
+        @click=${() => this.openPicker()}
       >
-        Select
+        <span class="material-symbols-outlined icon-white" aria-hidden="true"
+          >video_library</span
+        >
+        <span>Clips</span>
+        ${this._pick.length > 0
+          ? html`<span class="caption-clips-count">${this._pick.length}</span>`
+          : nothing}
       </button>
     </div>`;
   }
@@ -1707,18 +1938,36 @@ export class AutomaticCaption extends LitElement {
    * went is the one that could disagree.
    */
   renderEditor() {
-    // The same pair `_syncChrome` gates on, from the same function: these were
-    // two independent copies of the same three lines.
-    const { lineIndex: activeLine, wordIndex: activeWord } = activeAt(
-      this.lines,
-      this._progressSec,
-    );
+    // The same answer `_syncChrome` gates on, from the same function: these
+    // were two independent copies of the same three lines.
+    const lit = this._activeLines();
+
+    // A header before each clip's lines, once there is more than one clip. A
+    // clip with no speech still gets its header, at the place its lines would
+    // have been, so nothing chosen goes missing without a word.
+    const leaders = this._clips.filter((clip) => clip.follows == null);
+    const headers = new Map<number, typeof leaders>();
+    if (leaders.length > 1) {
+      const sections = clipSections(
+        this.lines,
+        leaders.map((clip) => clip.key),
+      );
+      sections.forEach((section, order) => {
+        const list = headers.get(section.from) ?? [];
+        list.push(leaders[order]);
+        headers.set(section.from, list);
+      });
+    }
+    const headersAt = (index: number) =>
+      (headers.get(index) ?? []).map((clip) =>
+        this.renderSection(clip, leaders.indexOf(clip) + 1, index),
+      );
 
     return html`
       <div class="caption-editor-lines">
         ${this.lines.map(
           (line, index) =>
-            html`<div
+            html`${headersAt(index)}<div
               class="text-light caption ${line.removed === true
                 ? "caption-cut"
                 : ""}"
@@ -1727,8 +1976,9 @@ export class AutomaticCaption extends LitElement {
                 ${line.words.map(
                   (word, wordIndex) =>
                     html`<span
-                      @click=${() => this.clickCaptionText(word.start)}
-                      class="${activeLine === index && activeWord === wordIndex
+                      @click=${() =>
+                        this.clickCaptionText(this._keyOfLine(line), word.start)}
+                      class="${lit.has(index) && lit.get(index) === wordIndex
                         ? "caption-part active"
                         : "caption-part"}"
                       >${word.word}</span
@@ -1767,10 +2017,46 @@ export class AutomaticCaption extends LitElement {
               </div>
             </div>`,
         )}
+        ${headersAt(this.lines.length)}
       </div>
 
       ${this.renderMenu()}
     `;
+  }
+
+  /**
+   * One clip's header in the caption list: its number, its kind and its name.
+   * Clicking it puts the playhead at the clip's first frame.
+   */
+  renderSection(clip: PanelClip, number: number, at: number) {
+    const empty = this.lines[at]?.sourceKey !== clip.key;
+    const twinned = this._clips.some((other) => other.follows === clip.key);
+    return html`<button
+      type="button"
+      class="caption-section"
+      title=${clip.name}
+      @click=${() =>
+        this.clickCaptionText(clip.key, (clip.window?.startMs ?? 0) / 1000)}
+    >
+      <span class="caption-section-number">${number}</span>
+      <span class="material-symbols-outlined" aria-hidden="true"
+        >${clip.filetype === "audio" ? "graphic_eq" : "movie"}</span
+      >
+      ${twinned
+        ? html`<span class="material-symbols-outlined" aria-hidden="true"
+            >link</span
+          >`
+        : nothing}
+      <span class="caption-section-name">${clip.name}</span>
+      ${empty
+        ? html`<span
+            class="material-symbols-outlined caption-section-quiet"
+            title="No speech"
+            aria-label="No speech"
+            >voice_over_off</span
+          >`
+        : nothing}
+    </button>`;
   }
 
   /**
@@ -1815,7 +2101,11 @@ export class AutomaticCaption extends LitElement {
       return null;
     }
 
-    return captionRowMenu({ index, removed: line.removed === true }).map(
+    return captionRowMenu({
+      index,
+      removed: line.removed === true,
+      startsClip: startsClip(this.lines, index),
+    }).map(
       (item) =>
         html`<button
           class="caption-menu-item"
@@ -1872,15 +2162,15 @@ export class AutomaticCaption extends LitElement {
    * there is one way out and it cannot get out of step with the other.
    */
   renderFooter() {
-    const removedMs = this._silenceOn
-      ? this._sourceRanges().reduce(
-          (total, cut) => total + Math.max(0, cut.endMs - cut.startMs),
-          0,
-        )
-      : removedSpans(this.lines).reduce(
-          (total, cut) => total + Math.max(0, cut.endMs - cut.startMs),
-          0,
-        );
+    // A twin is cut exactly as the clip it follows, so it is left out of the
+    // sum rather than counted twice.
+    const followers = new Set(
+      this._clips.filter((clip) => clip.follows != null).map((clip) => clip.key),
+    );
+    const removedMs = removedTotalOf(
+      this._clipRanges().filter((ranges) => !followers.has(ranges.key)),
+    );
+    const silenceError = this._silenceErrorText();
 
     // Where the captions sit, as the one glyph the trigger can show. The bar
     // this replaced said it by lighting the selected button.
@@ -1891,16 +2181,17 @@ export class AutomaticCaption extends LitElement {
     const silence = silenceButtonState({
       available: this._analyzeApi() != null,
       busy: this._silenceBusy,
-      gapCount: this._silenceRanges.length,
+      gapCount: this._silenceGapCount(),
       silenceOn: this._silenceOn,
       lineCount: this.lines.length,
+      clipCount: this._clips.length - followers.size,
     });
 
     return html`
       <div class="caption-panel-footer">
-        ${this._silenceError != null
+        ${silenceError != null
           ? html`<span class="caption-summary text-warning"
-              >${this._silenceError}</span
+              >${silenceError}</span
             >`
           : removedMs <= 0
             ? nothing
@@ -1948,33 +2239,5 @@ export class AutomaticCaption extends LitElement {
         </button>
       </div>
     `;
-  }
-
-  renderRows() {
-    if (!Array.isArray(this.videoRows)) {
-      return html``;
-    }
-
-    return this.videoRows.map(
-      (row) => html`
-        <tr @click=${() => this.handleRowSelection(row)}>
-          <th scope="row">${row.id}</th>
-          <td
-            class="text-truncate"
-            style="max-width: 26rem;"
-            title=${row.localpath}
-          >
-            ${sourceDisplayName(row.localpath)}
-          </td>
-          <td>
-            <input
-              type="radio"
-              name="videoSelect"
-              .checked=${this.selectedKey === row.key}
-            />
-          </td>
-        </tr>
-      `,
-    );
   }
 }

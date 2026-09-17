@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ChromeGate, chromeKey, chromeStateOf } from "./previewLoop";
+import { ChromeGate, chromeKey, chromeKeyAt, chromeStateOf } from "./previewLoop";
 import { linesFromWordGroups } from "./lines";
 import { playheadLabel } from "../media/playback";
 
@@ -131,5 +131,35 @@ describe("chromeStateOf", () => {
       if (gate.changed(active, label)) renders += 1;
     }
     expect(renders).toBe(1);
+  });
+});
+
+describe("chromeKeyAt", () => {
+  const tagged = () => [
+    { ...linesFromWordGroups([[{ word: "a", start: 1, end: 2 }]], () => "a")[0], sourceKey: "x" },
+    { ...linesFromWordGroups([[{ word: "b", start: 1, end: 2 }]], () => "b")[0], sourceKey: "y" },
+  ];
+
+  it("keys the gap between clips like a moment with nothing lit", () => {
+    expect(chromeKeyAt(tagged(), [])).toBe("-1:-1");
+  });
+
+  it("lights the line of the clip under the playhead, not its twin", () => {
+    expect(chromeKeyAt(tagged(), [{ key: "y", seconds: 1.5 }])).toBe("1:0");
+  });
+
+  // Two chosen clips on two tracks play at once. A key that folded them into
+  // one would hold the re-render back when only the second one moved.
+  it("changes when either of two positions changes", () => {
+    const ls = tagged();
+    const both = chromeKeyAt(ls, [
+      { key: "x", seconds: 1.5 },
+      { key: "y", seconds: 1.5 },
+    ]);
+    const moved = chromeKeyAt(ls, [
+      { key: "x", seconds: 1.5 },
+      { key: "y", seconds: 3 },
+    ]);
+    expect(both).not.toBe(moved);
   });
 });

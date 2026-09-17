@@ -48,9 +48,39 @@ export function windowScheduler(): FrameScheduler {
  * on the thread compositing the frame. Nothing in the template moves that fast:
  * only which word is highlighted, and a readout rounded to whole seconds.
  */
-export function chromeKey(lines: CaptionLine[], timeSec: number): string {
-  const { lineIndex, wordIndex } = activeAt(lines, timeSec);
+export function chromeKey(
+  lines: CaptionLine[],
+  timeSec: number,
+  sourceKey?: string,
+): string {
+  const { lineIndex, wordIndex } = activeAt(lines, timeSec, sourceKey);
   return `${lineIndex ?? -1}:${wordIndex ?? -1}`;
+}
+
+/**
+ * Where the playhead is in one clip's file. A position with no key matches
+ * untagged lines, which is how a one-clip list was matched before lines had
+ * keys.
+ */
+export type ChromePosition = { key?: string; seconds: number };
+
+/**
+ * The same key, for every clip the playhead is over at once.
+ *
+ * A list because two chosen clips on two tracks can play at the same moment,
+ * and each has its own line lit. No position at all is the gap between clips,
+ * where nothing is lit, and it keys the same as a moment with no line.
+ */
+export function chromeKeyAt(
+  lines: CaptionLine[],
+  positions: readonly ChromePosition[],
+): string {
+  if (positions.length === 0) {
+    return "-1:-1";
+  }
+  return positions
+    .map((position) => chromeKey(lines, position.seconds, position.key))
+    .join("|");
 }
 
 /**

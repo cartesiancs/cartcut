@@ -76,3 +76,57 @@ describe("captionPhaseView", () => {
     expect(captionPhaseView({ phase: "revealing" })?.failed).toBe(false);
   });
 });
+
+describe("captionPhaseView over several clips", () => {
+  it("counts the clip being transcribed, from one", () => {
+    const view = captionPhaseView({
+      phase: "transcribing",
+      fraction: 0,
+      clip: { index: 1, total: 3 },
+    });
+    expect(view?.counter).toBe("2/3");
+  });
+
+  // One bar for the whole run, so starting the next clip never sends it back
+  // to zero.
+  it("fills one bar across every clip", () => {
+    const at = (index: number, fraction: number) =>
+      captionPhaseView({
+        phase: "transcribing",
+        fraction,
+        clip: { index, total: 4 },
+      })?.percent;
+    expect(at(0, 0)).toBe(0);
+    expect(at(1, 0.5)).toBe(38);
+    expect(at(3, 1)).toBe(100);
+    expect(at(1, 0)).toBeGreaterThan(at(0, 0.9)!);
+  });
+
+  it("changes nothing for a single clip", () => {
+    const one = captionPhaseView({
+      phase: "transcribing",
+      fraction: 0.4,
+      clip: { index: 0, total: 1 },
+    });
+    expect(one).toEqual(captionPhaseView({ phase: "transcribing", fraction: 0.4 }));
+    expect(one?.counter).toBeNull();
+  });
+
+  it("clamps a counter that would run past the total", () => {
+    expect(
+      captionPhaseView({
+        phase: "transcribing",
+        clip: { index: 9, total: 2 },
+        fraction: 2,
+      }),
+    ).toMatchObject({ counter: "2/2", percent: 100 });
+  });
+
+  it("counts nothing outside transcription", () => {
+    for (const phase of ["sweeping", "revealing", "failed"] as const) {
+      expect(
+        captionPhaseView({ phase, clip: { index: 0, total: 3 } })?.counter,
+      ).toBeNull();
+    }
+  });
+});

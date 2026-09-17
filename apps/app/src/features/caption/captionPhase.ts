@@ -40,6 +40,11 @@ export type CaptionPhaseInput = {
   fraction?: number;
   /** What went wrong. Meaningful for `failed` alone. */
   message?: string;
+  /**
+   * Which of the chosen clips is being transcribed, from 0. Absent, or a total
+   * of one, reads as a single clip and changes nothing.
+   */
+  clip?: { index: number; total: number };
 };
 
 export type CaptionPhaseView = {
@@ -57,6 +62,8 @@ export type CaptionPhaseView = {
   cancellable: boolean;
   /** Whether this is the failure screen, which is styled as a warning. */
   failed: boolean;
+  /** `2/3` while the second of three clips is transcribed. Null for one clip. */
+  counter: string | null;
 };
 
 const NOTE_SWEEP = "Finding the gaps where nobody is speaking.";
@@ -81,12 +88,20 @@ export function captionPhaseView(
 
     case "transcribing": {
       const copy = progressCopy(input.stage ?? "");
+      const batch = batchOf(input.clip);
       return {
         title: copy.title,
         note: copy.note,
-        percent: progressPercent(input.fraction ?? 0),
+        // One bar for the whole run: each clip's own fraction is a slice of
+        // it, so the bar never goes backwards when the next clip starts.
+        percent: progressPercent(
+          batch == null
+            ? (input.fraction ?? 0)
+            : (batch.index + clamp01(input.fraction ?? 0)) / batch.total,
+        ),
         cancellable: true,
         failed: false,
+        counter: batch == null ? null : `${batch.index + 1}/${batch.total}`,
       };
     }
 
@@ -97,6 +112,7 @@ export function captionPhaseView(
         percent: null,
         cancellable: false,
         failed: false,
+        counter: null,
       };
 
     case "revealing":
@@ -106,6 +122,7 @@ export function captionPhaseView(
         percent: null,
         cancellable: false,
         failed: false,
+        counter: null,
       };
 
     case "failed":
@@ -120,6 +137,23 @@ export function captionPhaseView(
         percent: null,
         cancellable: false,
         failed: true,
+        counter: null,
       };
   }
+}
+
+/** A batch worth counting, or null. Clamped so a bad index cannot overrun. */
+function batchOf(
+  clip: CaptionPhaseInput["clip"],
+): { index: number; total: number } | null {
+  if (clip == null || !(clip.total > 1)) {
+    return null;
+  }
+  const total = Math.floor(clip.total);
+  const index = Math.min(total - 1, Math.max(0, Math.floor(clip.index)));
+  return { index, total };
+}
+
+function clamp01(value: number): number {
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
 }

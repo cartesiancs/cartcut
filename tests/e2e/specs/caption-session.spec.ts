@@ -26,31 +26,129 @@
 import { test, expect } from "../harness/test";
 import { agent, listClips, timelineDocument } from "../harness/agent";
 
-/** Three lines, spread far enough apart to leave gaps worth cutting. */
-const LINES = [
-  { at: 0.5, text: "first line" },
-  { at: 3.0, text: "second line" },
-  { at: 5.5, text: "third line" },
-].map((line, index) => {
-  const words = line.text.split(" ").map((word, w) => ({
-    word,
-    start: line.at + w * 0.3,
-    end: line.at + w * 0.3 + 0.25,
-  }));
-  return {
-    id: `line-${index + 1}`,
-    words,
-    start: line.at,
-    end: line.at + 0.8,
-    text: line.text,
-  };
-});
+/**
+ * Three lines of one clip, spread far enough apart to leave gaps worth cutting,
+ * tagged with the clip they were spoken in.
+ */
+function linesFor(sourceKey: string, prefix = "") {
+  return [
+    { at: 0.5, text: `${prefix}first line` },
+    { at: 3.0, text: `${prefix}second line` },
+    { at: 5.5, text: `${prefix}third line` },
+  ].map((line, index) => {
+    const words = line.text.split(" ").map((word, w) => ({
+      word,
+      start: line.at + w * 0.3,
+      end: line.at + w * 0.3 + 0.25,
+    }));
+    return {
+      id: `${sourceKey}-line-${index + 1}`,
+      words,
+      start: line.at,
+      end: line.at + 0.8,
+      text: line.text,
+      sourceKey,
+    };
+  });
+}
+
+/**
+ * Put a transcript and a sweep's result straight onto the panel, and start.
+ *
+ * What the sweep would have left behind, and the windows it would have been
+ * bounded by. Everything after this is the shipping path.
+ */
+function seedPanel(
+  page: import("@playwright/test").Page,
+  clips: Array<{ key: string; name: string }>,
+  lines: unknown[],
+) {
+  return page.evaluate(
+    ({ clips, lines, silences }) => {
+      const panel = document.querySelector("automatic-caption") as any;
+      panel.lines = lines;
+      panel._clips = clips.map((clip) => ({
+        key: clip.key,
+        localpath: "",
+        name: clip.name,
+        filetype: "video",
+        window: { startMs: 0, endMs: 8000 },
+      }));
+      panel._silenceByKey = Object.fromEntries(
+        clips.map((clip) => [clip.key, silences]),
+      );
+      panel._startSession();
+    },
+    { clips, lines, silences: SILENCES },
+  );
+}
+
+/** Open a line's menu and press one of its two entries. */
+async function rowMenu(
+  page: import("@playwright/test").Page,
+  line: number,
+  entry: number,
+) {
+  const trigger = page.locator("app-window .caption").nth(line).locator(".caption-row-more");
+  // Scrolled first and settled for two frames. A scroll event is delivered on
+  // the next frame, after a click made in the same one, and the menu closes on
+  // any scroll, so scrolling and clicking together closes the menu it opened.
+  await trigger.scrollIntoViewIfNeeded();
+  await page.evaluate(
+    () =>
+      new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      ),
+  );
+  await trigger.click();
+  const item = page.locator(".caption-menu .caption-menu-item").nth(entry);
+  await expect(item).toBeVisible();
+  return item;
+}
 
 /** Gaps between the lines, in source ms. What a real sweep would have found. */
 const SILENCES = [
   { startMs: 1500, endMs: 2800 },
   { startMs: 4000, endMs: 5300 },
 ];
+
+/**
+ * Whatever the store currently holds, as the numbers that matter.
+ */
+function readState(page: import("@playwright/test").Page) {
+  return page.evaluate(() => {
+    const store = (window as any).CARTCUT.useTimelineStore.getState();
+    const elements = Object.entries(store.timeline) as Array<[string, any]>;
+    return {
+      ids: elements.map(([id]) => id).sort(),
+      captions: elements
+        .filter(([, el]) => el.filetype === "text")
+        .map(([, el]) => ({ text: el.text, start: el.startTime, dur: el.duration }))
+        .sort((a, b) => a.start - b.start),
+      pieces: elements.filter(([, el]) => el.filetype === "video").length,
+      historyNow: store.history.historyNow,
+      historyLength: store.history.timelineHistory.length,
+      locked:
+        (window as any).CARTCUT.timelineLockStore.getState().reason !== null,
+    };
+  });
+}
+
+/**
+ * Open the window the way `ControlUtilities` does, through the store, so this
+ * does not depend on a tile's markup.
+ */
+async function openCaptionWindow(page: import("@playwright/test").Page) {
+  await page.evaluate(() => {
+    (window as any).CARTCUT.windowStore.getState().open({
+      id: "automaticCaption",
+      hostId: "preview",
+      placement: { mode: "docked", side: "right", sizePct: 46 },
+      minSize: { width: 320, height: 240 },
+    });
+  });
+  await expect(page.locator("automatic-caption")).toBeVisible({ timeout: 15_000 });
+}
 
 test("a transcript takes the timeline, and only Apply keeps it", async ({
   session,
@@ -67,66 +165,22 @@ test("a transcript takes the timeline, and only Apply keeps it", async ({
   const { clips } = await listClips(session);
   const sourceKey = clips[0].id as string;
 
-  /** Whatever the store currently holds, as the two numbers that matter. */
-  const state = () =>
-    page.evaluate(() => {
-      const store = (window as any).CARTCUT.useTimelineStore.getState();
-      const elements = Object.entries(store.timeline) as Array<[string, any]>;
-      return {
-        ids: elements.map(([id]) => id).sort(),
-        captions: elements
-          .filter(([, el]) => el.filetype === "text")
-          .map(([, el]) => ({ text: el.text, start: el.startTime, dur: el.duration }))
-          .sort((a, b) => a.start - b.start),
-        pieces: elements.filter(([, el]) => el.filetype === "video").length,
-        historyNow: store.history.historyNow,
-        historyLength: store.history.timelineHistory.length,
-        locked:
-          (window as any).CARTCUT.timelineLockStore.getState().reason !== null,
-      };
-    });
+  const state = () => readState(page);
 
   const before = await state();
   expect(before.captions).toHaveLength(0);
   expect(before.pieces).toBe(1);
   expect(before.locked).toBe(false);
 
-  /**
-   * Open the window the way `ControlUtilities` does, through the store, so this
-   * does not depend on a tile's markup.
-   *
-   * Needed twice: Apply closes the window, which is deliberate. Leaving it open
-   * on the setup screen after an edit was taken would read as the edit not
-   * having been taken.
-   */
-  const openWindow = async () => {
-    await page.evaluate(() => {
-      (window as any).CARTCUT.windowStore.getState().open({
-        id: "automaticCaption",
-        hostId: "preview",
-        placement: { mode: "docked", side: "right", sizePct: 46 },
-        minSize: { width: 320, height: 240 },
-      });
-    });
-    await expect(page.locator("automatic-caption")).toBeVisible({ timeout: 15_000 });
-  };
+  // Needed twice: Apply closes the window, which is deliberate. Leaving it
+  // open on the setup screen after an edit was taken would read as the edit
+  // not having been taken.
+  const openWindow = () => openCaptionWindow(page);
 
   await openWindow();
 
-  const seed = async () =>
-    page.evaluate(
-      ({ lines, silences, key }) => {
-        const panel = document.querySelector("automatic-caption") as any;
-        panel.lines = lines;
-        panel.selectedKey = key;
-        // What the sweep would have left behind, and the window it would have
-        // been bounded by. Everything after this is the shipping path.
-        panel._silenceRanges = silences;
-        panel._sourceWindow = { startMs: 0, endMs: 8000 };
-        panel._startSession();
-      },
-      { lines: LINES, silences: SILENCES, key: sourceKey },
-    );
+  const seed = () =>
+    seedPanel(page, [{ key: sourceKey, name: "clip" }], linesFor(sourceKey));
 
   await test.step("the captions and the cuts land without an undo step", async () => {
     await seed();
@@ -263,8 +317,8 @@ test("a transcript takes the timeline, and only Apply keeps it", async ({
     const secondStart = before.captions[1].start;
     const thirdStart = before.captions[2].start;
 
-    // The second button on the second line: merge, then the scissors.
-    await page.locator("app-window .caption").nth(1).locator(".caption-merge").nth(1).click();
+    // The second entry of the second line's menu: merge, then the scissors.
+    await (await rowMenu(page, 1, 1)).click();
     await expect
       .poll(async () => (await state()).captions.length, { timeout: 5_000 })
       .toBe(before.captions.length - 1);
@@ -284,7 +338,7 @@ test("a transcript takes the timeline, and only Apply keeps it", async ({
   await test.step("putting it back restores the footage and the caption", async () => {
     const struck = await state();
 
-    await page.locator("app-window .caption").nth(1).locator(".caption-merge").nth(1).click();
+    await (await rowMenu(page, 1, 1)).click();
     await expect
       .poll(async () => (await state()).captions.length, { timeout: 5_000 })
       .toBe(struck.captions.length + 1);
@@ -346,4 +400,110 @@ test("a transcript takes the timeline, and only Apply keeps it", async ({
   // The document is the authority, not the store snapshot the steps above read.
   const doc = await timelineDocument(session);
   expect(Object.keys(doc).length).toBeGreaterThan(0);
+});
+
+/**
+ * Two clips of one file, one after the other on one video track.
+ *
+ * Placed one at a time because the second has to name the first one's track.
+ * A short gap between them, because the second start is snapped down to the
+ * frame grid and a start a fraction inside the first clip is an occupied slot,
+ * which sends the clip to a new track.
+ */
+async function oneAfterTheOther(
+  session: Parameters<typeof listClips>[0],
+  path: string,
+) {
+  await agent(session, "add_media", {
+    items: [{ path, startMs: 0 }],
+    sequential: false,
+  });
+  const [head] = (await listClips(session)).clips.filter((c) => c.type === "video");
+  await agent(session, "add_media", {
+    items: [{ path, startMs: Math.ceil(head.end) + 100, trackId: head.trackId }],
+    sequential: false,
+  });
+  const videos = (await listClips(session)).clips
+    .filter((c) => c.type === "video")
+    .sort((a, b) => a.start - b.start);
+  expect(videos).toHaveLength(2);
+  expect(videos[1].trackId).toBe(videos[0].trackId);
+  expect(videos[1].start).toBeGreaterThanOrEqual(videos[0].end);
+  return videos;
+}
+
+// Several clips, one session. The node suites prove the arithmetic; this proves
+// the panel, `Control` and the real store carry more than one clip through it:
+// both clips cut, one caption list in sections, one Apply, one Cmd+Z.
+test("two clips on one track are captioned and cut as one edit", async ({
+  session,
+  fixtures,
+}) => {
+  const page = session.page;
+  const clip = fixtures.video.find((v) => v.id === "v01-h264-1080p60")!;
+
+  const videos = await oneAfterTheOther(session, clip.path);
+  const [first, second] = videos.map((c) => c.id);
+
+  const before = await readState(page);
+  expect(before.pieces).toBe(2);
+
+  await openCaptionWindow(page);
+  await seedPanel(
+    page,
+    [
+      { key: first, name: "first.mov" },
+      { key: second, name: "second.mov" },
+    ],
+    [...linesFor(first, "a "), ...linesFor(second, "b ")],
+  );
+
+  await test.step("both clips land, in two sections", async () => {
+    await expect
+      .poll(async () => (await readState(page)).captions.length, { timeout: 15_000 })
+      .toBe(6);
+    await expect(page.locator("app-window .caption-section")).toHaveCount(2);
+
+    const live = await readState(page);
+    // Two cuts in the middle of each clip leave three pieces of each.
+    expect(live.pieces).toBe(6);
+    expect(live.locked).toBe(true);
+    // The second clip's captions follow the first clip's, and every one of
+    // them sits before the end of the shortened pair.
+    const texts = live.captions.map((c) => c.text);
+    expect(texts.slice(0, 3).every((t) => t.startsWith("a "))).toBe(true);
+    expect(texts.slice(3).every((t) => t.startsWith("b "))).toBe(true);
+    // The second clip's first caption (0.5s into it) moved back by exactly
+    // what the first clip lost: two silences, 2.6s together. Within a frame,
+    // because the cut edges are snapped to the grid.
+    const expected = videos[1].start + 500 - 2600;
+    expect(Math.abs(live.captions[3].start - expected)).toBeLessThanOrEqual(40);
+  });
+
+  await test.step("Merge is off at the boundary between the clips", async () => {
+    const merge = await rowMenu(page, 3, 0);
+    await expect(merge).toBeDisabled();
+    await page.keyboard.press("Escape");
+
+    const inside = await rowMenu(page, 4, 0);
+    await expect(inside).toBeEnabled();
+    await page.keyboard.press("Escape");
+  });
+
+  await test.step("Apply is one step, and one undo takes both clips back", async () => {
+    const live = await readState(page);
+    await page.locator("app-window .caption-apply").click();
+    await expect.poll(async () => (await readState(page)).locked, { timeout: 10_000 }).toBe(false);
+
+    const applied = await readState(page);
+    expect(applied.historyLength).toBe(live.historyLength + 1);
+    expect(applied.pieces).toBe(6);
+
+    await page.evaluate(() => {
+      (window as any).CARTCUT.editorActions.undo();
+    });
+    const undone = await readState(page);
+    expect(undone.captions).toHaveLength(0);
+    expect(undone.pieces).toBe(2);
+  });
 });

@@ -73,6 +73,16 @@ export type CaptionLine = {
    * Absent means kept, so nothing about an untouched transcript changes shape.
    */
   removed?: boolean;
+  /**
+   * The element key of the clip these words were spoken in.
+   *
+   * A session can caption several clips, and their words share one list but
+   * not one clock: each counts in its own file's seconds, and two clips cut
+   * from one file can both have a word at 12s. Absent on a line nobody tagged,
+   * which is every line of a one-clip edit built before this existed. Never
+   * written to a project.
+   */
+  sourceKey?: string;
 };
 
 /** A caption ready for the timeline, in **milliseconds**. */
@@ -248,6 +258,7 @@ export function splitLineAt(
     start: line.start,
     end: cut,
     text: head,
+    ...keyOf(line),
   };
   const second: CaptionLine = {
     id: newId,
@@ -255,6 +266,7 @@ export function splitLineAt(
     start: cut,
     end: line.end,
     text: tail,
+    ...keyOf(line),
   };
 
   return [...lines.slice(0, index), first, second, ...lines.slice(index + 1)];
@@ -288,12 +300,20 @@ export function mergeLineWithPrevious(
     return lines;
   }
 
+  // Two clips, two clocks. A merged line would hold words from both files
+  // under one key, and its span would be a stretch of one file bounded by a
+  // time from the other.
+  if (previous.sourceKey !== current.sourceKey) {
+    return lines;
+  }
+
   const merged: CaptionLine = {
     id: previous.id,
     words: [...previous.words, ...current.words],
     start: Math.min(previous.start, current.start),
     end: Math.max(previous.end, current.end),
     text: joinText(previous.text, current.text),
+    ...keyOf(previous),
   };
 
   return [...lines.slice(0, index - 1), merged, ...lines.slice(index + 1)];
@@ -394,6 +414,20 @@ export function removedSpans(
     .map((line) => ({ startMs: line.start * 1000, endMs: line.end * 1000 }));
 }
 
+/**
+ * Whether the line at `index` is the first of its clip.
+ *
+ * What disables Merge at a section boundary. The first line of the list starts
+ * a clip too, and has nothing above it either way.
+ */
+export function startsClip(lines: CaptionLine[], index: number): boolean {
+  const line = lines[index];
+  if (line == null) {
+    return false;
+  }
+  return index === 0 || lines[index - 1].sourceKey !== line.sourceKey;
+}
+
 /** Whether anything is struck out. What the panel's summary line asks. */
 export function hasRemovedLines(lines: CaptionLine[]): boolean {
   return lines.some((line) => line.removed === true);
@@ -410,9 +444,17 @@ export function hasRemovedLines(lines: CaptionLine[]): boolean {
 export function lineIndexAt(
   lines: CaptionLine[],
   timeSec: number,
+  sourceKey?: string,
 ): number | null {
   for (let index = 0; index < lines.length; index += 1) {
-    if (timeSec >= lines[index].start && timeSec < lines[index].end) {
+    const line = lines[index];
+    // `timeSec` is a moment of one file. A line from another clip at the same
+    // second is a different moment, and matching it would light up a caption
+    // nobody is hearing.
+    if (sourceKey !== undefined && line.sourceKey !== sourceKey) {
+      continue;
+    }
+    if (timeSec >= line.start && timeSec < line.end) {
       return index;
     }
   }
@@ -452,8 +494,9 @@ export function wordIndexAt(
 export function activeAt(
   lines: CaptionLine[],
   timeSec: number,
+  sourceKey?: string,
 ): { lineIndex: number | null; wordIndex: number | null } {
-  const lineIndex = lineIndexAt(lines, timeSec);
+  const lineIndex = lineIndexAt(lines, timeSec, sourceKey);
   return {
     lineIndex,
     wordIndex: wordIndexAt(
@@ -509,11 +552,16 @@ function cutTimeFor(
   return line.start + (line.end - line.start) * fraction;
 }
 
-function midpoint(word: CaptionWord): number {
+/** The key, as a spread, so an untagged line stays without one. */
+function keyOf(line: CaptionLine): { sourceKey?: string } {
+  return line.sourceKey != null ? { sourceKey: line.sourceKey } : {};
+}
+
+export function midpoint(word: CaptionWord): number {
   return (word.start + word.end) / 2;
 }
 
-function joinWords(words: CaptionWord[]): string {
+export function joinWords(words: CaptionWord[]): string {
   return words
     .map((word) => word.word)
     .join(" ")

@@ -334,6 +334,15 @@ The handful of facts inside those that are worth stating up front:
   - **Ids are minted once and keyed**, a caption's by its line's id and a cut's
     by the cut's index. A running pool would rename every piece on every frame
     of the reveal, and `loadedAssetStore` caches decoders by element id.
+  - **Several clips are one session.** The picker
+    (`apps/automatic-caption/src/clipPicker.ts`, its own dark overlay, since
+    the vendored Bootstrap 5.0.2 has no dark modal) hands over an ordered list.
+    Every line carries its clip's `sourceKey`, and `clips.ts` trims each
+    transcript to its clip's window. Cuts are tracked **per track** but made
+    with each clip's own list on that clip's own pieces: a range merged across
+    two clips is clamped to one piece and half of it silently stays. Split ids
+    are keyed by clip, then by index within the clip, so an edit in one clip
+    never renames another's pieces.
   - **`timelineLockStore` is ephemeral, deliberately.** A `locked?: true` on
     `TimelineTrack` would persist, undo and save for free, and would also
     survive a crash as a lock with no holder and no way to release it. Five

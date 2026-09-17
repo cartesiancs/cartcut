@@ -46,6 +46,17 @@ export class SimpleApp extends LitElement {
         rotation: { isActivate: false, x: [], ax: [] },
       },
     },
+    // A second clip, so the picker has an order to change and a waveform to
+    // draw. Same file, so it is also the "two clips of one recording" case.
+    "7f1e9c52-2d4b-4c8e-9a51-0c3f6b8d2e11": {
+      priority: 2,
+      startTime: 52301.667,
+      duration: 12000,
+      trim: { startTime: 0, endTime: 12000 },
+      localpath: "/Users/huhhyeongjun/Downloads/test.MOV",
+      filetype: "audio",
+      speed: 1,
+    },
   };
 
   handleComplate(e) {

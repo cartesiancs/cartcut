@@ -49,14 +49,23 @@ const rowsOf = (ls: CaptionLine[]) =>
   captionRows(ls, "clip", { w: 1920, h: 1080 });
 
 /** Deterministic ids, so two runs of the same plan are comparable. */
-function ids(rowCount: number, cutCount: number): CaptionCommit["ids"] {
+function ids(rowCount: number): CaptionCommit["ids"] {
   return {
     captions: Array.from({ length: rowCount }, (_, i) => ({
       element: `cap${i}`,
       track: `capTrack${i}`,
     })),
-    splits: Array.from({ length: cutCount * 2 }, (_, i) => `split${i}`),
   };
+}
+
+/** Two split ids per cut, named after the clip. */
+function splits(key: string, cutCount: number): string[] {
+  return Array.from({ length: cutCount * 2 }, (_, i) => `${key}-split${i}`);
+}
+
+/** The one clip every case below started from. */
+function oneClip(cuts: TimeRange[]): CaptionCommit["clips"] {
+  return [{ key: "clip", cuts, splits: splits("clip", cuts.length) }];
 }
 
 function commit(
@@ -66,10 +75,9 @@ function commit(
 ): TimelineDocument {
   const rows = rowsOf(ls);
   return applyCaptionCommit(base, {
-    sourceKey: "clip",
-    cuts,
+    clips: oneClip(cuts),
     rows,
-    ids: ids(rows.length, cuts.length),
+    ids: ids(rows.length),
   });
 }
 
@@ -90,12 +98,14 @@ describe("applyCaptionCommit", () => {
     const base = doc();
     expect(
       applyCaptionCommit(base, {
-        sourceKey: "clip",
-        cuts: [],
+        clips: oneClip([]),
         rows: [],
-        ids: ids(0, 0),
+        ids: ids(0),
       }),
     ).toBe(base);
+    expect(applyCaptionCommit(base, { clips: [], rows: [], ids: ids(0) })).toBe(
+      base,
+    );
   });
 
   it("places every caption when nothing was cut", () => {
@@ -188,17 +198,15 @@ describe("applyCaptionCommit", () => {
     const edited = removeLine(lines(), 1);
     const plan = planCuts(removedSpans(edited), doc().elements.clip);
     const rows = rowsOf(edited);
-    const shared = ids(rows.length, plan.cuts.length);
+    const shared = ids(rows.length);
 
     const first = applyCaptionCommit(doc(), {
-      sourceKey: "clip",
-      cuts: plan.cuts,
+      clips: oneClip(plan.cuts),
       rows,
       ids: shared,
     });
     const second = applyCaptionCommit(doc(), {
-      sourceKey: "clip",
-      cuts: plan.cuts,
+      clips: oneClip(plan.cuts),
       rows,
       ids: shared,
     });
@@ -213,10 +221,15 @@ describe("applyCaptionCommit", () => {
     const rows = rowsOf(lines());
     expect(() =>
       applyCaptionCommit(doc(), {
-        sourceKey: "clip",
-        cuts: normalizeRanges([{ startMs: 3000, endMs: 4000 }]),
+        clips: [
+          {
+            key: "clip",
+            cuts: normalizeRanges([{ startMs: 3000, endMs: 4000 }]),
+            splits: [],
+          },
+        ],
         rows,
-        ids: { captions: ids(rows.length, 0).captions, splits: [] },
+        ids: ids(rows.length),
       }),
     ).toThrow(/split ids/);
   });
@@ -224,10 +237,9 @@ describe("applyCaptionCommit", () => {
   it("places captions with no clip to map against", () => {
     const rows = rowsOf(lines()).map((row) => ({ ...row, sourceKey: null }));
     const after = applyCaptionCommit(doc(), {
-      sourceKey: null,
-      cuts: [],
+      clips: [],
       rows,
-      ids: ids(rows.length, 0),
+      ids: ids(rows.length),
     });
     expect(captions(after)).toHaveLength(3);
   });
@@ -237,5 +249,140 @@ describe("applyCaptionCommit", () => {
     const plan = planCuts(removedSpans(edited), doc().elements.clip);
     const after = commit(doc(), edited, plan.cuts);
     expect(clipsOnTrack(after, "v1")).toHaveLength(2);
+  });
+});
+
+describe("applyCaptionCommit over several clips", () => {
+  /** X at 0-10s and Y at 10-20s on v1, and Z at 5-15s on v2. */
+  function scene(): TimelineDocument {
+    const clip = (trackId: string, localpath: string, startTime: number) =>
+      videoElement({
+        trackId,
+        localpath,
+        startTime,
+        duration: 10_000,
+        trim: { startTime: 0, endTime: 10_000 },
+        sourceDuration: 10_000,
+      });
+    return normalizeDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: [createTrack("v1", "video", 0), createTrack("v2", "video", 1)],
+      elements: {
+        x: clip("v1", "file:///x.mov", 0),
+        y: clip("v1", "file:///y.mov", 10_000),
+        z: clip("v2", "file:///z.mov", 5_000),
+      },
+    });
+  }
+
+  const pieces = (d: TimelineDocument, trackId: string) =>
+    clipsOnTrack(d, trackId).map(([, el]) => ({
+      file: (el as any).localpath,
+      start: Math.round(spanOf(el).start),
+      end: Math.round(spanOf(el).end),
+      from: Math.round((el as any).trim.startTime),
+    }));
+
+  const cutsFor = (base: TimelineDocument, key: string, ranges: TimeRange[]) =>
+    planCuts(ranges, base.elements[key]).cuts;
+
+  const tagged = (key: string, word: string, start: number) =>
+    linesFromWordGroups([[{ word, start, end: start + 1 }]]).map((line) => ({
+      ...line,
+      sourceKey: key,
+    }));
+
+  it("cuts both clips on one track, the later one first, and moves each caption by its own track", () => {
+    const base = scene();
+    const xCuts = cutsFor(base, "x", [{ startMs: 2_000, endMs: 3_000 }]);
+    const yCuts = cutsFor(base, "y", [{ startMs: 1_000, endMs: 2_000 }]);
+    const ls = [...tagged("x", "ex", 5), ...tagged("y", "why", 5)];
+    const rows = captionRows(ls, null, { w: 1920, h: 1080 });
+
+    const after = applyCaptionCommit(base, {
+      clips: [
+        // In the chosen order, which is not timeline order. The commit orders
+        // the cutting itself.
+        { key: "x", cuts: xCuts, splits: splits("x", xCuts.length) },
+        { key: "y", cuts: yCuts, splits: splits("y", yCuts.length) },
+      ],
+      rows,
+      ids: ids(rows.length),
+    });
+
+    expect(pieces(after, "v1")).toEqual([
+      { file: "file:///x.mov", start: 0, end: 2_000, from: 0 },
+      { file: "file:///x.mov", start: 2_000, end: 9_000, from: 3_000 },
+      { file: "file:///y.mov", start: 9_000, end: 10_000, from: 0 },
+      { file: "file:///y.mov", start: 10_000, end: 18_000, from: 2_000 },
+    ]);
+    expect(captions(after)).toEqual([
+      { text: "ex", startTime: 4_000, duration: 1_000 },
+      { text: "why", startTime: 13_000, duration: 1_000 },
+    ]);
+  });
+
+  it("leaves each track with only its own clip's cuts", () => {
+    const base = scene();
+    const zCuts = cutsFor(base, "z", [{ startMs: 0, endMs: 1_000 }]);
+    const after = applyCaptionCommit(base, {
+      clips: [
+        { key: "x", cuts: [], splits: [] },
+        { key: "z", cuts: zCuts, splits: splits("z", zCuts.length) },
+      ],
+      rows: [],
+      ids: ids(0),
+    });
+    expect(pieces(after, "v1")).toEqual(pieces(base, "v1"));
+    expect(pieces(after, "v2")).toEqual([
+      { file: "file:///z.mov", start: 5_000, end: 14_000, from: 1_000 },
+    ]);
+  });
+
+  it("throws when one clip's pool runs dry, whatever the other clip has spare", () => {
+    const base = scene();
+    const xCuts = cutsFor(base, "x", [{ startMs: 2_000, endMs: 3_000 }]);
+    const yCuts = cutsFor(base, "y", [{ startMs: 2_000, endMs: 3_000 }]);
+    expect(() =>
+      applyCaptionCommit(base, {
+        clips: [
+          { key: "x", cuts: xCuts, splits: [] },
+          { key: "y", cuts: yCuts, splits: splits("y", 5) },
+        ],
+        rows: [],
+        ids: ids(0),
+      }),
+    ).toThrow(/split ids/);
+  });
+
+  it("places nothing for a row whose clip is not in the commit", () => {
+    const base = scene();
+    const ls = [...tagged("x", "kept", 1), ...tagged("ghost", "dropped", 1)];
+    const rows = captionRows(ls, null, { w: 1920, h: 1080 });
+    const after = applyCaptionCommit(base, {
+      clips: [{ key: "x", cuts: [], splits: [] }],
+      rows,
+      ids: ids(rows.length),
+    });
+    expect(captions(after).map((c) => c.text)).toEqual(["kept"]);
+  });
+
+  it("produces identical documents when run twice", () => {
+    const base = scene();
+    const xCuts = cutsFor(base, "x", [{ startMs: 2_000, endMs: 3_000 }]);
+    const zCuts = cutsFor(base, "z", [{ startMs: 4_000, endMs: 6_000 }]);
+    const ls = [...tagged("x", "ex", 5), ...tagged("z", "zed", 7)];
+    const rows = captionRows(ls, null, { w: 1920, h: 1080 });
+    const plan: CaptionCommit = {
+      clips: [
+        { key: "z", cuts: zCuts, splits: splits("z", zCuts.length) },
+        { key: "x", cuts: xCuts, splits: splits("x", xCuts.length) },
+      ],
+      rows,
+      ids: ids(rows.length),
+    };
+    expect(applyCaptionCommit(scene(), plan).elements).toEqual(
+      applyCaptionCommit(scene(), plan).elements,
+    );
   });
 });

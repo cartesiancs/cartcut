@@ -14,6 +14,7 @@ import {
   setLineText,
   splitLineAt,
   splitLineAt as split,
+  startsClip,
   wordIndexAt,
   type CaptionWord,
   type TranscribedWord,
@@ -550,5 +551,78 @@ describe("removedSpans", () => {
       { startMs: 0, endMs: 1000 },
       { startMs: 4000, endMs: 5000 },
     ]);
+  });
+});
+
+// Several clips share one list but not one clock. The key is what keeps a
+// gesture inside the clip it started in.
+describe("lines tagged with their clip", () => {
+  const tagged = (key: string, words: CaptionWord[], id: string) => ({
+    ...linesFromWordGroups([words], () => id)[0],
+    sourceKey: key,
+  });
+
+  /** Two clips cut from one file: the same second means two moments. */
+  const twins = () => [
+    tagged("x", [{ word: "alpha", start: 10, end: 11 }], "x1"),
+    tagged("x", [{ word: "beta", start: 12, end: 13 }], "x2"),
+    tagged("y", [{ word: "gamma", start: 12, end: 13 }], "y1"),
+  ];
+
+  it("keeps the key on both halves of a split", () => {
+    const [line] = linesFromWordGroups([WORDS], () => "l1");
+    const out = splitLineAt([{ ...line, sourceKey: "x" }], 0, 6, "l2");
+    expect(out.map((l) => l.sourceKey)).toEqual(["x", "x"]);
+  });
+
+  it("adds no key to a split of a line that had none", () => {
+    const out = splitLineAt(lines(), 0, 6, "l2");
+    expect(out).toHaveLength(2);
+    for (const line of out) {
+      expect("sourceKey" in line).toBe(false);
+    }
+  });
+
+  it("refuses to merge across a clip boundary, by identity", () => {
+    const ls = twins();
+    expect(mergeLineWithPrevious(ls, 2)).toBe(ls);
+  });
+
+  it("merges inside a clip and keeps the key", () => {
+    const out = mergeLineWithPrevious(twins(), 1);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ id: "x1", sourceKey: "x", text: "alpha beta" });
+  });
+
+  it("keeps the key through a text edit, a strike-out and a restore", () => {
+    const edited = setLineText(twins(), 2, "changed");
+    expect(edited[2].sourceKey).toBe("y");
+    const struck = removeLine(edited, 2);
+    expect(struck[2].sourceKey).toBe("y");
+    expect(restoreLine(struck, 2)[2].sourceKey).toBe("y");
+  });
+
+  it("marks the first line of each clip", () => {
+    const ls = twins();
+    expect(ls.map((_, i) => startsClip(ls, i))).toEqual([true, false, true]);
+    expect(startsClip(ls, 7)).toBe(false);
+  });
+
+  it("finds the line of the clip asked about, as an index into the whole list", () => {
+    const ls = twins();
+    expect(lineIndexAt(ls, 12.5, "x")).toBe(1);
+    expect(lineIndexAt(ls, 12.5, "y")).toBe(2);
+    expect(activeAt(ls, 12.5, "y")).toEqual({ lineIndex: 2, wordIndex: 0 });
+  });
+
+  it("finds nothing for a clip it has no lines for", () => {
+    expect(activeAt(twins(), 12.5, "z")).toEqual({
+      lineIndex: null,
+      wordIndex: null,
+    });
+  });
+
+  it("still takes the first match when no key is given", () => {
+    expect(lineIndexAt(twins(), 12.5)).toBe(1);
   });
 });

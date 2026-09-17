@@ -36,10 +36,10 @@
  * this pool shape avoids: `removeRanges` mints up to *two* ids per range.
  */
 
-import { v4 as uuidv4 } from "uuid";
 import type { TimelineElement } from "../../@types/timeline";
 import { createTextElement } from "../element/textElement";
 import { removeRanges, type TimeRange } from "../timeline/clipOps";
+import { spanStart } from "../timeline/geometry";
 import { placeNewElement } from "../timeline/placement";
 import { shiftSpan } from "../timeline/rippleMap";
 import type { TimelineDocument } from "../timeline/tracks";
@@ -49,34 +49,25 @@ import { captionToTimeline } from "./timing";
 /** One caption's ids: the element, and the track it makes if it needs one. */
 export type CaptionIds = { element: string; track: string };
 
-export type CaptionCommit = {
-  /** The transcribed clip, or null when the captions are not mapped to one. */
-  sourceKey: string | null;
+/** One chosen clip's part of a commit. */
+export type CaptionCommitClip = {
+  key: string;
   /** Timeline ms, already snapped, clamped and merged by `cuts.ts#planCuts`. */
   cuts: TimeRange[];
-  /** Source ms, from `rows.ts#captionRows`. */
+  /** **Two per cut**, drawn in order. See the header. */
+  splits: string[];
+};
+
+export type CaptionCommit = {
+  /** Every chosen clip, cut or not. A row whose clip is absent is not placed. */
+  clips: CaptionCommitClip[];
+  /** Source ms, from `rows.ts#captionRows`, each carrying its clip's key. */
   rows: CaptionRow[];
   ids: {
     /** One per row, in order. */
     captions: CaptionIds[];
-    /** **Two per cut**, drawn in order. See the header. */
-    splits: string[];
   };
 };
-
-/** The ids a commit needs, minted outside the transform. */
-export function mintCaptionIds(
-  rowCount: number,
-  cutCount: number,
-): CaptionCommit["ids"] {
-  return {
-    captions: Array.from({ length: rowCount }, () => ({
-      element: uuidv4(),
-      track: uuidv4(),
-    })),
-    splits: Array.from({ length: cutCount * 2 }, () => uuidv4()),
-  };
-}
 
 /**
  * Cut, then place.
@@ -85,28 +76,50 @@ export function mintCaptionIds(
  * `withCheckpoint` records no undo step and the store notifies nobody. That is
  * the convention `features/timeline/` states, and here it is what stops a
  * Complate on an untouched transcript from costing the user an undo press.
+ *
+ * With several clips, each is cut with its own list, **latest first**. A cut
+ * ripples only what comes after it on its own track, so cutting the later clip
+ * first leaves the earlier one where it was and no list needs shifting to
+ * account for another. Each row is then carried across every cut on its own
+ * clip's track, and the rows are placed in reveal order, so the text track each
+ * one lands on is the one the reveal gives it.
  */
 export function applyCaptionCommit(
   doc: TimelineDocument,
   plan: CaptionCommit,
 ): TimelineDocument {
-  if (plan.cuts.length === 0 && plan.rows.length === 0) {
+  if (plan.clips.every((clip) => clip.cuts.length === 0) && plan.rows.length === 0) {
     return doc;
   }
 
   // Read before cutting. See the header: the original id may not survive.
-  const source: TimelineElement | undefined =
-    plan.sourceKey != null ? doc.elements[plan.sourceKey] : undefined;
+  const sources = new Map<string, TimelineElement | undefined>(
+    plan.clips.map((clip) => [clip.key, doc.elements[clip.key]]),
+  );
+
+  const lanes = new Map<string, TimeRange[]>();
+  for (const clip of plan.clips) {
+    const trackId = sources.get(clip.key)?.trackId;
+    if (trackId != null) {
+      lanes.set(trackId, [...(lanes.get(trackId) ?? []), ...clip.cuts]);
+    }
+  }
 
   let next = doc;
 
-  if (plan.cuts.length > 0 && plan.sourceKey != null) {
-    const pool = plan.ids.splits;
+  const latestFirst = plan.clips
+    .filter((clip) => clip.cuts.length > 0 && sources.get(clip.key) != null)
+    .sort(
+      (a, b) => spanStart(sources.get(b.key)!) - spanStart(sources.get(a.key)!),
+    );
+
+  for (const clip of latestFirst) {
+    const pool = clip.splits;
     let drawn = 0;
     next = removeRanges(
       next,
-      plan.sourceKey,
-      plan.cuts,
+      clip.key,
+      clip.cuts,
       // Ripple, always. A caption edit that left holes where the words were
       // would be a worse answer than not cutting at all.
       true,
@@ -122,13 +135,38 @@ export function applyCaptionCommit(
     );
   }
 
+  type Placement = {
+    row: CaptionRow;
+    ids: CaptionIds;
+    source: TimelineElement | undefined;
+    cuts: TimeRange[];
+    at: number;
+  };
+  const placed: Placement[] = [];
   plan.rows.forEach((row, index) => {
     const ids = plan.ids.captions[index];
-    if (ids == null) {
+    if (ids == null || (row.sourceKey != null && !sources.has(row.sourceKey))) {
       return;
     }
-    next = placeCaptionRow(next, row, ids, source, plan.cuts);
+    const source = row.sourceKey == null ? undefined : sources.get(row.sourceKey);
+    const trackId = source?.trackId;
+    placed.push({
+      row,
+      ids,
+      source,
+      cuts: trackId == null ? [] : (lanes.get(trackId) ?? []),
+      at: captionToTimeline(
+        { startTime: row.startTime, duration: row.duration },
+        source,
+      ).startTime,
+    });
   });
+  // Stable, so rows that start together keep their order.
+  placed.sort((a, b) => a.at - b.at);
+
+  for (const entry of placed) {
+    next = placeCaptionRow(next, entry.row, entry.ids, entry.source, entry.cuts);
+  }
 
   return next;
 }
@@ -142,10 +180,10 @@ export function applyCaptionCommit(
  * to get subtly wrong, and wrong here means captions a frame or two off the
  * words, which is the failure nobody reports and everybody notices.
  *
- * `cuts` is the list this caption has to survive, and for the incremental
- * caller that is **the cuts already applied**, not the whole plan. Those two
- * are the same answer: the ripple is lane-local and the reveal runs in time
- * order, so every cut that could move this caption is behind it already.
+ * `cuts` is every cut on the track of the clip this caption belongs to, the
+ * whole list and not the part applied so far: a caption straddling a later cut
+ * has to come out shorter. `captionProjection.ts` states why the incremental
+ * caller still lands where the batch does.
  *
  * Returns `doc` by identity when the cuts consumed the caption's footage, so a
  * caller can tell that nothing was placed.

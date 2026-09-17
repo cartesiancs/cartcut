@@ -26,6 +26,7 @@ import {
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { timelineLockStore } from "../../states/timelineLockStore";
+import { selectionStore } from "../../states/selectionStore";
 import {
   CaptionSession,
   type CaptionSessionPhase,
@@ -207,11 +208,12 @@ export class Control extends LitElement {
    * The panel has words and silences. Take the timeline.
    *
    * What is left here is the one thing only this component can do: read the
-   * store. The clip is resolved, the session is handed it, and everything after
-   * that is the session's, including the planning, because by the second change
-   * `doc.elements[sourceKey]` names a *piece* of the clip or nothing at all.
+   * store. The chosen clips are resolved, the session is handed them, and
+   * everything after that is the session's, including the planning, because by
+   * the second change `doc.elements[key]` names a *piece* of a clip or nothing
+   * at all.
    *
-   * The two warnings moved forward with the cuts. They used to fire on Apply,
+   * The warnings moved forward with the cuts. They used to fire on Apply,
    * which was the moment the cuts happened; the cuts happen as soon as a
    * transcript lands now, so this is that moment.
    */
@@ -233,42 +235,56 @@ export class Control extends LitElement {
    */
   _handleCaptionSessionStart = (e) => {
     const doc = useTimelineStore.getState().getDocument();
-    const sourceKey = e.detail.sourceKey ?? null;
-    // Read before anything cuts it. `removeRanges` splits the clip and the
+    // Read before anything cuts them. `removeRanges` splits a clip and the
     // original id does not always survive, so this is the only moment the
-    // transcribed clip can be resolved at all. The session holds it from here.
-    const source = sourceKey ? doc.elements[sourceKey] : undefined;
+    // chosen clips can be resolved at all. The session holds them from here.
+    const clips = (e.detail.clips ?? []).map((clip) => ({
+      key: clip.key,
+      source: doc.elements[clip.key],
+      sourceRanges: clip.sourceRanges ?? [],
+    }));
 
     this.captionSession.start({
       lines: e.detail.lines ?? [],
-      sourceKey,
-      source,
+      clips,
       frame: this.previewSize,
       placement: e.detail.placement ?? "lowerThird",
-      sourceRanges: e.detail.sourceRanges ?? [],
     });
 
-    // Both warnings read back what the session decided, because the planning
+    // The warnings read back what the session decided, because the planning
     // and the clamping are its job now. They fire here and not on every later
     // change: each describes something settled once, not a state the user is
     // going to keep looking at.
-    if (this.captionSession.coversWholeClip) {
+    const covered = this.captionSession.coveredClips.length;
+    if (covered > 0) {
       this.toastCaption(
-        "Those silences cover the whole clip, so nothing was cut. The captions were placed.",
+        covered === 1 && clips.length === 1
+          ? "Those silences cover the whole clip, so nothing was cut. The captions were placed."
+          : `The silences cover ${covered} whole clip(s), so those were not cut. Their captions were placed.`,
       );
     }
 
-    const cuts = this.captionSession.cuts;
-    if (cuts.length > 0 && sourceKey != null) {
-      // The ripple is lane-local, so anything already sitting on another row
-      // keeps its old timing and drifts out of sync with the speech. Said
-      // plainly rather than discovered at playback.
-      const stranded = clipsAcrossCuts(doc, (source as any)?.trackId ?? "", cuts);
-      if (stranded.length > 0) {
-        this.toastCaption(
-          `${stranded.length} clip(s) on other tracks overlap the cuts and were not moved, so they may now be out of sync.`,
-        );
+    const refused = this.captionSession.refusedClips.length;
+    if (refused > 0) {
+      this.toastCaption(
+        `${refused} clip(s) overlap another chosen clip or sit on no video or audio track, so they were not cut. Their captions were placed.`,
+      );
+    }
+
+    // The ripple is lane-local, so anything on another row keeps its old timing
+    // and drifts out of sync with the speech. That includes a chosen clip on
+    // another row, which drifts against the clips it was playing with. Said
+    // plainly rather than discovered at playback.
+    const stranded = new Set<string>();
+    for (const [trackId, cuts] of this.captionSession.cutsByTrack) {
+      for (const id of clipsAcrossCuts(doc, trackId, cuts)) {
+        stranded.add(id);
       }
+    }
+    if (stranded.size > 0) {
+      this.toastCaption(
+        `${stranded.size} clip(s) on other tracks overlap the cuts and were not moved, so they may now be out of sync.`,
+      );
     }
   };
 
@@ -284,7 +300,7 @@ export class Control extends LitElement {
     this.captionSession.update({
       lines: e.detail.lines ?? [],
       placement: e.detail.placement ?? "lowerThird",
-      sourceRanges: e.detail.sourceRanges ?? [],
+      ranges: e.detail.ranges ?? [],
     });
   };
 
@@ -307,13 +323,24 @@ export class Control extends LitElement {
           onChange();
         }
       }),
-    sourceSeconds: () =>
-      this.captionSession.sourceSecondsOf(useTimelineStore.getState().cursor),
-    seekToSource: (seconds) =>
-      useTimelineStore
-        .getState()
-        .setCursor(this.captionSession.timelineMsOf(seconds * 1000)),
+    sourcePositions: () =>
+      this.captionSession.sourcePositionsOf(useTimelineStore.getState().cursor),
+    seekToSource: (key, seconds) => {
+      const at = this.captionSession.timelineMsOf(key, seconds * 1000);
+      if (at != null) {
+        useTimelineStore.getState().setCursor(at);
+      }
+    },
   };
+
+  /**
+   * The timeline's selection, read when the clip picker opens.
+   *
+   * A function rather than a property, so a selection change does not
+   * re-render this component, which holds the whole preview column.
+   */
+  private readonly captionTimelineSelection = (): string[] =>
+    selectionStore.getState().ids;
 
   _handleChangeCursorType = (e) => {
     // See `_handleCaptionSessionStart` on why this is an arrow property. As a
@@ -346,6 +373,7 @@ export class Control extends LitElement {
           .timeline=${this.timeline}
           .previewSize=${this.previewSize}
           .playhead=${this.captionPlayhead}
+          .timelineSelection=${this.captionTimelineSelection}
           .sessionPhase=${this.captionSessionPhase}
           .isDev=${false}
           @captionSessionStart=${this._handleCaptionSessionStart}

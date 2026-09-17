@@ -9,22 +9,43 @@
 
 /** One row of the clip picker. */
 export type CaptionSource = {
-  /** 1-based, for the `#` column. */
+  /** 1-based, in timeline order. */
   id: number;
   /** The element key. Identifies the row *and* the clip the captions belong to. */
   key: string;
   /** The clip's `localpath` — a `file://` URL, not a filesystem path. */
   localpath: string;
   filetype: "video" | "audio";
-  /** The clip's span in ms. **Not** the file's length; see `media/playback.ts`. */
+  /**
+   * How much of the source file the clip plays, in **source** ms: the
+   * element's `duration`, which is `trim.endTime - trim.startTime`. Not the
+   * file's length, and not the timeline length either once the clip is sped
+   * up; that is `spanMs`.
+   */
   durationMs: number;
+  /** Where the clip begins on the timeline, in ms. */
+  startMs: number;
+  /** How much timeline the clip covers, in ms: `durationMs / speed`. */
+  spanMs: number;
+  /** The clip's window into its file, in source ms. */
+  trimStartMs: number;
+  trimEndMs: number;
+  speed: number;
+  /** Width over height of the picture, for a thumbnail. 16/9 when unknown. */
+  aspect: number;
+  /** The row the clip sits on, or an empty string for a malformed element. */
+  trackId: string;
 };
 
 /** Filetypes with speech in them. */
 const TRANSCRIBABLE = new Set(["video", "audio"]);
 
 /**
- * The transcribable clips on a timeline, in picker order.
+ * The transcribable clips on a timeline, in timeline order.
+ *
+ * Sorted by where they start, so the picker's grid reads left to right the way
+ * the timeline does. The sort is stable, so clips starting together keep the
+ * element map's own order.
  *
  * Keyed rather than pathed: two clips cut from one file share a `localpath`, and
  * identifying a row by path selected both of them and transcribed whichever came
@@ -36,7 +57,7 @@ export function captionSources(timeline: unknown): CaptionSource[] {
     return [];
   }
 
-  const rows: CaptionSource[] = [];
+  const rows: Omit<CaptionSource, "id">[] = [];
   for (const [key, value] of Object.entries(timeline as Record<string, any>)) {
     const filetype = value?.filetype;
     if (!TRANSCRIBABLE.has(filetype)) {
@@ -48,15 +69,54 @@ export function captionSources(timeline: unknown): CaptionSource[] {
       // in "No such media file" after the user had chosen it.
       continue;
     }
+    const durationMs = finite(value?.duration, 0);
+    const speed = positive(value?.speed, 1);
+    const trimStartMs = finite(value?.trim?.startTime, 0);
     rows.push({
-      id: rows.length + 1,
       key,
       localpath,
       filetype,
-      durationMs: Number.isFinite(value?.duration) ? value.duration : 0,
+      durationMs,
+      startMs: finite(value?.startTime, 0),
+      spanMs: durationMs / speed,
+      trimStartMs,
+      trimEndMs: finite(value?.trim?.endTime, trimStartMs + durationMs),
+      speed,
+      aspect: aspectOf(value),
+      trackId: typeof value?.trackId === "string" ? value.trackId : "",
     });
   }
-  return rows;
+  return rows
+    .sort((a, b) => a.startMs - b.startMs)
+    .map((row, index) => ({ id: index + 1, ...row }));
+}
+
+function finite(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function positive(value: unknown, fallback: number): number {
+  const n = finite(value, fallback);
+  return n > 0 ? n : fallback;
+}
+
+/**
+ * The picture's shape. `origin` is the decoded frame, which is what a
+ * thumbnail shows; `width`/`height` are the box on the canvas, which a user
+ * may have squashed.
+ */
+function aspectOf(value: any): number {
+  for (const [w, h] of [
+    [value?.origin?.width, value?.origin?.height],
+    [value?.width, value?.height],
+  ]) {
+    const width = positive(w, 0);
+    const height = positive(h, 0);
+    if (width > 0 && height > 0) {
+      return width / height;
+    }
+  }
+  return 16 / 9;
 }
 
 /**

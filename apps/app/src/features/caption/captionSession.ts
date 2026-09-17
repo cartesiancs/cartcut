@@ -33,6 +33,17 @@
  * except a document that still has it, so the baseline is held by reference for
  * the life of the session and `cancel` writes it straight back.
  *
+ * ## Several clips
+ *
+ * The panel can caption several clips in one session. Each is held as the
+ * session first saw it and cut against its own source ranges; the projection
+ * keeps the cuts per track (`captionProjection.ts`). Two guards run at `start`,
+ * against the document as it was: a clip whose track is gone or is not a
+ * video or audio track, and a clip overlapping another chosen clip on its own
+ * track, keeps its captions and loses its cuts. Tracks are not supposed to hold
+ * overlapping clips, but only the editing ops keep that true and a project can
+ * arrive without it, and the ripple arithmetic is wrong for an overlap.
+ *
  * ## Every exit unlocks
  *
  * `apply` and `cancel` both end in `finish`, which is the only thing that calls
@@ -43,9 +54,14 @@
 
 import type { TimelineElement } from "../../@types/timeline";
 import type { TimeRange } from "../timeline/clipOps";
-import { isDynamicElement, sourceTimeAt } from "../timeline/geometry";
+import {
+  isDynamicElement,
+  sourceTimeAt,
+  spanOf,
+} from "../timeline/geometry";
+import { overlaps } from "../timeline/overlap";
 import { shiftPoint, unshiftPoint } from "../timeline/rippleMap";
-import type { TimelineDocument } from "../timeline/tracks";
+import { trackById, type TimelineDocument } from "../timeline/tracks";
 import {
   advanceProjection,
   buildCaptionPlan,
@@ -61,6 +77,7 @@ import { revealDone, stepsDueAt } from "./captionReveal";
 import { EMPTY_CUT_PLAN, planCuts, type CutPlan } from "./cuts";
 import type { CaptionFrame, CaptionPlacement } from "./layout";
 import type { CaptionLine } from "./lines";
+import type { CaptionSourcePosition } from "./playheadPort";
 import type { FrameScheduler } from "./previewLoop";
 import { captionToTimeline } from "./timing";
 
@@ -96,44 +113,62 @@ export type CaptionSessionPorts = {
   onPhase?: (phase: CaptionSessionPhase) => void;
 };
 
+/**
+ * What to cut from one clip, in **source** milliseconds.
+ *
+ * Source rather than timeline, and unplanned rather than planned, because the
+ * two things that feed it are both authored against the file: the silences the
+ * sweep found, and the span of every line the user has struck out. The session
+ * plans them, which is also what keeps "resolve the clip before cutting it"
+ * true past the first change: the baseline clip is held here, and
+ * `doc.elements[key]` is a *piece* of it by then, or gone.
+ */
+export type CaptionClipRanges = { key: string; sourceRanges: TimeRange[] };
+
+/** One chosen clip, as the panel hands it over. */
+export type CaptionClipInput = CaptionClipRanges & {
+  /** The clip, read **before** anything cuts it. */
+  source: TimelineElement | undefined;
+};
+
 /** What the panel hands over once it has words and silences. */
 export type CaptionSessionStart = {
   lines: CaptionLine[];
-  /** The transcribed clip, read **before** anything cuts it. */
-  sourceKey: string | null;
-  source: TimelineElement | undefined;
+  /** In the order the user chose them. */
+  clips: CaptionClipInput[];
   frame: CaptionFrame;
   placement: CaptionPlacement;
-  /**
-   * What to cut, in **source** milliseconds.
-   *
-   * Source rather than timeline, and unplanned rather than planned, because the
-   * two things that feed it are both authored against the file: the silences
-   * the sweep found, and the span of every line the user has struck out. The
-   * session plans them, which is also what keeps "resolve the clip before
-   * cutting it" true past the first change: the baseline clip is held here, and
-   * `doc.elements[sourceKey]` is a *piece* of it by then, or gone.
-   */
-  sourceRanges: TimeRange[];
 };
 
 /** What the panel hands over on every later change. */
 export type CaptionSessionUpdate = {
   lines: CaptionLine[];
   placement: CaptionPlacement;
-  /** Source ms, rebuilt by the panel from its lines and its toggle. */
-  sourceRanges: TimeRange[];
+  /**
+   * Source ms per clip, rebuilt by the panel from its lines and its toggle. A
+   * clip left out has nothing to cut; a key the session does not hold is
+   * ignored.
+   */
+  ranges: CaptionClipRanges[];
 };
 
 export type CaptionSessionPhase = "idle" | "revealing" | "live";
 
+/** A clip whose cuts were refused at `start`, and why. See the header. */
+export type CaptionRefusal = { key: string; reason: "overlaps" | "noLane" };
+
+type HeldClip = {
+  key: string;
+  source: TimelineElement | undefined;
+  cutPlan: CutPlan;
+};
+
 export class CaptionSession {
   private phase: CaptionSessionPhase = "idle";
   private baseline: TimelineDocument | null = null;
-  private sourceKey: string | null = null;
-  private source: TimelineElement | undefined;
+  private clips: HeldClip[] = [];
+  private refusals: CaptionRefusal[] = [];
   private frame: CaptionFrame = { w: 1920, h: 1080 };
-  private cutPlan: CutPlan = EMPTY_CUT_PLAN;
   private lines: CaptionLine[] = [];
   private placement: CaptionPlacement = "lowerThird";
   private ids: CaptionSessionIds | null = null;
@@ -154,20 +189,43 @@ export class CaptionSession {
     return this.phase;
   }
 
-  /** The cuts as they will be made: timeline ms, snapped, merged, descending. */
-  get cuts(): TimeRange[] {
-    return this.cutPlan.cuts;
+  /**
+   * The cuts as they will be made, by the track they are made on: timeline ms,
+   * snapped, ascending, each clip's own list laid end to end.
+   */
+  get cutsByTrack(): ReadonlyMap<string, TimeRange[]> {
+    const lanes = new Map<string, TimeRange[]>();
+    for (const clip of this.clips) {
+      const trackId = clip.source?.trackId;
+      if (trackId == null || clip.cutPlan.cuts.length === 0) {
+        continue;
+      }
+      // `planCuts` answers descending; this answers ascending, like the plan.
+      const ascending = [...clip.cutPlan.cuts].reverse();
+      lanes.set(trackId, [...(lanes.get(trackId) ?? []), ...ascending]);
+    }
+    for (const cuts of lanes.values()) {
+      cuts.sort((a, b) => a.startMs - b.startMs);
+    }
+    return lanes;
   }
 
   /**
-   * Whether the ranges asked for would leave no footage at all.
+   * The clips whose ranges would leave no footage at all.
    *
-   * The cuts are dropped when they would, and the captions placed anyway. That
-   * half is recoverable by hand; an emptied track is not, and it would take
-   * every caption's anchor with it.
+   * Their cuts are dropped and their captions placed anyway. That half is
+   * recoverable by hand; an emptied track is not, and it would take every
+   * caption's anchor with it. Other clips are cut as asked.
    */
-  get coversWholeClip(): boolean {
-    return this.cutPlan.coversWholeClip;
+  get coveredClips(): readonly string[] {
+    return this.clips
+      .filter((clip) => clip.cutPlan.coversWholeClip)
+      .map((clip) => clip.key);
+  }
+
+  /** The clips that were refused cuts at `start`. See the header. */
+  get refusedClips(): readonly CaptionRefusal[] {
+    return this.refusals;
   }
 
   /**
@@ -184,20 +242,35 @@ export class CaptionSession {
     }
 
     this.ports.document.ensureBaseline();
-    this.baseline = this.ports.document.read();
-    this.sourceKey = input.sourceKey;
-    this.source = input.source;
+    const baseline = this.ports.document.read();
+    this.baseline = baseline;
+
+    const seen = new Set<string>();
+    this.clips = [];
+    for (const clip of input.clips) {
+      if (seen.has(clip.key)) {
+        continue;
+      }
+      seen.add(clip.key);
+      this.clips.push({
+        key: clip.key,
+        source: clip.source,
+        cutPlan: EMPTY_CUT_PLAN,
+      });
+    }
+    this.refusals = refusalsOf(this.clips, baseline);
+
     this.frame = input.frame;
     this.lines = input.lines;
     this.placement = input.placement;
     this.ids = null;
-    this.replan(input.sourceRanges);
+    this.replan(input.clips);
 
     this.ports.lock.lock();
     this.setPhase("revealing");
     this.rebuildPlan();
 
-    this.projection = startProjection(this.baseline);
+    this.projection = startProjection(baseline);
     this.revealStartedAt = this.ports.now();
     this.tick();
   }
@@ -216,7 +289,7 @@ export class CaptionSession {
     }
     this.lines = input.lines;
     this.placement = input.placement;
-    this.replan(input.sourceRanges);
+    this.replan(input.ranges);
     this.requestRebuild();
   }
 
@@ -249,68 +322,106 @@ export class CaptionSession {
   }
 
   /**
-   * Where a moment of the source file sits on the timeline now.
+   * Where a moment of one clip's file sits on the timeline now, or null for a
+   * clip the session does not hold.
    *
    * What the panel's word chips seek to. Two conversions, in this order: the
-   * clip's own trim and speed, then the cuts. Doing them the other way round
-   * would ripple a time that is not on the timeline yet.
+   * clip's own trim and speed, then the cuts on its track. Doing them the other
+   * way round would ripple a time that is not on the timeline yet.
    */
-  timelineMsOf(sourceMs: number): number {
+  timelineMsOf(key: string, sourceMs: number): number | null {
+    const clip = this.clips.find((candidate) => candidate.key === key);
+    if (clip == null) {
+      return null;
+    }
     const onOriginal = captionToTimeline(
       { startTime: sourceMs, duration: 1 },
-      this.source,
+      clip.source,
     ).startTime;
-    return shiftPoint(onOriginal, this.plan?.cuts ?? []);
+    return shiftPoint(onOriginal, this.laneCutsOf(clip));
   }
 
   /**
-   * The inverse, for the highlight.
+   * The inverse, for the highlight: every chosen clip whose footage is under
+   * the playhead, and where in its file.
    *
    * Answers in **seconds**, because that is what `lines.ts` counts in and what
-   * `activeAt` compares against. The panel asks this once per playhead change,
-   * filtered by `ChromeGate`.
+   * `activeAt` compares against. Each clip undoes its own track's cuts and is
+   * answered only if the instant lands inside the clip as it originally was, so
+   * the gap between two clips answers nothing and the instant a cut closes
+   * onto the next clip answers that clip.
    */
-  sourceSecondsOf(timelineMs: number): number {
-    const onOriginal = unshiftPoint(timelineMs, this.plan?.cuts ?? []);
-    const source = this.source;
-    if (source == null || !isDynamicElement(source)) {
-      return onOriginal / 1000;
+  sourcePositionsOf(timelineMs: number): CaptionSourcePosition[] {
+    const out: CaptionSourcePosition[] = [];
+    for (const clip of this.clips) {
+      const source = clip.source;
+      if (source == null || !isDynamicElement(source)) {
+        continue;
+      }
+      const onOriginal = unshiftPoint(timelineMs, this.laneCutsOf(clip));
+      const span = spanOf(source);
+      if (onOriginal >= span.start && onOriginal < span.end) {
+        out.push({
+          key: clip.key,
+          seconds: sourceTimeAt(source, onOriginal) / 1000,
+        });
+      }
     }
-    return sourceTimeAt(source, onOriginal) / 1000;
+    return out;
   }
 
   // --------------------------------------------------------------- internals
 
+  private laneCutsOf(clip: HeldClip): TimeRange[] {
+    const trackId = clip.source?.trackId;
+    return trackId == null ? [] : (this.plan?.lanes.get(trackId) ?? []);
+  }
+
   /**
    * Turn the panel's source ranges into the cuts that will be made.
    *
-   * Against the clip as the session first saw it, never as it stands: by the
+   * Against each clip as the session first saw it, never as it stands: by the
    * second change the original id names a piece of the clip or nothing at all,
    * and `planCuts` would answer `EMPTY_CUT_PLAN` or clamp to the wrong window.
    */
-  private replan(sourceRanges: TimeRange[]): void {
-    const plan = planCuts(sourceRanges, this.source, this.ports.snap);
-    this.cutPlan = plan.coversWholeClip
-      ? { ...plan, cuts: [] }
-      : plan;
+  private replan(ranges: readonly CaptionClipRanges[]): void {
+    // The first entry for a key wins, the same rule `start` keeps for clips.
+    const byKey = new Map<string, TimeRange[]>();
+    for (const entry of ranges) {
+      if (!byKey.has(entry.key)) {
+        byKey.set(entry.key, entry.sourceRanges);
+      }
+    }
+    const refused = new Set(this.refusals.map((refusal) => refusal.key));
+    for (const clip of this.clips) {
+      if (refused.has(clip.key)) {
+        clip.cutPlan = EMPTY_CUT_PLAN;
+        continue;
+      }
+      const plan = planCuts(byKey.get(clip.key) ?? [], clip.source, this.ports.snap);
+      clip.cutPlan = plan.coversWholeClip ? { ...plan, cuts: [] } : plan;
+    }
   }
 
   private rebuildPlan(): void {
     this.ids = mintSessionIds(
       this.ids,
       this.lines,
-      this.cutPlan.cuts.length,
+      new Map(this.clips.map((clip) => [clip.key, clip.cutPlan.cuts.length])),
       this.ports.mintId,
     );
     this.plan = buildCaptionPlan({
       lines: this.lines,
-      sourceKey: this.sourceKey,
+      clips: this.clips.map((clip) => ({
+        key: clip.key,
+        source: clip.source,
+        cuts: clip.cutPlan.cuts,
+      })),
       frame: this.frame,
       placement: this.placement,
-      cuts: this.cutPlan.cuts,
       ids: this.ids,
     });
-    this.steps = revealSteps(this.plan, this.source);
+    this.steps = revealSteps(this.plan);
   }
 
   /**
@@ -346,7 +457,6 @@ export class CaptionSession {
       startProjection(baseline),
       this.plan!,
       this.steps,
-      this.source,
       this.steps.length,
     );
     this.ports.document.preview(this.projection.doc);
@@ -386,13 +496,7 @@ export class CaptionSession {
       return;
     }
 
-    const next = advanceProjection(
-      projection,
-      plan,
-      this.steps,
-      this.source,
-      upTo,
-    );
+    const next = advanceProjection(projection, plan, this.steps, upTo);
     // Identity means no step was due since the last frame, which happens
     // whenever the display outruns the reveal's own pace. Writing anyway would
     // wake every subscriber to redraw a picture that cannot have changed.
@@ -427,9 +531,8 @@ export class CaptionSession {
     this.steps = [];
     this.ids = null;
     this.baseline = null;
-    this.sourceKey = null;
-    this.source = undefined;
-    this.cutPlan = EMPTY_CUT_PLAN;
+    this.clips = [];
+    this.refusals = [];
     this.lines = [];
     this.ports.lock.unlock();
   }
@@ -441,4 +544,48 @@ export class CaptionSession {
     this.phase = phase;
     this.ports.onPhase?.(phase);
   }
+}
+
+/**
+ * The clips that may not be cut, judged against the document as it was.
+ *
+ * Both halves of an overlapping pair are refused: neither can be cut without
+ * the ripple arithmetic mispredicting where the other went.
+ */
+function refusalsOf(
+  clips: readonly HeldClip[],
+  doc: TimelineDocument,
+): CaptionRefusal[] {
+  const reasons = new Map<string, CaptionRefusal["reason"]>();
+  const byTrack = new Map<string, { key: string; span: { start: number; end: number } }[]>();
+
+  for (const clip of clips) {
+    const source = clip.source;
+    if (source == null || !isDynamicElement(source)) {
+      continue;
+    }
+    const track = trackById(doc, source.trackId);
+    if (track == null || (track.kind !== "video" && track.kind !== "audio")) {
+      reasons.set(clip.key, "noLane");
+      continue;
+    }
+    const list = byTrack.get(track.id) ?? [];
+    list.push({ key: clip.key, span: spanOf(source) });
+    byTrack.set(track.id, list);
+  }
+
+  for (const list of byTrack.values()) {
+    for (let i = 0; i < list.length; i += 1) {
+      for (let j = i + 1; j < list.length; j += 1) {
+        if (overlaps(list[i].span, list[j].span)) {
+          reasons.set(list[i].key, "overlaps");
+          reasons.set(list[j].key, "overlaps");
+        }
+      }
+    }
+  }
+
+  return clips
+    .filter((clip) => reasons.has(clip.key))
+    .map((clip) => ({ key: clip.key, reason: reasons.get(clip.key)! }));
 }

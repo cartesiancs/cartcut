@@ -91,3 +91,14 @@ describe("silenceButtonState", () => {
     }
   });
 });
+
+describe("silenceButtonState over several clips", () => {
+  it("says the clips, plural, when none of them had a gap", () => {
+    expect(
+      silenceButtonState(input({ gapCount: 0, clipCount: 3 }))?.label,
+    ).toBe("No silent gaps were found in these clips");
+    expect(silenceButtonState(input({ gapCount: 0 }))?.label).toBe(
+      "No silent gaps were found in this clip",
+    );
+  });
+});

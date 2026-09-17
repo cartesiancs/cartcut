@@ -129,19 +129,28 @@ function harness(baseline: TimelineDocument) {
 
 function start(h: ReturnType<typeof harness>, base: TimelineDocument) {
   const session = new CaptionSession(h.ports);
-  session.start({
-    lines: lines(),
-    sourceKey: "clip",
-    source: base.elements.clip,
-    frame: FRAME,
-    placement: "lowerThird",
-    // Source ms. The clip sits at timeline 0 with no trim and no speed, so
-    // these are the same numbers on either clock, which is what keeps the
-    // cases below about the session rather than about `timing.ts`.
-    sourceRanges: SILENCES,
-  });
+  session.start(oneClip(base, SILENCES));
   return session;
 }
+
+/**
+ * The one clip every case below started from.
+ *
+ * Source ms. The clip sits at timeline 0 with no trim and no speed, so these
+ * are the same numbers on either clock, which is what keeps the cases below
+ * about the session rather than about `timing.ts`.
+ */
+function oneClip(base: TimelineDocument, sourceRanges: { startMs: number; endMs: number }[]) {
+  return {
+    lines: lines(),
+    clips: [{ key: "clip", source: base.elements.clip, sourceRanges }],
+    frame: FRAME,
+    placement: "lowerThird" as const,
+  };
+}
+
+/** Every cut the session will make, on any track. */
+const allCuts = (session: CaptionSession) => [...session.cutsByTrack.values()].flat();
 
 const SILENCES = [
   { startMs: 2500, endMs: 3000 },
@@ -152,7 +161,7 @@ const SILENCES = [
 const change = (lines: CaptionLine[], silenceOn: boolean) => ({
   lines,
   placement: "lowerThird" as const,
-  sourceRanges: silenceOn ? SILENCES : [],
+  ranges: [{ key: "clip", sourceRanges: silenceOn ? SILENCES : [] }],
 });
 
 const textClips = (d: TimelineDocument) =>
@@ -244,9 +253,9 @@ describe("the silence toggle", () => {
     const session = start(h, base);
     h.settle(5);
 
-    expect(session.cuts).toHaveLength(2);
+    expect(allCuts(session)).toHaveLength(2);
     session.update(change(lines(), false));
-    expect(session.cuts).toHaveLength(0);
+    expect(allCuts(session)).toHaveLength(0);
   });
 
   // Cutting everything would leave an emptied track and take every caption's
@@ -255,18 +264,11 @@ describe("the silence toggle", () => {
     const base = doc();
     const h = harness(base);
     const session = new CaptionSession(h.ports);
-    session.start({
-      lines: lines(),
-      sourceKey: "clip",
-      source: base.elements.clip,
-      frame: FRAME,
-      placement: "lowerThird",
-      sourceRanges: [{ startMs: 0, endMs: 10_000 }],
-    });
+    session.start(oneClip(base, [{ startMs: 0, endMs: 10_000 }]));
     h.settle(4);
 
-    expect(session.coversWholeClip).toBe(true);
-    expect(session.cuts).toHaveLength(0);
+    expect(session.coveredClips).toEqual(["clip"]);
+    expect(allCuts(session)).toHaveLength(0);
     expect(pieces(h.shown)).toBe(1);
     expect(textClips(h.shown)).toHaveLength(3);
   });
@@ -424,14 +426,7 @@ describe("every way out unlocks", () => {
     const h = harness(base);
     const session = new CaptionSession(h.ports);
     const begin = () =>
-      session.start({
-        lines: lines(),
-        sourceKey: "clip",
-        source: base.elements.clip,
-        frame: FRAME,
-        placement: "lowerThird",
-        sourceRanges: [{ startMs: 2500, endMs: 3000 }],
-      });
+      session.start(oneClip(base, [{ startMs: 2500, endMs: 3000 }]));
 
     begin();
     h.settle(4);
@@ -456,8 +451,10 @@ describe("the two clocks", () => {
     h.settle(5);
 
     // 7s in the source is past both cuts, which remove a second between them.
-    expect(session.timelineMsOf(7000)).toBe(6000);
-    expect(session.sourceSecondsOf(6000)).toBeCloseTo(7, 3);
+    expect(session.timelineMsOf("clip", 7000)).toBe(6000);
+    expect(session.sourcePositionsOf(6000)).toEqual([
+      { key: "clip", seconds: expect.closeTo(7, 3) },
+    ]);
   });
 
   it("is the identity once the cuts are switched off", () => {
@@ -468,7 +465,307 @@ describe("the two clocks", () => {
     session.update(change(lines(), false));
     h.tick(16);
 
-    expect(session.timelineMsOf(7000)).toBe(7000);
-    expect(session.sourceSecondsOf(7000)).toBeCloseTo(7, 3);
+    expect(session.timelineMsOf("clip", 7000)).toBe(7000);
+    expect(session.sourcePositionsOf(7000)).toEqual([
+      { key: "clip", seconds: expect.closeTo(7, 3) },
+    ]);
+  });
+});
+
+describe("several clips", () => {
+  const clip = (trackId: string, localpath: string, over: Record<string, unknown> = {}) =>
+    videoElement({
+      trackId,
+      localpath,
+      startTime: 0,
+      duration: 10_000,
+      trim: { startTime: 0, endTime: 10_000 },
+      sourceDuration: 10_000,
+      ...over,
+    });
+
+  /** X at 0-10s and Y at 10-20s on v1, and Z at 5-15s on v2. */
+  function scene(extra: Record<string, ReturnType<typeof videoElement>> = {}) {
+    return normalizeDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: [
+        createTrack("v1", "video", 0),
+        createTrack("v2", "video", 1),
+        createTrack("t1", "text", 2),
+      ],
+      elements: {
+        x: clip("v1", "file:///x.mov"),
+        y: clip("v1", "file:///y.mov", { startTime: 10_000 }),
+        z: clip("v2", "file:///z.mov", { startTime: 5_000 }),
+        ...extra,
+      },
+    });
+  }
+
+  const tagged = (key: string): CaptionLine[] =>
+    linesFromWordGroups(
+      [
+        [{ word: `${key}-one`, start: 1, end: 2 }],
+        [{ word: `${key}-two`, start: 7, end: 8 }],
+      ],
+      counter(`${key}-`),
+    ).map((line) => ({ ...line, sourceKey: key }));
+
+  type Ask = { key: string; sourceRanges: { startMs: number; endMs: number }[] };
+
+  function begin(base: TimelineDocument, asks: Ask[], ls: CaptionLine[]) {
+    const h = harness(base);
+    const session = new CaptionSession(h.ports);
+    session.start({
+      lines: ls,
+      clips: asks.map((ask) => ({ ...ask, source: base.elements[ask.key] })),
+      frame: FRAME,
+      placement: "lowerThird",
+    });
+    h.settle(8);
+    return { h, session };
+  }
+
+  const on = (d: TimelineDocument, trackId: string) =>
+    clipsOnTrack(d, trackId).map(([, el]) => ({
+      file: (el as any).localpath,
+      start: Math.round(el.startTime),
+      from: Math.round((el as any).trim.startTime),
+    }));
+
+  const X_CUT = { startMs: 4_000, endMs: 5_000 };
+  const Y_CUT = { startMs: 3_000, endMs: 4_000 };
+
+  it("reveals every clip's captions and cuts", () => {
+    const base = scene();
+    const { h, session } = begin(
+      base,
+      [
+        { key: "x", sourceRanges: [X_CUT] },
+        { key: "y", sourceRanges: [Y_CUT] },
+      ],
+      [...tagged("x"), ...tagged("y")],
+    );
+    expect(session.currentPhase).toBe("live");
+    expect(textClips(h.shown)).toHaveLength(4);
+    expect(on(h.shown, "v1")).toEqual([
+      { file: "file:///x.mov", start: 0, from: 0 },
+      { file: "file:///x.mov", start: 4_000, from: 5_000 },
+      { file: "file:///y.mov", start: 9_000, from: 0 },
+      { file: "file:///y.mov", start: 12_000, from: 4_000 },
+    ]);
+  });
+
+  it("reports the cuts per track, ascending, each clip's own", () => {
+    const { session } = begin(
+      scene(),
+      [
+        { key: "y", sourceRanges: [Y_CUT] },
+        { key: "x", sourceRanges: [X_CUT] },
+        { key: "z", sourceRanges: [{ startMs: 0, endMs: 500 }] },
+      ],
+      [],
+    );
+    expect(session.cutsByTrack.get("v1")).toEqual([
+      { startMs: 4_000, endMs: 5_000 },
+      { startMs: 13_000, endMs: 14_000 },
+    ]);
+    expect(session.cutsByTrack.get("v2")).toEqual([{ startMs: 5_000, endMs: 5_500 }]);
+  });
+
+  it("refuses only the clip whose ranges cover it whole", () => {
+    const { h, session } = begin(
+      scene(),
+      [
+        { key: "x", sourceRanges: [{ startMs: 0, endMs: 10_000 }] },
+        { key: "y", sourceRanges: [Y_CUT] },
+      ],
+      [...tagged("x"), ...tagged("y")],
+    );
+    expect(session.coveredClips).toEqual(["x"]);
+    expect(textClips(h.shown)).toHaveLength(4);
+    expect(on(h.shown, "v1")).toEqual([
+      { file: "file:///x.mov", start: 0, from: 0 },
+      { file: "file:///y.mov", start: 10_000, from: 0 },
+      { file: "file:///y.mov", start: 13_000, from: 4_000 },
+    ]);
+  });
+
+  // Only the editing ops keep a track free of overlaps. A project can arrive
+  // without it, and the ripple arithmetic is wrong for an overlap.
+  it("refuses cuts to two chosen clips that overlap on one track, and still captions them", () => {
+    const base = scene();
+    const overlapping: TimelineDocument = {
+      ...base,
+      elements: {
+        ...base.elements,
+        y: { ...base.elements.y, startTime: 8_000 },
+      },
+    };
+    const { h, session } = begin(
+      overlapping,
+      [
+        { key: "x", sourceRanges: [X_CUT] },
+        { key: "y", sourceRanges: [Y_CUT] },
+        { key: "z", sourceRanges: [{ startMs: 0, endMs: 500 }] },
+      ],
+      [...tagged("x"), ...tagged("y")],
+    );
+    expect(session.refusedClips).toEqual([
+      { key: "x", reason: "overlaps" },
+      { key: "y", reason: "overlaps" },
+    ]);
+    expect(session.cutsByTrack.get("v1")).toBeUndefined();
+    expect(session.cutsByTrack.get("v2")).toHaveLength(1);
+    expect(textClips(h.shown)).toHaveLength(4);
+  });
+
+  it("refuses cuts to a clip that is not on a video or audio track", () => {
+    const base = scene();
+    const stray: TimelineDocument = {
+      ...base,
+      elements: { ...base.elements, x: { ...base.elements.x, trackId: "t1" } },
+    };
+    const { session } = begin(stray, [{ key: "x", sourceRanges: [X_CUT] }], tagged("x"));
+    expect(session.refusedClips).toEqual([{ key: "x", reason: "noLane" }]);
+    expect(allCuts(session)).toEqual([]);
+  });
+
+  it("holds a clip chosen twice once", () => {
+    const { h, session } = begin(
+      scene(),
+      [
+        { key: "x", sourceRanges: [X_CUT] },
+        { key: "x", sourceRanges: [{ startMs: 6_000, endMs: 7_000 }] },
+      ],
+      tagged("x"),
+    );
+    expect(session.cutsByTrack.get("v1")).toEqual([X_CUT]);
+    expect(textClips(h.shown)).toHaveLength(2);
+  });
+
+  it("drops a clip's cuts when an update leaves it out, and ignores a clip it does not hold", () => {
+    const { h, session } = begin(
+      scene(),
+      [
+        { key: "x", sourceRanges: [X_CUT] },
+        { key: "y", sourceRanges: [Y_CUT] },
+      ],
+      [...tagged("x"), ...tagged("y")],
+    );
+    session.update({
+      lines: [...tagged("x"), ...tagged("y")],
+      placement: "lowerThird",
+      ranges: [
+        { key: "y", sourceRanges: [Y_CUT] },
+        { key: "stranger", sourceRanges: [{ startMs: 0, endMs: 1_000 }] },
+      ],
+    });
+    h.tick(16);
+    expect(session.cutsByTrack.get("v1")).toEqual([{ startMs: 13_000, endMs: 14_000 }]);
+    expect(on(h.shown, "v1").filter((p) => p.file === "file:///x.mov")).toHaveLength(1);
+  });
+
+  describe("the two clocks", () => {
+    function live() {
+      return begin(
+        scene(),
+        [
+          { key: "x", sourceRanges: [X_CUT] },
+          { key: "y", sourceRanges: [Y_CUT] },
+          { key: "z", sourceRanges: [] },
+        ],
+        [...tagged("x"), ...tagged("y"), ...tagged("z")],
+      ).session;
+    }
+
+    it("places Y's moments after what X lost", () => {
+      const session = live();
+      expect(session.timelineMsOf("x", 7_000)).toBe(6_000);
+      // Y's 7s was at 17s; X lost 1s and Y its own 3-4s.
+      expect(session.timelineMsOf("y", 7_000)).toBe(15_000);
+      expect(session.timelineMsOf("stranger", 7_000)).toBeNull();
+    });
+
+    it("round-trips every word of both clips", () => {
+      const session = live();
+      for (const [key, seconds] of [
+        ["x", 1],
+        ["x", 7],
+        ["y", 1],
+        ["y", 7],
+      ] as const) {
+        const at = session.timelineMsOf(key, seconds * 1000)!;
+        expect(session.sourcePositionsOf(at)).toContainEqual({
+          key,
+          seconds: expect.closeTo(seconds, 3),
+        });
+      }
+    });
+
+    it("answers both clips where two tracks play at once", () => {
+      const session = live();
+      // 5.5s: X (source 6.5s, past its cut) on v1, and Z (source 0.5s) on v2.
+      expect(session.sourcePositionsOf(5_500)).toEqual([
+        { key: "x", seconds: expect.closeTo(6.5, 3) },
+        { key: "z", seconds: expect.closeTo(0.5, 3) },
+      ]);
+    });
+
+    it("answers nothing in the gap after every clip", () => {
+      expect(live().sourcePositionsOf(40_000)).toEqual([]);
+    });
+  });
+
+  // A tail cut on X closes onto Y's first frame. The instant it resumes on is
+  // Y's, not the last of X's.
+  it("answers the next clip at the instant a tail cut resumes on", () => {
+    const { session } = begin(
+      scene(),
+      [
+        { key: "x", sourceRanges: [{ startMs: 9_000, endMs: 10_000 }] },
+        { key: "y", sourceRanges: [] },
+      ],
+      [...tagged("x"), ...tagged("y")],
+    );
+    expect(session.sourcePositionsOf(9_000)).toEqual([
+      { key: "y", seconds: expect.closeTo(0, 3) },
+    ]);
+  });
+
+  it("answers the clip under the playhead for two clips cut from one file", () => {
+    const base = scene({
+      w: clip("v1", "file:///x.mov", {
+        startTime: 20_000,
+        trim: { startTime: 0, endTime: 10_000 },
+      }),
+    });
+    const { session } = begin(
+      base,
+      [
+        { key: "x", sourceRanges: [] },
+        { key: "w", sourceRanges: [] },
+      ],
+      [...tagged("x"), ...tagged("w")],
+    );
+    expect(session.sourcePositionsOf(21_000)).toEqual([
+      { key: "w", seconds: expect.closeTo(1, 3) },
+    ]);
+  });
+
+  it("gives the project back exactly on cancel, and one step on apply", () => {
+    const asks: Ask[] = [
+      { key: "x", sourceRanges: [X_CUT] },
+      { key: "z", sourceRanges: [{ startMs: 0, endMs: 500 }] },
+    ];
+    const base = scene();
+    const cancelled = begin(base, asks, [...tagged("x"), ...tagged("z")]);
+    cancelled.session.cancel();
+    expect(cancelled.h.shown).toBe(base);
+
+    const applied = begin(scene(), asks, [...tagged("x"), ...tagged("z")]);
+    applied.session.apply();
+    expect(applied.h.events.filter((e) => e === "commit")).toHaveLength(1);
+    expect(applied.h.locked).toBe(false);
   });
 });

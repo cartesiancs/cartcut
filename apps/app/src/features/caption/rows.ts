@@ -39,7 +39,11 @@ import { captionsFrom, type CaptionLine, type CaptionOut } from "./lines";
  */
 export type CaptionRow = CaptionStyle &
   CaptionOut & {
-    /** The element key of the transcribed clip, or null if none was chosen. */
+    /**
+     * The element key of the clip this caption was spoken in, or null if none
+     * was chosen. A line's own key wins over the fallback, which is what lets
+     * one list hold the captions of several clips.
+     */
     sourceKey: string | null;
   };
 
@@ -58,9 +62,11 @@ export function captionRows(
   placement: CaptionPlacement = "lowerThird",
 ): CaptionRow[] {
   const style = captionStyle(frame, placement);
+  // By id, because `captionsFrom` drops lines and no index survives it.
+  const keys = new Map(lines.map((line) => [line.id, line.sourceKey]));
 
   return captionsFrom(lines).map((caption) => ({
-    sourceKey,
+    sourceKey: keys.get(caption.lineId) ?? sourceKey,
     ...style,
     ...caption,
   }));

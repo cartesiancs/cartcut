@@ -20,6 +20,11 @@
  * and what `lines.ts` compares against, and it should go on counting in
  * exactly one unit.
  *
+ * Every answer names its clip, because a session can hold several and each
+ * counts in its own file's seconds. The playhead can be over none of them (the
+ * gap between two clips) or over two at once (two chosen clips on two tracks),
+ * so the answer is a list.
+ *
  * ## `subscribe` rather than a property
  *
  * A `@property` on `<automatic-caption>` written at playback rate would make
@@ -29,11 +34,14 @@
  * by two orders of magnitude before anything re-renders.
  */
 
+/** A moment of one chosen clip's file. */
+export type CaptionSourcePosition = { key: string; seconds: number };
+
 export type CaptionPlayheadPort = {
   /** Fires on every playhead change. Returns the unsubscribe. */
   subscribe(onChange: () => void): () => void;
-  /** Where the playhead is, in source-file seconds. */
-  sourceSeconds(): number;
-  /** Put the playhead at a moment of the source file. */
-  seekToSource(seconds: number): void;
+  /** Every chosen clip the playhead is over, in the chosen order. */
+  sourcePositions(): CaptionSourcePosition[];
+  /** Put the playhead at a moment of one clip's file. */
+  seekToSource(key: string, seconds: number): void;
 };
