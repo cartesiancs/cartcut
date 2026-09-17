@@ -196,9 +196,8 @@ describe("detachAudio", () => {
   });
 
   it("silences the video it came from", () => {
-    // The other half of the same edit. `amix` normalises by input count, so a
-    // document where both are audible is not merely loud — it drags down every
-    // other clip in the project.
+    // The other half of the same edit. The export sums at unity, so a document
+    // where both are audible plays the sound twice, 6 dB above where it was.
     const next = detachAudio(doc({ v: clip() }), "v", "a", "t");
     expect((next.elements.v as any).audioDetached).toBe(true);
     expect(isAudibleElement(next.elements.v)).toBe(false);

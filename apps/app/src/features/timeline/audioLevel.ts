@@ -165,10 +165,10 @@ export function audiblePathsAt(
  * clips at 0.6 and 0.8 make 1.0, not 1.4. Adding the amplitudes instead would
  * put the meter in the red on any two clips that overlap.
  *
- * It models the **preview**, not the export. `buildFFmpegArgs` mixes with
- * `amix`, whose `normalize=1` divides by the number of inputs; the preview does
- * no such thing, because nothing in the renderer ever sees the sum. The meter
- * reports what the user is hearing right now, so it follows the preview.
+ * It models the **preview**, where each clip plays on its own element and the
+ * speakers sum them. The export agrees: `buildFFmpegArgs` mixes with
+ * `amix=...:normalize=0`, which sums at unity rather than dividing by the
+ * number of inputs.
  *
  * Clamped at 1: past unity the output is clipping, and a meter that read 1.4
  * would be describing headroom that does not exist. The clamp means more now

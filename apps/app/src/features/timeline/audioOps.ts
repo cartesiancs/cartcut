@@ -64,9 +64,9 @@ export function detachAudio(
   );
 
   // Silencing the source is not a follow-up edit, it is the other half of this
-  // one. `amix` normalises by its input count, so a document where both the
-  // video and its twin are audible is not merely loud, it is quieter
-  // everywhere else.
+  // one. The export sums its inputs at unity, and the preview plays both, so a
+  // document where the video and its twin are both audible plays that sound
+  // twice, 6 dB above where it was.
   //
   // The level envelope goes with the sound, and stripping it here is the other
   // half again. `audioTwinOf` has already copied it onto the new clip; leaving

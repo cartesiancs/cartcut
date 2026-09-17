@@ -5,10 +5,9 @@
  * are asserted here rather than trusted:
  *
  *   - `gainOf` at 0 dB is exactly `1`. That is what lets `audioFilterFor` drop
- *     the `volume=` stage entirely, which in turn is what keeps every FFmpeg
- *     command for a project nobody has mixed byte-identical to the ones from
- *     before this field existed. If it drifts to 0.999999, every existing
- *     export changes and the pinned filter strings all break at once.
+ *     the `volume=` stage entirely, so a project nobody has mixed reaches
+ *     FFmpeg with no level filter. If it drifts to 0.999999, every export
+ *     gains a stage and the pinned filter strings all break at once.
  *   - `gainOf` at the floor is exactly `0`, not the arithmetic 0.001. When the
  *     user pulls a fader to the bottom they mean silence, and 0.1% of a loud
  *     source is plainly audible.
@@ -84,8 +83,9 @@ describe("volumeDbOf", () => {
 
 describe("gainOf", () => {
   it("is exactly 1 at unity", () => {
-    // Load-bearing. `audioFilterFor` omits its stage on `gain !== 1`, so this
-    // being 0.999999 would rewrite every export command in the app.
+    // Load-bearing. `audioFilterFor` emits its level stage only on
+    // `gain !== 1`, so this being 0.999999 would add one to every export
+    // command in the app.
     expect(gainOf(audioElement({}))).toBe(1);
     expect(gainOf(audioElement({ volumeDb: 0 }))).toBe(1);
     expect(gainOf(videoElement({}))).toBe(1);
@@ -134,8 +134,8 @@ describe("gainOf", () => {
     // while the ceiling *was* unity, and widening the ceiling without
     // narrowing this would have played every level from 0 dB up at 1.0 and
     // thrown the boost away in silence. The exactness also lets
-    // `audioFilterFor` drop the `volume=` stage, so an untouched project still
-    // produces byte-identical FFmpeg commands.
+    // `audioFilterFor` drop the `volume=` stage, so an untouched project
+    // carries no level filter.
     expect(gainOf(audioElement({ volumeDb: 0 }))).toBe(1);
     expect(gainOf(audioElement({}))).toBe(1);
     expect(gainOf(audioElement({ volumeDb: 12 }))).toBeGreaterThan(3.9);

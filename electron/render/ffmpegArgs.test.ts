@@ -72,6 +72,14 @@ function filterComplexOf(args: string[]): string[] {
   return args[args.indexOf("-filter_complex") + 1].split(";");
 }
 
+/**
+ * The layout stage every clip chain opens with, written out rather than
+ * imported, so a change to it is a change to this file as well.
+ * `audioMix.parity.test.ts` is where these two strings are shown to be right.
+ */
+const STEREO = "pan=stereo|FL=FL+FC|FR=FR+FC";
+const MONO = "pan=mono|FC<FL+FR+FC";
+
 describe("isAudible", () => {
   it("takes audio clips and video clips that carry a track", () => {
     expect(isAudible(audioElement({}))).toBe(true);
@@ -118,9 +126,9 @@ describe("isAudible", () => {
 
 describe("gainOf", () => {
   it("is exactly 1 for a clip nobody has touched", () => {
-    // Load-bearing: `audioFilterFor` omits its stage on `gain !== 1`, which is
-    // what keeps every command for an unmixed project byte-identical to the
-    // ones this file produced before the field existed.
+    // Load-bearing: `audioFilterFor` emits its level stage only on
+    // `gain !== 1`, which is what keeps an unmixed project's command free of
+    // any `volume` filter.
     expect(gainOf(audioElement({}))).toBe(1);
     expect(gainOf(videoElement({}))).toBe(1);
     expect(gainOf(audioElement({ volumeDb: 0 }))).toBe(1);
@@ -379,13 +387,47 @@ describe("an envelope, all the way to the command", () => {
 });
 
 describe("audioFilterFor", () => {
+  it("opens every chain by naming the export's layout", () => {
+    // Left to negotiation, a mono source upmixes 3 dB down, and one mono clip
+    // anywhere folds every stereo clip in the project down to mono.
+    const input = { localpath: "/a.mp3", ssSec: 0, tSec: 1, delayMs: 0, speed: 1 };
+    expect(audioFilterFor(input, 1, "audio0", 2)).toBe(
+      `[1:a]${STEREO},adelay=0|0[audio0]`,
+    );
+    expect(audioFilterFor(input, 1, "audio0", 1)).toBe(
+      `[1:a]${MONO},adelay=0|0[audio0]`,
+    );
+  });
+
+  it("puts the layout ahead of the level and the envelope", () => {
+    const filter = audioFilterFor(
+      {
+        localpath: "/a.mp3",
+        ssSec: 0,
+        tSec: 4,
+        delayMs: 0,
+        speed: 1,
+        gain: 1,
+        envelope: [
+          { tMs: 0, db: 0 },
+          { tMs: 2000, db: -20 },
+        ],
+      },
+      1,
+      "audio0",
+      2,
+    );
+    expect(filter.startsWith(`[1:a]${STEREO},asetnsamples=`)).toBe(true);
+  });
+
   it("delays without touching tempo at natural speed", () => {
     const filter = audioFilterFor(
       { localpath: "/a.mp3", ssSec: 0, tSec: 1, delayMs: 2000, speed: 1 },
       1,
       "audio0",
+      2,
     );
-    expect(filter).toBe("[1:a]adelay=2000|2000[audio0]");
+    expect(filter).toBe(`[1:a]${STEREO},adelay=2000|2000[audio0]`);
   });
 
   it("puts an envelope after the tempo, and drops the static stage", () => {
@@ -411,6 +453,7 @@ describe("audioFilterFor", () => {
       },
       2,
       "audio1",
+      2,
     );
     expect(filter.indexOf("atempo=2")).toBeLessThan(
       filter.indexOf("volume=eval=frame"),
@@ -428,8 +471,9 @@ describe("audioFilterFor", () => {
       { localpath: "/a.mp3", ssSec: 0, tSec: 4, delayMs: 1000, speed: 2 },
       2,
       "audio1",
+      2,
     );
-    expect(filter).toBe("[2:a]atempo=2,adelay=1000|1000[audio1]");
+    expect(filter).toBe(`[2:a]${STEREO},atempo=2,adelay=1000|1000[audio1]`);
   });
 
   it("emits a chain for a rate beyond the single-stage range", () => {
@@ -437,8 +481,9 @@ describe("audioFilterFor", () => {
       { localpath: "/a.mp3", ssSec: 0, tSec: 4, delayMs: 0, speed: 4 },
       1,
       "audio0",
+      2,
     );
-    expect(filter).toBe("[1:a]atempo=2,atempo=2,adelay=0|0[audio0]");
+    expect(filter).toBe(`[1:a]${STEREO},atempo=2,atempo=2,adelay=0|0[audio0]`);
   });
 
   it("rounds a fractional delay, which adelay requires", () => {
@@ -446,19 +491,21 @@ describe("audioFilterFor", () => {
       { localpath: "/a.mp3", ssSec: 0, tSec: 1, delayMs: 1500.6, speed: 1 },
       1,
       "audio0",
+      2,
     );
     expect(filter).toContain("adelay=1501|1501");
   });
 
   it("emits no level stage at unity gain", () => {
-    // Every pinned string above depends on this. A project nobody has mixed
-    // must produce the exact command it produced before the field existed.
+    // Every pinned string above depends on this. A clip nobody has mixed
+    // carries no `volume` filter at all.
     const filter = audioFilterFor(
       { localpath: "/a.mp3", ssSec: 0, tSec: 1, delayMs: 0, speed: 1, gain: 1 },
       1,
       "audio0",
+      2,
     );
-    expect(filter).toBe("[1:a]adelay=0|0[audio0]");
+    expect(filter).toBe(`[1:a]${STEREO},adelay=0|0[audio0]`);
   });
 
   it("applies the level before tempo and placement", () => {
@@ -476,9 +523,10 @@ describe("audioFilterFor", () => {
       },
       2,
       "audio1",
+      2,
     );
     expect(filter).toBe(
-      "[2:a]volume=0.501187,atempo=2,adelay=1000|1000[audio1]",
+      `[2:a]${STEREO},volume=0.501187,atempo=2,adelay=1000|1000[audio1]`,
     );
   });
 
@@ -487,8 +535,9 @@ describe("audioFilterFor", () => {
       { localpath: "/a.mp3", ssSec: 0, tSec: 1, delayMs: 0, speed: 1, gain: 0 },
       1,
       "audio0",
+      2,
     );
-    expect(filter).toBe("[1:a]volume=0,adelay=0|0[audio0]");
+    expect(filter).toBe(`[1:a]${STEREO},volume=0,adelay=0|0[audio0]`);
   });
 
   it("reads a missing gain as unity rather than interpolating it", () => {
@@ -498,8 +547,9 @@ describe("audioFilterFor", () => {
       { localpath: "/a.mp3", ssSec: 0, tSec: 1, delayMs: 0, speed: 1 } as any,
       1,
       "audio0",
+      2,
     );
-    expect(filter).toBe("[1:a]adelay=0|0[audio0]");
+    expect(filter).toBe(`[1:a]${STEREO},adelay=0|0[audio0]`);
   });
 });
 
@@ -647,7 +697,7 @@ describe("buildFFmpegArgs", () => {
 
     expect(flagsForInput(args, "/song.mp3")).toEqual({ ss: 1, t: 3 });
     expect(filterComplexOf(args)).toContain(
-      "[1:a]adelay=2000|2000[audio0]",
+      `[1:a]${STEREO},adelay=2000|2000[audio0]`,
     );
   });
 
@@ -667,16 +717,59 @@ describe("buildFFmpegArgs", () => {
       b: audioElement({ localpath: "/b.mp3", startTime: 1000, duration: 1000 }),
     });
     expect(filterComplexOf(args)).toContain(
-      "[audio0][audio1]amix=inputs=2[aout]",
+      "[audio0][audio1]amix=inputs=2:normalize=0[aout]",
     );
   });
 
+  it("sums the mix at unity rather than dividing by the input count", () => {
+    // The default `normalize=1` exported a clip split into ten pieces 20 dB
+    // below its source. `audioMix.parity.test.ts` measures the difference.
+    const pieces: Record<string, any> = {};
+    for (let i = 0; i < 10; i += 1) {
+      pieces[`p${i}`] = audioElement({
+        localpath: "/a.mp3",
+        startTime: i * 1000,
+        duration: 1000,
+        trim: { startTime: i * 1000, endTime: (i + 1) * 1000 },
+        sourceDuration: 10_000,
+      });
+    }
+    const mix = filterComplexOf(buildFFmpegArgs(options, pieces)).find(
+      (stage) => stage.includes("amix="),
+    );
+    expect(mix).toMatch(/amix=inputs=10:normalize=0\[aout\]$/);
+  });
+
+  it("maps every clip onto the export's channel count", () => {
+    const clips = {
+      a: audioElement({ localpath: "/a.mp3", startTime: 0, duration: 1000 }),
+      b: audioElement({ localpath: "/b.mp3", startTime: 1000, duration: 1000 }),
+    };
+    const chains = (channels: 1 | 2) =>
+      filterComplexOf(
+        buildFFmpegArgs({ ...options, exportSettings: { channels } }, clips),
+      ).filter((stage) => /^\[\d+:a\]/.test(stage));
+
+    expect(chains(2)).toHaveLength(2);
+    expect(chains(2).every((c) => c.includes(`:a]${STEREO},`))).toBe(true);
+    expect(chains(1)).toHaveLength(2);
+    expect(chains(1).every((c) => c.includes(`:a]${MONO},`))).toBe(true);
+  });
+
+  it("maps a lone clip too, which skips the mix", () => {
+    // One audible clip goes through `aresample` rather than `amix`, and a
+    // mono source there still needs its upmix named.
+    const filters = filterComplexOf(
+      buildFFmpegArgs(options, { a: audioElement({ localpath: "/a.mp3" }) }),
+    );
+    expect(filters[0].startsWith(`[1:a]${STEREO},`)).toBe(true);
+    expect(filters).toContain("[audio0]aresample=async=1[aout]");
+  });
+
   it("still counts a silenced clip as a mix input", () => {
-    // The trap this guards. `amix` normalises by its *declared* input count,
-    // so dropping a clip turned all the way down would shrink the divisor and
-    // make every other clip in the project louder — the user pulls one fader
-    // down and everything else jumps up. Audibility ("am I an input") and gain
-    // ("how loud") stay strictly apart, exactly as `audioDetached` requires.
+    // Audibility ("am I an input") and gain ("how loud") stay separate
+    // questions, so the fader's position never changes the command's shape.
+    // The mix sums at unity, so the extra input changes no other clip's level.
     const args = buildFFmpegArgs(options, {
       a: audioElement({ localpath: "/a.mp3", startTime: 0, duration: 1000 }),
       b: audioElement({
@@ -687,8 +780,8 @@ describe("buildFFmpegArgs", () => {
       }),
     });
     const filters = filterComplexOf(args);
-    expect(filters).toContain("[2:a]volume=0,adelay=1000|1000[audio1]");
-    expect(filters).toContain("[audio0][audio1]amix=inputs=2[aout]");
+    expect(filters).toContain(`[2:a]${STEREO},volume=0,adelay=1000|1000[audio1]`);
+    expect(filters).toContain("[audio0][audio1]amix=inputs=2:normalize=0[aout]");
   });
 
   it("carries an authored level into the filter graph", () => {
@@ -701,7 +794,7 @@ describe("buildFFmpegArgs", () => {
       }),
     });
     expect(filterComplexOf(args)).toContain(
-      "[1:a]volume=0.501187,adelay=0|0[audio0]",
+      `[1:a]${STEREO},volume=0.501187,adelay=0|0[audio0]`,
     );
   });
 
@@ -769,10 +862,9 @@ describe("buildFFmpegArgs", () => {
  * Detaching audio moves a clip's sound to a second element pointing at the
  * *same file*, and this is where that has to cost nothing.
  *
- * `amix` runs with its default `normalize=1`, so the output is divided by the
- * input count. A detach that added the twin without silencing its source would
- * not merely double that clip — it would pull down every other clip in the
- * project. These tests pin the count, not just the shape.
+ * The mix sums its inputs at unity, so a detach that added the twin without
+ * silencing its source would play that sound twice, 6 dB above where it was.
+ * These tests pin the count, not just the shape.
  */
 describe("a detached clip in the export graph", () => {
   /** The video as it stands before the detach. */
@@ -845,7 +937,7 @@ describe("a detached clip in the export graph", () => {
     expect(flagsForInput(args, "/clip.mp4").t).toBe(4);
   });
 
-  it("does not quieten the other clips in the project", () => {
+  it("leaves the other clips' inputs as they were", () => {
     const song = audioElement({
       localpath: "/song.mp3",
       startTime: 0,

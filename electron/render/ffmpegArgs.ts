@@ -138,10 +138,9 @@ function speedOf(element: any): number {
  * imports both and asserts they agree over every element shape, so the copy
  * cannot drift without a test failing.
  *
- * `audioDetached` is what keeps a detach from getting louder. The mix below is
- * `amix`, whose default `normalize=1` divides by its input count, so a video
- * left audible alongside the audio clip that now carries its sound would both
- * double that clip and pull down every other clip in the project.
+ * `audioDetached` is what keeps a detach from getting louder. The mix below sums
+ * its inputs at unity, so a video left audible alongside the audio clip that now
+ * carries its sound would play that sound twice, 6 dB above where it was.
  */
 export function isAudible(element: any): boolean {
   if (element?.filetype === "audio") {
@@ -243,7 +242,42 @@ export function atempoChain(speed: number): number[] {
 const ENVELOPE_FRAME_SAMPLES = 256;
 
 /**
- * Formats one clip's audio chain: level, then tempo correction, then placement.
+ * Maps one input onto the export's channel layout at unity, whatever it arrived as.
+ *
+ * Left to itself FFmpeg does this conversion with swresample's matrix, which is
+ * not the preview's. Measured against the bundled ffmpeg 9.0:
+ *
+ *   - a mono source upmixed to stereo lands at -3.01 dB on each side
+ *     (`M_SQRT1_2`), where Chromium and QuickTime copy it to both at unity;
+ *   - one mono clip anywhere in the project makes `amix` negotiate **mono** for
+ *     the whole mix, so every stereo clip is folded down and spread back out,
+ *     and a clip with sound only on the left comes out centred and 6 dB down;
+ *   - a stereo clip in a mono export comes out 3 dB *louder*, because the float
+ *     downmix sums both sides at `M_SQRT1_2` instead of averaging them.
+ *
+ * Naming the conversion on every input takes the choice away from negotiation.
+ * `pan` drops a named channel the input does not have, so the stereo form is a
+ * plain channel map for a stereo source and a copy of `FC` to both sides for a
+ * mono one. The mono form's `<` renormalises over the channels present: a mono
+ * source passes through, a stereo one becomes the mean of its two sides.
+ *
+ * A surround source is outside what one expression can serve. `FC` has to be
+ * unity for a mono file and 0.707 for a 5.1 one, and `pan` cannot tell them
+ * apart before it sees the stream; this keeps the mono answer, so a 5.1 file
+ * exports its centre at unity and drops its surrounds.
+ */
+export function channelStageFor(channels: 1 | 2): string {
+  return channels === 1
+    ? "pan=mono|FC<FL+FR+FC"
+    : "pan=stereo|FL=FL+FC|FR=FR+FC";
+}
+
+/**
+ * Formats one clip's audio chain: layout, level, tempo correction, placement.
+ *
+ * The layout stage comes first and is always present; see `channelStageFor`.
+ * It is linear, so it commutes with everything after it exactly as the static
+ * level does.
  *
  * A static `volume` is a per-sample scalar multiply, so it commutes with both
  * `atempo` and `adelay` and the rendered samples are the same wherever it sits.
@@ -253,9 +287,8 @@ const ENVELOPE_FRAME_SAMPLES = 256;
  * already holds: source-domain work before timeline placement. How loud, then
  * how fast, then where.
  *
- * The stage is omitted entirely at unity, which is what makes a project nobody
- * has touched the faders on produce the exact command it produced before this
- * field existed.
+ * The level stage is omitted entirely at unity, so a clip nobody has touched
+ * the fader on carries no `volume` filter at all.
  *
  * **An envelope does not commute, and sits after `atempo` instead.** Its
  * breakpoints are clip-local *timeline* ms, and `t` only means that once
@@ -270,8 +303,13 @@ const ENVELOPE_FRAME_SAMPLES = 256;
  * drawn in absolute dB, so it already carries the level; multiplying by the
  * static gain as well would apply it twice.
  */
-export function audioFilterFor(input: AudioInput, streamIndex: number, label: string): string {
-  const stages: string[] = [];
+export function audioFilterFor(
+  input: AudioInput,
+  streamIndex: number,
+  label: string,
+  channels: 1 | 2,
+): string {
+  const stages: string[] = [channelStageFor(channels)];
   const envelope = input.envelope;
   const hasEnvelope = envelope != null && envelope.length > 0;
 
@@ -304,11 +342,10 @@ export function audioFilterFor(input: AudioInput, streamIndex: number, label: st
  * enters only through `delayMs`. After `atempo` the stream occupies
  * `tSec / speed` seconds of output, which is the clip's timeline span.
  *
- * A clip turned all the way down stays in this list. Dropping it would shrink
- * `amix=inputs=N`, and `amix` normalises by its declared input count — so
- * pulling one fader to the bottom would make every *other* clip in the project
- * louder. Audibility ("am I an input") and gain ("how loud") are kept strictly
- * apart, for the same reason `audioDetached` exists.
+ * A clip turned all the way down stays in this list, at `volume=0`. The mix
+ * sums at unity, so its presence changes no other clip's level; keeping it
+ * means audibility ("am I an input") and gain ("how loud") stay separate
+ * questions, and the fader position never changes the shape of the command.
  */
 export function collectAudioInputs(timeline: Record<string, any>): AudioInput[] {
   const inputs: AudioInput[] = [];
@@ -481,7 +518,7 @@ export function buildFFmpegArgs(
 
     const label = `audio${index}`;
     // Stream 0 is the PNG pipe, so clip inputs start at 1.
-    filterComplex.push(audioFilterFor(input, index + 1, label));
+    filterComplex.push(audioFilterFor(input, index + 1, label, settings.channels));
     mapAudio.push(`[${label}]`);
   });
 
@@ -498,8 +535,15 @@ export function buildFFmpegArgs(
   filterComplex.push(`[0:v]null[vout]`);
 
   if (mapAudio.length > 1) {
+    // `normalize=0` is what makes the export as loud as the preview. The
+    // default divides by the number of inputs that have not ended yet, and
+    // `adelay` makes a clip late on the timeline an input from 0s, so a clip
+    // split into three exported its first piece 9.5 dB down and one split into
+    // ten 20 dB down, recovering only as pieces ended. The preview plays each
+    // clip on its own element and the speakers sum them; `lib/recordMux.ts`
+    // mixes with `normalize=0` for the same reason.
     filterComplex.push(
-      `${mapAudio.join("")}amix=inputs=${mapAudio.length}[aout]`,
+      `${mapAudio.join("")}amix=inputs=${mapAudio.length}:normalize=0[aout]`,
     );
   } else {
     filterComplex.push(`${mapAudio[0]}aresample=async=1[aout]`);

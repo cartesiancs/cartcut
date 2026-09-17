@@ -14,13 +14,11 @@
  * So detaching is a pure rename of where the sound lives — no disk, no ffmpeg,
  * no wait — and the video is silenced by a flag rather than by losing anything.
  *
- * Silencing is the half that must not be forgotten. `buildFFmpegArgs` mixes
- * with `amix`, whose default `normalize=1` divides the output by the number of
- * inputs, so a detach that added a clip without silencing its source would not
- * merely double that clip — it would quietly halve every other clip in the
- * project. Keeping the audible count constant is the whole reason
- * `isAudibleElement` and `ffmpegArgs#isAudible` have to agree, and why a test
- * asserts they do.
+ * Silencing is the half that must not be forgotten. The preview plays every
+ * audible clip and the export sums them at unity, so a detach that added a clip
+ * without silencing its source would play that sound twice, 6 dB above where
+ * it was. That is why `isAudibleElement` and `ffmpegArgs#isAudible` have to
+ * agree, and why a test asserts they do.
  *
  * Pure and DOM-free. It imports the element types and one function, the
  * keyframe sampler, which the level envelope needs and which is itself pure.
@@ -128,9 +126,8 @@ export function volumeDbOf(
  *     and widening the ceiling without narrowing this would have made every
  *     level from 0 dB up play at 1.0 and silently thrown the boost away. The
  *     exactness is load-bearing on its own: it lets `audioFilterFor` drop the
- *     `volume=` stage entirely, so a project nobody has touched the faders on
- *     still produces byte-identical FFmpeg commands to the ones from before
- *     this field existed.
+ *     `volume=` stage entirely, so a clip nobody has touched the fader on
+ *     reaches FFmpeg with no level filter at all.
  *   - the floor is exactly `0`, per `MIN_VOLUME_DB`.
  *
  * Everything else is rounded to six decimals, and that is functional rather
