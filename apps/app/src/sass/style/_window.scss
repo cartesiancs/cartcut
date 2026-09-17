@@ -45,6 +45,9 @@
   overflow: hidden;
 }
 
+// The numbers are `<preview-top-bar>`'s (`.timeline-cursor-buttons` and its
+// `bg-darker p-1` strip). The frame stands beside that bar at the same height,
+// so any difference shows as a step in one line across the column.
 .app-window-titlebar {
   flex: 0 0 auto;
   height: 2rem;
@@ -52,40 +55,43 @@
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
-  padding: 0 0.35rem;
+  padding: 0 0.25rem;
+  background-color: $background-color;
   border-bottom: 0.05rem solid var(--app-window-border);
   // A title bar is a handle, and a handle that selects its own text on a
   // double click reads as broken.
   user-select: none;
 }
 
-.app-window-title {
+// `min-width: 0` is what lets the strip shrink past its tabs and scroll rather
+// than push the frame wider than its rect. No scrollbar, as in
+// `.preview-tab-scroll`: a bar 2rem tall has no room for one.
+.app-window-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.app-window-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+// `.preview-top-button`. The close glyph is a child of the tab, straight after
+// the label, and takes its size and colour from `icon-xs`.
+.app-window-tab {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 0.25rem;
   font-size: 12px;
   font-weight: bolder;
   white-space: nowrap;
-  // Ellipsis rather than wrap: the bar is exactly 2rem and a wrapped title
-  // would push the close button out of the window it belongs to.
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.app-window-close {
-  flex: 0 0 auto;
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  border: none;
-  background: transparent;
-  color: #adb5bd;
-  padding: 0.1rem;
-  cursor: pointer;
-}
-
-.app-window-close:hover {
-  color: #ffffff;
 }
 
 .app-window-body {
@@ -104,9 +110,12 @@
 
 // A custom element with no styles is `display: inline` and collapses to its
 // content, which is the trap `autoTrackPanel.connectedCallback` documents.
-// Giving every direct child a box here means a panel dropped into a window
-// does not have to know it was.
-.app-window-body > * {
+// Giving the pane and whatever is in it a box here means a panel dropped into a
+// window does not have to know it was. A pane that is not on show carries
+// `hidden`, and Bootstrap's `[hidden] { display: none !important }` outranks
+// the `display: block` below.
+.app-window-pane,
+.app-window-pane > * {
   display: block;
   width: 100%;
   height: 100%;

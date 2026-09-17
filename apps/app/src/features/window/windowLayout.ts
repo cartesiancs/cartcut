@@ -28,6 +28,18 @@
  * Below the host, a window's own minimum outranks the content's, because a
  * window shrunk past its minimum has controls stacked on top of each other
  * while the content region is usually a canvas that simply gets smaller.
+ *
+ * ## Frames
+ *
+ * Every window docked to one side of a host shares **one frame**, and each is a
+ * tab on that frame's title bar, the way `<preview-top-bar>` holds the record
+ * and proxy panels. Two windows on one side used to be carved as two columns,
+ * which put a second title bar and a second splitter beside the first and left
+ * the preview a third of the column.
+ *
+ * The frame is derived here and never stored. `WindowState` stays one entry per
+ * window, so opening, closing and focusing are the same ops they always were:
+ * the tab on show is simply the member with the highest `z`.
  */
 
 export type Size = { width: number; height: number };
@@ -72,7 +84,11 @@ export type WindowState = {
   resizable: boolean;
   /** Whether the title bar offers a close button. */
   closable: boolean;
-  /** Open order. The highest is focused and, when floating, on top. */
+  /**
+   * Focus order. The highest is focused: the tab on show in its frame and, when
+   * floating, on top. Open order is the window's position in the array, which
+   * focusing never changes.
+   */
   z: number;
 };
 
@@ -136,32 +152,99 @@ const sane = (rect: Rect): Rect => ({
   height: Math.max(0, rect.height),
 });
 
-export type WindowRects = {
-  id: string;
+export type WindowFrame = {
+  /**
+   * `dock:<side>` or `float:<id>`.
+   *
+   * Named after the dock and not after a tab, so it survives the first tab
+   * closing. `<window-host>` keys its frames by this, and a key that changed
+   * would make Lit build a new frame and a new copy of every panel in it,
+   * dropping whatever the remaining tab was in the middle of.
+   */
+  key: string;
+  /** Every window in the frame, in the order they were opened. */
+  tabs: string[];
+  /** The tab on show: the member with the highest `z`. */
+  active: string;
   rect: Rect;
   /**
-   * The grab strip, or null for a window that cannot be resized or is floating.
+   * The grab strip, or null for a frame that cannot be resized or is floating.
    *
-   * Overlaps the content region rather than sitting between it and the window.
-   * It is **not** part of the tiling: `content` and the windows account for the
+   * Overlaps the content region rather than sitting between it and the frame.
+   * It is **not** part of the tiling: `content` and the frames account for the
    * whole host on their own.
    */
   splitter: Rect | null;
+  /**
+   * The largest minimum of any tab, per axis.
+   *
+   * The frame is laid out against this and not against the active tab's own,
+   * so switching tabs never changes the frame's size. A splitter drag has to be
+   * clamped against the same number, which is why it is returned.
+   */
+  minSize: Size;
 };
 
 export type HostLayout = {
-  /** What is left for the host's own content once every window has its share. */
+  /** What is left for the host's own content once every frame has its share. */
   content: Rect;
-  windows: WindowRects[];
+  frames: WindowFrame[];
 };
+
+export const frameKey = (win: WindowState): string =>
+  win.placement.mode === "docked" ? `dock:${win.placement.side}` : `float:${win.id}`;
+
+/** The member on show. The earliest wins a tie, so equal `z` is still an answer. */
+export const activeOf = (members: WindowState[]): WindowState =>
+  members.reduce((top, win) => (win.z > top.z ? win : top));
+
+const largestMin = (members: WindowState[]): Size =>
+  members.reduce<Size>(
+    (min, win) => ({
+      width: Math.max(min.width, win.minSize.width),
+      height: Math.max(min.height, win.minSize.height),
+    }),
+    { width: 0, height: 0 },
+  );
+
+/**
+ * The share of the frame docked to `side` of `hostId`, or undefined when there
+ * is no such frame.
+ *
+ * Read from the tab on show, which is the one `layoutHost` reads. `windowOps`
+ * keeps every member at the same share, so in practice any member answers the
+ * same; reading the active one means a list that broke that rule still lays out
+ * the way the user is looking at it.
+ */
+export function dockShare(
+  windows: WindowState[],
+  hostId: string,
+  side: DockSide,
+  exceptId?: string,
+): number | undefined {
+  const members = windows.filter(
+    (win) =>
+      win.id !== exceptId &&
+      win.hostId === hostId &&
+      win.placement.mode === "docked" &&
+      win.placement.side === side,
+  );
+  if (members.length === 0) {
+    return undefined;
+  }
+  const { placement } = activeOf(members);
+  return placement.mode === "docked" ? placement.sizePct : undefined;
+}
 
 /**
  * Lay a host region out.
  *
- * Docked windows are carved off the free rect one at a time in `z` order, so
- * the first one opened sits outermost and a second one docked to the same side
- * stacks inside it. Floating windows take no space and are clamped into the
- * host afterwards.
+ * Windows docked to the same side become one frame. Frames are carved off the
+ * free rect in the order their first tab was opened, so the first dock opened
+ * sits outermost and a dock on another side nests inside what it left. That
+ * order is array position and not `z`: carving by `z` meant clicking into one
+ * dock could swap it with another. Floating windows are frames of one, take no
+ * space, and are clamped into the host afterwards.
  *
  * Every rect this returns is inside `{0, 0, host.width, host.height}`. That is
  * the whole contract, and `windowLayout.test.ts` asserts it over a sweep rather
@@ -176,51 +259,70 @@ export function layoutHost(host: Size, windows: WindowState[]): HostLayout {
     height: Math.max(0, host.height),
   };
 
-  const ordered = [...windows].sort((a, b) => a.z - b.z);
-  const out: WindowRects[] = [];
+  // A Map keeps first-insertion order, which is open order.
+  const groups = new Map<string, WindowState[]>();
+  for (const win of windows) {
+    const key = frameKey(win);
+    const members = groups.get(key);
+    if (members == null) {
+      groups.set(key, [win]);
+    } else {
+      members.push(win);
+    }
+  }
 
-  for (const win of ordered) {
-    if (win.placement.mode === "floating") {
+  const frames = new Map<string, WindowFrame>();
+
+  for (const [key, members] of groups) {
+    const active = activeOf(members);
+    if (active.placement.mode !== "docked") {
       continue;
     }
 
-    const { side, sizePct } = win.placement;
+    const { side, sizePct } = active.placement;
     const axis = axisOf(side);
+    const minSize = largestMin(members);
 
     const size = fitSpan(
       Math.round((sizePct / 100) * Math.max(0, host[axis])),
-      win.minSize[axis],
+      minSize[axis],
       free[axis],
       CONTENT_MIN[axis],
     );
 
     const carved = carve(free, side, size);
     const rect = sane(carved.window);
-    out.push({
-      id: win.id,
+    frames.set(key, {
+      key,
+      tabs: members.map((win) => win.id),
+      active: active.id,
       rect,
-      splitter: win.resizable ? straddle(rect, side, host) : null,
+      // A tab that cannot be resized pins its whole frame: the strip resizes
+      // every tab at once, including that one.
+      splitter: members.every((win) => win.resizable) ? straddle(rect, side, host) : null,
+      minSize,
     });
     free = carved.rest;
   }
 
-  for (const win of ordered) {
+  for (const [key, members] of groups) {
+    const win = members[0];
     if (win.placement.mode !== "floating") {
       continue;
     }
-    out.push({
-      id: win.id,
+    frames.set(key, {
+      key,
+      tabs: [win.id],
+      active: win.id,
       rect: clampRect(win.placement.rect, host, win.minSize),
       splitter: null,
+      minSize: win.minSize,
     });
   }
 
-  // Back into the order the caller gave, so a caller keying off the array
-  // position rather than the id is not quietly reading someone else's rect.
-  const byId = new Map(out.map((entry) => [entry.id, entry]));
   return {
     content: sane(free),
-    windows: windows.map((win) => byId.get(win.id)!).filter(Boolean),
+    frames: [...groups.keys()].map((key) => frames.get(key)!),
   };
 }
 

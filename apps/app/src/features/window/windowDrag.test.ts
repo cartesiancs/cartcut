@@ -25,7 +25,7 @@ function dockedInput(
 ): WindowDragInput {
   const sizePct = 40;
   const state = dockedState(side, sizePct);
-  const rect = layoutHost(HOST, [state]).windows[0].rect;
+  const rect = layoutHost(HOST, [state]).frames[0].rect;
 
   return {
     origin: { mode: "docked", side, sizePct },
@@ -77,7 +77,7 @@ const placed = (plan: ReturnType<typeof resolveWindowDrag>): WindowPlacement => 
 function laidOut(placement: WindowPlacement): Rect {
   return layoutHost(HOST, [
     { ...dockedState("right", 0), placement },
-  ]).windows[0].rect;
+  ]).frames[0].rect;
 }
 
 describe("resolveWindowDrag, docked", () => {
@@ -105,7 +105,7 @@ describe("resolveWindowDrag, docked", () => {
   ])("grows a %s-docked window from its %s handle", (side, handle, dx, dy) => {
     const input = dockedInput(side, handle, dx, dy);
     const placement = placed(resolveWindowDrag(input));
-    const after = layoutHost(HOST, [{ ...dockedState(side, 0), placement }]).windows[0].rect;
+    const after = layoutHost(HOST, [{ ...dockedState(side, 0), placement }]).frames[0].rect;
     const axis = side === "left" || side === "right" ? "width" : "height";
 
     expect(after[axis]).toBeGreaterThan(input.originRect[axis]);
@@ -148,7 +148,7 @@ describe("resolveWindowDrag, docked", () => {
           continue;
         }
         const layout = layoutHost(HOST, [{ ...dockedState(side, 0), placement: plan.placement }]);
-        expect(contains(bounds, layout.windows[0].rect, 0), `${side} ${travel}`).toBe(true);
+        expect(contains(bounds, layout.frames[0].rect, 0), `${side} ${travel}`).toBe(true);
         expect(contains(bounds, layout.content, 0), `${side} ${travel} content`).toBe(true);
       }
     }
@@ -158,7 +158,7 @@ describe("resolveWindowDrag, docked", () => {
     const placement = placed(resolveWindowDrag(dockedInput("right", "w", -5000, 0)));
     const layout = layoutHost(HOST, [{ ...dockedState("right", 0), placement }]);
     expect(layout.content.width).toBe(CONTENT_MIN.width);
-    expect(layout.windows[0].rect.width).toBe(HOST.width - CONTENT_MIN.width);
+    expect(layout.frames[0].rect.width).toBe(HOST.width - CONTENT_MIN.width);
   });
 
   it("stops at the window's own minimum at the near end", () => {

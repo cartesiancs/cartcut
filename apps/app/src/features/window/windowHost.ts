@@ -3,8 +3,13 @@
  *
  * This is the only component in the feature that knows about layout. It
  * measures itself, hands the size to `windowStore`, asks `layoutHost` for the
- * rects, and writes them as inline styles. `<app-window>` below it is chrome
+ * frames, and writes their rects as inline styles. One `<app-window>` is drawn
+ * per frame, carrying every window docked to that side as a tab; it is chrome
  * and nothing else.
+ *
+ * Frames are rendered through `repeat`, keyed by `WindowFrame.key`. A plain
+ * `map` reuses elements by position, so closing the first of two frames handed
+ * its `<app-window>` to the second and rebuilt that frame's panels from scratch.
  *
  * Geometry is written as an inline `style` rather than through CSS classes on
  * purpose: there is then exactly one place a rect is decided, it is a pure
@@ -27,8 +32,10 @@
 
 import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { customElement, property } from "lit/decorators.js";
+import { repeat } from "lit/directives/repeat.js";
 
 import "./appWindow";
+import type { WindowTab } from "./appWindow";
 import {
   SPLITTER_HANDLE,
   resolveWindowDrag,
@@ -39,6 +46,7 @@ import {
   axisOf,
   type Rect,
   type Size,
+  type WindowFrame,
   type WindowPlacement,
   type WindowState,
 } from "./windowLayout";
@@ -56,7 +64,6 @@ import { hostLayout, windowStore, type IWindowStore } from "./windowStore";
 export type WindowPanel = {
   id: string;
   label: string;
-  icon?: string;
   content: TemplateResult;
 };
 
@@ -64,7 +71,9 @@ const rectStyle = (rect: Rect): string =>
   `left:${rect.x}px;top:${rect.y}px;width:${rect.width}px;height:${rect.height}px;`;
 
 type DragRecord = {
+  /** The tab on show when the drag began. `place` resizes its frame-mates too. */
   id: string;
+  frameKey: string;
   handle: DragHandle;
   origin: WindowPlacement;
   originRect: Rect;
@@ -87,9 +96,9 @@ export class WindowHost extends LitElement {
   @property({ attribute: false })
   windowState: IWindowStore = windowStore.getInitialState();
 
-  /** The window whose splitter is being dragged, for the hover style. */
+  /** The key of the frame whose splitter is being dragged, for the hover style. */
   @property()
-  draggingId: string | null = null;
+  draggingKey: string | null = null;
 
   private unsubscribe: (() => void) | null = null;
   private resizeObserver: ResizeObserver | null = null;
@@ -154,8 +163,8 @@ export class WindowHost extends LitElement {
     return { x: event.clientX - box.left, y: event.clientY - box.top };
   }
 
-  private handleSplitterDown(event: MouseEvent, win: WindowState, rect: Rect) {
-    if (win.placement.mode !== "docked") {
+  private handleSplitterDown(event: MouseEvent, frame: WindowFrame, active: WindowState) {
+    if (active.placement.mode !== "docked") {
       return;
     }
     // Without this the drag starts a text selection across the whole region,
@@ -163,14 +172,18 @@ export class WindowHost extends LitElement {
     event.preventDefault();
 
     this.drag = {
-      id: win.id,
-      handle: SPLITTER_HANDLE[win.placement.side],
-      origin: win.placement,
-      originRect: rect,
-      minSize: win.minSize,
+      id: active.id,
+      frameKey: frame.key,
+      handle: SPLITTER_HANDLE[active.placement.side],
+      origin: active.placement,
+      originRect: frame.rect,
+      // The frame's, not the tab's: `layoutHost` clamps against the largest
+      // minimum of any tab, and a gesture clamped against a smaller one would
+      // keep reporting changes the layout then refuses.
+      minSize: frame.minSize,
       from: this.hostPoint(event),
     };
-    this.draggingId = win.id;
+    this.draggingKey = frame.key;
   }
 
   private handleMouseMove(event: MouseEvent) {
@@ -207,7 +220,7 @@ export class WindowHost extends LitElement {
       return;
     }
     this.drag = null;
-    this.draggingId = null;
+    this.draggingKey = null;
     // One more after the gesture ends. `resizeEvent` arms a 300ms debounce over
     // a 50ms poll, and `previewRatio` is written asynchronously by the canvas's
     // own rAF draw, so the last move alone can settle before the final ratio
@@ -238,46 +251,56 @@ export class WindowHost extends LitElement {
         ${this.content}
       </div>
 
-      ${layout.windows.map((entry) => {
-        const win = open.get(entry.id);
-        const panel = this.panels.find((candidate) => candidate.id === entry.id);
-        if (win == null || panel == null) {
-          return nothing;
-        }
+      ${repeat(
+        layout.frames,
+        (frame) => frame.key,
+        (frame) => this.renderFrame(frame, open),
+      )}
+    `;
+  }
 
-        const vertical =
-          win.placement.mode === "docked" && axisOf(win.placement.side) === "width";
-        // Which edge of the strip touches the window. The divider line is drawn
-        // there rather than down the middle, so it reads as the window's edge
-        // the way `.option-window`'s own `border-left` does, instead of as a
-        // hairline floating a pixel away from it.
+  private renderFrame(frame: WindowFrame, open: Map<string, WindowState>) {
+    const active = open.get(frame.active);
+    const tabs: WindowTab[] = [];
+    for (const id of frame.tabs) {
+      const win = open.get(id);
+      const panel = this.panels.find((candidate) => candidate.id === id);
+      if (win != null && panel != null) {
+        tabs.push({ id, label: panel.label, closable: win.closable, content: panel.content });
+      }
+    }
+    if (active == null || tabs.length === 0) {
+      return nothing;
+    }
 
-        return html`
-          ${entry.splitter == null
-            ? nothing
-            : html`<div
-                class="window-splitter ${vertical ? "is-vertical" : "is-horizontal"} faces-${win
-                  .placement.mode === "docked"
-                  ? win.placement.side
-                  : "right"} ${this.draggingId === entry.id ? "is-dragging" : ""}"
-                style=${rectStyle(entry.splitter)}
-                @mousedown=${(event: MouseEvent) =>
-                  this.handleSplitterDown(event, win, entry.rect)}
-              ></div>`}
+    const side = active.placement.mode === "docked" ? active.placement.side : null;
+    const vertical = side != null && axisOf(side) === "width";
 
-          <app-window
-            class="app-window"
-            style=${rectStyle(entry.rect)}
-            .windowId=${entry.id}
-            .label=${panel.label}
-            .icon=${panel.icon ?? ""}
-            .closable=${win.closable}
-            .content=${panel.content}
-            @mousedown=${() => windowStore.getState().focus(entry.id)}
-            @windowClose=${() => windowStore.getState().close(entry.id)}
-          ></app-window>
-        `;
-      })}
+    // `faces-*` says which edge of the strip touches the frame. The divider line
+    // is drawn there rather than down the middle, so it reads as the frame's
+    // edge the way `.option-window`'s own `border-left` does, instead of as a
+    // hairline floating a pixel away from it.
+    return html`
+      ${frame.splitter == null
+        ? nothing
+        : html`<div
+            class="window-splitter ${vertical ? "is-vertical" : "is-horizontal"} faces-${side ??
+            "right"} ${this.draggingKey === frame.key ? "is-dragging" : ""}"
+            style=${rectStyle(frame.splitter)}
+            @mousedown=${(event: MouseEvent) => this.handleSplitterDown(event, frame, active)}
+          ></div>`}
+
+      <app-window
+        class="app-window"
+        style=${rectStyle(frame.rect)}
+        .tabs=${tabs}
+        .activeId=${frame.active}
+        @mousedown=${() => windowStore.getState().focus(frame.active)}
+        @windowSelect=${(event: CustomEvent<{ id: string }>) =>
+          windowStore.getState().focus(event.detail.id)}
+        @windowClose=${(event: CustomEvent<{ id: string }>) =>
+          windowStore.getState().close(event.detail.id)}
+      ></app-window>
     `;
   }
 }

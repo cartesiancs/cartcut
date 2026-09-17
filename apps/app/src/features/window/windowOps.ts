@@ -15,7 +15,14 @@
  * every op had to carry a field none of them reads.
  */
 
-import type { DockSide, Rect, Size, WindowPlacement, WindowState } from "./windowLayout";
+import {
+  dockShare,
+  type DockSide,
+  type Rect,
+  type Size,
+  type WindowPlacement,
+  type WindowState,
+} from "./windowLayout";
 
 /** What a caller has to say to open a window. Everything else has a default. */
 export type WindowSpec = {
@@ -82,13 +89,55 @@ export function openWindow(windows: WindowState[], spec: WindowSpec): WindowStat
     {
       id: spec.id,
       hostId: spec.hostId,
-      placement: spec.placement,
+      placement: joinDock(windows, spec.hostId, spec.placement),
       minSize: spec.minSize ?? DEFAULT_MIN,
       resizable: spec.resizable ?? true,
       closable: spec.closable ?? true,
       z: nextZ(windows),
     },
   ];
+}
+
+/**
+ * A docked placement, at the share of the frame it lands in.
+ *
+ * Every tab in a frame carries the same `sizePct`, and this is one of the two
+ * places that keeps it so. Without it, opening Text to Speech beside a caption
+ * window the user had dragged wide would snap the frame back to the spec's
+ * default, because the new tab is the one on show.
+ */
+function joinDock(
+  windows: WindowState[],
+  hostId: string,
+  placement: WindowPlacement,
+): WindowPlacement {
+  if (placement.mode !== "docked") {
+    return placement;
+  }
+  const share = dockShare(windows, hostId, placement.side);
+  return share == null || share === placement.sizePct
+    ? placement
+    : { ...placement, sizePct: share };
+}
+
+/**
+ * What a window in the frame `placement` lands in should hold once it is
+ * written, or null for a window in any other frame.
+ */
+function frameMatePlacement(
+  win: WindowState,
+  hostId: string,
+  placement: WindowPlacement,
+): WindowPlacement | null {
+  if (
+    placement.mode !== "docked" ||
+    win.hostId !== hostId ||
+    win.placement.mode !== "docked" ||
+    win.placement.side !== placement.side
+  ) {
+    return null;
+  }
+  return { ...win.placement, sizePct: placement.sizePct };
 }
 
 export function closeWindow(windows: WindowState[], id: string): WindowState[] {
@@ -120,26 +169,46 @@ export function focusWindow(windows: WindowState[], id: string): WindowState[] {
   );
 }
 
+/**
+ * Re-place a window, and resize the rest of its frame with it.
+ *
+ * The splitter belongs to the frame, not to the tab on show, so a drag written
+ * against that tab has to reach every tab in the frame. Otherwise switching tabs
+ * would jump the frame back to whatever size the other tab last had.
+ */
 export function setPlacement(
   windows: WindowState[],
   id: string,
   placement: WindowPlacement,
 ): WindowState[] {
   const target = findWindow(windows, id);
-  if (target == null || samePlacement(target.placement, placement)) {
+  if (target == null) {
     return windows;
   }
 
-  return windows.map((win) => (win.id === id ? { ...win, placement } : win));
+  let changed = false;
+  const next = windows.map((win) => {
+    const wanted =
+      win.id === id ? placement : frameMatePlacement(win, target.hostId, placement);
+    if (wanted == null || samePlacement(win.placement, wanted)) {
+      return win;
+    }
+    changed = true;
+    return { ...win, placement: wanted };
+  });
+
+  return changed ? next : windows;
 }
 
 /**
- * Dock a window to a side, keeping the share it had if it was already docked.
+ * Dock a window to a side, at the share it will have there.
  *
- * A window moved from the right edge to the bottom keeps its percentage, which
- * is the behaviour that makes the two look like one window that turned rather
- * than one that was closed and another opened. `DEFAULT_DOCK_PCT` only applies
- * to a window arriving from floating, where there is no share to carry.
+ * Joining a frame that is already on that side takes the frame's share, since a
+ * frame has one size. Otherwise a docked window keeps its percentage, which is
+ * the behaviour that makes a move from the right edge to the bottom look like
+ * one window that turned rather than one that was closed and another opened.
+ * `DEFAULT_DOCK_PCT` only applies to a window arriving from floating onto an
+ * empty side, where there is no share to carry.
  */
 export const DEFAULT_DOCK_PCT = 46;
 
@@ -154,7 +223,8 @@ export function dockWindow(
   }
 
   const sizePct =
-    target.placement.mode === "docked" ? target.placement.sizePct : DEFAULT_DOCK_PCT;
+    dockShare(windows, target.hostId, side, id) ??
+    (target.placement.mode === "docked" ? target.placement.sizePct : DEFAULT_DOCK_PCT);
 
   return setPlacement(windows, id, { mode: "docked", side, sizePct });
 }

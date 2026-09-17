@@ -1,10 +1,25 @@
 /**
- * A window's chrome: a title bar, a close button, and a body.
+ * A frame's chrome: a strip of tabs, and a body showing one of them.
  *
  * Deliberately knows nothing about layout, the store, or which host it is in.
- * It is handed a position by `<window-host>` as an inline style and a body as a
- * Lit template, and it reports a close by event. That makes it usable for a
- * plain dialog later without dragging a docking model in behind it.
+ * It is handed a position by `<window-host>` as an inline style and its tabs as
+ * Lit templates, and it reports a tab chosen or closed by event. That makes it
+ * usable for a plain dialog later without dragging a docking model in behind it.
+ *
+ * ## The tabs are `<preview-top-bar>`'s tabs
+ *
+ * Same chip, same classes, and the close glyph sits inside the tab straight
+ * after its label (`previewTopBar.ts#_renderTab`). The frame stands beside the
+ * preview column's own top bar at the same 2rem, so the two read as one strip
+ * across the column; a title chip with its close pushed to the far edge read as
+ * a different kind of thing.
+ *
+ * ## Every tab stays mounted
+ *
+ * A tab that is not on show is hidden, not removed. The caption panel holds a
+ * running session and Text to Speech holds what was typed into it, and removing
+ * either to show the other would throw that away. `repeat` keys each pane by the
+ * tab's id so closing one tab never hands its element to another.
  *
  * ## Why the body arrives as a template rather than through a `<slot>`
  *
@@ -33,74 +48,102 @@
 
 import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { customElement, property } from "lit/decorators.js";
+import { repeat } from "lit/directives/repeat.js";
+
+export type WindowTab = {
+  /** The id this tab's window is known by in `windowStore`. */
+  id: string;
+  /**
+   * The name on the tab.
+   *
+   * Called `label` and not `title`: `title` is a global HTML property, and a
+   * Lit `@property` of that name shadows it, so the frame would grow a native
+   * tooltip carrying its own name.
+   */
+  label: string;
+  closable: boolean;
+  content: TemplateResult;
+};
 
 @customElement("app-window")
 export class AppWindow extends LitElement {
-  /** The id this window is known by in `windowStore`. Sent back on close. */
-  @property()
-  windowId = "";
-
-  /**
-   * The name on the title bar.
-   *
-   * Called `label` and not `title`: `title` is a global HTML property, and a
-   * Lit `@property` of that name shadows it, so the window would grow a native
-   * tooltip carrying its own name.
-   */
-  @property()
-  label = "";
-
-  /** A material-symbols ligature, or empty for no icon. */
-  @property()
-  icon = "";
-
-  @property({ type: Boolean })
-  closable = true;
-
   @property({ attribute: false })
-  content: TemplateResult | typeof nothing = nothing;
+  tabs: WindowTab[] = [];
+
+  /** The tab on show. */
+  @property()
+  activeId = "";
 
   createRenderRoot() {
     return this;
   }
 
-  private _close(event: Event) {
-    // The close button lives inside the title bar, and the title bar raises the
-    // window on mousedown. Without this the click both closes the window and
-    // focuses it on the way past, which is the trap `previewTopBar`'s own tab
-    // close already documents.
-    event.stopPropagation();
+  private _emit(type: "windowSelect" | "windowClose", id: string) {
     this.dispatchEvent(
-      new CustomEvent("windowClose", {
-        detail: { id: this.windowId },
+      new CustomEvent(type, {
+        detail: { id },
         bubbles: true,
         composed: true,
       }),
     );
   }
 
+  private _close(event: Event, id: string) {
+    // The close glyph lives inside the tab, so without this the click bubbles
+    // into the tab's own handler and focuses the window that was just closed,
+    // the trap `previewTopBar`'s tab close already documents.
+    event.stopPropagation();
+    this._emit("windowClose", id);
+  }
+
+  private _renderTab(tab: WindowTab) {
+    const active = tab.id === this.activeId;
+    return html`<button
+      type="button"
+      data-window=${tab.id}
+      class="btn btn-xxs ${active ? "btn-active" : "btn-default"} text-light app-window-tab m-0"
+      @click=${() => this._emit("windowSelect", tab.id)}
+    >
+      ${tab.label}
+      ${tab.closable
+        ? html`<span
+            class="material-symbols-outlined icon-xs app-window-close"
+            role="button"
+            title="Close ${tab.label}"
+            aria-label="Close ${tab.label}"
+            @click=${(event: Event) => this._close(event, tab.id)}
+          >
+            close
+          </span>`
+        : nothing}
+    </button>`;
+  }
+
   render() {
     return html`
       <div class="app-window-titlebar">
-        <span class="app-window-title btn btn-xxs btn-active text-light m-0">
-          ${this.icon === ""
-            ? nothing
-            : html`<span class="material-symbols-outlined icon-xs">${this.icon}</span>`}
-          ${this.label}
-        </span>
-        ${this.closable
-          ? html`<button
-              class="app-window-close"
-              type="button"
-              title="Close ${this.label}"
-              aria-label="Close ${this.label}"
-              @click=${this._close}
-            >
-              <span class="material-symbols-outlined icon-xs">close</span>
-            </button>`
-          : nothing}
+        <div class="app-window-tabs">
+          ${repeat(
+            this.tabs,
+            (tab) => tab.id,
+            (tab) => this._renderTab(tab),
+          )}
+        </div>
       </div>
-      <div class="app-window-body">${this.content}</div>
+      <div class="app-window-body">
+        ${repeat(
+          this.tabs,
+          (tab) => tab.id,
+          (tab) =>
+            html`<div
+              class="app-window-pane"
+              data-window=${tab.id}
+              ?hidden=${tab.id !== this.activeId}
+            >
+              ${tab.content}
+            </div>`,
+        )}
+      </div>
     `;
   }
 }

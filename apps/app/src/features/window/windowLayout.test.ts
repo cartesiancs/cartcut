@@ -75,10 +75,10 @@ function expectInsideHost(host: Size, windows: WindowState[]) {
   const bounds = hostRect(host);
 
   expect(contains(bounds, layout.content, 0)).toBe(true);
-  for (const entry of layout.windows) {
+  for (const entry of layout.frames) {
     expect(
       contains(bounds, entry.rect, 0),
-      `${entry.id} ${JSON.stringify(entry.rect)} left ${JSON.stringify(bounds)}`,
+      `${entry.key} ${JSON.stringify(entry.rect)} left ${JSON.stringify(bounds)}`,
     ).toBe(true);
     expect(entry.rect.width).toBeGreaterThanOrEqual(0);
     expect(entry.rect.height).toBeGreaterThanOrEqual(0);
@@ -92,7 +92,7 @@ function expectInsideHost(host: Size, windows: WindowState[]) {
 describe("layoutHost", () => {
   it("puts a right-docked window beside the content, not over it", () => {
     const layout = expectInsideHost(HOST, [docked("captions", "right", 47)]);
-    const window = layout.windows[0];
+    const window = layout.frames[0];
 
     expect(window.rect.x).toBeGreaterThan(layout.content.x);
     expect(window.rect.y).toBe(0);
@@ -104,7 +104,7 @@ describe("layoutHost", () => {
     "tiles the host exactly when docked %s",
     (side) => {
       const layout = expectInsideHost(HOST, [docked("w", side, 40)]);
-      const window = layout.windows[0];
+      const window = layout.frames[0];
 
       expect(window.splitter).not.toBeNull();
       expect(overlaps(layout.content, window.rect)).toBe(false);
@@ -122,32 +122,88 @@ describe("layoutHost", () => {
     },
   );
 
-  it("stacks two windows on the same side and still tiles exactly", () => {
+  it("puts two windows docked to the same side into one frame, as tabs", () => {
     const layout = expectInsideHost(HOST, [
-      docked("first", "right", 30, { z: 0, minSize: { width: 120, height: 80 } }),
-      docked("second", "right", 25, { z: 1, minSize: { width: 120, height: 80 } }),
+      docked("captions", "right", 50, { z: 1, minSize: { width: 320, height: 240 } }),
+      docked("speech", "right", 50, { z: 2, minSize: { width: 300, height: 280 } }),
     ]);
 
-    const [first, second] = layout.windows;
-    expect(overlaps(first.rect, second.rect)).toBe(false);
-    // Opened first sits outermost, so the second is to its left.
-    expect(second.rect.x).toBeLessThan(first.rect.x);
+    expect(layout.frames).toHaveLength(1);
+    const [frame] = layout.frames;
+    expect(frame.key).toBe("dock:right");
+    // Tabs in open order, and the one on show is the last focused.
+    expect(frame.tabs).toEqual(["captions", "speech"]);
+    expect(frame.active).toBe("speech");
+    // Laid out against the largest minimum of either tab.
+    expect(frame.minSize).toEqual({ width: 320, height: 280 });
 
-    const total =
-      areaOf(layout.content) +
-      layout.windows.reduce((sum, entry) => sum + areaOf(entry.rect), 0);
-    expect(total).toBe(HOST.width * HOST.height);
+    // One column beside the content, not two.
+    expect(frame.rect.width).toBe(Math.round(0.5 * HOST.width));
+    expect(areaOf(layout.content) + areaOf(frame.rect)).toBe(HOST.width * HOST.height);
   });
 
-  it("nests a top-docked window inside what a right-docked one left", () => {
+  it("keeps a frame's size when the tab on show changes", () => {
+    // Both carry the same share, which `windowOps` guarantees. What changes
+    // with focus is the tab and the minimum it brings, and the minimum is
+    // already the larger of the two either way.
+    const captions = docked("captions", "right", 20, {
+      z: 1,
+      minSize: { width: 320, height: 80 },
+    });
+    const speech = docked("speech", "right", 20, { z: 2, minSize: { width: 60, height: 80 } });
+
+    const speechOnShow = layoutHost(HOST, [captions, speech]).frames[0];
+    const captionsOnShow = layoutHost(HOST, [{ ...captions, z: 3 }, speech]).frames[0];
+
+    expect(speechOnShow.active).toBe("speech");
+    expect(captionsOnShow.active).toBe("captions");
+    expect(captionsOnShow.tabs).toEqual(speechOnShow.tabs);
+    expect(captionsOnShow.rect).toEqual(speechOnShow.rect);
+    // 20% of 680 is 136, so the caption tab's 320 is what holds both.
+    expect(speechOnShow.rect.width).toBe(320);
+  });
+
+  it("names a docked frame after its side, so it survives its first tab closing", () => {
+    const both = layoutHost(HOST, [
+      docked("captions", "right", 40, { z: 1 }),
+      docked("speech", "right", 40, { z: 2 }),
+    ]);
+    const second = layoutHost(HOST, [docked("speech", "right", 40, { z: 2 })]);
+
+    expect(both.frames[0].key).toBe(second.frames[0].key);
+    expect(second.frames[0].tabs).toEqual(["speech"]);
+  });
+
+  it("gives a frame no splitter when any of its tabs cannot be resized", () => {
+    const layout = layoutHost(HOST, [
+      docked("free", "right", 40, { z: 1 }),
+      docked("fixed", "right", 40, { z: 2, resizable: false }),
+    ]);
+    expect(layout.frames[0].splitter).toBeNull();
+  });
+
+  it("nests a top-docked frame inside what a right-docked one left", () => {
     const layout = expectInsideHost(HOST, [
       docked("side", "right", 40, { z: 0 }),
       docked("strip", "top", 20, { z: 1, minSize: { width: 80, height: 40 } }),
     ]);
 
-    const [side, strip] = layout.windows;
+    const [side, strip] = layout.frames;
     expect(overlaps(side.rect, strip.rect)).toBe(false);
-    // The strip only spans what was left after the side window took its share.
+    // The strip only spans what was left after the side frame took its share.
+    expect(strip.rect.width).toBe(HOST.width - side.rect.width);
+  });
+
+  it("carves frames in open order, so focusing one never swaps two docks", () => {
+    // `side` was opened first but is now focused, so its z is the higher. It
+    // still sits outermost: carving by z made a click into one dock move it.
+    const layout = expectInsideHost(HOST, [
+      docked("side", "right", 40, { z: 9 }),
+      docked("strip", "top", 20, { z: 1, minSize: { width: 80, height: 40 } }),
+    ]);
+
+    const [side, strip] = layout.frames;
+    expect(side.rect.height).toBe(HOST.height);
     expect(strip.rect.width).toBe(HOST.width - side.rect.width);
   });
 
@@ -157,7 +213,7 @@ describe("layoutHost", () => {
     ]);
 
     expect(layout.content.width).toBe(CONTENT_MIN.width);
-    expect(layout.windows[0].rect.width).toBe(HOST.width - CONTENT_MIN.width);
+    expect(layout.frames[0].rect.width).toBe(HOST.width - CONTENT_MIN.width);
   });
 
   it("lets the window's own minimum outrank the content's floor", () => {
@@ -167,7 +223,7 @@ describe("layoutHost", () => {
       docked("wide", "right", 10, { minSize: { width: 560, height: 100 } }),
     ]);
 
-    expect(layout.windows[0].rect.width).toBe(560);
+    expect(layout.frames[0].rect.width).toBe(560);
     expect(layout.content.width).toBeLessThan(CONTENT_MIN.width);
   });
 
@@ -180,8 +236,8 @@ describe("layoutHost", () => {
       docked("wide", "right", 90, { minSize: { width: 560, height: 400 } }),
     ]);
 
-    expect(layout.windows[0].rect.width).toBeLessThanOrEqual(host.width);
-    expect(layout.windows[0].rect.height).toBeLessThanOrEqual(host.height);
+    expect(layout.frames[0].rect.width).toBeLessThanOrEqual(host.width);
+    expect(layout.frames[0].rect.height).toBeLessThanOrEqual(host.height);
   });
 
   it("survives a host with no area at all", () => {
@@ -204,12 +260,12 @@ describe("layoutHost", () => {
     // Turning the splitter on must not move anything. It overlays the content
     // rather than pushing it, the way `.split-col-bar` does one level up.
     expect(withStrip.content).toEqual(bare.content);
-    expect(withStrip.windows[0].rect).toEqual(bare.windows[0].rect);
+    expect(withStrip.frames[0].rect).toEqual(bare.frames[0].rect);
 
-    const strip = withStrip.windows[0].splitter!;
+    const strip = withStrip.frames[0].splitter!;
     expect(strip.width).toBe(SPLITTER_PX);
     // Immediately outside the window, on the content's side of the seam.
-    expect(strip.x + strip.width).toBe(withStrip.windows[0].rect.x);
+    expect(strip.x + strip.width).toBe(withStrip.frames[0].rect.x);
   });
 
   it("clips the grab strip into the host when the window has taken it all", () => {
@@ -218,39 +274,51 @@ describe("layoutHost", () => {
     const layout = expectInsideHost({ width: 2, height: 200 }, [
       docked("w", "right", 100, { minSize: { width: 1, height: 1 } }),
     ]);
-    const strip = layout.windows[0].splitter!;
+    const strip = layout.frames[0].splitter!;
     expect(strip.x).toBeGreaterThanOrEqual(0);
     expect(strip.x + strip.width).toBeLessThanOrEqual(2);
   });
 
   it("gives an unresizable window no splitter", () => {
     const layout = layoutHost(HOST, [docked("fixed", "right", 40, { resizable: false })]);
-    expect(layout.windows[0].splitter).toBeNull();
-    expect(areaOf(layout.content) + areaOf(layout.windows[0].rect)).toBe(
+    expect(layout.frames[0].splitter).toBeNull();
+    expect(areaOf(layout.content) + areaOf(layout.frames[0].rect)).toBe(
       HOST.width * HOST.height,
     );
   });
 
   it("holds a docked window's share as the host grows", () => {
     const win = docked("w", "right", 40, { minSize: { width: 40, height: 40 } });
-    const narrow = layoutHost({ width: 600, height: 300 }, [win]).windows[0].rect;
-    const wide = layoutHost({ width: 1200, height: 300 }, [win]).windows[0].rect;
+    const narrow = layoutHost({ width: 600, height: 300 }, [win]).frames[0].rect;
+    const wide = layoutHost({ width: 1200, height: 300 }, [win]).frames[0].rect;
 
     expect(narrow.width).toBe(240);
     expect(wide.width).toBe(480);
   });
 
-  it("returns windows in the order they were given, not in dock order", () => {
+  it("returns frames in the order their first tab was opened", () => {
     const layout = layoutHost(HOST, [
+      floating("f", { x: 20, y: 20, width: 300, height: 200 }, { z: 7 }),
       docked("b", "right", 20, { z: 5, minSize: { width: 60, height: 60 } }),
       docked("a", "left", 20, { z: 1, minSize: { width: 60, height: 60 } }),
+      docked("c", "right", 20, { z: 2, minSize: { width: 60, height: 60 } }),
     ]);
-    expect(layout.windows.map((entry) => entry.id)).toEqual(["b", "a"]);
+    expect(layout.frames.map((frame) => frame.key)).toEqual([
+      "float:f",
+      "dock:right",
+      "dock:left",
+    ]);
+    expect(layout.frames[1].tabs).toEqual(["b", "c"]);
   });
 
-  it("takes no space for a floating window", () => {
-    const layout = layoutHost(HOST, [floating("f", { x: 20, y: 20, width: 300, height: 200 })]);
+  it("takes no space for a floating window, and makes it a frame of its own", () => {
+    const layout = layoutHost(HOST, [
+      floating("f", { x: 20, y: 20, width: 300, height: 200 }),
+      floating("g", { x: 40, y: 40, width: 300, height: 200 }),
+    ]);
     expect(layout.content).toEqual({ x: 0, y: 0, ...HOST });
+    expect(layout.frames.map((frame) => frame.tabs)).toEqual([["f"], ["g"]]);
+    expect(layout.frames.every((frame) => frame.splitter == null)).toBe(true);
   });
 
   it("keeps every rect inside the host across a sweep of hosts and placements", () => {
@@ -272,6 +340,30 @@ describe("layoutHost", () => {
 
     // The sweep is worth nothing if it swept nothing.
     expect(checked).toBeGreaterThan(2000);
+  });
+
+  it("keeps every rect inside the host with a shared frame and a second dock", () => {
+    const sides: DockSide[] = ["left", "right", "top", "bottom"];
+    let checked = 0;
+
+    for (let width = 0; width <= 1400; width += 139) {
+      for (let height = 0; height <= 900; height += 127) {
+        for (const side of sides) {
+          const other = sides[(sides.indexOf(side) + 1) % sides.length];
+          for (const pct of [0, 33, 88, 140]) {
+            const layout = expectInsideHost({ width, height }, [
+              docked("a", side, pct, { z: 1, minSize: { width: 320, height: 240 } }),
+              docked("b", side, pct, { z: 3, minSize: { width: 280, height: 280 } }),
+              docked("c", other, pct, { z: 2 }),
+            ]);
+            expect(layout.frames).toHaveLength(2);
+            checked += 1;
+          }
+        }
+      }
+    }
+
+    expect(checked).toBeGreaterThan(1000);
   });
 });
 
@@ -320,7 +412,7 @@ describe("pctForSize", () => {
     const layout = layoutHost(HOST, [
       docked("w", "right", pct, { minSize: { width: 40, height: 40 } }),
     ]);
-    expect(layout.windows[0].rect.width).toBe(target);
+    expect(layout.frames[0].rect.width).toBe(target);
   });
 
   it("never answers outside 0..100", () => {

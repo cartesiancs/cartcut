@@ -362,13 +362,11 @@ export class Control extends LitElement {
       {
         id: "textToSpeech",
         label: this.lc.t("window.text_to_speech") || "Text to Speech",
-        icon: "record_voice_over",
         content: html`<tts-panel></tts-panel>`,
       },
       {
         id: "automaticCaption",
         label: this.lc.t("window.automatic_caption") || "Automatic Caption",
-        icon: "subtitles",
         content: html`<automatic-caption
           .timeline=${this.timeline}
           .previewSize=${this.previewSize}
@@ -388,20 +386,20 @@ export class Control extends LitElement {
   /**
    * Finishing an edit puts the window away.
    *
-   * Apply and the title bar's close both reach `closeEditor`, so both end with
-   * the preview holding the whole column again. Leaving the window open on the
-   * "Load video" screen after an Apply would read as the edit not having been
-   * taken.
+   * Apply and the tab's close both reach `closeEditor`, so both end with the
+   * caption tab gone, and the preview holding the whole column again unless
+   * another tab is still open. Leaving the tab open on the "Load video" screen
+   * after an Apply would read as the edit not having been taken.
    */
   private _handleCaptionEditorClose() {
     windowStore.getState().close("automaticCaption");
   }
 
   /**
-   * Give the keyboard back when the caption window is closed from its title bar.
+   * Give the keyboard back when the caption tab is closed from its close glyph.
    *
    * The panel scopes its own `lockKeyboard` to focus and releases it on
-   * `focusout`, but closing the window unmounts the panel, and an event
+   * `focusout`, but closing the tab unmounts the panel, and an event
    * dispatched from a detached element reaches nobody. So the release is done
    * here, where the element that is going away cannot be the one responsible
    * for the last word about it.
@@ -415,7 +413,9 @@ export class Control extends LitElement {
     // session. It has to be done here for the same reason the keyboard is given
     // back here: closing unmounts the panel, and an event dispatched from a
     // detached element reaches nobody. `cancel` is a no-op when no session is
-    // running, so closing the window on the setup screen costs nothing.
+    // running, so closing the tab on the setup screen costs nothing. Switching
+    // to another tab is not a close and keeps the session: the panel is only
+    // hidden.
     this.captionSession.cancel();
   }
 

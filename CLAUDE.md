@@ -267,7 +267,8 @@ features/export/       exportSession, phases, snapshot, the ETA singleton
 features/agent/        commit, context, serialize, commands/, what MCP forwards to
 features/caption/      the auto-caption panel's every decision, and the session
                        that owns the timeline while it is open
-features/window/       docked panels beside a host's content, splitter, pure layout
+features/window/       docked panels beside a host's content, one tabbed frame per
+                       side, splitter, pure layout
 features/mask/         one mask per clip: templates, bezier geometry, the pen session
 features/shape/        parametric outlines, over mask/geometry.ts unchanged
 features/lut/          .cube reading, tetrahedral sampling, atlas, 80 built-ins
