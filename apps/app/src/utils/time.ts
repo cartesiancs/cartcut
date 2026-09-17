@@ -84,8 +84,11 @@ export function formatRemaining(ms: number): string {
  * A microsecond is five orders of magnitude above that error and six below
  * anything an edit can express, so it absorbs the noise without widening the
  * window in any observable way.
+ *
+ * Exported for `clipOps.ts#removeRanges`, which meets the same noise when a cut
+ * is meant to reach a clip's edge.
  */
-const EDGE_SLACK_MS = 1e-6;
+export const EDGE_SLACK_MS = 1e-6;
 
 /**
  * Whether `t` falls inside the half-open window `[start, end)`.

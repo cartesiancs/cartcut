@@ -11,6 +11,7 @@ import {
   splitClip,
   trimClipEnd,
   trimClipStart,
+  type TimeRange,
 } from "./clipOps";
 import {
   SCHEMA_VERSION,
@@ -19,7 +20,9 @@ import {
   normalizeDocument,
   type TimelineDocument,
 } from "./tracks";
-import { assertTrimInvariant, spanOf } from "./geometry";
+import { assertTrimInvariant, spanOf, timelineTimeAt } from "./geometry";
+import { snapMsToFrame } from "./frames";
+import { footageFaults, seededRandom } from "./testing";
 import {
   groupElement,
   imageElement,
@@ -360,6 +363,22 @@ describe("rippleDelete", () => {
   it("declines for a missing clip", () => {
     const base = doc([["v1", "video"]], {});
     expect(rippleDelete(base, "nope")).toBe(base);
+  });
+
+  it("pulls a clip that starts a ULP before the deleted one ends", () => {
+    // The pair a 60fps silence cut really produced. The middle's end and the
+    // tail's start are one instant, reached by two different sums.
+    const middleStart = 23616.66666666667;
+    const tailStart = 24266.666666666668;
+    expect(tailStart).toBeLessThan(middleStart + 650);
+
+    const base = doc([["v1", "video"]], {
+      head: imageElement({ trackId: "v1", startTime: 0, duration: middleStart }),
+      middle: imageElement({ trackId: "v1", startTime: middleStart, duration: 650 }),
+      tail: imageElement({ trackId: "v1", startTime: tailStart, duration: 1000 }),
+    });
+    const next = rippleDelete(base, "middle");
+    expect(next.elements.tail.startTime).toBeCloseTo(middleStart, 6);
   });
 });
 
@@ -786,6 +805,136 @@ describe("removeRanges", () => {
     expect(removeRanges(before, "nope", [{ startMs: 0, endMs: 1 }], true, idGen)).toBe(
       before,
     );
+  });
+
+  it("closes the hole on a piece whose edges are off the millisecond grid", () => {
+    // The piece a caption session had left after its first cut at 60fps, and
+    // its second cut carried into that piece's coordinates. The tail used to
+    // stay where it was, 650 ms late.
+    const piece = videoElement({
+      trackId: "v1",
+      startTime: 11966.666666666666,
+      duration: 554775 - 12383.333333333332,
+      trim: { startTime: 12383.333333333332, endTime: 554775 },
+      sourceDuration: 554775,
+    });
+    const cut = { startMs: 23616.66666666667, endMs: 24266.666666666668 };
+    const after = removeRanges(
+      doc([["v1", "video"]], { piece }),
+      "piece",
+      [cut],
+      true,
+      idGen,
+    );
+
+    expect(footageFaults(after, "v1", piece, [cut])).toEqual([]);
+  });
+
+  it("leaves no sliver when a cut stops a ULP short of the clip's end", () => {
+    // What `caption/cuts.ts#planCuts` answers at 60fps for the last second of
+    // this clip's source: the clip ends at 7333.333333333334, the cut one ULP
+    // before it. Taken literally, that split off a tail of length 0.
+    const clip = videoElement({
+      trackId: "v1",
+      startTime: 666.6666666666666,
+      duration: 10000,
+      speed: 1.5,
+      trim: { startTime: 0, endTime: 10000 },
+      sourceDuration: 10000,
+    });
+    const cut = { startMs: 6666.666666666667, endMs: 7333.333333333333 };
+    expect(cut.endMs).toBeLessThan(spanOf(clip).end);
+
+    const after = removeRanges(
+      doc([["v1", "video"]], { clip }),
+      "clip",
+      [cut],
+      true,
+      idGen,
+    );
+
+    expect(clipsOnTrack(after, "v1")).toHaveLength(1);
+    expect(footageFaults(after, "v1", clip, [cut])).toEqual([]);
+  });
+});
+
+/**
+ * Cut lists the way a caption session makes them: source ranges converted to
+ * the timeline, snapped to the frame grid and clamped to the clip, which is
+ * what `caption/cuts.ts#planCuts` does. The clip starts on or off the grid,
+ * and some lists begin on its first frame or run to its last.
+ */
+function frameGridCases() {
+  const random = seededRandom(20260917);
+  const cases: Array<{
+    label: string;
+    clip: ReturnType<typeof videoElement>;
+    cuts: TimeRange[];
+  }> = [];
+
+  for (const fps of [24, 30, 60, 120]) {
+    for (const speed of [1, 1.5, 2]) {
+      for (let run = 0; run < 12; run += 1) {
+        const length = 30000 + Math.floor(random() * 90000);
+        const clip = videoElement({
+          trackId: "v1",
+          startTime: (Math.floor(random() * 3) * 1000) / 3,
+          duration: length,
+          speed,
+          trim: { startTime: 0, endTime: length },
+          sourceDuration: length,
+        });
+        const span = spanOf(clip);
+        const onGrid = (sourceMs: number) =>
+          snapMsToFrame(timelineTimeAt(clip, sourceMs), fps);
+
+        const ranges: TimeRange[] = [];
+        let at = run % 3 === 0 ? 0 : random() * 3000;
+        while (at < length) {
+          const width = 150 + random() * 900;
+          ranges.push({
+            startMs: Math.max(span.start, onGrid(at)),
+            endMs: Math.min(span.end, onGrid(Math.min(length, at + width))),
+          });
+          at += width + 200 + random() * 6000;
+        }
+        if (run % 4 === 0) {
+          ranges.push({
+            startMs: Math.max(span.start, onGrid(length - 700)),
+            endMs: Math.min(span.end, onGrid(length)),
+          });
+        }
+
+        cases.push({
+          label: `${fps}fps at ${speed}x, run ${run}`,
+          clip,
+          cuts: normalizeRanges(ranges.filter((r) => r.endMs > r.startMs)),
+        });
+      }
+    }
+  }
+  return cases;
+}
+
+describe("removeRanges over frame-grid cuts", () => {
+  // Before the ripple and the edge clamp allowed for float noise, more than
+  // half of these left a hole, and every cut after a hole took the wrong
+  // footage.
+  it("leaves the survivors butted together, each showing its own source", () => {
+    const faults: string[] = [];
+    for (const { label, clip, cuts } of frameGridCases()) {
+      const after = removeRanges(
+        doc([["v1", "video"]], { clip }),
+        "clip",
+        cuts,
+        true,
+        idGen,
+      );
+      for (const fault of footageFaults(after, "v1", clip, [...cuts].reverse())) {
+        faults.push(`${label}: ${fault}`);
+      }
+    }
+    expect(faults).toEqual([]);
   });
 });
 

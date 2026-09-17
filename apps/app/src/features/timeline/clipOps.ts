@@ -13,8 +13,9 @@
 
 import type { TimelineElement } from "../../@types/timeline";
 import { splitAt, trimEnd, trimStart } from "./clipEdit";
-import { spanLength, spanOf } from "./geometry";
+import { ADJACENCY_EPSILON_MS, spanLength, spanOf } from "./geometry";
 import { findCollisions, overlaps } from "./overlap";
+import { EDGE_SLACK_MS } from "../../utils/time";
 import { chooseTrackFor } from "./placement";
 import { cloneAnimation } from "../animation/keyframes";
 import { withDescendants } from "./hierarchy";
@@ -283,7 +284,16 @@ export function rippleDelete(
     if (elements[id] == null) {
       continue;
     }
-    if (spanOf(sibling).start >= end) {
+    // Within `ADJACENCY_EPSILON_MS`, never exactly. The tail of a split starts
+    // where the deleted middle ends, but the two numbers come from different
+    // sums (`startTime + offset` against `startTime + duration / speed`) and can
+    // disagree in the last ULP: at 60fps a middle ending at 24266.66666666667
+    // against a tail starting at 24266.666666666668. A strict `>=` read that
+    // tail as starting inside the deleted clip and left it behind, so a caption
+    // session's silence cut left a hole as long as the silence. The track holds
+    // no overlaps, so nothing but a transition starts inside `[start, end)`,
+    // and a transition is far wider than this.
+    if (spanOf(sibling).start >= end - ADJACENCY_EPSILON_MS) {
       elements[id] = {
         ...sibling,
         startTime: Math.max(0, sibling.startTime - length),
@@ -380,8 +390,16 @@ export function removeRanges(
 
     const [targetId, element] = target;
     const span = spanOf(element);
-    const from = Math.max(span.start, range.startMs);
-    const to = Math.min(span.end, range.endMs);
+    // Clamped to the piece, and held to its edge when within float noise of
+    // it. A cut meant to run to the end of the clip reaches here from
+    // `planCuts` or `shiftSpan` a few ULPs short, and taken literally it splits
+    // off a tail 1e-11 ms long, or 0: an invisible clip left on the track.
+    // Only noise, never `ADJACENCY_EPSILON_MS`: a clip off the frame grid can
+    // be planned to keep a real piece shorter than half a millisecond, and
+    // dropping it would put the footage where `rippleMap` says it is not.
+    const from =
+      range.startMs - span.start <= EDGE_SLACK_MS ? span.start : range.startMs;
+    const to = span.end - range.endMs <= EDGE_SLACK_MS ? span.end : range.endMs;
     if (to <= from) {
       continue;
     }

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { transitionElement, videoElement } from "../renderer/testing";
+import type { VideoElementType } from "../../@types/timeline";
 import type { TimeRange } from "../timeline/clipOps";
+import { snapMsToFrame } from "../timeline/frames";
 import { spanOf } from "../timeline/geometry";
+import { footageFaults, seededRandom } from "../timeline/testing";
 import {
   SCHEMA_VERSION,
   clipsOnTrack,
@@ -896,5 +899,98 @@ describe("several clips", () => {
     const ls = lines();
     const { plan } = run(base, ls, [{ key: "clip", ranges: [] }]);
     expect(plan.rows.every((row) => row.sourceKey === "clip")).toBe(true);
+  });
+});
+
+// Silence cuts land a frame apart on a non-integer grid, so every edge the
+// session computes is a float that two different sums reach. Before
+// `clipOps.ts#rippleDelete` allowed for that, one cut in a few at 60fps left
+// its tail behind, and because the plan's arithmetic assumed it had moved,
+// every later cut took footage from the wrong place.
+describe("footage stays contiguous", () => {
+  it("closes both of the first two silences found in a 60fps recording", () => {
+    // IMG_5587.MOV, where this was reported: the second tail stayed 650 ms
+    // late and every cut after it landed 650 ms early, on speech.
+    const base = doc({
+      duration: 30_000,
+      trim: { startTime: 0, endTime: 30_000 },
+      sourceDuration: 30_000,
+    });
+    const source = base.elements.clip as VideoElementType;
+    const cutList = planCuts(
+      [
+        { startMs: 11967, endMs: 12383 },
+        { startMs: 24033, endMs: 24683 },
+      ],
+      source,
+      (ms) => snapMsToFrame(ms, 60),
+    ).cuts;
+    const { plan, steps } = oneClip(base, [], cutList, idsFor([], cutList.length));
+
+    const after = projectCaptions(base, plan, steps);
+
+    expect(footageFaults(after, "v1", source, [...cutList].reverse())).toEqual([]);
+    const third = clipsOnTrack(after, "v1")
+      .map(([, el]) => el as VideoElementType)
+      .sort((a, b) => a.startTime - b.startTime)[2];
+    expect(third.startTime).toBeCloseTo(23616.667, 2);
+    expect(third.trim.startTime).toBeCloseTo(24683.333, 2);
+  });
+
+  it("holds for seeded silences at four rates and three speeds, sequence and batch alike", () => {
+    const random = seededRandom(917);
+    const faults: string[] = [];
+
+    for (const fps of [24, 30, 60, 120]) {
+      for (const speed of [1, 1.5, 2]) {
+        for (let run = 0; run < 12; run += 1) {
+          const length = 30_000 + Math.floor(random() * 90_000);
+          const base = doc({
+            // On the grid and a third or two thirds of a second off it.
+            startTime: (Math.floor(random() * 3) * 1000) / 3,
+            duration: length,
+            speed,
+            trim: { startTime: 0, endTime: length },
+            sourceDuration: length,
+          });
+          const source = base.elements.clip as VideoElementType;
+
+          const silences: TimeRange[] = [];
+          let at = run % 3 === 0 ? 0 : random() * 3000;
+          while (at < length) {
+            const width = 150 + random() * 900;
+            silences.push({ startMs: at, endMs: Math.min(length, at + width) });
+            at += width + 200 + random() * 6000;
+          }
+          if (run % 4 === 0) {
+            silences.push({ startMs: length - 700, endMs: length });
+          }
+
+          const plan = planCuts(silences, source, (ms) => snapMsToFrame(ms, fps));
+          if (plan.cuts.length === 0 || plan.coversWholeClip) {
+            continue;
+          }
+          const ids = idsFor([], plan.cuts.length);
+          const sequence = oneClip(base, [], plan.cuts, ids);
+          const results = {
+            sequence: projectCaptions(base, sequence.plan, sequence.steps),
+            batch: applyCaptionCommit(base, {
+              clips: [{ key: "clip", cuts: plan.cuts, splits: poolOf(ids, "clip") }],
+              rows: [],
+              ids: { captions: [] },
+            }),
+          };
+
+          const ascending = [...plan.cuts].reverse();
+          for (const [path, result] of Object.entries(results)) {
+            for (const fault of footageFaults(result, "v1", source, ascending)) {
+              faults.push(`${path}, ${fps}fps at ${speed}x, run ${run}: ${fault}`);
+            }
+          }
+        }
+      }
+    }
+
+    expect(faults).toEqual([]);
   });
 });
