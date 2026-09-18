@@ -14,8 +14,10 @@ import {
   fractionToSpeed,
   hitTest,
   insertPoint,
+  isRampArmed,
   movePoint,
   removePoint,
+  seedCurveFor,
   speedToFraction,
   toCurve,
   toScreen,
@@ -243,5 +245,60 @@ describe("the presets", () => {
       const built = preset.build(0, 100);
       expect(coerceSpeedCurve(built)).toEqual(built);
     }
+  });
+});
+
+describe("seedCurveFor", () => {
+  it("is a flat pair at the clip's own rate, across its window", () => {
+    expect(seedCurveFor(2000, 12_000, 1.5)).toEqual([
+      { t: 2000, v: 1.5 },
+      { t: 12_000, v: 1.5 },
+    ]);
+  });
+
+  it("is rejected by the write validator, which is what makes arming free", () => {
+    // The whole contract of the toggle: flipping it on shows a line and writes
+    // nothing, so the clip does not resize and the lane does not ripple until
+    // the user moves a point.
+    for (const speed of [0.25, 1, 1.7, 4]) {
+      expect(coerceSpeedCurve(seedCurveFor(0, 10_000, speed))).toBeNull();
+    }
+  });
+
+  it("becomes a real ramp the moment one point moves", () => {
+    const seed = seedCurveFor(0, 10_000, 1)!;
+    const moved = movePoint(seed, 1, { t: 10_000, v: 2 });
+    expect(coerceSpeedCurve(moved)).toEqual([
+      { t: 0, v: 1 },
+      { t: 10_000, v: 2 },
+    ]);
+  });
+
+  it("clamps a rate outside the range rather than seeding an illegal curve", () => {
+    expect(seedCurveFor(0, 1000, 99)?.[0].v).toBe(MAX_SPEED);
+    expect(seedCurveFor(0, 1000, 0)?.[0].v).toBe(1);
+    expect(seedCurveFor(0, 1000, Number.NaN)?.[0].v).toBe(1);
+  });
+
+  it("declines a window with no room for two points", () => {
+    expect(seedCurveFor(0, 0, 1)).toBeNull();
+    expect(seedCurveFor(0, MIN_CURVE_GAP_MS - 1, 1)).toBeNull();
+    expect(seedCurveFor(Number.NaN, 1000, 1)).toBeNull();
+  });
+});
+
+describe("isRampArmed", () => {
+  it("is on for a clip that carries a ramp, whatever the panel thinks", () => {
+    expect(isRampArmed(true, false)).toBe(true);
+  });
+
+  it("is on while the panel holds it open, so a drag to flat does not close it", () => {
+    // Dragging a ramp back to flat deletes the curve. Without the local flag
+    // the section would close under the pointer mid-gesture.
+    expect(isRampArmed(false, true)).toBe(true);
+  });
+
+  it("is off for an untouched clip", () => {
+    expect(isRampArmed(false, false)).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  formatSpeedOption,
   setClipSpeed,
   setClipSpeedCurve,
   coerceSpeed,
@@ -480,5 +481,36 @@ describe("setClipSpeedCurve", () => {
         );
       }
     }
+  });
+});
+
+describe("formatSpeedOption", () => {
+  it("leaves every preset reading exactly as it did", () => {
+    expect(SPEED_PRESETS.map(formatSpeedOption)).toEqual([
+      "0.25",
+      "0.5",
+      "1",
+      "1.5",
+      "2",
+      "4",
+    ]);
+  });
+
+  it("makes a flattened ramp's mean readable", () => {
+    // Found in the running app: turning the ramp toggle off leaves the clip at
+    // the ramp's mean, and the menu rendered it as "0.4009824491765815x".
+    expect(formatSpeedOption(10_000 / 24_938.747370452314)).toBe("0.4");
+    expect(formatSpeedOption(1.7333333)).toBe("1.73");
+  });
+
+  it("never rounds a rate out of the range the menu may offer", () => {
+    expect(Number(formatSpeedOption(MIN_SPEED))).toBeGreaterThanOrEqual(
+      MIN_SPEED,
+    );
+    expect(Number(formatSpeedOption(MAX_SPEED))).toBeLessThanOrEqual(MAX_SPEED);
+  });
+
+  it("falls back to real time for a rate that makes no sense", () => {
+    expect(formatSpeedOption(Number.NaN)).toBe("1");
   });
 });

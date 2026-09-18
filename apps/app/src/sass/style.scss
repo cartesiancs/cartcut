@@ -402,6 +402,65 @@ keyframe-editor {
   border-color: $background-border-color;
 }
 
+// A labelled switch, as a full-width row with the control at its end.
+//
+// Two things Bootstrap gets wrong here, and both are about where it expects to
+// be used. Its `.form-switch` is built for a form on a light page: the track is
+// `#fff` with a `rgba(0, 0, 0, .25)` knob, which on these panels is a white pill
+// with a thumb nobody can see. And it floats the input to the left of its label,
+// which is right in a list of checkboxes and wrong in this column, where every
+// other row is a name on the left and its control on the right.
+//
+// The checked colours are left alone: `#0d6efd` is already the accent
+// `.btn-nav.active` uses, and the focus ring works as it is on a dark panel.
+//
+// Keep `form-check form-switch` on the element as well as this class: the pill
+// shape, the sliding knob and its transition are all inherited from them, and
+// this only undoes the layout and repaints the off state.
+.form-switch-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  // Undoes `.form-check` and `.form-switch`, which reserve this for the input
+  // they are about to pull left into it.
+  padding-left: 0;
+
+  .form-check-input {
+    // Undoes `.form-check-input`'s float and `.form-switch`'s negative margin,
+    // so the switch is an ordinary flex item and lands at the end of the row.
+    float: none;
+    flex: 0 0 auto;
+    margin-top: 0;
+    margin-left: 0;
+    cursor: pointer;
+  }
+
+  // **The off state only.** Painting the track on the bare `.form-check-input`
+  // was the first try and it silently took the *on* state with it: this
+  // stylesheet loads after `bootstrap.min.css`, and
+  // `.form-switch-row .form-check-input` and `.form-check-input:checked` carry
+  // the same specificity, so the later one wins and the switch stayed dark when
+  // it was on. Narrowing it also keeps the accent in one place, since Bootstrap
+  // already checks to the `#0d6efd` that `.btn-nav.active` uses.
+  .form-check-input:not(:checked) {
+    background-color: $button-background-color;
+    border-color: $background-border-color;
+    // A light knob. The default is near-black, invisible against the track
+    // above, and reads as a switch with nothing in it.
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='rgba%28255, 255, 255, 0.55%29'/%3e%3c/svg%3e");
+  }
+
+  .form-check-label {
+    margin-bottom: 0;
+    cursor: pointer;
+    // The label is the row, so it takes the slack and the switch stays pinned
+    // to the right edge however long the text is in the current locale.
+    flex: 1 1 auto;
+  }
+}
+
 .form-control:disabled,
 .form-control[readonly] {
   background-color: $button-background-color;

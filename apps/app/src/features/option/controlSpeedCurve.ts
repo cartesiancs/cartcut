@@ -14,9 +14,31 @@
  * The ramp is also drawn over the clip in the timeline (`speedBand.ts`), and
  * that copy is **draw-only** for the same reason: `layout.ts#hitTest` never
  * offers it, so no press can land on a band whose clip is about to resize.
+ *
+ * ## The toggle arms the section; it does not write a ramp
+ *
+ * A clip that carries a ramp reads as on, and on top of that the panel holds a
+ * local flag the switch writes. Flipping it on shows the graph as the flat line
+ * the clip is already playing and stores **nothing**: `coerceSpeedCurve` answers
+ * `null` for a flat curve, so `setClipSpeedCurve` declines and the clip neither
+ * resizes nor ripples its lane until a point actually moves. A toggle that
+ * seeded a real ramp would change how the clip plays as the price of looking at
+ * it.
+ *
+ * The flag is deliberately not a field on the element. It would be UI state in
+ * the project file, and an armed-but-flat ramp would save a key for nothing,
+ * against the rule that a feature nobody has used saves byte-identically. What
+ * it costs is that arming does not survive selecting away and back, which is
+ * the right trade: if there is a ramp, the document says so; if there is not,
+ * there is nothing to remember. `timelineLockStore` is ephemeral on the same
+ * argument.
+ *
+ * Switching it **off** removes the ramp and leaves `speed` at the mean it was
+ * running, so the clip keeps its length and its neighbours do not move. No
+ * confirm: the graph above it showed what was there, and undo is one keystroke.
  */
 
-import { LitElement, html } from "lit";
+import { LitElement, PropertyValues, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { useTimelineStore } from "../../states/timelineStore";
 import { LocaleController } from "../../controllers/locale";
@@ -32,8 +54,10 @@ import {
   SPEED_CURVE_PRESETS,
   hitTest,
   insertPoint,
+  isRampArmed,
   movePoint,
   removePoint,
+  seedCurveFor,
   speedToFraction,
   toCurve,
   toScreen,
@@ -60,12 +84,29 @@ const COLORS = {
 /** The rates that get a gridline and a label. */
 const TICKS = [0.25, 0.5, 1, 2, 4];
 
+/**
+ * Unique per instance, for the switch's `id` and its label's `for`.
+ *
+ * Keyed on the element id was the first try and is wrong: both option panels
+ * mount this control, so two of them can hold the same clip id at once and the
+ * label would point at whichever input the document happened to reach first.
+ */
+let nextControlId = 0;
+
 @customElement("clip-speed-curve")
 export class ClipSpeedCurveControl extends LitElement {
   private lc = new LocaleController(this);
   private gesture = new GestureCommit({ idleMs: null });
   /** Index of the point being dragged, or null. */
   private dragging: number | null = null;
+  /**
+   * Whether the panel is holding the section open for a clip with no ramp.
+   *
+   * Reset when the control is pointed at a different clip, or selecting a plain
+   * clip after a ramped one would show it armed for no reason.
+   */
+  private locallyArmed = false;
+  private readonly controlId = `speed-ramp-${++nextControlId}`;
 
   @property()
   elementId = "";
@@ -93,40 +134,50 @@ export class ClipSpeedCurveControl extends LitElement {
     return this;
   }
 
+  willUpdate(changed: PropertyValues<this>) {
+    if (changed.has("elementId")) {
+      this.locallyArmed = false;
+    }
+  }
+
   private get element() {
     return useTimelineStore.getState().timeline[this.elementId];
   }
 
+  /** Whether the graph is showing. */
+  private get armed(): boolean {
+    return isRampArmed(speedCurveOf(this.element) != null, this.locallyArmed);
+  }
+
   /** The ramp as stored, or the flat pair a first edit starts from. */
   private get points(): SpeedPoint[] {
-    const element = this.element;
-    const stored = (element as { speedCurve?: SpeedPoint[] } | undefined)
-      ?.speedCurve;
+    const element = this.element as any;
+    const stored = element?.speedCurve as SpeedPoint[] | undefined;
     if (stored != null && stored.length >= 2) {
       return stored.map((point) => ({ t: point.t, v: point.v }));
     }
-    // A clip with no ramp is drawn as its own constant rate across its window,
-    // so the first drag starts from the line the user is already looking at
-    // rather than from 1x. `coerceSpeedCurve` rejects a flat pair, so nothing
-    // is written until one of the two moves.
-    const trim = (element as any)?.trim;
-    const speed = (element as any)?.speed;
-    const rate = typeof speed === "number" && speed > 0 ? speed : 1;
-    return [
-      { t: trim?.startTime ?? 0, v: rate },
-      { t: trim?.endTime ?? 1000, v: rate },
-    ];
+    return (
+      seedCurveFor(
+        element?.trim?.startTime ?? 0,
+        element?.trim?.endTime ?? 0,
+        element?.speed,
+      ) ?? []
+    );
   }
 
   private viewportOf(canvas: HTMLCanvasElement): GraphViewport | null {
     const element = this.element as any;
     const rect = canvas.getBoundingClientRect();
-    return viewportFor(element?.trim?.startTime ?? 0, element?.trim?.endTime ?? 0, {
-      x: PAD_LEFT,
-      y: PAD,
-      w: Math.max(1, rect.width - PAD_LEFT - PAD),
-      h: Math.max(1, rect.height - PAD * 2),
-    });
+    return viewportFor(
+      element?.trim?.startTime ?? 0,
+      element?.trim?.endTime ?? 0,
+      {
+        x: PAD_LEFT,
+        y: PAD,
+        w: Math.max(1, rect.width - PAD_LEFT - PAD),
+        h: Math.max(1, rect.height - PAD * 2),
+      },
+    );
   }
 
   render() {
@@ -137,10 +188,31 @@ export class ClipSpeedCurveControl extends LitElement {
       return html``;
     }
 
+    const armed = this.armed;
+
     return html`
-      <label class="form-label text-light"
-        >${this.lc.t("setting.speed_ramp")}</label
-      >
+      <div class="form-check form-switch form-switch-row mb-2">
+        <label class="form-check-label text-light" for=${this.controlId}>
+          ${this.lc.t("setting.speed_ramp")}
+        </label>
+
+        <input
+          class="form-check-input"
+          type="checkbox"
+          role="switch"
+          id=${this.controlId}
+          aria-event="speed_ramp_toggle"
+          .checked=${armed}
+          @change=${this.handleToggle}
+        />
+      </div>
+      ${armed ? this.graph() : ``}
+    `;
+  }
+
+  /** The graph and its presets, rendered only while the section is armed. */
+  private graph() {
+    return html`
       <canvas
         class="w-100 mb-1"
         style="height: ${PLOT_HEIGHT}px; border-radius: 4px; cursor: crosshair;"
@@ -171,13 +243,51 @@ export class ClipSpeedCurveControl extends LitElement {
         <option value="">${this.lc.t("setting.speed_ramp_preset")}</option>
         ${SPEED_CURVE_PRESETS.map(
           (preset) =>
-            html`<option value=${preset.id}>${this.lc.t(preset.label)}</option>`,
+            html`<option value=${preset.id}>
+              ${this.lc.t(preset.label)}
+            </option>`,
         )}
       </select>
     `;
   }
 
+  /**
+   * Arm the section, or take the ramp off.
+   *
+   * On writes nothing. Off removes the ramp through the same op the "Constant"
+   * preset uses, which leaves `speed` at the mean the ramp was running so the
+   * clip keeps its length and its neighbours stay put.
+   */
+  private handleToggle = (event: Event) => {
+    const on = (event.currentTarget as HTMLInputElement).checked;
+    if (!on) {
+      this.commit(null);
+    }
+    // After the commit, not before: `commit` re-renders, and the handlers above
+    // arm on every edit, so setting it first would have the section switch
+    // itself straight back on.
+    this.locallyArmed = on;
+    this.requestUpdate();
+  };
+
   updated() {
+    // The switch, imperatively, for the reason `clip-speed` writes its own
+    // `select.value` in `updated`. `?checked` was the first try and it is an
+    // *attribute* binding: once a real click has set an input's dirty flag the
+    // browser stops applying the attribute, so selecting a plain clip after a
+    // ramped one left the switch reading on over a hidden graph. `.checked` is
+    // a property binding and does not have that problem; this second write
+    // covers a render where the bound value did not change but the DOM did.
+    const toggle = this.querySelector<HTMLInputElement>(
+      "input[aria-event='speed_ramp_toggle']",
+    );
+    if (toggle != null) {
+      const armed = this.armed;
+      if (toggle.checked !== armed) {
+        toggle.checked = armed;
+      }
+    }
+
     // The preset select is a verb and holds no state, so it is re-pointed at
     // its own label on every render rather than at anything in the document.
     const select = this.querySelector<HTMLSelectElement>(
@@ -204,6 +314,11 @@ export class ClipSpeedCurveControl extends LitElement {
     if (index == null) {
       return;
     }
+    // Every edit arms locally, including one on a clip that already has a ramp.
+    // Dragging a ramp back to flat deletes the curve, and without this the
+    // section would be reading `armed` off the document alone and would close
+    // under the pointer halfway through the gesture.
+    this.locallyArmed = true;
     this.dragging = index;
     canvas.setPointerCapture(event.pointerId);
     event.preventDefault();
@@ -238,6 +353,7 @@ export class ClipSpeedCurveControl extends LitElement {
   };
 
   private handleDoubleClick = (event: MouseEvent) => {
+    this.locallyArmed = true;
     const canvas = event.currentTarget as HTMLCanvasElement;
     const view = this.viewportOf(canvas);
     if (view == null) {
@@ -252,6 +368,7 @@ export class ClipSpeedCurveControl extends LitElement {
   };
 
   private handleContextMenu = (event: MouseEvent) => {
+    this.locallyArmed = true;
     event.preventDefault();
     const canvas = event.currentTarget as HTMLCanvasElement;
     const view = this.viewportOf(canvas);
@@ -267,6 +384,7 @@ export class ClipSpeedCurveControl extends LitElement {
   };
 
   private handlePreset = (event: Event) => {
+    this.locallyArmed = true;
     const select = event.currentTarget as HTMLSelectElement;
     const preset = SPEED_CURVE_PRESETS.find(
       (entry) => entry.id === select.value,
@@ -366,8 +484,7 @@ export class ClipSpeedCurveControl extends LitElement {
     const columns = Math.max(2, Math.round(view.w));
     for (let i = 0; i <= columns; i++) {
       const x = view.x + (i / columns) * view.w;
-      const sourceMs =
-        view.fromMs + (i / columns) * (view.toMs - view.fromMs);
+      const sourceMs = view.fromMs + (i / columns) * (view.toMs - view.fromMs);
       const rate = curve == null ? flat : speedAtSource(curve, sourceMs);
       const y = view.y + speedToFraction(rate) * view.h;
       if (i === 0) {
@@ -386,5 +503,4 @@ export class ClipSpeedCurveControl extends LitElement {
       ctx.fill();
     }
   }
-
 }

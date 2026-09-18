@@ -130,6 +130,26 @@ export function speedOptionsFor(current: number): number[] {
 }
 
 /**
+ * How a rate is spelled in the menu.
+ *
+ * The **label** only; the option's value stays the exact number, so picking it
+ * back sets the rate the clip already has and `setClipSpeed` declines by
+ * identity rather than nudging it.
+ *
+ * At most two decimals, trailing zeros trimmed, so the six presets keep reading
+ * as "0.25x" and "1.5x". It exists for the rates nobody typed: flattening a
+ * ramp leaves the clip at the ramp's mean, which is an arbitrary float, and the
+ * menu rendered one as "0.4009824491765815x". An agent can put a clip at any
+ * rate in range and reach the same thing.
+ */
+export function formatSpeedOption(speed: number): string {
+  if (!Number.isFinite(speed)) {
+    return "1";
+  }
+  return String(Math.round(speed * 100) / 100);
+}
+
+/**
  * Set one clip's playback rate.
  *
  * Returns the document unchanged, **by identity**, when the clip is missing,

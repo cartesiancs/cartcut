@@ -31,6 +31,7 @@ import { speedOf } from "../timeline/geometry";
 import {
   coerceSpeed,
   isSpeedAdjustable,
+  formatSpeedOption,
   setClipSpeed,
   speedOptionsFor,
   SPEED_PRESETS,
@@ -108,7 +109,9 @@ export class ClipSpeedControl extends LitElement {
           : ``}
         ${(ramped ? SPEED_PRESETS : speedOptionsFor(speed)).map(
           (option) =>
-            html`<option value=${String(option)}>${option}x</option>`,
+            html`<option value=${String(option)}>
+              ${formatSpeedOption(option)}x
+            </option>`,
         )}
       </select>
     `;

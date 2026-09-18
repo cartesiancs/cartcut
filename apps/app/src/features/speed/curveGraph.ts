@@ -230,6 +230,61 @@ export function removePoint(
 }
 
 /**
+ * The two points a clip with no ramp is edited from.
+ *
+ * A flat pair at the clip's own rate, across its source window, so arming the
+ * ramp shows the line the user is already looking at rather than jumping to 1x.
+ *
+ * **It must stay flat**, which is what makes arming free: `coerceSpeedCurve`
+ * answers `null` for a flat curve, so `setClipSpeedCurve` declines and nothing
+ * is written until one of the two points actually moves. A seed that was a
+ * gentle ramp instead would resize the clip and ripple the lane the instant the
+ * toggle was flipped, which is not what a toggle means.
+ *
+ * Declines with a degenerate window, so a caller with an element that has not
+ * loaded yet draws nothing rather than a curve of zero width.
+ */
+export function seedCurveFor(
+  trimStartMs: number,
+  trimEndMs: number,
+  speed: number,
+): SpeedPoint[] | null {
+  if (
+    !Number.isFinite(trimStartMs) ||
+    !Number.isFinite(trimEndMs) ||
+    trimEndMs - trimStartMs < MIN_CURVE_GAP_MS
+  ) {
+    return null;
+  }
+  const rate = clamp(
+    Number.isFinite(speed) && speed > 0 ? speed : 1,
+    MIN_SPEED,
+    MAX_SPEED,
+  );
+  return [
+    { t: trimStartMs, v: rate },
+    { t: trimEndMs, v: rate },
+  ];
+}
+
+/**
+ * Whether the ramp section is open for editing.
+ *
+ * A clip that carries a ramp always reads as on, so selecting it shows what it
+ * is doing. On top of that the panel holds a local flag, which is what the
+ * toggle writes and which is deliberately **not** stored on the element: a flag
+ * whose only job is to say "the graph is open" would be UI state in the project
+ * file, and an armed-but-flat ramp would save a key for nothing.
+ *
+ * The local flag is also what keeps the graph from vanishing under the pointer.
+ * Dragging a ramp back to flat deletes the curve, so an `on` derived from the
+ * document alone would close the section mid-drag.
+ */
+export function isRampArmed(hasCurve: boolean, locallyArmed: boolean): boolean {
+  return hasCurve || locallyArmed;
+}
+
+/**
  * The ramps the panel offers as one click.
  *
  * Laid out as fractions of the clip's source window, so they mean the same
