@@ -34,7 +34,7 @@ export type ExportSession = {
   process: ChildProcessWithoutNullStreams;
   destination: string;
   /** Scratch audio written by the ramp pre-pass, to be removed with the session. */
-  rendered?: RenderedAudioSet | null;
+  rendered: RenderedAudioSet;
   /**
    * Exact bytes each frame must be, or 0 when the pipe is self-delimiting.
    *
@@ -68,11 +68,22 @@ export function startExportSession(
   options: RenderOptions,
   timeline: Record<string, any>,
   handlers: SessionHandlers,
-  rendered?: RenderedAudioSet,
+  /**
+   * Audio retimed by the speed-ramp pre-pass, keyed by element id.
+   *
+   * **Required**, and required because it was optional once. `renderFrame.ts`
+   * took the set as a parameter, used it in its cleanup handlers, and never
+   * passed it here; the argument was optional so nothing failed to compile, and
+   * every ramped clip exported at `atempo` of the ramp's *mean* rate while the
+   * picture ramped correctly. Sound and picture drifted apart across the clip
+   * and nothing anywhere said so. Pass `EMPTY_RENDERED_AUDIO` for a project
+   * with no ramps.
+   */
+  rendered: RenderedAudioSet,
 ): ExportSession {
   // Argument construction lives in `ffmpegArgs.ts` so it can be unit tested;
   // this function only owns the process.
-  const args = buildFFmpegArgs(options, timeline, rendered?.byElementId);
+  const args = buildFFmpegArgs(options, timeline, rendered.byElementId);
   const child = spawn(ffmpegPath, args);
 
   const session: ExportSession = {
@@ -90,7 +101,7 @@ export function startExportSession(
     drain: null,
     // Carried so every exit path can remove it. A ramped clip's retimed audio
     // lives here, and FFmpeg holds the files open until it closes.
-    rendered: rendered ?? null,
+    rendered,
   };
 
   child.stderr.on("data", (data) => {

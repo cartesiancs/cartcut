@@ -176,9 +176,31 @@ export function stretchAudio(request: StretchRequest): Float32Array {
       Math.round((wanted / 1000) * sampleRate) - hop;
 
     if (expected >= 0 && search > 0) {
+      // **Seeded at offset zero, and only beaten strictly.**
+      //
+      // Starting from `-Infinity` and scanning from `-search` upwards was the
+      // first version, and it is wrong wherever the candidates tie. Silence is
+      // the case that matters: `similarity` answers 0 for every candidate when
+      // there is nothing to correlate against, the first one scanned wins by
+      // being first, and the window is taken `SEARCH_MS` earlier than the map
+      // asked for, on every frame of every silent stretch.
+      //
+      // The position the map computed is the one that is arithmetically right.
+      // The search exists to improve on it when there is a waveform to match,
+      // not to move it when there is not.
       let best = analysis;
-      let bestScore = -Infinity;
+      let bestScore = similarity(
+        input,
+        channels,
+        frames,
+        analysis,
+        expected,
+        hop,
+      );
       for (let offset = -search; offset <= search; offset++) {
+        if (offset === 0) {
+          continue;
+        }
         const candidate = analysis + offset;
         if (candidate < 0 || candidate + hop > frames) {
           continue;

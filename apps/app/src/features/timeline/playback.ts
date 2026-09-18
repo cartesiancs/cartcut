@@ -33,6 +33,7 @@ import {
   speedOf,
 } from "./geometry";
 import { MAX_SPEED, MIN_SPEED, speedCurveOf } from "./speedCurve";
+import { sourceTimeAtFrame } from "./frames";
 import { isVisibleThroughTransition } from "./transitionWindow";
 import type { TimelineDocument } from "./tracks";
 
@@ -218,7 +219,23 @@ export const DRIFT_TOLERANCE_SEC = 0;
  * clamp does not bite; it is here because a document also arrives from `.ngt`
  * and from IPC, where the media may since have been replaced by a shorter file.
  */
-function sourceBoundsSec(
+/**
+ * The source window a clip may be seeked into, in seconds.
+ *
+ * Exported so the **export's** seek can bound itself the same way the preview
+ * does. Without it the two disagree on one frame of every clip whose span is
+ * not a whole number of frames, which a speed ramp makes essentially every
+ * clip: the last output frame's centre falls past the clip's end, the preview
+ * stops at the out-point and the export reads on past it into footage the user
+ * trimmed away. One frame, and up to two source frames of it on a clip that
+ * ends at 4x.
+ *
+ * `extended` is the transition case, and it is why this cannot simply be folded
+ * into `sourceTimeAtFrame`: a clip held on screen by a transition is deliberately
+ * asked for frames outside its own window, and `maxTransitionMs` has already
+ * guaranteed they exist in the file.
+ */
+export function sourceBoundsSec(
   element: TimelineElement,
   extended: boolean,
 ): [number, number] {
@@ -249,6 +266,18 @@ export function intentFor(
    * either way. `syncPlayback` always supplies it.
    */
   elements?: Timeline,
+  /**
+   * The project frame rate, so the source instant is the one the **export**
+   * would seek to for this frame.
+   *
+   * Optional only so the seventy existing test call sites compile unchanged;
+   * `syncPlayback` always supplies it and `loadedAssetStore.syncPlayback`
+   * requires it, which is the boundary a production caller has to come through.
+   * Absent means "do not frame-sample", which is what a test asking about
+   * windows or volume wants and what this function did before a speed ramp made
+   * the difference visible.
+   */
+  fps?: number,
 ): PlaybackIntent {
   const { start, end } = spanOf(element);
   const ownWindow = isTimeInRange(cursorMs, start, end);
@@ -263,8 +292,14 @@ export function intentFor(
 
   const [low, high] = sourceBoundsSec(element, throughTransition);
 
+  // The **centre** of the frame the cursor is in, not the cursor, whenever the
+  // rate is known. `frames.ts#sourceTimeAtFrame` is the same call the export's
+  // seek makes, and sharing it is the whole point: the two used to compute this
+  // separately and disagreed on 86 percent of a ramped clip's frames.
   const exact = isDynamicElement(element)
-    ? sourceTimeAt(element, cursorMs) / 1000
+    ? (fps == null
+        ? sourceTimeAt(element, cursorMs)
+        : sourceTimeAtFrame(element, cursorMs, fps)) / 1000
     : low;
 
   // Outside its window a clip parks at whichever edge it is nearest: before it
@@ -518,6 +553,11 @@ export function syncPlayback(
    * sink, which is the only thing that can play a clip above unity.
    */
   gain: GainSink = writeVolume,
+  /**
+   * The project frame rate, threaded to `intentFor` so the preview parks on the
+   * frame the export will deliver. See `frames.ts#sourceTimeAtFrame`.
+   */
+  fps?: number,
 ): SeekRequest[] {
   const seeks: SeekRequest[] = [];
 
@@ -538,7 +578,7 @@ export function syncPlayback(
       continue;
     }
 
-    const intent = intentFor(element, cursorMs, isPlaying, doc.elements);
+    const intent = intentFor(element, cursorMs, isPlaying, doc.elements, fps);
     if (
       applyIntent(
         handle,

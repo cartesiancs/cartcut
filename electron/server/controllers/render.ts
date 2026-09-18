@@ -48,14 +48,14 @@ export async function startFFmpegProcess(options, timeline) {
     {
       onSuccess: (finished) => {
         if (finished === session) session = null;
-        void dropRenderedAudio(finished.rendered ?? EMPTY_RENDERED_AUDIO);
+        void dropRenderedAudio(finished.rendered);
         mainWindow.webContents.send("PROCESSING_FINISH", {
           destination: finished.destination,
         });
       },
       onError: (failed, detail) => {
         if (failed === session) session = null;
-        void dropRenderedAudio(failed.rendered ?? EMPTY_RENDERED_AUDIO);
+        void dropRenderedAudio(failed.rendered);
         console.error("[render:offscreen]", detail.message, failed.stderrTail);
         mainWindow.webContents.send("render:offscreen:error", {
           ...detail,
@@ -64,7 +64,7 @@ export async function startFFmpegProcess(options, timeline) {
       },
       onCancelled: (cancelled) => {
         if (cancelled === session) session = null;
-        void dropRenderedAudio(cancelled.rendered ?? EMPTY_RENDERED_AUDIO);
+        void dropRenderedAudio(cancelled.rendered);
       },
     },
     rendered,

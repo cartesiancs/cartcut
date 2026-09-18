@@ -74,6 +74,7 @@ import {
   cropUp,
   cropZoneAt,
 } from "../crop/cropSession";
+import { projectFps } from "../editor/frameRate";
 import {
   CROP_CURSORS,
   CROP_THIRDS,
@@ -790,6 +791,7 @@ export class PreviewCanvas extends LitElement {
         assetTimeline(this.timeline),
         this.timelineCursor,
         this.timelineControl.isPlay,
+        projectFps(),
         () => this.scheduleDraw(),
       );
 
@@ -1962,8 +1964,12 @@ export class PreviewCanvas extends LitElement {
   public stopPlay() {
     loadedAssetStore
       .getState()
-      .syncPlayback(assetTimeline(this.timeline), this.timelineCursor, false, () =>
-        this.scheduleDraw(),
+      .syncPlayback(
+        assetTimeline(this.timeline),
+        this.timelineCursor,
+        false,
+        projectFps(),
+        () => this.scheduleDraw(),
       );
     this.drawCanvas(this.canvas);
   }
@@ -1971,7 +1977,12 @@ export class PreviewCanvas extends LitElement {
   public startPlay() {
     loadedAssetStore
       .getState()
-      .syncPlayback(assetTimeline(this.timeline), this.timelineCursor, true);
+      .syncPlayback(
+        assetTimeline(this.timeline),
+        this.timelineCursor,
+        true,
+        projectFps(),
+      );
   }
 
   /**

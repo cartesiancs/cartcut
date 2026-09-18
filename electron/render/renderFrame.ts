@@ -48,12 +48,12 @@ export function startFFmpegProcess(
   const started = startExportSession(ffmpegConfig.FFMPEG_PATH, options, timeline, {
     onSuccess: (finished) => {
       if (finished === session) session = null;
-      void dropRenderedAudio(finished.rendered ?? EMPTY_RENDERED_AUDIO);
+      void dropRenderedAudio(finished.rendered);
       send("PROCESSING_FINISH", { destination: finished.destination });
     },
     onError: (failed, detail) => {
       if (failed === session) session = null;
-      void dropRenderedAudio(failed.rendered ?? EMPTY_RENDERED_AUDIO);
+      void dropRenderedAudio(failed.rendered);
       send("render:v2:error", {
         sessionId: failed.id,
         ...detail,
@@ -62,7 +62,7 @@ export function startFFmpegProcess(
     },
     onCancelled: (cancelled) => {
       if (cancelled === session) session = null;
-      void dropRenderedAudio(cancelled.rendered ?? EMPTY_RENDERED_AUDIO);
+      void dropRenderedAudio(cancelled.rendered);
 
       // The kill is asynchronous, so by the time it is reaped the user may
       // already have started another export — and if that one writes to the
@@ -75,7 +75,9 @@ export function startFFmpegProcess(
 
       send("render:v2:cancelled", { sessionId: cancelled.id });
     },
-  });
+  },
+    rendered,
+  );
 
   session = started;
   return started;

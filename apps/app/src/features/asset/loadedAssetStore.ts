@@ -14,8 +14,10 @@ import { decodersFor } from "./decoderWindow";
 import { playbackPathFor } from "../../states/proxyStore";
 import { toLocalPath } from "../element/mediaProbe";
 import { count as perfCount, gauge as perfGauge } from "../debug/frameStats";
-import { sourceTimeAt, speedOf } from "../timeline/geometry";
-import { frameSampleMs } from "../timeline/frames";
+import { speedOf } from "../timeline/geometry";
+import { sourceTimeAtFrame } from "../timeline/frames";
+import { sourceBoundsSec } from "../timeline/playback";
+import { isVisibleThroughTransition } from "../timeline/transitionWindow";
 import {
   syncPlayback as syncPlaybackHandles,
   whenSeeksLand,
@@ -198,6 +200,14 @@ export interface ILoadedAssetStore {
     timeline: Timeline,
     cursorMs: number,
     isPlaying: boolean,
+    /**
+     * The project frame rate. **Required**, and required here rather than on
+     * the pure function, because this is the boundary every production caller
+     * comes through: without it the preview parks on the frame's start while
+     * the export delivers its centre, and a speed ramp turns that half frame
+     * into as much as two. See `frames.ts#sourceTimeAtFrame`.
+     */
+    fps: number,
     onSeeksLand?: () => void,
   ) => SeekRequest[];
 
@@ -564,7 +574,7 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
     scope.lastSeekRequests.clear();
   },
 
-  syncPlayback(timeline, cursorMs, isPlaying, onSeeksLand) {
+  syncPlayback(timeline, cursorMs, isPlaying, fps, onSeeksLand) {
     const state = get();
     const handles: Record<string, MediaHandle> = {};
     for (const meta of Object.values(state._loadedElementVideo)) {
@@ -587,6 +597,7 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
       // other caller of `syncPlayback` takes the default sink and writes
       // `handle.volume` exactly as it always did.
       gainSink,
+      fps,
     );
 
     // The two numbers that say whether the media layer is healthy: how many
@@ -726,7 +737,18 @@ async function seekHandles(
           // quarter of one. Adding a fixed offset to the source time instead
           // would be right only at speed 1, and on a ramped clip it would be
           // right nowhere, since the factor changes across the clip.
-          const want = sourceTimeAt(element, frameSampleMs(time, fps)) / 1000;
+          // Bounded exactly as `playback.ts#intentFor` bounds it, so the two
+          // paths cannot disagree about the last frame of a clip. Widened to
+          // the whole file while a transition is holding this clip, which is
+          // the case the unbounded version existed for.
+          const [low, high] = sourceBoundsSec(
+            element,
+            isVisibleThroughTransition(time, timeline, element),
+          );
+          const want = Math.min(
+            Math.max(sourceTimeAtFrame(element, time, fps) / 1000, low),
+            high,
+          );
 
           // Decorative on this path: the handle is paused and placed by
           // `currentTime` for every frame, so nothing integrates this. Kept as

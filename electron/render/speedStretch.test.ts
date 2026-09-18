@@ -262,3 +262,47 @@ describe("stretchAudio", () => {
     expect(Math.abs((at / RATE) * 1000 - expected)).toBeLessThan(WINDOW_MS * 2);
   });
 });
+
+describe("the search", () => {
+  it("does not move the window when there is nothing to match", () => {
+    // Silence correlates with everything equally, so every candidate scores the
+    // same. Scanning from `-SEARCH_MS` and taking the first winner shifted the
+    // analysis window back by the whole search radius on every frame of every
+    // silent stretch; the map's own answer is the one to keep on a tie.
+    //
+    // Measured through the output: a burst preceded by silence has to start
+    // where the map puts it, not `SEARCH_MS` early.
+    const lead = Math.round(RATE * 0.5);
+    const input = new Float32Array(RATE);
+    for (let n = lead; n < lead + RATE * 0.2; n++) {
+      input[n] = Math.sin((2 * Math.PI * 1000 * (n - lead)) / RATE);
+    }
+
+    const out = stretchAudio({
+      input,
+      channels: 1,
+      sampleRate: RATE,
+      sourceStartMs: 0,
+      sourceAt: atRate(1),
+      outputFrames: input.length,
+    });
+
+    const onsetOf = (samples: Float32Array): number => {
+      const step = Math.round(RATE * 0.001);
+      for (let i = 0; i + step < samples.length; i += step) {
+        let energy = 0;
+        for (let j = i; j < i + step; j++) {
+          energy += samples[j] * samples[j];
+        }
+        if (Math.sqrt(energy / step) > 0.1) {
+          return (i / RATE) * 1000;
+        }
+      }
+      return -1;
+    };
+
+    // Within a millisecond of the source's own onset, which is far tighter
+    // than the 5ms the tie-break used to cost.
+    expect(Math.abs(onsetOf(out) - onsetOf(input))).toBeLessThan(1);
+  });
+});
