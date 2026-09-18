@@ -16,6 +16,7 @@
  */
 
 import { msToPxSigned, pxToMsSigned } from "../geometry";
+import { curveSourceAt, type SpeedCurve } from "../speedCurve";
 import { DEFAULT_FPS, frameToMs, msToFrame, normalizeFps } from "../frames";
 
 /**
@@ -123,6 +124,8 @@ export type FilmstripInput = {
   /** Source ms shown at the clip's left edge. */
   sourceInMs: number;
   speed: number;
+  /** The clip's ramp, prepared, or absent for a constant rate. */
+  curve?: SpeedCurve | null;
   /** Source width / height; controls how wide one frame is drawn. */
   sourceAspect: number;
   range: number;
@@ -142,6 +145,7 @@ export function planFilmstrip(input: FilmstripInput): FilmstripPlan {
     clipH,
     sourceInMs,
     speed,
+    curve,
     sourceAspect,
     range,
     viewportX0,
@@ -151,6 +155,9 @@ export function planFilmstrip(input: FilmstripInput): FilmstripPlan {
   const fps = normalizeFps(input.fps);
   const tileW = Math.max(1, Math.round(clipH * sourceAspect));
   const tileSpanTimelineMs = pxToMsSigned(tileW, range);
+  // The mean rate is the right ladder for the clip as a whole: the quantum is
+  // one decision for the whole strip, and a ramp's own extremes would size it
+  // for footage most of the strip does not show.
   const quantumFrames = chooseQuantumFrames(
     Math.abs(tileSpanTimelineMs * speed),
     fps,
@@ -160,10 +167,16 @@ export function planFilmstrip(input: FilmstripInput): FilmstripPlan {
   // The grid is anchored where source time 0 would sit on the timeline, not at
   // the clip's left edge. A head trim moves the edge and the trim point
   // together, so this anchor stays put and the edge slides over a strip that
-  // does not move — the same way a tail trim already looked. Anchored at the
+  // does not move, the same way a tail trim already looked. Anchored at the
   // edge instead, every tile rode along with it and the whole strip appeared
   // to be pushed rather than cut.
-  const originX = clipX - msToPxSigned(sourceInMs / speed, range);
+  //
+  // A ramped clip cannot have that anchor: a fixed pixel pitch no longer maps
+  // to a fixed source pitch, so "where source 0 would sit" is not one pixel
+  // that the whole strip can be laid out from. It is anchored at the edge
+  // instead and pays the re-decode on a head trim, which only ramped clips do.
+  const originX =
+    curve == null ? clipX - msToPxSigned(sourceInMs / speed, range) : clipX;
   const clipRight = clipX + clipW;
 
   // Only the indices that touch both the clip and the viewport. Cull before
@@ -187,7 +200,10 @@ export function planFilmstrip(input: FilmstripInput): FilmstripPlan {
       continue;
     }
 
-    const exactSourceMs = pxToMsSigned(i * tileW, range) * speed;
+    const exactSourceMs =
+      curve == null
+        ? pxToMsSigned(i * tileW, range) * speed
+        : curveSourceAt(curve, sourceInMs, pxToMsSigned(i * tileW, range));
     // Quantised through the frame index rather than by dividing milliseconds:
     // one frame at 60fps is 16.666…ms, so `floor(ms / quantum) * quantum` drifts
     // off the grid and gives two neighbouring tiles different keys for the same

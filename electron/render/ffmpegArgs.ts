@@ -71,6 +71,16 @@ export type AudioInput = {
    * this field existed.
    */
   envelope?: EnvelopePoint[];
+  /**
+   * A file holding this clip's sound **already retimed** to the timeline, for a
+   * clip carrying a speed ramp. Absent on every clip playing at a constant rate.
+   *
+   * FFmpeg cannot vary `atempo` over a clip (`speedStretch.ts` records the
+   * measurement), so a ramp's audio is stretched before the spawn and arrives
+   * as an ordinary 1x input. It covers exactly the clip's window, so it takes
+   * no `-ss`, no `-t` and no tempo stage.
+   */
+  rendered?: { path: string; sampleRate: number; channels: 1 | 2 };
 };
 
 /** How the renderer serialises each frame onto stdin. */
@@ -291,13 +301,22 @@ export function channelStageFor(channels: 1 | 2): string {
  * the fader on carries no `volume` filter at all.
  *
  * **An envelope does not commute, and sits after `atempo` instead.** Its
- * breakpoints are clip-local *timeline* ms, and `t` only means that once
- * `atempo` has rewritten the timestamps: measured against the bundled ffmpeg,
- * `gte(t,1)` placed after `atempo=2` switches at output 1.0 s, not at 0.5 s.
- * Putting it first would mean multiplying every breakpoint by `speed` to reach
- * source time; putting it after `adelay` would mean adding the clip's timeline
- * offset to every one. After `atempo` and before `adelay` is the one position
- * where the numbers need no conversion at all.
+ * breakpoints are clip-local *timeline* ms, and on a clip playing at a constant
+ * rate `t` only means that once `atempo` has rewritten the timestamps: measured
+ * against the bundled ffmpeg, `gte(t,1)` placed after `atempo=2` switches at
+ * output 1.0 s, not at 0.5 s. Putting it first would mean multiplying every
+ * breakpoint by `speed` to reach source time; putting it after `adelay` would
+ * mean adding the clip's timeline offset to every one. After `atempo` and
+ * before `adelay` is the one position where the numbers need no conversion at
+ * all.
+ *
+ * On a **rendered** input none of that applies and the position is right for a
+ * simpler reason: there is no tempo stage, because the stream arrived already
+ * in timeline time. `t` is clip-local timeline seconds directly, with no filter
+ * having to establish it. A ramp could never have worked the other way round:
+ * one `atempo` factor cannot express a varying rate, so before this input
+ * existed a ramped clip's breakpoints would have landed at the wrong instants
+ * no matter where the stage sat.
  *
  * The envelope replaces the static stage rather than joining it. The curve was
  * drawn in absolute dB, so it already carries the level; multiplying by the
@@ -320,11 +339,15 @@ export function audioFilterFor(
   if (!hasEnvelope && Number.isFinite(input.gain) && input.gain !== 1) {
     stages.push(`volume=${input.gain}`);
   }
-  stages.push(
-    ...atempoChain(input.speed).map(
-      (factor) => `atempo=${Number(factor.toFixed(6))}`,
-    ),
-  );
+  // A rendered input is already in timeline time: the ramp was applied sample
+  // by sample before the spawn, and a tempo stage on top would retime it twice.
+  if (input.rendered == null) {
+    stages.push(
+      ...atempoChain(input.speed).map(
+        (factor) => `atempo=${Number(factor.toFixed(6))}`,
+      ),
+    );
+  }
   if (hasEnvelope) {
     stages.push(`asetnsamples=n=${ENVELOPE_FRAME_SAMPLES}:p=0`);
     stages.push(`volume=eval=frame:volume='${volumeExprOf(envelope)}'`);
@@ -347,7 +370,10 @@ export function audioFilterFor(
  * means audibility ("am I an input") and gain ("how loud") stay separate
  * questions, and the fader position never changes the shape of the command.
  */
-export function collectAudioInputs(timeline: Record<string, any>): AudioInput[] {
+export function collectAudioInputs(
+  timeline: Record<string, any>,
+  rendered?: ReadonlyMap<string, { path: string; sampleRate: number; channels: 1 | 2 }>,
+): AudioInput[] {
   const inputs: AudioInput[] = [];
 
   for (const key in timeline) {
@@ -364,6 +390,11 @@ export function collectAudioInputs(timeline: Record<string, any>): AudioInput[] 
     // function of this record.
     const envelope = envelopeFor(element);
 
+    // Passed in rather than read from disk here, so this function stays a pure
+    // reduction of the document and its suite needs no filesystem, the same
+    // reason `missingInputs` takes an `exists` predicate.
+    const retimed = rendered?.get(key);
+
     inputs.push({
       localpath: element.localpath,
       ssSec: element.trim.startTime / 1000,
@@ -372,6 +403,7 @@ export function collectAudioInputs(timeline: Record<string, any>): AudioInput[] 
       speed: speedOf(element),
       gain: gainOf(element),
       ...(envelope != null ? { envelope } : {}),
+      ...(retimed != null ? { rendered: retimed } : {}),
     });
   }
 
@@ -465,6 +497,10 @@ function outputDurationSec(videoDuration: number, fps: number): number {
 export function buildFFmpegArgs(
   options: RenderOptions,
   timeline: Record<string, any>,
+  rendered?: ReadonlyMap<
+    string,
+    { path: string; sampleRate: number; channels: 1 | 2 }
+  >,
 ): string[] {
   const args: string[] = [];
   const filterComplex: string[] = [];
@@ -509,12 +545,19 @@ export function buildFFmpegArgs(
     );
   }
 
-  const inputs = collectAudioInputs(timeline);
+  const inputs = collectAudioInputs(timeline, rendered);
 
   inputs.forEach((input, index) => {
-    args.push("-ss", `${input.ssSec}`);
-    args.push("-t", `${input.tSec}`);
-    args.push("-i", input.localpath);
+    if (input.rendered != null) {
+      // No `-ss` and no `-t`: the file is exactly the clip's window, already
+      // retimed. Seeking into it would cut the ramp, and a duration would cut
+      // it short.
+      args.push("-i", input.rendered.path);
+    } else {
+      args.push("-ss", `${input.ssSec}`);
+      args.push("-t", `${input.tSec}`);
+      args.push("-i", input.localpath);
+    }
 
     const label = `audio${index}`;
     // Stream 0 is the PNG pipe, so clip inputs start at 1.

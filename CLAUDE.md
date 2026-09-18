@@ -110,7 +110,13 @@ and makes an unusable value unrepresentable from then on. `normalizeFps` /
 `coerceAdjustPatch`.
 
 **Anything animatable is an ordinary keyframe track in `element.animation`.**
-Never a bespoke field. Everything that rewrites keyframes walks
+Never a bespoke field, with exactly one exception. A **speed ramp**
+(`speedCurve`, keyed in absolute source ms) cannot be a track: keyframe times
+are clip-local *timeline* ms, so a speed keyframe's own position would depend on
+the curve it defines, and a track is read from a lane baked at
+`bakeRateFor(fps)`, so a frame-rate change would re-integrate the curve and move
+the clip. `features/timeline/speedCurve.ts` states it at length.
+Everything that rewrites keyframes walks
 `Object.keys(animation)` or `animatableProperties(element)`, so split, trim,
 move, paste and a frame-rate change carry any track for free. A field of its own
 means reimplementing `cloneAnimation`, `rebaseAnimation`, `sliceAnimation` and
@@ -276,6 +282,7 @@ features/adjust/       15 sliders: tone bakes into a LUT, effects run a finish p
 features/template/     a whole edit standing in for one clip (.cttpl)
 features/record/       the screen recorder's pure logic; the windows are apps/overlay-record
 features/reverse/      reversed media files, made by electron/lib/reversePipeline.ts
+features/speed/        the ramp's graph editor; the curve is timeline/speedCurve.ts
 features/update/       the update card; main's half is electron/lib/updateSession.ts
 features/editor/       actions, menuCommands, shortcuts, frameRate
 electron/mcp/          the MCP server, the tools, the bridge to the renderer
@@ -295,6 +302,20 @@ The handful of facts inside those that are worth stating up front:
   re-cut. **The grid does not apply to audio** (`frames.ts#isFrameLocked`), on
   drag only, and one gesture is one delta so a picture clip in the selection
   keeps the grid on for everything.
+- **A speed ramp is a curve in source time, and `speed` is derived from it.**
+  While `speedCurve` is present, `element.speed` holds
+  `duration / curveSpanLength(curve, trim)`, so `spanLength` is still
+  `duration / speed` and every collision, ripple, placement and layout call site
+  is untouched. The curve and the scalar agree **exactly at both clip edges**
+  and differ only inside, which is what makes a call site nobody generalised
+  show a slightly wrong frame mid-clip rather than a wrong length. Anything
+  writing `trim` on a ramped clip has to re-derive the scalar:
+  `clipEdit.ts#withTrim` covers trim and split, and `mergeOps`, `reverseOps` and
+  `audio.ts`'s detached twin each call `withDerivedSpeed` themselves. FFmpeg
+  cannot ramp audio (measured: stepping `atempo` through `asendcmd` loses 21ms
+  to 161ms over ten seconds, and loses more the finer the steps), so
+  `electron/render/renderedAudio.ts` retimes a ramped clip's sound with our own
+  WSOLA before the spawn and hands FFmpeg a 1x input.
 - **`size` and `scale` are different things.** `scale` is uniform, in tenths,
   about the centre, and never touches the box. `size` replaces the clip's own
   `width`/`height` in pixels on the way to the renderer, so a keyframed property

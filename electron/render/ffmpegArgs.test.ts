@@ -1332,3 +1332,83 @@ describe("the output duration limit", () => {
     expect(filterComplexOf(args)[0]).toContain("d=7");
   });
 });
+
+describe("a clip whose audio was retimed before the spawn", () => {
+  const ramp = [
+    { t: 0, v: 1 },
+    { t: 4000, v: 2 },
+  ];
+
+  /** The clip, and the file the pre-pass would have written for it. */
+  function rampedCase() {
+    const timeline = {
+      a: audioElement({
+        localpath: "/song.mp3",
+        startTime: 2000,
+        duration: 4000,
+        trim: { startTime: 1000, endTime: 5000 },
+        sourceDuration: 30_000,
+        speed: 1.44,
+        speedCurve: ramp,
+      }),
+    };
+    const rendered = new Map([
+      ["a", { path: "/tmp/ramp/a.wav", sampleRate: 48_000, channels: 2 as const }],
+    ]);
+    return { timeline, rendered };
+  }
+
+  it("takes the retimed file as its input, with no seek and no duration", () => {
+    // The file *is* the clip's window, already in timeline time. A `-ss` would
+    // cut into the ramp and a `-t` would cut it short.
+    const { timeline, rendered } = rampedCase();
+    const args = buildFFmpegArgs(options, timeline, rendered);
+
+    const at = args.indexOf("/tmp/ramp/a.wav");
+    expect(at).toBeGreaterThan(0);
+    expect(args[at - 1]).toBe("-i");
+    expect(args[at - 2]).not.toBe("-t");
+    expect(args).not.toContain("/song.mp3");
+  });
+
+  it("emits no tempo stage, because the samples are already retimed", () => {
+    const { timeline, rendered } = rampedCase();
+    const filters = filterComplexOf(buildFFmpegArgs(options, timeline, rendered));
+    const clip = filters.find((line) => line.includes("[audio0]"));
+    expect(clip).toBeDefined();
+    expect(clip).not.toContain("atempo");
+    // Everything else about the chain is unchanged and in the same order.
+    expect(clip).toContain(STEREO);
+    expect(clip).toContain("adelay=2000|2000");
+  });
+
+  it("emits the source seek and the tempo chain when nothing was retimed", () => {
+    // The same clip with no pre-pass entry is the old path exactly, which is
+    // what keeps a project with no ramp byte-identical on the command line.
+    const { timeline } = rampedCase();
+    const args = buildFFmpegArgs(options, timeline);
+
+    expect(flagsForInput(args, "/song.mp3")).toEqual({ ss: 1, t: 4 });
+    const clip = filterComplexOf(args).find((line) => line.includes("[audio0]"));
+    expect(clip).toContain("atempo");
+  });
+
+  it("leaves an unramped clip's arguments exactly where they were", () => {
+    // A rendered map that names some other clip must not disturb this one.
+    const timeline = {
+      b: audioElement({
+        localpath: "/other.mp3",
+        startTime: 0,
+        duration: 2000,
+        trim: { startTime: 0, endTime: 2000 },
+        sourceDuration: 2000,
+      }),
+    };
+    const withMap = buildFFmpegArgs(
+      options,
+      timeline,
+      new Map([["a", { path: "/tmp/ramp/a.wav", sampleRate: 48_000, channels: 2 as const }]]),
+    );
+    expect(withMap).toEqual(buildFFmpegArgs(options, timeline));
+  });
+});

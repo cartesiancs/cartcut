@@ -1,13 +1,17 @@
 import { describe, it, expect } from "vitest";
 import {
   PLAYING_DRIFT_TOLERANCE_SEC,
+  RATE_LOOKAHEAD_MS,
   applyIntent,
   intentFor,
+  playbackRateFor,
   syncPlayback,
   type MediaHandle,
 } from "./playback";
-import { splitAt } from "./clipEdit";
-import { sourceTimeAt } from "./geometry";
+import { splitAt, withSpeedCurve } from "./clipEdit";
+import { sourceTimeAt, spanLength, speedAt, speedOf } from "./geometry";
+import { MAX_CURVE_POINTS, MIN_CURVE_GAP_MS } from "./speedCurve";
+import { seededRandom } from "./testing";
 import { moveClip } from "./clipOps";
 import {
   SCHEMA_VERSION,
@@ -950,6 +954,129 @@ describe("a quantized playback cursor", () => {
       expect(
         intentFor(element, cursorAtElapsed(enter - 1 / fps, fps), true).inWindow,
       ).toBe(false);
+    }
+  });
+});
+
+describe("playbackRateFor, and the drift it exists to prevent", () => {
+  /** A ten-second clip carrying `points`, starting at the timeline origin. */
+  function ramped(points: Array<{ t: number; v: number }>) {
+    return withSpeedCurve(
+      videoElement({
+        trackId: "v1",
+        startTime: 0,
+        duration: 10_000,
+        sourceDuration: 10_000,
+        trim: { startTime: 0, endTime: 10_000 },
+        speed: 1,
+      }),
+      points,
+    );
+  }
+
+  /**
+   * Where a media handle ends up after playing the clip through at 60Hz.
+   *
+   * The handle advances `rate * dt` of source per repaint, which is what
+   * `playbackRate` means. `sourceTimeAt` is where it should be. The gap between
+   * the two is the drift `applyIntent` re-seeks on.
+   */
+  function worstDriftMs(
+    element: ReturnType<typeof ramped>,
+    rateAt: (el: typeof element, cursorMs: number) => number,
+  ): number {
+    const dt = RATE_LOOKAHEAD_MS;
+    let handle = sourceTimeAt(element, 0);
+    let worst = 0;
+    for (let cursor = 0; cursor < spanLength(element); cursor += dt) {
+      handle += rateAt(element, cursor) * dt;
+      worst = Math.max(
+        worst,
+        Math.abs(handle - sourceTimeAt(element, cursor + dt)),
+      );
+    }
+    return worst;
+  }
+
+  it("is the scalar, unrounded, for a clip with no ramp", () => {
+    const plain = videoElement({ speed: 1.5, trackId: "v1" });
+    expect(playbackRateFor(plain, 0)).toBe(1.5);
+    expect(playbackRateFor(plain, 99_999)).toBe(1.5);
+    expect(playbackRateFor(imageElement({ trackId: "v1" }), 0)).toBe(1);
+  });
+
+  it("follows the ramp rather than reporting the clip's mean", () => {
+    const element = ramped([
+      { t: 0, v: 1 },
+      { t: 10_000, v: 4 },
+    ]);
+    const atStart = playbackRateFor(element, 0);
+    const atEnd = playbackRateFor(element, spanLength(element) - 1);
+    expect(atStart).toBeCloseTo(1, 2);
+    expect(atEnd).toBeCloseTo(4, 2);
+    expect(speedOf(element)).toBeGreaterThan(atStart);
+    expect(speedOf(element)).toBeLessThan(atEnd);
+  });
+
+  it("stays inside the re-seek tolerance for a sweep of random ramps", () => {
+    const rand = seededRandom(0xd71f7);
+    for (let i = 0; i < 60; i++) {
+      const count = 2 + Math.floor(rand() * 6);
+      const points = Array.from({ length: count }, (_, index) => ({
+        t: (10_000 * index) / (count - 1),
+        v: 0.25 + rand() * 3.75,
+      }));
+      if (points.every((p) => Math.abs(p.v - points[0].v) < 1e-6)) {
+        continue;
+      }
+      const element = ramped(points);
+      expect(worstDriftMs(element, playbackRateFor)).toBeLessThan(
+        PLAYING_DRIFT_TOLERANCE_SEC * 1000,
+      );
+    }
+  });
+
+  it("holds the sound two orders of magnitude closer than the cursor's own rate", () => {
+    // The measurement that chose this rule. Writing the rate at the cursor makes
+    // the handle integrate a left Riemann sum of the curve, and it settles at
+    // about 31ms whatever the shape: the handle is re-aimed on every repaint, so
+    // the error saturates rather than accumulating. That never trips
+    // `PLAYING_DRIFT_TOLERANCE_SEC`, which is the problem rather than the
+    // reassurance: 31ms is two frames at 60fps of sound out against picture, and
+    // nothing would ever correct it.
+    //
+    // The four shapes here are the ones that could plausibly behave differently:
+    // a monotone ramp, its reverse, a V, and alternation at the minimum gap.
+    const shapes: Array<Array<{ t: number; v: number }>> = [
+      [
+        { t: 0, v: 0.25 },
+        { t: 10_000, v: 4 },
+      ],
+      [
+        { t: 0, v: 4 },
+        { t: 10_000, v: 0.25 },
+      ],
+      [
+        { t: 0, v: 4 },
+        { t: 5000, v: 0.25 },
+        { t: 10_000, v: 4 },
+      ],
+      Array.from({ length: MAX_CURVE_POINTS }, (_, i) => ({
+        t: i * MIN_CURVE_GAP_MS,
+        v: i % 2 === 0 ? 0.25 : 4,
+      })),
+    ];
+
+    for (const points of shapes) {
+      const element = ramped(points);
+      const instant = worstDriftMs(element, (el, cursorMs) =>
+        speedAt(el, cursorMs),
+      );
+      const averaged = worstDriftMs(element, playbackRateFor);
+
+      expect(instant).toBeGreaterThan(20);
+      expect(averaged).toBeLessThan(1);
+      expect(averaged).toBeLessThan(instant / 20);
     }
   });
 });

@@ -18,6 +18,8 @@ import type {
 } from "../../@types/timeline";
 import { isAudibleElement } from "./audio";
 import { isDynamicElement, spanStart, speedOf } from "./geometry";
+import { speedCurveOf } from "./speedCurve";
+import { hasSpeedRamp, speedPolyline } from "./speedBand";
 import { normalizeFps, planFrameGrid } from "./frames";
 import {
   CUT_AFFORDANCE_PX,
@@ -406,6 +408,13 @@ export function drawClip(
     viewportW: opts.viewportW,
   });
 
+  // And after the level line, because a ramp is the rarer of the two and the
+  // one that has to be noticed. Draw-only: see `speedBand.ts`.
+  drawSpeedBand(ctx, rect, element, {
+    range: opts.range,
+    viewportW: opts.viewportW,
+  });
+
   if (lane != null) {
     drawKeyframeLane(ctx, rect, element, {
       colors: opts.colors,
@@ -482,6 +491,7 @@ function drawFilmstrip(
     clipH: rect.h,
     sourceInMs: isDynamicElement(element) ? element.trim.startTime : 0,
     speed: speedOf(element),
+    curve: speedCurveOf(element),
     sourceAspect: aspect,
     range: opts.range,
     fps: opts.fps,
@@ -552,6 +562,7 @@ function drawWaveform(
     spanStartMs: spanStart(element),
     sourceInMs: isDynamicElement(element) ? element.trim.startTime : 0,
     speed: speedOf(element),
+    curve: speedCurveOf(element),
     range: opts.range,
     viewportX0: 0,
     viewportX1: opts.viewportW,
@@ -923,5 +934,49 @@ export function drawMarquee(
   // Half-pixel inset, so a 1px stroke lands on one pixel instead of straddling
   // two and drawing at half strength.
   ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+  ctx.restore();
+}
+
+/**
+ * The speed ramp over a clip: a dashed 1x line and the curve against it.
+ *
+ * Nothing is drawn for a clip with a constant rate, so an unramped project's
+ * timeline is pixel-identical to one rendered before ramps existed.
+ */
+function drawSpeedBand(
+  ctx: CanvasRenderingContext2D,
+  rect: { x: number; y: number; w: number; h: number },
+  element: TimelineElement,
+  opts: { range: number; viewportW: number },
+): void {
+  if (!hasSpeedRamp(element)) {
+    return;
+  }
+
+  const { points, unityY } = speedPolyline(rect, element, opts.range, opts.viewportW);
+  if (points.length < 2) {
+    return;
+  }
+
+  ctx.save();
+  // The reference first and underneath, so the curve crossing it reads as
+  // "faster here, slower there" rather than as a line of its own.
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.22)";
+  ctx.setLineDash([2, 3]);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, unityY);
+  ctx.lineTo(points[points.length - 1].x, unityY);
+  ctx.stroke();
+
+  ctx.setLineDash([]);
+  ctx.strokeStyle = "rgba(120, 180, 255, 0.95)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (const point of points.slice(1)) {
+    ctx.lineTo(point.x, point.y);
+  }
+  ctx.stroke();
   ctx.restore();
 }

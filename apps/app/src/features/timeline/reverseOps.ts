@@ -31,7 +31,9 @@ import type {
   TimelineElement,
   VideoElementType,
 } from "../../@types/timeline";
+import { withDerivedSpeed } from "./clipEdit";
 import { hasValidTrim } from "./geometry";
+import { mirrorSpeedCurve } from "./speedCurve";
 import type { TimelineDocument } from "./tracks";
 
 /** What the clip looked like when its reversal was started. */
@@ -130,19 +132,28 @@ export function applyReverse(
     isExistAudio: video.isExistAudio,
   };
 
-  const next: VideoElementType = {
+  const next: VideoElementType = withDerivedSpeed({
     ...video,
     localpath: result.localpath,
     // `duration` is untouched, so the span is too. The file is the window, so
     // the window within it starts at zero.
     trim: { startTime: 0, endTime: video.duration },
+    // A source instant `r` in the new file is `to - r` in the old one, so a
+    // ramp keyed in the old file's source ms reflects about `to`. The rate
+    // itself is untouched: speed is a magnitude, and playing footage backwards
+    // does not make it faster. Reflecting leaves the window's integral alone,
+    // so the derived scalar comes back to the same number and the clip does not
+    // change length, which is what `reverseOps.test.ts` pins.
+    ...(video.speedCurve != null
+      ? { speedCurve: mirrorSpeedCurve(video.speedCurve, video.trim.endTime) }
+      : {}),
     // A re-encode can come back a frame short of the window it was cut from.
     // Padding the recorded length keeps the trim inside it; the decoder simply
     // holds its last frame for that final fraction of a frame.
     sourceDuration: Math.max(result.durationMs, video.duration),
     isExistAudio: result.hasAudio,
     reversed,
-  };
+  });
 
   return {
     ...doc,
@@ -178,13 +189,18 @@ export function unreverse(
     startTime = Math.max(0, endTime - length);
   }
 
-  const next: VideoElementType = {
+  const next: VideoElementType = withDerivedSpeed({
     ...(rest as VideoElementType),
     localpath: reversed.localpath,
     trim: { startTime, endTime },
     sourceDuration: reversed.sourceDuration,
     isExistAudio: reversed.isExistAudio,
-  };
+    // The same reflection about the same axis, which is what makes the pair an
+    // exact involution and spares `unreverse` any bookkeeping of its own.
+    ...(element.speedCurve != null
+      ? { speedCurve: mirrorSpeedCurve(element.speedCurve, reversed.to) }
+      : {}),
+  });
 
   return {
     ...doc,

@@ -6,7 +6,7 @@ import path from "path";
 import ffmpeg from "fluent-ffmpeg";
 import { window } from "../../lib/window.js";
 import { mainWindow } from "../../main";
-import { ipcMain } from "electron";
+import { app, ipcMain } from "electron";
 import { ffmpegConfig } from "../../lib/ffmpeg";
 import { sendRenderDone, sendRenderProgress } from "../sockets/conn.js";
 import {
@@ -16,33 +16,59 @@ import {
   startExportSession,
   writeFrame,
 } from "../../render/framePipe";
+import { resolveExportSettings } from "../../render/exportSettings";
+import {
+  dropRenderedAudio,
+  prepareRenderedAudio,
+  EMPTY_RENDERED_AUDIO,
+} from "../../render/renderedAudio";
 
 let session: ExportSession | null = null;
 let offscreenRender;
 
-export function startFFmpegProcess(options, timeline) {
+export async function startFFmpegProcess(options, timeline) {
+  // The speed ramp's audio is retimed before the spawn on this path too, or an
+  // offscreen export would ship a ramped clip whose sound plays at the clip's
+  // mean rate against a picture that ramps. Same helper, same refusal.
+  const { sampleRate, channels } = resolveExportSettings(options);
+  const rendered = await prepareRenderedAudio(
+    ffmpegConfig.FFMPEG_PATH,
+    timeline,
+    { sampleRate, channels },
+    app.getPath("temp"),
+  );
+
   // Shares the session/backpressure machinery with the in-app export path.
   // This used to be a second bare `let ffmpegProcess` with its own copy of the
   // spawn, so the two could disagree and neither honoured `write`'s return.
-  session = startExportSession(ffmpegConfig.FFMPEG_PATH, options, timeline, {
-    onSuccess: (finished) => {
-      if (finished === session) session = null;
-      mainWindow.webContents.send("PROCESSING_FINISH", {
-        destination: finished.destination,
-      });
+  session = startExportSession(
+    ffmpegConfig.FFMPEG_PATH,
+    options,
+    timeline,
+    {
+      onSuccess: (finished) => {
+        if (finished === session) session = null;
+        void dropRenderedAudio(finished.rendered ?? EMPTY_RENDERED_AUDIO);
+        mainWindow.webContents.send("PROCESSING_FINISH", {
+          destination: finished.destination,
+        });
+      },
+      onError: (failed, detail) => {
+        if (failed === session) session = null;
+        void dropRenderedAudio(failed.rendered ?? EMPTY_RENDERED_AUDIO);
+        console.error("[render:offscreen]", detail.message, failed.stderrTail);
+        mainWindow.webContents.send("render:offscreen:error", {
+          ...detail,
+          stderrTail: failed.stderrTail.join("\n"),
+        });
+      },
+      onCancelled: (cancelled) => {
+        if (cancelled === session) session = null;
+        void dropRenderedAudio(cancelled.rendered ?? EMPTY_RENDERED_AUDIO);
+      },
     },
-    onError: (failed, detail) => {
-      if (failed === session) session = null;
-      console.error("[render:offscreen]", detail.message, failed.stderrTail);
-      mainWindow.webContents.send("render:offscreen:error", {
-        ...detail,
-        stderrTail: failed.stderrTail.join("\n"),
-      });
-    },
-    onCancelled: (cancelled) => {
-      if (cancelled === session) session = null;
-    },
-  });
+    rendered,
+  );
 }
 
 let timeline, options;
@@ -68,9 +94,11 @@ export const httpRender = {
 };
 
 export const httpFFmpegRenderV2 = {
-  start: (event, options, timeline) => {
+  // Awaited, so a ramp that cannot be retimed rejects the start rather than
+  // leaving the offscreen window feeding frames to a process that never spawned.
+  start: async (event, options, timeline) => {
     sendRenderProgress(0);
-    startFFmpegProcess(options, timeline);
+    await startFFmpegProcess(options, timeline);
   },
 
   readyToRender: (event) => {

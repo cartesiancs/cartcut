@@ -27,13 +27,34 @@
  */
 
 import type { TimelineElement } from "../../@types/timeline";
-import { isDynamicElement, spanOf, speedOf } from "./geometry";
+import {
+  isDynamicElement,
+  spanOf,
+  speedOf,
+  type DynamicElement,
+} from "./geometry";
+import { withDerivedSpeed, withSpeedCurve } from "./clipEdit";
+import {
+  coerceSpeedCurve,
+  MAX_SPEED,
+  MIN_SPEED,
+  speedCurveOf,
+  type SpeedPoint,
+} from "./speedCurve";
 import { findCollisions } from "./overlap";
 import { clipsOnTrack, normalizeDocument, type TimelineDocument } from "./tracks";
 
-/** The range the UI offers. */
-export const MIN_SPEED = 0.25;
-export const MAX_SPEED = 4;
+/**
+ * The range the UI offers.
+ *
+ * Re-exported rather than declared, the way `mergeOps.ts` re-exports
+ * `ADJACENCY_EPSILON_MS`. It moved to `speedCurve.ts` when the ramp arrived,
+ * because a ramp's points are clamped to the same range and that file imports
+ * nothing, so it cannot read a constant from here. Every existing importer
+ * names `speedOps`, and keeping the name working is cheaper than a rename that
+ * would touch the agent command and every suite.
+ */
+export { MIN_SPEED, MAX_SPEED } from "./speedCurve";
 
 /**
  * The rates the option panel lists.
@@ -130,8 +151,17 @@ export function setClipSpeed(
     return doc;
   }
 
+  // A ramped clip always proceeds, ahead of both identity guards below.
+  // `speedOf` on one of those is the *derived mean*, so a clip ramping around
+  // 1.5x asked for 1.5x would match the first guard, and one whose mean is
+  // close enough would match the second. Either way the pick would delete
+  // nothing, leave the ramp running, and report success: the two clips a user
+  // is most likely to reach for this control on are exactly the two it would
+  // silently refuse.
+  const ramped = speedCurveOf(element) != null;
+
   const current = speedOf(element);
-  if (Math.abs(current - speed) < 1e-9) {
+  if (!ramped && Math.abs(current - speed) < 1e-9) {
     return doc;
   }
 
@@ -139,21 +169,52 @@ export function setClipSpeed(
   const newLength = element.duration / speed;
   const delta = newLength - before.length;
 
-  if (Math.abs(delta) < EPSILON_MS) {
+  if (!ramped && Math.abs(delta) < EPSILON_MS) {
     return doc;
   }
 
-  const resized = { ...element, speed } as TimelineElement;
-  const newEnd = before.start + newLength;
+  // Picking a rate flattens the ramp. Destructive and deliberate: this control
+  // states one rate for the whole clip, and a rate that silently rode on top of
+  // a curve would be a third meaning for `speed`. The panel shows the ramp
+  // directly below, and undo is one keystroke.
+  const resized = withSpeedCurve(
+    { ...element, speed } as DynamicElement,
+    null,
+  ) as TimelineElement;
 
-  const ripple = options.ripple === true;
+  return resizeClipTo(doc, elementId, resized, options.ripple === true);
+}
+
+/**
+ * Put a resized clip into the document, and make room for it or refuse.
+ *
+ * Shared by the two ops that change how long a clip is without changing how
+ * much footage it holds, `setClipSpeed` and `setClipSpeedCurve`. One copy,
+ * because the property the option panel leans on is a property of this function
+ * rather than of either caller: with `ripple` on, the gap in front of every
+ * later clip changes by exactly the amount this one grew or shrank, so a
+ * collision has nowhere to come from and no rate ever has to be refused.
+ *
+ * `resized` must already carry its final `speed` and `speedCurve`; this reads
+ * its span and nothing else about it.
+ */
+function resizeClipTo(
+  doc: TimelineDocument,
+  elementId: string,
+  resized: TimelineElement,
+  ripple: boolean,
+): TimelineDocument {
+  const element = doc.elements[elementId];
+  const before = spanOf(element);
+  const after = spanOf(resized);
+  const delta = after.length - before.length;
 
   if (!ripple) {
     const withResized = { ...doc.elements, [elementId]: resized };
     const collisions = findCollisions(
       { ...doc, elements: withResized },
       element.trackId,
-      { start: before.start, end: newEnd },
+      { start: after.start, end: after.end },
       [elementId],
     );
     if (collisions.length > 0) {
@@ -185,4 +246,92 @@ export function setClipSpeed(
   }
 
   return normalizeDocument({ ...doc, elements });
+}
+
+/**
+ * Put a speed ramp on one clip, or take it off.
+ *
+ * The curve's own writer, next to `setClipSpeed` because it has the same effect
+ * on the lane: the clip's timeline length is what the ramp takes to play its
+ * source window, so authoring a curve *resizes the clip where it sits* and the
+ * ripple that follows is the same one.
+ *
+ * `points` is **absolute**, never a delta, which is what lets a drag re-apply it
+ * on every pointermove through one `GestureCommit` and collapse to a single undo
+ * step. `null` removes the ramp and leaves `speed` at the mean it was running,
+ * so flattening changes how the footage plays inside the clip and not where the
+ * clip sits.
+ *
+ * Returns the document unchanged, **by identity**, when the clip is missing,
+ * carries no source window, the curve is already what was asked for, or the new
+ * span would overlap a neighbour with `ripple` off.
+ */
+export function setClipSpeedCurve(
+  doc: TimelineDocument,
+  elementId: string,
+  points: readonly SpeedPoint[] | null,
+  options: { ripple?: boolean } = {},
+): TimelineDocument {
+  const element = doc.elements[elementId];
+  if (!isSpeedAdjustable(element)) {
+    return doc;
+  }
+
+  const resized = withSpeedCurve(element as DynamicElement, points);
+  if (resized === element) {
+    return doc;
+  }
+
+  return resizeClipTo(
+    doc,
+    elementId,
+    resized as TimelineElement,
+    options.ripple === true,
+  );
+}
+
+/**
+ * Validate every ramp in a document and re-derive the scalar each one implies.
+ *
+ * Ingress only, called from `timelineStore.patchDocument` one line after
+ * `normalizeAnimations`, and for the same reason that one is there: `speed`
+ * means two things depending on whether a curve is present, and this is the
+ * cheap moment to make a file that disagrees with itself self-heal. A project
+ * written by a build with a bug, hand-edited, or saved by a future version
+ * arrives with its curve coerced and its scalar recomputed, so nothing
+ * downstream has to wonder which of the two to believe.
+ *
+ * Not in `normalizeDocument`, which runs on every checkpoint and every clip op;
+ * re-walking curves at pointer rate to re-check data that was checked on the
+ * way in is pure cost, which is the argument `patchDocument` already makes for
+ * the baked lanes.
+ *
+ * Returns the document **by identity** when nothing changed, so a project with
+ * no ramps costs one walk and no allocation.
+ */
+export function normalizeSpeedCurves(doc: TimelineDocument): TimelineDocument {
+  let changed = false;
+  const elements: Record<string, TimelineElement> = {};
+
+  for (const [id, element] of Object.entries(doc.elements)) {
+    elements[id] = element;
+
+    if (!isDynamicElement(element) || element.speedCurve === undefined) {
+      continue;
+    }
+
+    const coerced = coerceSpeedCurve(element.speedCurve);
+    const repaired = withSpeedCurve(element, coerced);
+    // `withSpeedCurve` settles the scalar when it writes a curve, but a file
+    // whose points were already legal returns by identity and may still carry a
+    // stale scalar, which is the exact shape a buggy writer leaves behind.
+    const settled = withDerivedSpeed(repaired);
+
+    if (settled !== element) {
+      elements[id] = settled;
+      changed = true;
+    }
+  }
+
+  return changed ? { ...doc, elements } : doc;
 }

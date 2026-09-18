@@ -15,6 +15,7 @@
  */
 
 import { pxToMsSigned } from "../geometry";
+import { curveSourceAt, type SpeedCurve } from "../speedCurve";
 
 export type PeakData = {
   /**
@@ -49,6 +50,16 @@ export type WaveformInput = {
   /** Source ms shown at the clip's left edge. */
   sourceInMs: number;
   speed: number;
+  /**
+   * The clip's ramp, prepared, or absent for a constant rate.
+   *
+   * Prepared once by the caller and handed in, rather than read off an element
+   * here: this is a planner over a pixel column at a time and it has no element
+   * to read. Without it a ramped clip's waveform runs at the clip's mean rate
+   * while the sound runs at the ramp, so the picture of the sound drifts against
+   * the sound itself, which is the most visible wrongness the ramp can produce.
+   */
+  curve?: SpeedCurve | null;
   range: number;
   viewportX0: number;
   viewportX1: number;
@@ -68,6 +79,7 @@ export function planWaveform(input: WaveformInput): WaveformColumn[] {
     spanStartMs,
     sourceInMs,
     speed,
+    curve,
     range,
     viewportX0,
     viewportX1,
@@ -84,14 +96,26 @@ export function planWaveform(input: WaveformInput): WaveformColumn[] {
     return [];
   }
 
-  // Source time one pixel covers. Constant across the clip.
+  // Source time one pixel covers. Constant across an unramped clip, and
+  // re-measured per column on a ramped one, where a pixel at 0.25x covers a
+  // sixteenth of the source a pixel at 4x does.
   const perPixelSourceMs = Math.abs(pxToMsSigned(1, range) * speed);
   const columns: WaveformColumn[] = [];
 
   for (let x = from; x < to; x++) {
     const timelineMs = spanStartMs + pxToMsSigned(x - clipX, range);
-    const startSource = sourceInMs + (timelineMs - spanStartMs) * speed;
-    const endSource = startSource + perPixelSourceMs;
+    const startSource =
+      curve == null
+        ? sourceInMs + (timelineMs - spanStartMs) * speed
+        : curveSourceAt(curve, sourceInMs, timelineMs - spanStartMs);
+    const endSource =
+      curve == null
+        ? startSource + perPixelSourceMs
+        : curveSourceAt(
+            curve,
+            sourceInMs,
+            timelineMs - spanStartMs + pxToMsSigned(1, range),
+          );
 
     const first = Math.floor(startSource / data.bucketMs);
     let last = Math.ceil(endSource / data.bucketMs);

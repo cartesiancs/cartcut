@@ -1,9 +1,17 @@
+import { app } from "electron";
 import { existsSync } from "fs";
 import { unlink } from "fs/promises";
 import { basename } from "path";
 import { mainWindow } from "../main";
 import { ffmpegConfig } from "../lib/ffmpeg";
 import { RenderOptions, missingInputs } from "./ffmpegArgs";
+import { resolveExportSettings } from "./exportSettings";
+import {
+  dropRenderedAudio,
+  prepareRenderedAudio,
+  EMPTY_RENDERED_AUDIO,
+  type RenderedAudioSet,
+} from "./renderedAudio";
 import {
   cancelSession,
   ExportSession,
@@ -35,14 +43,17 @@ function currentSession(id: string | undefined): ExportSession | null {
 export function startFFmpegProcess(
   options: RenderOptions,
   timeline: Record<string, any>,
+  rendered: RenderedAudioSet = EMPTY_RENDERED_AUDIO,
 ): ExportSession {
   const started = startExportSession(ffmpegConfig.FFMPEG_PATH, options, timeline, {
     onSuccess: (finished) => {
       if (finished === session) session = null;
+      void dropRenderedAudio(finished.rendered ?? EMPTY_RENDERED_AUDIO);
       send("PROCESSING_FINISH", { destination: finished.destination });
     },
     onError: (failed, detail) => {
       if (failed === session) session = null;
+      void dropRenderedAudio(failed.rendered ?? EMPTY_RENDERED_AUDIO);
       send("render:v2:error", {
         sessionId: failed.id,
         ...detail,
@@ -51,6 +62,7 @@ export function startFFmpegProcess(
     },
     onCancelled: (cancelled) => {
       if (cancelled === session) session = null;
+      void dropRenderedAudio(cancelled.rendered ?? EMPTY_RENDERED_AUDIO);
 
       // The kill is asynchronous, so by the time it is reaped the user may
       // already have started another export — and if that one writes to the
@@ -70,7 +82,10 @@ export function startFFmpegProcess(
 }
 
 export const ipcRenderV2 = {
-  start: (_event: unknown, options: RenderOptions, timeline: any) => {
+  // `async` because a ramped clip's audio is retimed before the spawn. The
+  // renderer already awaits this handler, so the wait reaches the user as the
+  // export taking a moment to begin rather than as anything new.
+  start: async (_event: unknown, options: RenderOptions, timeline: any) => {
     if (session != null && !session.finished) {
       throw new Error("An export is already running");
     }
@@ -93,7 +108,26 @@ export const ipcRenderV2 = {
       );
     }
 
-    const started = startFFmpegProcess(options, timeline);
+    // After the missing-input refusal and before the spawn, so a ramp that
+    // cannot be retimed reaches the user the same way a missing file does: as a
+    // refusal to begin, with the clip named. There is deliberately no fallback
+    // to a constant `atempo` at the ramp's mean rate, which would deliver a
+    // file whose sound slides against its picture with nothing saying so.
+    const { sampleRate, channels } = resolveExportSettings(options);
+    const rendered = await prepareRenderedAudio(
+      ffmpegConfig.FFMPEG_PATH,
+      timeline,
+      { sampleRate, channels },
+      app.getPath("temp"),
+    );
+
+    let started: ExportSession;
+    try {
+      started = startFFmpegProcess(options, timeline, rendered);
+    } catch (error) {
+      await dropRenderedAudio(rendered);
+      throw error;
+    }
     return {
       sessionId: started.id,
       expectedFrameBytes: started.expectedFrameBytes,

@@ -30,6 +30,14 @@ import type {
   VideoElementType,
 } from "../../@types/timeline";
 import { elementUtils } from "../../utils/element";
+import {
+  curveSourceAt,
+  curveSpanLength,
+  MAX_SPEED,
+  MIN_SPEED,
+  speedAtSource,
+  speedCurveOf,
+} from "./speedCurve";
 
 /** Elements that carry a source window: video and audio. */
 export type DynamicElement = VideoElementType | AudioElementType;
@@ -94,6 +102,11 @@ export function isDurationLocked(
  *
  * `speed` is absent on hand-authored fixtures and a zero would turn every span
  * into `Infinity`, so anything non-positive falls back to real time.
+ *
+ * On a clip carrying a `speedCurve` this is the **mean** rate over the trim
+ * window, derived so that `spanLength` stays `duration / speed`. That is what
+ * keeps every collision, ripple, placement and layout call site correct without
+ * knowing the ramp exists. For the rate at an instant, ask `speedAt`.
  */
 export function speedOf(element: TimelineElement): number {
   if (!isDynamicElement(element)) {
@@ -159,7 +172,11 @@ export function spanOf(element: TimelineElement): {
  * term a trimmed clip seeks to the untrimmed frame.
  */
 export function sourceTimeAt(element: DynamicElement, t: number): number {
-  return element.trim.startTime + (t - element.startTime) * speedOf(element);
+  const curve = speedCurveOf(element);
+  if (curve == null) {
+    return element.trim.startTime + (t - element.startTime) * speedOf(element);
+  }
+  return curveSourceAt(curve, element.trim.startTime, t - element.startTime);
 }
 
 /**
@@ -174,9 +191,37 @@ export function timelineTimeAt(
   element: DynamicElement,
   sourceMs: number,
 ): number {
+  const curve = speedCurveOf(element);
+  if (curve == null) {
+    return (
+      element.startTime + (sourceMs - element.trim.startTime) / speedOf(element)
+    );
+  }
   return (
-    element.startTime + (sourceMs - element.trim.startTime) / speedOf(element)
+    element.startTime +
+    curveSpanLength(curve, element.trim.startTime, sourceMs)
   );
+}
+
+/**
+ * The rate the clip is playing at one timeline instant.
+ *
+ * `speedOf` for an unramped clip, and for a ramped one the curve's value at the
+ * source frame that instant shows. Wanted by anything that has to *act* at a
+ * rate rather than measure a length: the preview's media handle, and the band
+ * drawn over the clip.
+ *
+ * Static elements have no rate and answer 1, exactly as `speedOf` does.
+ */
+export function speedAt(element: TimelineElement, t: number): number {
+  if (!isDynamicElement(element)) {
+    return 1;
+  }
+  const curve = speedCurveOf(element);
+  if (curve == null) {
+    return speedOf(element);
+  }
+  return speedAtSource(curve, sourceTimeAt(element, t));
 }
 
 /**
@@ -237,6 +282,69 @@ export function assertTrimInvariant(
 export function hasValidTrim(element: TimelineElement): boolean {
   try {
     assertTrimInvariant(element);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Development-time check that a ramped clip's derived scalar still matches its
+ * curve, the twin of `assertTrimInvariant` for the other half of the model.
+ *
+ * `speed` is authored on a clip with no `speedCurve` and derived on one that has
+ * it, and the whole design rests on the second staying true:
+ *
+ *     duration / speed === curveSpanLength(curve, trim.startTime, trim.endTime)
+ *
+ * Break it and the clip's drawn length stops matching the footage it plays, in
+ * a way that shows up three subsystems later as a mis-timed frame. The half
+ * millisecond of tolerance is `assertTrimInvariant`'s, and the same budget
+ * `ADJACENCY_EPSILON_MS` reconciles spans with everywhere else.
+ *
+ * **Anything that writes `trim` on a ramped clip has to recompute the scalar.**
+ * `clipEdit.ts#withTrim` is where that happens for trim and split; `mergeOps`,
+ * `reverseOps` and `audio.ts`'s detached twin write `trim` themselves and each
+ * calls `withDerivedSpeed` for this reason. A new op that writes `trim` without
+ * it will fail this assertion in the suites, which is what it is for.
+ */
+export function assertSpeedInvariant(
+  element: TimelineElement,
+  context = "element",
+): void {
+  if (!isDynamicElement(element)) {
+    return;
+  }
+  const curve = speedCurveOf(element);
+  if (curve == null) {
+    return;
+  }
+
+  const speed = element.speed;
+  if (!Number.isFinite(speed) || speed < MIN_SPEED || speed > MAX_SPEED) {
+    throw new Error(
+      `${context}: ramped clip carries an unusable speed ${speed}`,
+    );
+  }
+
+  const want = curveSpanLength(
+    curve,
+    element.trim.startTime,
+    element.trim.endTime,
+  );
+  const have = element.duration / speed;
+  if (Math.abs(want - have) > 0.5) {
+    throw new Error(
+      `${context}: speed ${speed} gives a span of ${have} where the ramp asks ` +
+        `for ${want}`,
+    );
+  }
+}
+
+/** Whether an element currently satisfies the speed invariant, without throwing. */
+export function hasValidSpeed(element: TimelineElement): boolean {
+  try {
+    assertSpeedInvariant(element);
     return true;
   } catch {
     return false;

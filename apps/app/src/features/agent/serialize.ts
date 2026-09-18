@@ -28,6 +28,7 @@ import {
   sourceDurationOf,
   speedOf,
 } from "../timeline/geometry";
+import { speedCurveOf } from "../timeline/speedCurve";
 import { describeFilter } from "../renderer/filter/params";
 import { blendOf, DEFAULT_BLEND } from "../renderer/blend";
 import { DEFAULT_LUT_INTENSITY, lutOf } from "../renderer/lut";
@@ -497,6 +498,7 @@ export function clipDetail(
     // `clipRow` reports speed only when it is not 1, so an agent reading a
     // detail view cannot tell "normal speed" from "not applicable".
     detail.speed = speedOf(element);
+    describeSpeedRamp(element, detail);
     // Through the resolver, so a clip from a project written before the field
     // existed reports its effective 0 dB rather than nothing at all.
     detail.volumeDb = volumeDbOf(element);
@@ -508,6 +510,7 @@ export function clipDetail(
     detail.filters = (element.filter?.list ?? []).map(describeFilter);
     detail.filtersEnabled = element.filter?.enable === true;
     detail.speed = speedOf(element);
+    describeSpeedRamp(element, detail);
     detail.codec = element.codec;
     // What the clip *sounds like now*, not what its file holds: a detached
     // clip is silent here, and its sound is reported by the audio element that
@@ -597,5 +600,31 @@ export function paginate<T>(items: T[], offset: number, limit: number): Page<T> 
     total: items.length,
     offset: start,
     truncated: start + slice.length < items.length,
+  };
+}
+
+/**
+ * Say that a clip carries a speed ramp, and what its extremes are.
+ *
+ * The **shape** and not the points. Two reasons, and the first is the rule this
+ * file exists to enforce: a curve can hold sixty-four points and tool output is
+ * capped, so a project of ramped clips would spend its whole budget on numbers
+ * an agent cannot author anyway. The second is that `set_clip_speed` *flattens*
+ * a ramp, so what an agent needs is to know one is there before it destroys it.
+ *
+ * Detail view only. `clipRow` already reports `speed`, which on a ramped clip
+ * is the mean, and that is the right amount for a listing.
+ */
+function describeSpeedRamp(element: any, detail: Record<string, unknown>): void {
+  const curve = speedCurveOf(element);
+  if (curve == null) {
+    return;
+  }
+  const rates = curve.points.map((point) => point.v);
+  detail.speedRamp = {
+    points: curve.points.length,
+    min: Math.round(Math.min(...rates) * 100) / 100,
+    max: Math.round(Math.max(...rates) * 100) / 100,
+    note: "speed is the ramp's average; set_clip_speed replaces the ramp with one rate",
   };
 }

@@ -23,7 +23,10 @@ import {
   spanEnd,
   spanStart,
   speedOf,
+  type DynamicElement,
 } from "./geometry";
+import { withDerivedSpeed } from "./clipEdit";
+import { sameSpeedCurve, speedCurveOf } from "./speedCurve";
 import { normalizeDocument, type TimelineDocument } from "./tracks";
 
 /**
@@ -109,7 +112,16 @@ function canJoin(left: TimelineElement, right: TimelineElement): boolean {
   }
 
   if (isDynamicElement(left) && isDynamicElement(right)) {
-    if (speedOf(left) !== speedOf(right)) {
+    // The ramp first, because on a ramped clip the scalar is *derived* and the
+    // two halves of a split carry different ones by construction: each half's
+    // mean is the mean of its own part of the curve. Comparing the scalars
+    // there would refuse to rejoin a clip this module's own header promises can
+    // be rejoined. Two clips with no ramp both answer `true` here and fall
+    // through to the scalar test, which is the only case it still governs.
+    if (!sameSpeedCurve(left.speedCurve, right.speedCurve)) {
+      return false;
+    }
+    if (speedCurveOf(left) == null && speedOf(left) !== speedOf(right)) {
       return false;
     }
     if (!near(left.trim.endTime, right.trim.startTime)) {
@@ -203,11 +215,16 @@ export function mergeClips(
     // Restated rather than summed, so the invariant
     // `duration === trim.endTime - trim.startTime` holds by construction and
     // cannot drift across a long chain.
-    merged = {
+    // `withDerivedSpeed` because this writes `trim` itself rather than going
+    // through `clipEdit.ts#withTrim`: the merged window is the whole of both
+    // halves, so a ramped chain's mean rate is neither half's and has to be
+    // integrated again. `canJoin` has already proved the two ramps are the same
+    // curve, so `head`'s copy is the right one to keep.
+    merged = withDerivedSpeed({
       ...head,
       trim,
       duration: trim.endTime - trim.startTime,
-    } as TimelineElement;
+    } as DynamicElement) as TimelineElement;
   } else {
     merged = {
       ...head,

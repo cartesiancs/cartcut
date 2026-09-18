@@ -123,10 +123,22 @@ export async function setDuration(page: Page, seconds: number): Promise<void> {
 export async function setResolution(page: Page, width: number, height: number): Promise<void> {
   await openSettingsTab(page);
 
-  const preset = { "1920x1080": "1920x1080 (desktop)", "3840x2160": "3840x2160 (4k)", "1080x1080": "1080x1080 (square)", "1080x1920": "1080x1920 (mobile)" }[`${width}x${height}`];
+  // By the `title` attribute, not by visible text. The buttons show a ratio and
+  // a short tag ("16:9" over "FHD"); the size is only in the tooltip, and the
+  // app spells it with a multiplication sign. This used to filter on
+  // `hasText: "1920x1080 (desktop)"` with an ASCII x, which matched nothing
+  // from the day the preset buttons landed, so every spec asking for a preset
+  // size timed out for thirty seconds and failed before it started. Selecting
+  // on the attribute means a future change to the tag does not break it again.
+  const preset = {
+    "1920x1080": "1920\u00d71080 (desktop)",
+    "3840x2160": "3840\u00d72160 (4K)",
+    "1080x1080": "1080\u00d71080 (square)",
+    "1080x1920": "1080\u00d71920 (mobile)",
+  }[`${width}x${height}`];
 
   if (preset != null) {
-    await page.locator("#nav-home button", { hasText: preset }).click();
+    await page.locator(`#nav-home button[title="${preset}"]`).click();
   } else {
     // Note the DOM order: the height input comes first. Filling by id rather
     // than by position keeps that from mattering.

@@ -38,6 +38,7 @@ import {
   spanLength,
   spanStart,
   speedOf,
+  timelineTimeAt,
 } from "./geometry";
 import { frameStartMs } from "./frames";
 
@@ -57,25 +58,37 @@ export const DEFAULT_TRANSITION_MS = 500;
 /**
  * Timeline ms the outgoing clip can still supply *after* its out-point.
  *
- * Source ms divided by `speed`, because `trim` addresses the file while the
- * transition occupies the timeline — the conversion `geometry.ts` exists to
+ * Source ms converted to timeline ms, because `trim` addresses the file while
+ * the transition occupies the timeline: the conversion `geometry.ts` exists to
  * keep straight. A 2x clip with 1000ms of unused tail can only cover 500ms of
  * transition.
+ *
+ * `timelineTimeAt` rather than a division, so a ramped clip measures its tail
+ * at the rate the ramp holds past its last point rather than at the clip's mean.
+ * Those differ by the whole depth of the ramp, and the number decides how much
+ * of a transition is real footage rather than a frozen frame.
  */
 export function tailHandleOf(element: TimelineElement): number {
   if (!isDynamicElement(element)) {
     return Infinity;
   }
-  const remaining = sourceDurationOf(element) - element.trim.endTime;
-  return Math.max(0, remaining) / speedOf(element);
+  const end = Math.max(element.trim.endTime, sourceDurationOf(element));
+  return Math.max(0, timelineTimeAt(element, end) - spanEnd(element));
 }
 
-/** Timeline ms the incoming clip can still supply *before* its in-point. */
+/**
+ * Timeline ms the incoming clip can still supply *before* its in-point.
+ *
+ * The mirror of `tailHandleOf`, measured back to the start of the file.
+ */
 export function headHandleOf(element: TimelineElement): number {
   if (!isDynamicElement(element)) {
     return Infinity;
   }
-  return Math.max(0, element.trim.startTime) / speedOf(element);
+  // Source 0, and the outer clamp covers a `trim.startTime` below it: the map
+  // then lands after the clip's own start and the difference goes negative,
+  // which is the zero head room the division used to reach by clamping first.
+  return Math.max(0, spanStart(element) - timelineTimeAt(element, 0));
 }
 
 /**

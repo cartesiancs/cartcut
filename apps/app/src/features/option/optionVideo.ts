@@ -21,6 +21,7 @@ import type { FilterInput } from "../renderer/filter/params";
 import "./controlAudioVolume";
 import "./controlBlendMode";
 import "./controlClipSpeed";
+import "./controlSpeedCurve";
 import "./controlClipOrientation";
 import "./controlClipCrop";
 import "./optionLutSection";
@@ -220,6 +221,13 @@ export class OptionVideo extends LitElement {
         .elementId=${this.elementId}
         .isShow=${this.isShow}
       ></clip-speed>
+
+      <!-- Directly under the rate, because the two edit the same property and
+           picking a rate above flattens whatever is drawn here. -->
+      <clip-speed-curve
+        .elementId=${this.elementId}
+        .isShow=${this.isShow}
+      ></clip-speed-curve>
 
       <!-- Beside speed: reverse is the other thing here that changes how the
            footage plays rather than how it looks. -->

@@ -1,4 +1,5 @@
 import { ParsedFrame } from "gifuct-js";
+import type { SpeedPoint } from "../features/timeline/speedCurve";
 
 export type CubicKeyframeType = {
   type: "cubic" | "linear";
@@ -781,6 +782,26 @@ export type VideoElementType = TimelinePlaced &
     audioDetached?: boolean;
     codec: { video: string; audio: string };
     speed: number;
+    /**
+     * The speed ramp, in **absolute source ms**, or absent for a constant rate.
+     *
+     * The one animatable thing in this codebase that is not a keyframe track,
+     * for the reasons `features/timeline/speedCurve.ts` states: a speed
+     * keyframe's timeline position would depend on the curve it defines, and a
+     * track is read from a lane baked at the project frame rate, so changing
+     * that rate would move the clip.
+     *
+     * While it is present, `speed` is **derived** from it:
+     * `speed === duration / curveSpanLength(curve, trim)`. So `spanLength` is
+     * still `duration / speed`, the clip's length and every collision are
+     * unchanged, and a build that has never heard of this field plays the clip
+     * at its mean rate in exactly the right place.
+     *
+     * Absent means a constant rate, and `coerceSpeedCurve` answering `null`
+     * deletes the key, so a project nobody has ramped saves byte-identically to
+     * one written before the feature and `SCHEMA_VERSION` did not move.
+     */
+    speedCurve?: SpeedPoint[];
     filter: {
       enable: boolean;
       list: VideoFilterType[];
@@ -1179,6 +1200,8 @@ export type AudioElementType = TimelinePlaced &
     /** Full untrimmed length of the source file, in source ms. */
     sourceDuration: number;
     speed: number;
+    /** The speed ramp. See `VideoElementType.speedCurve`. */
+    speedCurve?: SpeedPoint[];
     /**
      * The level envelope, and nothing else.
      *

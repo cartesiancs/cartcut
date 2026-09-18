@@ -31,6 +31,7 @@ import {
   type VideoElementType,
 } from "../../@types/timeline";
 import { sampleTrack } from "../animation/keyframes";
+import { withDerivedSpeed } from "./clipEdit";
 
 /**
  * The colour a detached clip gets on the timeline.
@@ -265,7 +266,18 @@ export function audioTwinOf(video: VideoElementType): AudioElementType {
   // Cloned rather than shared: `cloneAnimation` would pull in every track, and
   // there is only ever one here.
   const envelope = (video as any).animation?.volumeDb;
-  return {
+  // The ramp travels with the sound for a reason nothing else here shares: a
+  // twin left at the video's *mean* rate would play a straight 1.5x against a
+  // picture that ramps, so the two drift apart inside the clip while starting
+  // and ending together. That is lip sync going out by seconds with nothing
+  // anywhere saying so. Copied rather than shared, so editing one clip's ramp
+  // cannot reach the other, and `withDerivedSpeed` settles the twin's own
+  // scalar rather than trusting the one copied below.
+  const ramp =
+    video.speedCurve == null
+      ? null
+      : video.speedCurve.map((point) => ({ t: point.t, v: point.v }));
+  return withDerivedSpeed({
     ...(envelope != null
       ? { animation: { volumeDb: JSON.parse(JSON.stringify(envelope)) } }
       : {}),
@@ -280,6 +292,7 @@ export function audioTwinOf(video: VideoElementType): AudioElementType {
     trim: { startTime: video.trim.startTime, endTime: video.trim.endTime },
     sourceDuration: video.sourceDuration,
     speed: video.speed,
+    ...(ramp != null ? { speedCurve: ramp } : {}),
     // The level the user set is a property of the sound, so it travels with it.
     // `undefined` when the video was never touched, and `JSON.stringify` drops
     // an undefined field — so a detached clip stays indistinguishable from an
@@ -289,5 +302,5 @@ export function audioTwinOf(video: VideoElementType): AudioElementType {
     // zeroes and marks them "NOT USING".
     location: { x: 0, y: 0 },
     timelineOptions: { color: AUDIO_CLIP_COLOR },
-  };
+  });
 }

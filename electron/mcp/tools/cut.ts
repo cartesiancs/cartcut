@@ -149,7 +149,8 @@ export function registerCutTools(define: Registrar) {
         "Honoured in the preview and in the export, picture and sound both. " +
         "With `ripple` (the default) later clips on the same track shift to make room or close up; without it, " +
         "a change that would overlap the next clip is refused. " +
-        "Keyframes are left at their own times, so speeding a clip up can leave its animation running past the end.",
+        "Keyframes are left at their own times, so speeding a clip up can leave its animation running past the end. " +
+        "A clip carrying a speed ramp is flattened to this one rate; `get_clip` reports `speedRamp` when there is one to lose.",
       inputSchema: {
         elementIds: z.array(z.string()).min(1),
         speed: z.number().min(0.25).max(4),

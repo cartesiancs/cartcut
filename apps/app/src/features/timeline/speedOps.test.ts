@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   setClipSpeed,
+  setClipSpeedCurve,
   coerceSpeed,
   isSpeedAdjustable,
   speedOptionsFor,
@@ -10,10 +11,12 @@ import {
 } from "./speedOps";
 import {
   ADJACENCY_EPSILON_MS,
+  assertSpeedInvariant,
   assertTrimInvariant,
   spanOf,
   speedOf,
 } from "./geometry";
+import { withSpeedCurve } from "./clipEdit";
 import {
   clipsOnTrack,
   createTrack,
@@ -364,5 +367,118 @@ describe("speedOptionsFor", () => {
   it("falls back to real time for a rate that makes no sense", () => {
     expect(speedOptionsFor(Number.NaN)).toEqual([...SPEED_PRESETS]);
     expect(speedOptionsFor(0)).toEqual([...SPEED_PRESETS]);
+  });
+});
+
+describe("the menu a ramped clip offers", () => {
+  it("would splice the ramp's mean into the list, which is why the panel does not ask", () => {
+    // `speedOptionsFor` is right for a clip the agent set to an off-preset
+    // rate and wrong for a ramp's derived mean, which is an arbitrary float
+    // nobody chose. Found by running the app: a slow-middle ramp rendered a
+    // menu entry reading "0.4009824491765815x".
+    const mean = 10_000 / 24_938.747370452314;
+    expect(speedOptionsFor(mean)).toContain(mean);
+    expect(SPEED_PRESETS).not.toContain(mean as never);
+  });
+});
+
+describe("setClipSpeedCurve", () => {
+  const RAMP = [
+    { t: 0, v: 1 },
+    { t: 10_000, v: 2 },
+  ];
+
+  function ramped(startTime = 0) {
+    return doc({ a: withSpeedCurve(clip(startTime), RAMP) });
+  }
+
+  it("resizes the clip to what the ramp takes to play its window", () => {
+    const after = setClipSpeedCurve(doc({ a: clip(0) }), "a", RAMP);
+    const element = after.elements.a;
+    // 10s of source ramped 1x to 2x takes 10000 * ln(2) of timeline.
+    expect(spanOf(element).length).toBeCloseTo(10_000 * Math.LN2, 3);
+    expect(element.duration).toBe(10_000);
+    expect(() => assertSpeedInvariant(element)).not.toThrow();
+  });
+
+  it("returns the input by identity when the ramp is already exactly this", () => {
+    // The convention every op here follows: re-picking the preset a clip is
+    // already on, or a drag step that has not moved, must cost no undo entry.
+    const before = ramped();
+    expect(setClipSpeedCurve(before, "a", RAMP)).toBe(before);
+    // A fresh array of equal points is the same ramp, and is what a preset
+    // rebuild and a JSON round trip both hand back.
+    expect(setClipSpeedCurve(before, "a", RAMP.map((p) => ({ ...p })))).toBe(
+      before,
+    );
+  });
+
+  it("returns the input by identity for the declines it shares with setClipSpeed", () => {
+    const before = ramped();
+    expect(setClipSpeedCurve(before, "missing", RAMP)).toBe(before);
+
+    // An image has no source window and so no rate to ramp.
+    const still = doc({ i: imageElement({ trackId: "v1" }) });
+    expect(setClipSpeedCurve(still, "i", RAMP)).toBe(still);
+
+    // Removing a ramp that is not there, and a flat curve, are both no-ops.
+    const plain = doc({ a: clip(0) });
+    expect(setClipSpeedCurve(plain, "a", null)).toBe(plain);
+    expect(
+      setClipSpeedCurve(plain, "a", [
+        { t: 0, v: 1 },
+        { t: 1000, v: 1 },
+      ]),
+    ).toBe(plain);
+  });
+
+  it("takes the ramp off and leaves the clip where the mean had it", () => {
+    const before = ramped();
+    const mean = speedOf(before.elements.a);
+    const after = setClipSpeedCurve(before, "a", null);
+    expect((after.elements.a as any).speedCurve).toBeUndefined();
+    expect(speedOf(after.elements.a)).toBe(mean);
+    expect(spanOf(after.elements.a).length).toBeCloseTo(
+      spanOf(before.elements.a).length,
+      9,
+    );
+  });
+
+  it("pushes later clips along, the same ripple setClipSpeed uses", () => {
+    const before = doc({ a: clip(0), b: clip(10_000) });
+    const after = setClipSpeedCurve(before, "a", RAMP, { ripple: true });
+    const grew = spanOf(after.elements.a).length - 10_000;
+    expect(after.elements.b.startTime).toBeCloseTo(10_000 + grew, 6);
+  });
+
+  it("never declines for a collision with ripple on, at any shape", () => {
+    // The property the option panel leans on, repeated for the curve: every
+    // ramp the graph can draw has to be reachable with no "no room" state.
+    const shapes = [
+      [
+        { t: 0, v: MIN_SPEED },
+        { t: 10_000, v: MIN_SPEED + 0.01 },
+      ],
+      [
+        { t: 0, v: MAX_SPEED },
+        { t: 10_000, v: MAX_SPEED - 0.01 },
+      ],
+      [
+        { t: 0, v: MAX_SPEED },
+        { t: 5000, v: MIN_SPEED },
+        { t: 10_000, v: MAX_SPEED },
+      ],
+    ];
+    for (const shape of shapes) {
+      const before = doc({ a: clip(0), b: clip(10_000), c: clip(20_000) });
+      const after = setClipSpeedCurve(before, "a", shape, { ripple: true });
+      expect(after).not.toBe(before);
+      const lane = clipsOnTrack(after, "v1");
+      for (let i = 1; i < lane.length; i++) {
+        expect(spanOf(lane[i][1]).start).toBeGreaterThanOrEqual(
+          spanOf(lane[i - 1][1]).end - ADJACENCY_EPSILON_MS,
+        );
+      }
+    }
   });
 });

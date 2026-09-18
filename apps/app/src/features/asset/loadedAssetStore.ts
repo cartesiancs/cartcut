@@ -712,19 +712,27 @@ async function seekHandles(
           const element = timeline[meta.elementId] as VideoElementType;
           const video = meta.object;
           // Deliberately NOT clamped to the trim window. Inside a transition
-          // this clip is being asked for frames past its out-point — or
-          // before its in-point — which is the whole mechanism, and
-          // `sourceTimeAt` extrapolates there correctly because it is linear.
-          // `maxTransitionMs` already guarantees the frames exist in the file.
+          // this clip is being asked for frames past its out-point, or before
+          // its in-point, which is the whole mechanism. `sourceTimeAt`
+          // extrapolates there because a speed ramp holds its end values
+          // outside its outermost points and an unramped clip is linear
+          // everywhere; `maxTransitionMs` already guarantees the frames exist
+          // in the file.
           //
           // The half-frame goes in on the *timeline* side of `sourceTimeAt`,
-          // not after it. That is what makes it correct for a retimed clip:
-          // the conversion multiplies by `speed`, so a 2x clip needs two
-          // source frames of offset per timeline frame and a 0.25x clip a
+          // not after it. That is what makes it correct for a retimed clip: the
+          // conversion carries timeline ms into source ms, so a 2x clip needs
+          // two source frames of offset per timeline frame and a 0.25x clip a
           // quarter of one. Adding a fixed offset to the source time instead
-          // would be right only at speed 1.
+          // would be right only at speed 1, and on a ramped clip it would be
+          // right nowhere, since the factor changes across the clip.
           const want = sourceTimeAt(element, frameSampleMs(time, fps)) / 1000;
 
+          // Decorative on this path: the handle is paused and placed by
+          // `currentTime` for every frame, so nothing integrates this. Kept as
+          // the clip's mean so a handle that is somehow left rolling drifts
+          // slowly rather than at 1x. `playback.ts#playbackRateFor` is the one
+          // that matters, and it is the preview's.
           video.playbackRate = speedOf(element);
 
           // The caller drives the handles itself rather than through

@@ -33,7 +33,9 @@ import {
   isSpeedAdjustable,
   setClipSpeed,
   speedOptionsFor,
+  SPEED_PRESETS,
 } from "../timeline/speedOps";
+import { speedCurveOf } from "../timeline/speedCurve";
 
 @customElement("clip-speed")
 export class ClipSpeedControl extends LitElement {
@@ -81,6 +83,15 @@ export class ClipSpeedControl extends LitElement {
     }
 
     const speed = speedOf(element);
+    // On a ramped clip `speedOf` is the *mean* rate, and showing it as a plain
+    // pick would read as a lie: the clip never plays at that rate for a whole
+    // frame. The entry names the ramp and reports the mean as what it is.
+    //
+    // It also takes the mean out of the list. `speedOptionsFor` splices a rate
+    // that is not a preset into the menu, which is right for a clip the agent
+    // set to 1.7x and wrong here: the mean of a ramp is an arbitrary float
+    // nobody chose, and a live one rendered as "0.4009824491765815x".
+    const ramped = speedCurveOf(element) != null;
 
     return html`
       <label class="form-label text-light">${this.lc.t("setting.speed")}</label>
@@ -90,7 +101,12 @@ export class ClipSpeedControl extends LitElement {
         aria-event="clip_speed"
         @change=${this.handleChange}
       >
-        ${speedOptionsFor(speed).map(
+        ${ramped
+          ? html`<option value="ramp">
+              ${this.lc.t("setting.speed_ramp_option")} (${speed.toFixed(2)}x)
+            </option>`
+          : ``}
+        ${(ramped ? SPEED_PRESETS : speedOptionsFor(speed)).map(
           (option) =>
             html`<option value=${String(option)}>${option}x</option>`,
         )}
@@ -117,7 +133,8 @@ export class ClipSpeedControl extends LitElement {
     if (select == null || !isSpeedAdjustable(element)) {
       return;
     }
-    select.value = String(speedOf(element));
+    select.value =
+      speedCurveOf(element) != null ? "ramp" : String(speedOf(element));
   }
 
   /**
@@ -133,6 +150,14 @@ export class ClipSpeedControl extends LitElement {
    * `ripple: true` matches `set_clip_speed`'s own default, and is the only
    * setting under which every listed rate is reachable. It is lane-local, the
    * same rule `rippleDelete` follows: a clip on another track never moves.
+   *
+   * **Picking a rate flattens a speed ramp**, which `setClipSpeed` does and
+   * documents. Destructive and deliberate: this control states one rate for the
+   * whole clip, and a rate riding on top of a curve would be a third meaning
+   * for `speed`. The graph sits directly below showing what is about to go, and
+   * undo is one keystroke, so there is no confirm. Re-picking the "Ramp" entry
+   * is not a rate at all: `coerceSpeed` answers null for it and nothing
+   * happens, which is the decline this handler already had.
    */
   private handleChange(event: Event) {
     const speed = coerceSpeed((event.target as HTMLSelectElement).value);

@@ -18,6 +18,7 @@
  */
 
 import { spawn, ChildProcessWithoutNullStreams } from "child_process";
+import type { RenderedAudioSet } from "./renderedAudio";
 import {
   buildFFmpegArgs,
   frameByteLength,
@@ -32,6 +33,8 @@ export type ExportSession = {
   id: string;
   process: ChildProcessWithoutNullStreams;
   destination: string;
+  /** Scratch audio written by the ramp pre-pass, to be removed with the session. */
+  rendered?: RenderedAudioSet | null;
   /**
    * Exact bytes each frame must be, or 0 when the pipe is self-delimiting.
    *
@@ -65,10 +68,11 @@ export function startExportSession(
   options: RenderOptions,
   timeline: Record<string, any>,
   handlers: SessionHandlers,
+  rendered?: RenderedAudioSet,
 ): ExportSession {
   // Argument construction lives in `ffmpegArgs.ts` so it can be unit tested;
   // this function only owns the process.
-  const args = buildFFmpegArgs(options, timeline);
+  const args = buildFFmpegArgs(options, timeline, rendered?.byElementId);
   const child = spawn(ffmpegPath, args);
 
   const session: ExportSession = {
@@ -84,6 +88,9 @@ export function startExportSession(
     cancelled: false,
     finished: false,
     drain: null,
+    // Carried so every exit path can remove it. A ramped clip's retimed audio
+    // lives here, and FFmpeg holds the files open until it closes.
+    rendered: rendered ?? null,
   };
 
   child.stderr.on("data", (data) => {

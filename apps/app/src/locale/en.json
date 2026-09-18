@@ -51,7 +51,18 @@
     "volume": "Volume",
     "speed": "Speed",
     "no_selection": "Nothing selected yet. Pick a clip on the timeline to see its options.",
-    "background": "Background"
+    "background": "Background",
+    "speed_ramp": "Speed ramp",
+    "speed_ramp_add": "Double-click to add a point, right-click to remove",
+    "speed_ramp_constant": "Constant",
+    "speed_ramp_up": "Ramp up",
+    "speed_ramp_down": "Ramp down",
+    "speed_ramp_slow_middle": "Slow middle",
+    "speed_ramp_fast_middle": "Fast middle",
+    "speed_ramp_ease_in": "Ease in",
+    "speed_ramp_ease_out": "Ease out",
+    "speed_ramp_option": "Ramp",
+    "speed_ramp_preset": "Apply a preset"
   },
   "modal": {
     "change_language": "Change Language",

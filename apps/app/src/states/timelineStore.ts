@@ -16,6 +16,7 @@ import {
   normalizeAnimations,
   rebakeAnimations,
 } from "../features/animation/keyframeOps";
+import { normalizeSpeedCurves } from "../features/timeline/speedOps";
 import { count as perfCount } from "../features/debug/frameStats";
 
 /**
@@ -262,10 +263,13 @@ export const useTimelineStore = createStore<ITimelineStore>((set, get) => ({
       // Ingress, and the only place animation blocks are validated: this is
       // what a loaded `.ngt` comes through, and projects written by older
       // builds carry `ax: [[], []]` where a list of `[t, value]` pairs belongs.
-      // `normalizeDocument` would be the wrong home — it runs on every
+      // `normalizeDocument` would be the wrong home: it runs on every
       // checkpoint and every clip op, and re-walking keyframe arrays at pointer
       // rate to re-check data that was checked on the way in is pure cost.
-      const validated = normalizeAnimations(doc);
+      // `normalizeSpeedCurves` rides along for the same reason, and settles the
+      // other derived field a file can arrive disagreeing with itself about:
+      // `speed` is authored on a clip with no ramp and derived on one with one.
+      const validated = normalizeSpeedCurves(normalizeAnimations(doc));
       // A project saved at one frame rate and opened at another carries baked
       // lanes at the old rate. Ingress is the cheap moment to fix that: the
       // arrays are being walked anyway, and doing it here rather than on the

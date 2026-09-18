@@ -170,6 +170,11 @@ export {
   previewFxRuntime,
 } from "./features/renderer/fx/createRuntime";
 export { frameCount, frameTimeMs } from "./features/export/frames";
+// Authoring a speed ramp, for `specs/speed-ramp.spec.ts`. The graph in the
+// option panel is a canvas, so a spec that drove it would be proving Playwright
+// can hit a pixel rather than that the ramp reaches the delivered file; this is
+// the same op the graph itself calls.
+export { setClipSpeedCurve } from "./features/timeline/speedOps";
 // Re-reading the preset folders, for the one thing a spec cannot otherwise
 // reach: whether a LUT a *user* dropped into `userData/presets` is picked up by
 // the real scanner, validated by the real validator and graded by the real

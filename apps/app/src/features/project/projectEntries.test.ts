@@ -279,3 +279,57 @@ describe("the round trip", () => {
     }
   });
 });
+
+describe("a speed ramp in the project file", () => {
+  /** The same clip, with a ramp on it and the scalar the ramp implies. */
+  function ramped(): Timeline {
+    return {
+      clip: {
+        ...(elements().clip as any),
+        speed: 5000 / 6931.471805599453,
+        speedCurve: [
+          { t: 0, v: 1 },
+          { t: 5000, v: 2 },
+        ],
+      },
+    } as unknown as Timeline;
+  }
+
+  it("round trips the curve and the rate it implies", async () => {
+    const written = serializeProjectEntries({
+      elements: ramped(),
+      tracks: TRACKS,
+      options: options(),
+      anchor: PROJECT,
+    });
+
+    const result = await readBack(written, PROJECT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    const clip = result.document.elements.clip as any;
+    expect(clip.speedCurve).toEqual([
+      { t: 0, v: 1 },
+      { t: 5000, v: 2 },
+    ]);
+    // `duration / speed` has to come back as the integral, or the clip is a
+    // different length in the reopened project than it was in the saved one.
+    expect(clip.duration / clip.speed).toBeCloseTo(6931.471805599453, 6);
+  });
+
+  it("writes nothing at all for a project nobody has ramped", () => {
+    // The `SCHEMA_VERSION` contract: a new field absent means default, and a
+    // project written before the ramp existed and one written after it are the
+    // same bytes. This compares the entries the digest covers, which is where
+    // an extra `"speedCurve":null` or `"speedCurve":[]` would show up.
+    const plain = serializeProjectEntries({
+      elements: elements(),
+      tracks: TRACKS,
+      options: options(),
+      anchor: PROJECT,
+    });
+    expect(plain.timeline).not.toContain("speedCurve");
+  });
+});

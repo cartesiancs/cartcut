@@ -51,7 +51,18 @@
     "volume": "볼륨",
     "speed": "속도",
     "no_selection": "아직 선택된 항목이 없습니다. 타임라인에서 클립을 선택하면 옵션이 표시됩니다.",
-    "background": "배경"
+    "background": "배경",
+    "speed_ramp": "속도 곡선",
+    "speed_ramp_add": "더블클릭으로 점 추가, 우클릭으로 제거",
+    "speed_ramp_constant": "일정",
+    "speed_ramp_up": "가속",
+    "speed_ramp_down": "감속",
+    "speed_ramp_slow_middle": "중간 느리게",
+    "speed_ramp_fast_middle": "중간 빠르게",
+    "speed_ramp_ease_in": "서서히 가속",
+    "speed_ramp_ease_out": "서서히 감속",
+    "speed_ramp_option": "곡선",
+    "speed_ramp_preset": "프리셋 적용"
   },
   "modal": {
     "change_language": "언어 변경",
