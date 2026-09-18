@@ -32,6 +32,7 @@ import { createGroup, isGroupAnimated, ungroup } from "../timeline/groupOps";
 import { canMergeClips, mergeClips } from "../timeline/mergeOps";
 import { canRotateClips, rotateClips } from "../timeline/rotateOps";
 import { toggleMirror, type MirrorAxis } from "../timeline/mirrorOps";
+import { isCroppable } from "../timeline/cropOps";
 import { projectBakeHz } from "./frameRate";
 import { refusesEdit } from "./timelineLock";
 import { canDetachAudio } from "../timeline/audio";
@@ -117,6 +118,30 @@ export function mergeSelection(): void {
  */
 export function mirrorClips(ids: string[], axis: MirrorAxis): void {
   commit((input) => toggleMirror(input, ids, axis));
+}
+
+/**
+ * Open the crop tool on the one selected clip.
+ *
+ * **Not a `commit`**, and the only command here that is not. A crop is a
+ * gesture rather than an edit: the tool opens, the user aims a rectangle, and
+ * `previewCanvas.commitCrop` records the one undo step when they apply it.
+ * Committing anything here would put a step on the stack for merely opening a
+ * panel.
+ *
+ * The canvas is asked rather than told, so a clip it will not open on (a type
+ * that cannot be cropped, or one with no extent) leaves the tool flag alone
+ * and the two cannot disagree about whether a session exists.
+ */
+export function cropSelection(): void {
+  const ids = selectedIds();
+  if (ids.length !== 1) {
+    return;
+  }
+  const canvas: any = document.querySelector("preview-canvas");
+  if (canvas?.beginCrop?.(ids[0]) === true) {
+    useTimelineStore.getState().setCursorType("crop");
+  }
 }
 
 /** Turn the selection by `deltaDeg` — 90 for the toolbar's quarter turn. */
@@ -331,6 +356,7 @@ export type EditorCapabilities = {
   canCopy: boolean;
   canPaste: boolean;
   canDetachAudio: boolean;
+  canCrop: boolean;
   canUndo: boolean;
   canRedo: boolean;
 };
@@ -372,6 +398,10 @@ export function capabilities(): EditorCapabilities {
     canCut: hasSelection,
     canCopy: hasSelection,
     canPaste: Object.keys(clipboard).length > 0,
+    // One clip only. A crop is aimed at a picture, and two clips have two
+    // different frames to aim in; the tool has nowhere to put a second
+    // rectangle.
+    canCrop: ids.length === 1 && isCroppable(current.elements[ids[0]]),
     canDetachAudio: ids.some((id) => canDetachAudio(current.elements[id])),
     // The same bounds check `rollbackTimelineFromCheckPoint` makes: it moves
     // `historyNow` by ±1 and refuses to leave the array.

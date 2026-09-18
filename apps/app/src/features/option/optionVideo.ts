@@ -22,6 +22,7 @@ import "./controlAudioVolume";
 import "./controlBlendMode";
 import "./controlClipSpeed";
 import "./controlClipOrientation";
+import "./controlClipCrop";
 import "./optionLutSection";
 import "./optionAdjustSection";
 import "./optionMaskSection";
@@ -226,6 +227,11 @@ export class OptionVideo extends LitElement {
         .elementId=${this.elementId}
         .isShow=${this.isShow}
       ></clip-orientation>
+
+      <clip-crop
+        .elementId=${this.elementId}
+        .isShow=${this.isShow}
+      ></clip-crop>
 
       <blend-mode
         .elementId=${this.elementId}

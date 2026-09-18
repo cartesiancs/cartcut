@@ -64,6 +64,33 @@ import {
   penUp,
 } from "../mask/penSession";
 import {
+  type CropAction,
+  type CropSession,
+  cropBegin,
+  cropCapturesKey,
+  cropDown,
+  cropKey,
+  cropMove,
+  cropUp,
+  cropZoneAt,
+} from "../crop/cropSession";
+import {
+  CROP_CURSORS,
+  CROP_THIRDS,
+  cropHandlePoints,
+  frameOfLocal,
+  grabOf,
+  localRectOfFrame,
+} from "../crop/cropOverlay";
+import {
+  cropOf,
+  frameBoxOf,
+  isCroppable,
+  setClipCrop,
+} from "../timeline/cropOps";
+import { cropTransformInto } from "../renderer/crop";
+import { applyMirror } from "../renderer/mirror";
+import {
   isMaskable,
   setClipMaskFields,
   setClipMaskPath,
@@ -144,6 +171,22 @@ const PEN_STROKE = "#ffffff";
 const PEN_NODE = "#1b6ef3";
 /** The one that closes the path, so it cannot be mistaken for the others. */
 const PEN_FIRST_NODE = "#ffd400";
+
+/**
+ * The crop tool's chrome.
+ *
+ * The grab band matches `preview/hitTest.ts#HANDLE_PADDING_PX` rather than the
+ * pen's smaller radius: these are resize grips, and a crop grip should be as
+ * easy to hit as the clip's own.
+ */
+const CROP_GRAB_PX = 20;
+const CROP_HANDLE_PX = 7;
+const CROP_STROKE = "#ffffff";
+const CROP_CASING = "rgba(0, 0, 0, 0.62)";
+/** How far the frame outside the crop is knocked back. */
+const CROP_DIM = "rgba(0, 0, 0, 0.58)";
+/** Painted under the ghost, so a source with alpha does not show the scene. */
+const CROP_GROUND = "#101010";
 
 /**
  * The polygon tool's chrome reuses the pen's colours and radius on purpose:
@@ -235,6 +278,7 @@ export class PreviewCanvas extends LitElement {
     | "ns-resize"
     | "nesw-resize"
     | "nwse-resize"
+    | "move"
     | "crosshair";
   isStretch: boolean;
   isEditText: boolean;
@@ -324,6 +368,19 @@ export class PreviewCanvas extends LitElement {
 
   /** A pen session cannot outlive the window losing focus mid-stroke. */
   private boundWindowBlur = () => this.cancelPen();
+
+  /**
+   * The crop tool's state, or `null`.
+   *
+   * Component state rather than document state, exactly as `penSession` is and
+   * for its reason: **nothing is written until Apply**, so a crop is one undo
+   * step and an undo pressed mid-crop cannot desynchronise a session from a
+   * document it has not touched. The logic is `features/crop/cropSession.ts`;
+   * everything here is dispatch.
+   */
+  private cropSession: CropSession | null = null;
+  private boundCropKeydown = (e: KeyboardEvent) => this._handleCropKeydown(e);
+  private boundCropBlur = () => this.cancelCrop();
 
   renderers: TimelineRenderers = {
     image: renderImage,
@@ -439,6 +496,17 @@ export class PreviewCanvas extends LitElement {
         this.cancelPen();
       }
 
+      // The same rule for the crop tool, and the same two ways out of it. A
+      // crop session also cannot survive its clip being deleted, because the
+      // box it measures the frame against would be gone.
+      if (
+        this.cropSession != null &&
+        (state.control.cursorType !== "crop" ||
+          state.timeline[this.cropSession.elementId] == null)
+      ) {
+        this.cancelCrop();
+      }
+
       // this.setTimelineColor();
       // Coalesced, not drawn inline. A store write can arrive faster than the
       // display can show the result — a cursor tick on a 120Hz panel, a
@@ -512,6 +580,7 @@ export class PreviewCanvas extends LitElement {
     // keydown listener comes off with it — a leaked one would keep swallowing
     // Backspace for the rest of the session.
     this.cancelPen();
+    this.cancelCrop();
     // A drag interrupted by the panel closing still commits what it did, rather
     // than leaving a previewed document that no checkpoint ever recorded.
     this.gesture.flush();
@@ -785,9 +854,17 @@ export class PreviewCanvas extends LitElement {
     if (this.chrome.selection) {
       ctx.save();
       ctx.setTransform(...toDevice);
-      this.drawNullGizmos(ctx, g.scale);
-      this.drawActiveOutline(ctx);
+      // The clip's own outline, its rotation knob and the group gizmos are
+      // suppressed while the crop tool is open. Not for tidiness: the tool owns
+      // the pointer for as long as it is up, so none of that chrome can be
+      // grabbed, and a second set of eight grips sitting a few pixels from the
+      // crop's own is an invitation to aim at the wrong one.
+      if (this.cropSession == null) {
+        this.drawNullGizmos(ctx, g.scale);
+        this.drawActiveOutline(ctx);
+      }
       this.drawPenOverlay(ctx);
+      this.drawCropOverlay(ctx);
       this.drawShapeOverlay(ctx);
       if (this.alignDirection.length > 0) {
         this.drawAlign(ctx, this.alignDirection);
@@ -1238,6 +1315,304 @@ export class PreviewCanvas extends LitElement {
   /** The radius within which clicking the first node closes the path. */
   private penGrabRadius(elementId: string): number {
     return PEN_GRAB_RADIUS_PX / this.penScreenUnit(elementId);
+  }
+
+
+  // ------------------------------------------------------------- the crop tool
+
+  /** The clip's committed crop and the box it is drawn in, at this cursor. */
+  private cropFrameOf(elementId: string): {
+    crop: ReturnType<typeof cropOf>;
+    box: { width: number; height: number };
+    frame: { width: number; height: number };
+  } | null {
+    const element = this.timeline[elementId];
+    if (element == null) {
+      return null;
+    }
+    const box = sampledBoxOf(element, this.timelineCursor);
+    if (!(box.width > 0) || !(box.height > 0)) {
+      return null;
+    }
+    const crop = cropOf(element);
+    return { crop, box, frame: frameBoxOf(box, crop) };
+  }
+
+  /**
+   * Open the crop tool on `elementId`, or refuse.
+   *
+   * Refuses a clip that cannot be cropped and one with no extent, so the tool
+   * never opens a session it could not commit. Playback is stopped first for
+   * `beginPen`'s reason: `Timeline.stop()` declines unless the tool is
+   * `pointer`, so entering the crop while playing would leave the playhead
+   * running with Space unable to halt it.
+   */
+  public beginCrop(elementId: string): boolean {
+    const element = this.timeline[elementId];
+    if (!isCroppable(element)) {
+      return false;
+    }
+    const placed = this.cropFrameOf(elementId);
+    if (placed == null) {
+      return false;
+    }
+    this.stopPlay();
+    // The clip has to be the selected one, or its own outline and grips would
+    // stay live under the overlay and the two would fight for the pointer.
+    this.activeElementId = elementId;
+    this.cropSession = cropBegin(elementId, placed.crop, placed.frame);
+    window.addEventListener("keydown", this.boundCropKeydown, true);
+    window.addEventListener("blur", this.boundCropBlur);
+    this.updateCursor();
+    this.drawCanvas(this.canvas);
+    return true;
+  }
+
+  /** Tear the session down. Idempotent, so every exit path can just call it. */
+  private endCrop(): void {
+    if (this.cropSession == null) {
+      return;
+    }
+    this.cropSession = null;
+    window.removeEventListener("keydown", this.boundCropKeydown, true);
+    window.removeEventListener("blur", this.boundCropBlur);
+    this.cursorType = "default";
+    this.updateCursor();
+    this.drawCanvas(this.canvas);
+  }
+
+  /** Abandon the crop. The document is untouched: nothing was written. */
+  private cancelCrop(): void {
+    this.endCrop();
+  }
+
+  /** Whether a crop session is open, for the panel to read. */
+  public get isCropping(): boolean {
+    return this.cropSession != null;
+  }
+
+  /** The live session, for the panel's aspect buttons. */
+  public get activeCropSession(): CropSession | null {
+    return this.cropSession;
+  }
+
+  /** Replace the session wholesale, for an action the panel produced. */
+  public applyCrop(action: CropAction): void {
+    this.applyCropAction(action);
+  }
+
+  /** Write the framing as one undo step, then leave the tool. */
+  private commitCrop(session: CropSession): void {
+    const elementId = session.elementId;
+    const rect = session.rect;
+    const cursor = this.timelineCursor;
+    const bakeHz = bakeRateFor(this.renderOption.fps);
+
+    this.endCrop();
+    // Back to the pointer whether or not anything was committed: the crop is
+    // over either way, and leaving the tool armed would make the next click on
+    // the picture start a second one nobody asked for.
+    this.timelineState.setCursorType("pointer");
+
+    if (refusesEdit()) {
+      return;
+    }
+    useTimelineStore
+      .getState()
+      .withCheckpoint((doc) =>
+        setClipCrop(doc, elementId, rect, cursor, bakeHz),
+      );
+  }
+
+  /** Apply whatever the state machine decided. */
+  private applyCropAction(action: CropAction): void {
+    switch (action.kind) {
+      case "none":
+        return;
+      case "update":
+        this.cropSession = action.session;
+        // Pointer-rate, as the pen's is: a crop drag's updates arrive as fast
+        // as the mouse reports, which on a high-rate pointer is well above the
+        // display's refresh.
+        this.scheduleDraw();
+        return;
+      case "commit":
+        this.commitCrop(action.session);
+        return;
+      case "cancel":
+        this.cancelCrop();
+        this.timelineState.setCursorType("pointer");
+        return;
+    }
+  }
+
+  /** A pointer position in the clip's normalized frame coordinates. */
+  private toCropFrame(
+    session: CropSession,
+    world: { x: number; y: number },
+  ): { x: number; y: number } | null {
+    const placed = this.cropFrameOf(session.elementId);
+    if (placed == null) {
+      return null;
+    }
+    return frameOfLocal(
+      this.toElementLocal(session.elementId, world),
+      placed.crop,
+      placed.box,
+    );
+  }
+
+  /** The grab band, as a fraction of the frame on each axis. */
+  private cropGrab(session: CropSession): { x: number; y: number } {
+    const placed = this.cropFrameOf(session.elementId);
+    if (placed == null) {
+      return { x: 0, y: 0 };
+    }
+    return grabOf(
+      CROP_GRAB_PX / this.penScreenUnit(session.elementId),
+      placed.crop,
+      placed.box,
+    );
+  }
+
+  private _handleCropKeydown(event: KeyboardEvent): void {
+    const session = this.cropSession;
+    if (session == null) {
+      return;
+    }
+    // Before anything else, and it has to be here rather than inherited: this
+    // listener runs in the capture phase, so the bubble handlers' own guards
+    // have not had a chance to let a text field through yet.
+    if (isTypingEvent(event)) {
+      return;
+    }
+    if (!cropCapturesKey(event.code)) {
+      return;
+    }
+    event.preventDefault();
+    // Both, deliberately. `preventDefault` stops the browser's own use of the
+    // key; `stopPropagation` is what keeps Backspace from reaching the timeline
+    // canvas and deleting the very clip being cropped.
+    event.stopPropagation();
+    this.applyCropAction(cropKey(session, event.code));
+  }
+
+  /**
+   * The whole source frame, the framing rectangle and the grips.
+   *
+   * Drawn in `drawCanvas`'s chrome pass, which is neither dimmed by
+   * `OUTSIDE_ALPHA` nor clipped to the frame rectangle, and both matter: a
+   * crop is very often aimed at a clip that hangs outside the project frame and
+   * a half-lit grip is hard to aim at.
+   *
+   * Two passes, and the first is a picture rather than chrome. The scene pass
+   * below has already drawn this clip *cropped*, so the parts the user is about
+   * to reveal are simply not there; the ghost draws the clip's whole frame over
+   * the top, at the geometry the crop map implies, and the dim then knocks back
+   * everything outside the rectangle being described. Painting over the scene
+   * is what CapCut's crop view does too, and it is the only way to show a region
+   * that the composite by definition does not contain.
+   */
+  private drawCropOverlay(ctx: CanvasRenderingContext2D): void {
+    const session = this.cropSession;
+    if (session == null) {
+      return;
+    }
+    const element: any = this.timeline[session.elementId];
+    const placed = this.cropFrameOf(session.elementId);
+    if (element == null || placed == null) {
+      return;
+    }
+    const renderFunction = (this.renderers as any)[element.filetype];
+    const unit = this.penScreenUnit(session.elementId);
+    const { crop, box, frame } = placed;
+
+    // ---- the ghost: the clip's whole frame, in the place the crop map puts it
+    ctx.save();
+    // The parent chain first, then the element's own transform, the same two
+    // steps `renderElement` and `drawActiveOutline` take, so the ghost lands
+    // exactly on the pixels the scene pass drew.
+    const parent = parentMatrixOf(
+      this.timeline,
+      session.elementId,
+      this.timelineCursor,
+    );
+    ctx.transform(parent.a, parent.b, parent.c, parent.d, parent.e, parent.f);
+    applyElementTransform(ctx, element, this.timelineCursor);
+
+    if (renderFunction != null) {
+      ctx.save();
+      // The real draw's own order, with `applyCrop`'s clip left off, so the
+      // frame appears exactly where the cropped picture already sits and
+      // extends outward from it. Anything else would have to reproduce this
+      // geometry and could drift from it.
+      applyMirror(ctx, element, box.width, box.height);
+      cropTransformInto(ctx, crop, box.width, box.height);
+      ctx.fillStyle = CROP_GROUND;
+      ctx.fillRect(0, 0, box.width, box.height);
+      renderFunction(ctx, session.elementId, element, this.timelineCursor);
+      ctx.restore();
+    }
+
+    // ---- the dim: everything in the frame that the rectangle does not keep
+    const outer = localRectOfFrame(
+      { x: 0, y: 0, width: 1, height: 1 },
+      crop,
+      box,
+    );
+    const kept = localRectOfFrame(session.rect, crop, box);
+
+    ctx.beginPath();
+    ctx.rect(outer.x, outer.y, outer.width, outer.height);
+    ctx.rect(kept.x, kept.y, kept.width, kept.height);
+    ctx.fillStyle = CROP_DIM;
+    // Even-odd, so the kept rectangle is a hole in the wash rather than a
+    // second layer of it.
+    ctx.fill("evenodd");
+
+    // ---- the chrome, every measurement in screen pixels rather than world
+    const line = 1.5 / unit;
+    const handle = CROP_HANDLE_PX / unit;
+
+    ctx.strokeStyle = CROP_CASING;
+    ctx.lineWidth = line * 3;
+    ctx.strokeRect(kept.x, kept.y, kept.width, kept.height);
+    ctx.strokeStyle = CROP_STROKE;
+    ctx.lineWidth = line;
+    ctx.strokeRect(kept.x, kept.y, kept.width, kept.height);
+
+    // The thirds, which is what people actually frame against.
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.45)";
+    ctx.lineWidth = line;
+    ctx.beginPath();
+    for (const at of CROP_THIRDS) {
+      const x = kept.x + kept.width * at;
+      const y = kept.y + kept.height * at;
+      ctx.moveTo(x, kept.y);
+      ctx.lineTo(x, kept.y + kept.height);
+      ctx.moveTo(kept.x, y);
+      ctx.lineTo(kept.x + kept.width, y);
+    }
+    ctx.stroke();
+
+    for (const { point } of cropHandlePoints(session.rect)) {
+      const at = localRectOfFrame(
+        { x: point.x, y: point.y, width: 0, height: 0 },
+        crop,
+        box,
+      );
+      ctx.fillStyle = CROP_CASING;
+      ctx.fillRect(
+        at.x - handle / 2 - line,
+        at.y - handle / 2 - line,
+        handle + line * 2,
+        handle + line * 2,
+      );
+      ctx.fillStyle = CROP_STROKE;
+      ctx.fillRect(at.x - handle / 2, at.y - handle / 2, handle, handle);
+    }
+
+    ctx.restore();
   }
 
   private _handlePenKeydown(event: KeyboardEvent): void {
@@ -1728,6 +2103,19 @@ export class PreviewCanvas extends LitElement {
     // The clip is the one the session began on, never whatever is under the
     // pointer: a mask belongs to a clip, and re-targeting mid-stroke would
     // silently move half a drawing onto a different picture.
+    // The crop tool owns the whole preview while it is open, so this returns
+    // unconditionally, including for a press that lands on nothing. A press on
+    // the backdrop must not select a clip behind the overlay or start a pan out
+    // from under the framing the user is aiming.
+    if (this.cropSession != null) {
+      const session = this.cropSession;
+      const point = this.toCropFrame(session, world);
+      if (point != null) {
+        this.applyCropAction(cropDown(session, point, this.cropGrab(session)));
+      }
+      return false;
+    }
+
     if (this.penSession != null) {
       const session = this.penSession;
       this.applyPenAction(
@@ -1999,7 +2387,8 @@ export class PreviewCanvas extends LitElement {
       this.isMove ||
       this.isStretch ||
       this.isRotation ||
-      (this.penSession?.dragging ?? -1) >= 0;
+      (this.penSession?.dragging ?? -1) >= 0 ||
+      this.cropSession?.drag != null;
     if (!isDragging && !this.isInsideCanvas(e)) {
       // The rubber band chases the pointer, so it has to stop at the edge
       // rather than freeze pointing at wherever the pointer was last seen.
@@ -2029,6 +2418,23 @@ export class PreviewCanvas extends LitElement {
       if (this.nowShapeId !== "") {
         this.shapeHover = { x: mx, y: my };
         this.scheduleDraw();
+      }
+      return false;
+    }
+
+    if (this.cropSession != null) {
+      const session = this.cropSession;
+      const point = this.toCropFrame(session, world);
+      if (point != null) {
+        // The cursor follows the grip that *would* be grabbed while nothing is
+        // down, and the one that is grabbed while something is, so it does not
+        // flicker as the pointer wanders off a handle mid-drag.
+        const zone =
+          session.drag?.zone ??
+          cropZoneAt(session.rect, point, this.cropGrab(session));
+        this.cursorType = zone == null ? "default" : CROP_CURSORS[zone];
+        this.updateCursor();
+        this.applyCropAction(cropMove(session, point));
       }
       return false;
     }
@@ -2341,6 +2747,11 @@ export class PreviewCanvas extends LitElement {
     // stay armed, turning the next hover into a handle drag. Above the keyframe
     // write too: that one is for a move gesture, and a pen stroke that reached
     // it would plant a *position* keyframe on the clip it is masking.
+    if (this.cropSession != null) {
+      this.applyCropAction(cropUp(this.cropSession));
+      return;
+    }
+
     if (this.penSession != null) {
       this.applyPenAction(penUp(this.penSession));
       return;
@@ -2503,7 +2914,7 @@ export class PreviewCanvas extends LitElement {
     // A double click while drawing is two pen clicks, not a request to edit a
     // caption underneath. (Nothing binds this handler today, so this is a guard
     // against it being bound later rather than a bug being fixed.)
-    if (this.penSession != null) {
+    if (this.penSession != null || this.cropSession != null) {
       return;
     }
     const world = this.toWorld(e);

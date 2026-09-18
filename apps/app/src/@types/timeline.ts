@@ -190,6 +190,58 @@ type Mirrorable = {
 };
 
 /**
+ * The part of the source frame a clip shows.
+ *
+ * All four numbers are fractions of the **whole source frame**, never of the
+ * previous crop. That is what makes two crops compose by intersecting in one
+ * coordinate system, and what lets the crop tool re-open on the original frame
+ * however many times the clip has been cropped.
+ *
+ * **The invariant everything else is derived from:** `width` and `height` on the
+ * element are the box the *cropped* picture is drawn into, so the whole source
+ * frame would occupy `width / crop.width` by `height / crop.height`. That
+ * division is the only definition of the uncropped extent; nothing stores it,
+ * which is why it cannot drift away from the crop it belongs to.
+ *
+ * Applying a crop therefore moves three fields at once (the rect, the box and
+ * the location) so the kept picture stays on exactly the canvas pixels it was
+ * already on and the box shrinks to hug it. `features/timeline/cropOps.ts` owns
+ * that arithmetic and states why the location term is not simply an offset.
+ *
+ * A straighten angle would belong here, as an optional fifth field. It is
+ * deliberately absent for now, and adding it later needs no schema move.
+ */
+export type CropRect = {
+  /** Left edge, as a fraction of the source frame. 0 is the left edge. */
+  x: number;
+  /** Top edge, as a fraction of the source frame. */
+  y: number;
+  /** Kept width, as a fraction of the source frame. */
+  width: number;
+  /** Kept height, as a fraction of the source frame. */
+  height: number;
+};
+
+/**
+ * A clip whose picture can be reframed to part of its source.
+ *
+ * Video and image only, the same two types as `Mirrorable` and for a related
+ * reason: a crop reframes *media*. A shape and a text clip have no source frame
+ * to take a part of, and a group, an effect and a transition have no picture of
+ * their own at all.
+ *
+ * Absent means the whole frame, answered by
+ * `features/timeline/cropOps.ts#cropOf`. Cropping back to the whole frame
+ * deletes the key rather than storing `{0, 0, 1, 1}`, so a project nobody has
+ * cropped saves byte-identically to one written before the feature and
+ * `SCHEMA_VERSION` did not move. The rule `blend`, `lut`, `mask` and `mirror`
+ * all follow.
+ */
+type Croppable = {
+  crop?: CropRect;
+};
+
+/**
  * Where a reversed clip came from, so reversing it back is instant.
  *
  * A reversed clip's `localpath` points at a *new file*, the clip's trimmed
@@ -581,6 +633,7 @@ export type ImageElementType = TimelinePlaced &
   Gradable &
   Adjustable &
   Mirrorable &
+  Croppable &
   Maskable &
   Replaceable & {
     filetype: "image";
@@ -690,6 +743,7 @@ export type VideoElementType = TimelinePlaced &
   Gradable &
   Adjustable &
   Mirrorable &
+  Croppable &
   Maskable &
   Replaceable & {
     filetype: "video";

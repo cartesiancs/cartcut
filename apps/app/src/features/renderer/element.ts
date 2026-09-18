@@ -17,6 +17,7 @@ import { adjustToneFor, applyFinish, finishRenderFor } from "./adjust/apply";
 import { applyLutGrade, lutGradeFor } from "./lut/apply";
 import { applyMask, clipToMask, destinationMatrix, maskRenderFor } from "./mask";
 import { applyMirror } from "./mirror";
+import { applyCrop } from "./crop";
 import { backdropOf, type Backdrop } from "./backdrop";
 import { layerFor } from "./surface";
 import type { ElementRenderFunction } from "./type";
@@ -420,12 +421,24 @@ function drawDirect<T extends VisualTimelineElement>(
   }
   ctx.globalAlpha *= opacityScaledBy100 / 100;
 
-  // Inside the box and after the transform, so the picture turns over and the
-  // box does not — see `mirror.ts`. The outline below is symmetric, so it does
-  // not care that it is drawn under the flip.
+  // Saved around the picture alone, so the outline below is drawn in clean box
+  // space. The mirror never needed it, since a flip about the box centre leaves
+  // a symmetric outline where it was, but a crop installs a clip region and a
+  // scale, and an outline drawn under those would be cut off and magnified.
+  ctx.save();
+
+  // Both inside the box and after the transform, so the picture turns over and
+  // is reframed while the box does not move. See `mirror.ts` and `crop.ts`.
+  //
+  // The mirror goes first, which is not arbitrary: it makes the *kept* picture
+  // the thing that turns over. Reversed, flipping a cropped clip would also
+  // slide its framing.
   applyMirror(ctx, sized, width, height);
+  applyCrop(ctx, sized, width, height);
 
   renderFunction(ctx, elementId, sized, timelineCursor, backdrop);
+
+  ctx.restore();
 
   if (controlOutlineEnabled) {
     renderControlOutline(ctx, 0, 0, width, height);

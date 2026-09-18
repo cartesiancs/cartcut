@@ -41,6 +41,7 @@ import {
   addTrack,
   capabilities,
   copySelection,
+  cropSelection,
   cutSelection,
   deleteSelection,
   detachAudioFromSelection,
@@ -143,6 +144,13 @@ const BUTTONS: ToolbarButton[] = [
     label: "Detach audio",
     run: detachAudioFromSelection,
     enabled: (caps) => caps.canDetachAudio,
+  },
+  {
+    // `crop_free` rather than `crop`, which the option panel's Mask tab wears.
+    icon: "crop_free",
+    label: "Crop",
+    run: cropSelection,
+    enabled: (caps) => caps.canCrop,
   },
   {
     icon: "delete",

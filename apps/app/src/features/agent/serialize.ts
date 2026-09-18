@@ -35,6 +35,7 @@ import { adjustOf } from "../renderer/adjust";
 import { isAdjustable } from "../timeline/adjustOps";
 import { isBlendable } from "../timeline/blendOps";
 import { isMirrorable, mirrorOf } from "../timeline/mirrorOps";
+import { cropOf, isCropped, isCroppable } from "../timeline/cropOps";
 import { isReversed } from "../timeline/reverseOps";
 import { isGradable } from "../timeline/lutOps";
 import { maskOf } from "../mask/maskShape";
@@ -216,6 +217,19 @@ export function clipRow(
     row.reversed = true;
   }
 
+  // Only when the clip is actually cropped, for `mirror`'s reason: a reframed
+  // clip explains a picture that does not match its source at a glance, and
+  // four numbers on every row of a long list would not pay for themselves.
+  // Rounded to whole percentages: the agent is choosing which clip to look at,
+  // not reproducing the framing.
+  const crop = cropOf(element);
+  if (isCropped(crop)) {
+    const percent = (value: number) => Math.round(value * 100);
+    row.crop =
+      `${percent(crop.x)},${percent(crop.y)} ` +
+      `${percent(crop.width)}x${percent(crop.height)}%`;
+  }
+
   switch (element.filetype) {
     case "text": {
       row.text = truncate(element.text, TEXT_PREVIEW_CHARS);
@@ -375,6 +389,20 @@ export function clipDetail(
     const mirror = mirrorOf(element);
     detail.flipH = mirror.h;
     detail.flipV = mirror.v;
+  }
+
+  // Whatever its value on the types that can carry one, so an agent can tell
+  // "this clip shows its whole frame" from "this clip cannot be cropped".
+  // Fractions of the source frame, which is the unit the field stores and the
+  // one any future `set_crop` would take.
+  if (isCroppable(element)) {
+    const crop = cropOf(element);
+    detail.crop = {
+      x: crop.x,
+      y: crop.y,
+      width: crop.width,
+      height: crop.height,
+    };
   }
 
   // Reported whatever its value on the types that can carry one, and absent on

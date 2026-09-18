@@ -42,6 +42,7 @@ export type TimelineCursorType =
   | "text"
   | "shape"
   | "pen"
+  | "crop"
   | "lockKeyboard";
 
 /**

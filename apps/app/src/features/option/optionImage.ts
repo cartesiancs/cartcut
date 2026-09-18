@@ -6,6 +6,7 @@ import "../filter/backgroundRemove";
 import "./controlDefaultTransform";
 import "./controlBlendMode";
 import "./controlClipOrientation";
+import "./controlClipCrop";
 import "./optionLutSection";
 import "./optionAdjustSection";
 import "./optionMaskSection";
@@ -97,6 +98,11 @@ export class OptionImage extends LitElement {
         .elementId=${this.elementId}
         .isShow=${this.isShow}
       ></clip-orientation>
+
+      <clip-crop
+        .elementId=${this.elementId}
+        .isShow=${this.isShow}
+      ></clip-crop>
 
       <blend-mode
         .elementId=${this.elementId}
