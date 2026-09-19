@@ -34,7 +34,12 @@ import { sweepSpec } from "../input/numberScrub";
 // Font size and letter spacing are whole pixels — both handlers read the field
 // back as an integer. Line spacing is a multiple of the size, so it moves in
 // twentieths across the same 0.5..4 band the field declares.
-const SCRUB_FONT_SIZE = scrubOn({ sensitivity: 0.5, step: 1, min: 1, decimals: 0 });
+const SCRUB_FONT_SIZE = scrubOn({
+  sensitivity: 0.5,
+  step: 1,
+  min: 1,
+  decimals: 0,
+});
 const SCRUB_LINE_HEIGHT = scrubOn({
   sensitivity: 0.01,
   step: 0.05,
@@ -42,7 +47,11 @@ const SCRUB_LINE_HEIGHT = scrubOn({
   max: 4,
   decimals: 2,
 });
-const SCRUB_LETTER_SPACING = scrubOn({ sensitivity: 0.25, step: 1, decimals: 0 });
+const SCRUB_LETTER_SPACING = scrubOn({
+  sensitivity: 0.25,
+  step: 1,
+  decimals: 0,
+});
 
 /**
  * The bundled default font: the name it is stored under, and the name it is
@@ -211,7 +220,9 @@ export class OptionText extends LitElement {
             family.family
               ? "bg-primary"
               : ""}"
-            style=${preview == null ? "" : `font-family: '${preview.entry.name}'`}
+            style=${preview == null
+              ? ""
+              : `font-family: '${preview.entry.name}'`}
             @click=${() => this.handleChangeFontFamily(family)}
             >${this.familyLabel(family)}</a
           >
@@ -252,34 +263,32 @@ export class OptionText extends LitElement {
       </div>
 
       <div class=${this.tab === "media" ? "" : "d-none"}>
-      <span class="text-light ${this.elementId.length > 1 ? "" : "d-none"}"
-        >${this.elementId.length} selected</span
-      >
+        <span class="text-light ${this.elementId.length > 1 ? "" : "d-none"}"
+          >${this.elementId.length} selected</span
+        >
 
-      <default-transform
-        .elementId=${this.elementId}
-        .timeline=${this.timeline}
-        .timelineCursor=${this.timelineCursor}
-        .timelineState=${this.timelineState}
-        .isShow=${this.isShow}
-      ></default-transform>
+        <default-transform
+          .elementId=${this.elementId}
+          .timeline=${this.timeline}
+          .timelineCursor=${this.timelineCursor}
+          .timelineState=${this.timelineState}
+          .isShow=${this.isShow}
+        ></default-transform>
 
-      <blend-mode
-        .elementId=${this.elementId}
-        .isShow=${this.isShow}
-      ></blend-mode>
+        <blend-mode
+          .elementId=${this.elementId}
+          .isShow=${this.isShow}
+        ></blend-mode>
 
-      <!--
+        <!--
         Next to the blend mode, because the two are the same question asked
         twice: how this clip's picture is changed before it meets the scene,
         and how it meets it. Picking *which* filter happens in the Filter tab
         against thumbnails; what belongs here is how strongly it applies.
       -->
-      <option-lut-section
-        .elementId=${this.elementId}
-      ></option-lut-section>
+        <option-lut-section .elementId=${this.elementId}></option-lut-section>
 
-      <!--
+        <!--
         A textarea, not an input: a title that breaks over two lines is a thing
         the renderer can draw (text/lines.ts), and a single-line field cannot
         even hold the string — assigning one strips the break, and the next
@@ -290,44 +299,32 @@ export class OptionText extends LitElement {
         ones this field itself makes, so a bound value would put the caret back
         at the end on every keystroke. resetValue() fills it in instead.
       -->
-      <div class="mb-2">
-        <label class="form-label text-light">Text</label>
-        <textarea
-          @click=${this.handleClickTextForm}
-          @input=${this.handleInputText}
-          @change=${this.handleCommitText}
-          aria-event="text"
-          rows="3"
-          class="form-control bg-default text-light"
-          style="resize: vertical; min-height: 64px;"
-        ></textarea>
-      </div>
+        <div class="mb-2">
+          <label class="form-label text-light">Text</label>
+          <textarea
+            @click=${this.handleClickTextForm}
+            @input=${this.handleInputText}
+            @change=${this.handleCommitText}
+            aria-event="text"
+            rows="3"
+            class="form-control bg-default text-light"
+            style="resize: vertical; min-height: 64px;"
+          ></textarea>
+        </div>
 
-      <div class="mb-2">
-        <label class="form-label text-light">Color</label>
-        <input
-          @input=${this.handleChangeTextColor}
-          aria-event="font-color"
-          type="color"
-          class="form-control bg-default form-control-color"
-          value="#ffffff"
-          title="Choose your color"
-        />
-      </div>
+        <div class="mb-2">
+          <label class="form-label text-light">Color</label>
+          <input
+            @input=${this.handleChangeTextColor}
+            aria-event="font-color"
+            type="color"
+            class="form-control bg-default form-control-color"
+            value="#ffffff"
+            title="Choose your color"
+          />
+        </div>
 
-      <div class="mb-2">
-        <label class="form-label text-light">Font Size</label>
-        <input
-          @change=${this.handleChangeTextSize}
-          @mousedown=${SCRUB_FONT_SIZE}
-          aria-event="font-size"
-          type="number"
-          class="form-control bg-default text-light scrub-number"
-          value="52"
-        />
-      </div>
-
-      <!--
+        <!--
         Leading, as a multiple of the font size. It lives next to Font Size
         because that is what it is measured in, and because between them they
         are the whole of a line's vertical rhythm.
@@ -337,111 +334,77 @@ export class OptionText extends LitElement {
         resizing it. Now the box follows the text and this is where the spacing
         is asked for.
       -->
-      <div class="mb-2">
-        <label class="form-label text-light">Line Spacing</label>
-        <input
-          @change=${this.handleChangeLineHeight}
-          @mousedown=${SCRUB_LINE_HEIGHT}
-          aria-event="line-height"
-          type="number"
-          min="0.5"
-          max="4"
-          step="0.1"
-          class="form-control bg-default text-light scrub-number"
-          .value=${String(this.textStyle.lineHeight)}
-        />
-      </div>
 
-      <div class="mb-2">
-        <label class="form-label text-light">Letter Spacing</label>
-        <input
-          @change=${this.handleChangeLetterSpacing}
-          @mousedown=${SCRUB_LETTER_SPACING}
-          aria-event="letter-spacing"
-          type="number"
-          class="form-control bg-default text-light scrub-number"
-          value="0"
-        />
-      </div>
-
-      <!--
+        <!--
         The button says which font the clip is in, not what the control does.
         A picker that reads "Select Font" whatever is selected makes the panel
         the one place in the app that cannot answer the question it is for —
         every other row here (Font Size, Color, Line Spacing) shows its value.
       -->
-      <div class="mb-2">
-        <label class="form-label text-light">Font</label>
+        <div class="mb-2">
+          <label class="form-label text-light">Font</label>
 
-        <div class="dropdown">
-          <button
-            aria-event="font-toggle"
-            class="btn btn-dark btn-sm dropdown-toggle w-100 d-flex align-items-center text-start"
-            type="button"
-            aria-expanded=${this.fontMenuOpen}
-            title=${this.selectedFontLabel}
-            @click=${this.handleToggleFontMenu}
-          >
-            <!--
+          <div class="dropdown mb-2">
+            <button
+              aria-event="font-toggle"
+              class="btn btn-dark btn-sm dropdown-toggle w-100 d-flex align-items-center text-start"
+              type="button"
+              aria-expanded=${this.fontMenuOpen}
+              title=${this.selectedFontLabel}
+              @click=${this.handleToggleFontMenu}
+            >
+              <!--
               A flex row, so a long font name ellipsises against the caret
               instead of pushing it out of an overflow-hidden button.
             -->
-            <span class="flex-grow-1 text-truncate"
-              >${this.selectedFontLabel}</span
+              <span class="flex-grow-1 text-truncate"
+                >${this.selectedFontLabel}</span
+              >
+            </button>
+            <div
+              aria-event="font-menu"
+              class="dropdown-menu p-0 ${this.fontMenuOpen ? "show" : ""}"
+              style="z-index: 6000;"
             >
-          </button>
-          <div
-            aria-event="font-menu"
-            class="dropdown-menu p-0 ${this.fontMenuOpen ? "show" : ""}"
-            style="z-index: 6000;"
-          >
-            <!--
+              <!--
               Outside the scrolling list, so it stays put while the names move
               under it. placeFontMenu gives the list its height; the frame gets
               none, or the search box would scroll away with them.
             -->
-            <div class="p-2">
-              <input
-                type="text"
-                aria-event="font-search"
-                class="form-control form-control-sm bg-default text-light"
-                placeholder="Search fonts"
-                .value=${this.fontQuery}
-                @input=${this.handleSearchFont}
-              />
+              <div class="p-2">
+                <input
+                  type="text"
+                  aria-event="font-search"
+                  class="form-control form-control-sm bg-default text-light"
+                  placeholder="Search fonts"
+                  .value=${this.fontQuery}
+                  @input=${this.handleSearchFont}
+                />
+              </div>
+              <ul
+                aria-event="font-list"
+                class="list-unstyled mb-0"
+                style="overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;"
+              >
+                ${fontListTemplate.length === 0
+                  ? html`<li>
+                      <span class="dropdown-item-text text-secondary"
+                        >No fonts found</span
+                      >
+                    </li>`
+                  : fontListTemplate}
+              </ul>
             </div>
-            <ul
-              aria-event="font-list"
-              class="list-unstyled mb-0"
-              style="overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;"
-            >
-              ${fontListTemplate.length === 0
-                ? html`<li>
-                    <span class="dropdown-item-text text-secondary"
-                      >No fonts found</span
-                    >
-                  </li>`
-                : fontListTemplate}
-            </ul>
           </div>
-        </div>
-      </div>
 
-      <!--
-        Only the weights this family actually ships. A native select rather
-        than another overlay menu: the list is at most nine rows and never
-        needs a search, and a select is the one control that already says
-        "these are all the choices" without being opened.
-      -->
-      <div class="mb-2">
-        <label class="form-label text-light">Weight</label>
-        <select
-          aria-event="font-weight"
-          class="form-select form-control bg-default text-light"
-          ?disabled=${this.availableWeights().length < 2}
-          @change=${this.handleChangeFontWeight}
-        >
-          <!--
+          <div class="mb-2 w-full d-flex gap-1">
+            <select
+              aria-event="font-weight"
+              class="form-select form-control bg-default text-light"
+              ?disabled=${this.availableWeights().length < 2}
+              @change=${this.handleChangeFontWeight}
+            >
+              <!--
             The selection is a property on the option, not a value binding on
             the select and not the selected attribute. Lit commits an element's
             own bindings before its children, so a value binding would be
@@ -449,82 +412,124 @@ export class OptionText extends LitElement {
             and once anyone has used the control, its dirty flag makes the
             attribute stop moving the visible selection.
           -->
-          ${this.availableWeights().map(
-            (weight) => html`
-              <option value=${weight} .selected=${weight === this.selectedWeight}>
-                ${labelForWeight(weight)}
-              </option>
-            `,
-          )}
-        </select>
-      </div>
+              ${this.availableWeights().map(
+                (weight) => html`
+                  <option
+                    value=${weight}
+                    .selected=${weight === this.selectedWeight}
+                  >
+                    ${labelForWeight(weight)}
+                  </option>
+                `,
+              )}
+            </select>
 
-      <label class="form-label text-light">Font Options</label>
+            <input
+              @change=${this.handleChangeTextSize}
+              @mousedown=${SCRUB_FONT_SIZE}
+              aria-event="font-size"
+              type="number"
+              class="form-control bg-default text-light scrub-number"
+              value="52"
+            />
+          </div>
 
-      <div class="mb-2">
-        <div class="btn-group" role="group" aria-label="Basic example">
-          <button
-            type="button"
-            class="btn btn-sm ${this.isBold
-              ? "btn-primary"
-              : "btn-default"}  text-light"
-            @click=${this.handleClickEnableBold}
-          >
-            <span class="material-symbols-outlined icon-sm"> format_bold </span>
-          </button>
-          <button
-            type="button"
-            class="btn btn-sm ${this.isItalic
-              ? "btn-primary"
-              : "btn-default"} text-light"
-            @click=${this.handleClickEnableItalic}
-          >
-            <span class="material-symbols-outlined icon-sm">
-              format_italic
-            </span>
-          </button>
+          <div class="mb-2">
+            <label class="form-label text-light">Line Spacing</label>
+            <input
+              @change=${this.handleChangeLineHeight}
+              @mousedown=${SCRUB_LINE_HEIGHT}
+              aria-event="line-height"
+              type="number"
+              min="0.5"
+              max="4"
+              step="0.1"
+              class="form-control bg-default text-light scrub-number"
+              .value=${String(this.textStyle.lineHeight)}
+            />
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label text-light">Letter Spacing</label>
+            <input
+              @change=${this.handleChangeLetterSpacing}
+              @mousedown=${SCRUB_LETTER_SPACING}
+              aria-event="letter-spacing"
+              type="number"
+              class="form-control bg-default text-light scrub-number"
+              value="0"
+            />
+          </div>
+
+          <label class="form-label text-light">Font Options</label>
+
+          <div class="mb-2">
+            <div class="btn-group" role="group" aria-label="Basic example">
+              <button
+                type="button"
+                class="btn btn-sm ${this.isBold
+                  ? "btn-primary"
+                  : "btn-default"}  text-light"
+                @click=${this.handleClickEnableBold}
+              >
+                <span class="material-symbols-outlined icon-sm">
+                  format_bold
+                </span>
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm ${this.isItalic
+                  ? "btn-primary"
+                  : "btn-default"} text-light"
+                @click=${this.handleClickEnableItalic}
+              >
+                <span class="material-symbols-outlined icon-sm">
+                  format_italic
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div class="mb-2">
+            <div class="btn-group" role="group" aria-label="Basic example">
+              <button
+                type="button"
+                class="btn btn-sm ${this.align == "left"
+                  ? "btn-primary"
+                  : "btn-default"} text-light"
+                @click=${() => this.handleClickAlign("left")}
+              >
+                <span class="material-symbols-outlined icon-sm">
+                  format_align_left
+                </span>
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm ${this.align == "center"
+                  ? "btn-primary"
+                  : "btn-default"} text-light"
+                @click=${() => this.handleClickAlign("center")}
+              >
+                <span class="material-symbols-outlined icon-sm">
+                  format_align_center
+                </span>
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm ${this.align == "right"
+                  ? "btn-primary"
+                  : "btn-default"} text-light"
+                @click=${() => this.handleClickAlign("right")}
+              >
+                <span class="material-symbols-outlined icon-sm">
+                  format_align_right
+                </span>
+              </button>
+            </div>
+          </div>
+
+          ${this.renderEffects()}
         </div>
-      </div>
-
-      <div class="mb-2">
-        <div class="btn-group" role="group" aria-label="Basic example">
-          <button
-            type="button"
-            class="btn btn-sm ${this.align == "left"
-              ? "btn-primary"
-              : "btn-default"} text-light"
-            @click=${() => this.handleClickAlign("left")}
-          >
-            <span class="material-symbols-outlined icon-sm">
-              format_align_left
-            </span>
-          </button>
-          <button
-            type="button"
-            class="btn btn-sm ${this.align == "center"
-              ? "btn-primary"
-              : "btn-default"} text-light"
-            @click=${() => this.handleClickAlign("center")}
-          >
-            <span class="material-symbols-outlined icon-sm">
-              format_align_center
-            </span>
-          </button>
-          <button
-            type="button"
-            class="btn btn-sm ${this.align == "right"
-              ? "btn-primary"
-              : "btn-default"} text-light"
-            @click=${() => this.handleClickAlign("right")}
-          >
-            <span class="material-symbols-outlined icon-sm">
-              format_align_right
-            </span>
-          </button>
-        </div>
-      </div>
-
-      ${this.renderEffects()}
       </div>
     `;
   }
@@ -589,7 +594,11 @@ export class OptionText extends LitElement {
     label: string,
     path: string[],
     value: number,
-    { min = 0, max = 500, step = 1 }: { min?: number; max?: number; step?: number } = {},
+    {
+      min = 0,
+      max = 500,
+      step = 1,
+    }: { min?: number; max?: number; step?: number } = {},
   ) {
     return html`<div class="col-6 mb-2">
       <label class="form-label text-light small">${label}</label>
@@ -648,7 +657,10 @@ export class OptionText extends LitElement {
           max="100"
           .value=${String(style.textOpacity)}
           @change=${(e: Event) =>
-            this.set(["textOpacity"], Number((e.target as HTMLInputElement).value))}
+            this.set(
+              ["textOpacity"],
+              Number((e.target as HTMLInputElement).value),
+            )}
         />
       </div>
 
@@ -699,44 +711,123 @@ export class OptionText extends LitElement {
             })}
           </div>`
         : ""}
-
-      ${this.toggle("Outline", ["options", "outline", "enable"], style.outline.enable)}
+      ${this.toggle(
+        "Outline",
+        ["options", "outline", "enable"],
+        style.outline.enable,
+      )}
       ${style.outline.enable
         ? html`<div class="row">
-            ${this.numberRow("Size", ["options", "outline", "size"], style.outline.size, { max: 200 })}
-            ${this.numberRow("Opacity", ["options", "outline", "opacity"], style.outline.opacity, { max: 100 })}
-            ${this.colorRow("Color", ["options", "outline", "color"], style.outline.color)}
+            ${this.numberRow(
+              "Size",
+              ["options", "outline", "size"],
+              style.outline.size,
+              { max: 200 },
+            )}
+            ${this.numberRow(
+              "Opacity",
+              ["options", "outline", "opacity"],
+              style.outline.opacity,
+              { max: 100 },
+            )}
+            ${this.colorRow(
+              "Color",
+              ["options", "outline", "color"],
+              style.outline.color,
+            )}
           </div>`
         : ""}
-
-      ${this.toggle("Shadow", ["options", "shadow", "enable"], style.shadow.enable)}
+      ${this.toggle(
+        "Shadow",
+        ["options", "shadow", "enable"],
+        style.shadow.enable,
+      )}
       ${style.shadow.enable
         ? html`<div class="row">
-            ${this.numberRow("Offset X", ["options", "shadow", "offsetX"], style.shadow.offsetX, { min: -500 })}
-            ${this.numberRow("Offset Y", ["options", "shadow", "offsetY"], style.shadow.offsetY, { min: -500 })}
-            ${this.numberRow("Blur", ["options", "shadow", "blur"], style.shadow.blur)}
-            ${this.numberRow("Opacity", ["options", "shadow", "opacity"], style.shadow.opacity, { max: 100 })}
-            ${this.colorRow("Color", ["options", "shadow", "color"], style.shadow.color)}
+            ${this.numberRow(
+              "Offset X",
+              ["options", "shadow", "offsetX"],
+              style.shadow.offsetX,
+              { min: -500 },
+            )}
+            ${this.numberRow(
+              "Offset Y",
+              ["options", "shadow", "offsetY"],
+              style.shadow.offsetY,
+              { min: -500 },
+            )}
+            ${this.numberRow(
+              "Blur",
+              ["options", "shadow", "blur"],
+              style.shadow.blur,
+            )}
+            ${this.numberRow(
+              "Opacity",
+              ["options", "shadow", "opacity"],
+              style.shadow.opacity,
+              { max: 100 },
+            )}
+            ${this.colorRow(
+              "Color",
+              ["options", "shadow", "color"],
+              style.shadow.color,
+            )}
           </div>`
         : ""}
-
       ${this.toggle("Glow", ["options", "glow", "enable"], style.glow.enable)}
       ${style.glow.enable
         ? html`<div class="row">
-            ${this.numberRow("Size", ["options", "glow", "size"], style.glow.size)}
-            ${this.numberRow("Opacity", ["options", "glow", "opacity"], style.glow.opacity, { max: 100 })}
-            ${this.colorRow("Color", ["options", "glow", "color"], style.glow.color)}
+            ${this.numberRow(
+              "Size",
+              ["options", "glow", "size"],
+              style.glow.size,
+            )}
+            ${this.numberRow(
+              "Opacity",
+              ["options", "glow", "opacity"],
+              style.glow.opacity,
+              { max: 100 },
+            )}
+            ${this.colorRow(
+              "Color",
+              ["options", "glow", "color"],
+              style.glow.color,
+            )}
           </div>`
         : ""}
-
-      ${this.toggle("Background", ["background", "enable"], style.background.enable)}
+      ${this.toggle(
+        "Background",
+        ["background", "enable"],
+        style.background.enable,
+      )}
       ${style.background.enable
         ? html`<div class="row">
-            ${this.numberRow("Opacity", ["background", "opacity"], style.background.opacity, { max: 100 })}
-            ${this.numberRow("Padding", ["background", "padding"], style.background.padding)}
-            ${this.numberRow("Radius", ["background", "radius"], style.background.radius)}
-            ${this.numberRow("Blur", ["background", "blur"], style.background.blur)}
-            ${this.colorRow("Color", ["background", "color"], style.background.color)}
+            ${this.numberRow(
+              "Opacity",
+              ["background", "opacity"],
+              style.background.opacity,
+              { max: 100 },
+            )}
+            ${this.numberRow(
+              "Padding",
+              ["background", "padding"],
+              style.background.padding,
+            )}
+            ${this.numberRow(
+              "Radius",
+              ["background", "radius"],
+              style.background.radius,
+            )}
+            ${this.numberRow(
+              "Blur",
+              ["background", "blur"],
+              style.background.blur,
+            )}
+            ${this.colorRow(
+              "Color",
+              ["background", "color"],
+              style.background.color,
+            )}
           </div>`
         : ""}
 
@@ -1147,7 +1238,9 @@ export class OptionText extends LitElement {
 
     event.stopPropagation();
     this.closeFontMenu();
-    this.querySelector<HTMLElement>("button[aria-event='font-toggle']")?.focus();
+    this.querySelector<HTMLElement>(
+      "button[aria-event='font-toggle']",
+    )?.focus();
   };
 
   /**
@@ -1369,7 +1462,9 @@ export class OptionText extends LitElement {
 
   /** The bundled default is stored under its internal name, shown under its own. */
   private familyLabel(family: FontFamily): string {
-    return family.family === DEFAULT_FONT_NAME ? DEFAULT_FONT_LABEL : family.family;
+    return family.family === DEFAULT_FONT_NAME
+      ? DEFAULT_FONT_LABEL
+      : family.family;
   }
 
   /**
