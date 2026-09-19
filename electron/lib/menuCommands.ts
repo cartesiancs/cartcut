@@ -44,7 +44,9 @@ export type MenuCommandId =
   | "file.saveAs"
   | "file.autoSaveRecover"
   | "file.importMedia"
+  | "file.importSubtitles"
   | "file.exportVideo"
+  | "file.exportSubtitles"
   // Edit
   | "edit.undo"
   | "edit.redo"
@@ -110,11 +112,17 @@ export const MENU_COMMANDS: readonly MenuCommand[] = [
     label: "Import Media…",
     accelerator: "CmdOrCtrl+I",
   },
+  // **No accelerators on either subtitle item.** CmdOrCtrl+I and CmdOrCtrl+E
+  // are taken by the two above, `menuCommands.test.ts` refuses a duplicate, and
+  // neither of these is a gesture anyone repeats often enough to earn a third
+  // combination.
+  { id: "file.importSubtitles", label: "Import Subtitles…" },
   {
     id: "file.exportVideo",
     label: "Export Video…",
     accelerator: "CmdOrCtrl+E",
   },
+  { id: "file.exportSubtitles", label: "Export Subtitles…" },
 
   // ------------------------------------------------------------------- Edit
   {

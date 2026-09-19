@@ -118,6 +118,7 @@ ipcMain.handle("dialog:openFiles", ipcDialog.openFiles);
 ipcMain.handle("dialog:exportVideo", ipcDialog.exportVideo);
 ipcMain.handle("dialog:saveProject", ipcDialog.saveProject);
 ipcMain.handle("dialog:saveTemplate", ipcDialog.saveTemplate);
+ipcMain.handle("dialog:saveSubtitles", ipcDialog.saveSubtitles);
 
 ipcMain.handle("autosave:write", ipcAutosave.write);
 ipcMain.handle("autosave:dropRings", ipcAutosave.dropRings);

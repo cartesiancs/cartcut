@@ -43,6 +43,7 @@ import "./features/proxy/proxyPanel";
 import "./features/menu/menuDropdown";
 import "./features/onboarding/onboardingOverlay";
 import "./features/update/updatePrompt";
+import "./features/subtitle/importDialog";
 
 
 import "./features/option/optionGroup";
@@ -183,3 +184,11 @@ export { setClipSpeedCurve } from "./features/timeline/speedOps";
 // half that has to be proved end to end.
 export { loadPresets, presetsOfKind } from "./features/fx/presetRegistry";
 export { preloadLutsForDocument } from "./features/lut/lutRegistry";
+// Subtitle import and export, minus their two native dialogs. Same argument as
+// the LUT pair above: the dialogs are main-process work with their own filters,
+// and this is the half that has to be proved end to end — that a real file's
+// cues reach real text clips, and that those clips come back as the same file.
+// `runImportSubtitlePaths` is the function a dropped `.srt` already calls, and
+// `collectSubtitleText` is what the save dialog would have written.
+export { runImportSubtitlePaths } from "./features/subtitle/subtitleCommands";
+export { collectSubtitleText } from "./features/subtitle/exportSubtitleFile";

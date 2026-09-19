@@ -38,6 +38,10 @@ import { rendererModal } from "../../utils/modal";
 import { startExport } from "../export/exportSession";
 import { recoverAutosaveEntry } from "../project/recoverAutosave";
 import {
+  runExportSubtitles,
+  runImportSubtitles,
+} from "../subtitle/subtitleCommands";
+import {
   clearSelection,
   copySelection,
   cutSelection,
@@ -197,11 +201,26 @@ const COMMANDS: Record<MenuCommandId, (payload?: unknown) => void> = {
       toast("Those files could not be added.");
     });
   },
+  // The same function a dropped `.srt` reaches, so the menu and the drop cannot
+  // behave differently. It asks which clock the file counts in and reports what
+  // landed; everything it decides is in `features/subtitle/`.
+  "file.importSubtitles": () => {
+    void runImportSubtitles().catch((error) => {
+      console.error("[menu] could not import subtitles", error);
+      toast("Those subtitles could not be added.");
+    });
+  },
   "file.exportVideo": () => {
     // The same call the title bar's button makes. It used to reach into
     // `<control-ui-render>` and invoke a method on it, which only worked while
     // that panel was mounted.
     void startExport();
+  },
+  "file.exportSubtitles": () => {
+    void runExportSubtitles().catch((error) => {
+      console.error("[menu] could not export subtitles", error);
+      toast("The subtitles could not be exported.");
+    });
   },
 
   // -------------------------------------------------------------------- Edit

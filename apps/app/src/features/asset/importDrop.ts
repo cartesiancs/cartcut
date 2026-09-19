@@ -14,6 +14,7 @@ import { normalizeFps } from "../timeline/frames";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { collectDroppedPaths } from "./droppedFiles";
 import { planImport, placeImported, type ImportItem } from "./importMedia";
+import { runImportSubtitlePaths } from "../subtitle/subtitleCommands";
 import type { DropTarget } from "./dropTarget";
 import { v4 as uuidv4 } from "uuid";
 import { addTemplateToTimeline } from "../template/addTemplate";
@@ -122,17 +123,20 @@ export async function importPathsAt(
     return [];
   }
 
-  // Templates are partitioned out **above** `planImport`, deliberately. A
-  // `.cttpl` is not media, and `probeMedia` is this app's single gate on what
-  // counts as media — letting one reach it would mean teaching that gate about
-  // a format it has no business knowing, and the reward would be a toast
-  // saying Cartcut has no renderer for a file it can in fact open.
+  // Templates and subtitles are partitioned out **above** `planImport`,
+  // deliberately. Neither is media, and `probeMedia` is this app's single gate
+  // on what counts as media — letting one reach it would mean teaching that
+  // gate about a format it has no business knowing, and the reward would be a
+  // toast saying Cartcut has no renderer for a file it can in fact open.
   const templates: string[] = [];
+  const subtitles: string[] = [];
   const media: (string | ImportItem)[] = [];
   for (const entry of paths) {
     const path = typeof entry === "string" ? entry : entry.path;
     if (/\.cttpl$/i.test(path)) {
       templates.push(path);
+    } else if (/\.(?:srt|vtt)$/i.test(path)) {
+      subtitles.push(path);
     } else {
       media.push(entry);
     }
@@ -140,6 +144,13 @@ export async function importPathsAt(
 
   if (templates.length > 0) {
     await importTemplatesAt(templates, target);
+  }
+  if (subtitles.length > 0) {
+    // **`target` is ignored, on purpose.** A subtitle file states absolute
+    // times, so shifting every cue by wherever the pointer happened to be would
+    // be a surprise the file gives no reason to expect. The clock is chosen in
+    // the dialog and nowhere else.
+    await runImportSubtitlePaths(subtitles);
   }
   if (media.length === 0) {
     return [];

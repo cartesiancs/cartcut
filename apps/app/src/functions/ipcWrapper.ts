@@ -50,6 +50,9 @@ export function enableIpcWrapper() {
         exportVideo: async function (lang) {
           return "none";
         },
+        saveSubtitles: async function () {
+          return "none";
+        },
       },
       store: {
         set: async function (lang) {

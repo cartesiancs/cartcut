@@ -100,6 +100,36 @@ export const ipcDialog = {
     }
   },
 
+  /**
+   * Where to write a subtitle file, and in which of the two formats.
+   *
+   * Its own handler for the reason `saveTemplate` gives above. **Two filters,
+   * not one**, and that is the whole of the format choice: the platform's save
+   * dialog lets the user pick between them and appends the matching extension,
+   * so `flavourForPath` reads the answer off the path it returns. Asking again
+   * in a dialog of our own would be asking twice.
+   */
+  saveSubtitles: async () => {
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: "Export Subtitles",
+      buttonLabel: "Export",
+      filters: [
+        {
+          name: "SubRip",
+          extensions: ["srt"],
+        },
+        {
+          name: "WebVTT",
+          extensions: ["vtt"],
+        },
+      ],
+      properties: [],
+    });
+    if (!canceled) {
+      return filePath.toString();
+    }
+  },
+
   saveProject: async () => {
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
       title: "Save the Project Path to save",

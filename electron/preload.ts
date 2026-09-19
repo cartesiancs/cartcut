@@ -40,6 +40,8 @@ const request = {
     /** Many paths, for Import Media. Resolves to `[]` when cancelled. */
     openFiles: (extension) => ipcRenderer.invoke("dialog:openFiles", extension),
     saveTemplate: () => ipcRenderer.invoke("dialog:saveTemplate"),
+    /** Two filters, so the chosen extension is the chosen format. */
+    saveSubtitles: () => ipcRenderer.invoke("dialog:saveSubtitles"),
     exportVideo: (container?: string) =>
       ipcRenderer.invoke("dialog:exportVideo", container),
   },
