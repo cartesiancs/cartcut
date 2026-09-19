@@ -457,19 +457,27 @@ export function resolvedStyleAt(
 // ------------------------------------------------------------------- the writer
 
 /**
+ * What one edit does to the overrides on a range.
+ *
+ * Two halves, and the second is not a convenience. Asking for a property the
+ * clip already has is a request to stop overriding **that property**, and it
+ * has to leave the range's other overrides alone: un-bolding a stretch that is
+ * also yellow and larger must return it to the clip's weight and to nothing
+ * else. Expressing that as "set nothing" would be a no-op, and expressing it as
+ * "clear the range" throws away the colour and the size, which is the bug this
+ * type exists to make unstatable.
+ */
+export type RunStyleEdit = {
+  /** Keys to override over the range. */
+  set?: TextRunStyle;
+  /** Keys to stop overriding, so the clip's own value shows through again. */
+  remove?: readonly RunStyleKey[];
+};
+
+/**
  * Merge a patch over `[from, to)`.
  *
- * The only producer of run geometry. It splits every run the range crosses,
- * merges the patch onto the covered pieces, drops a merged style that has ended
- * up empty, and merges equal neighbours back together.
- *
- * Returns its input **by identity** when nothing moved, which is what carries
- * the decline contract up to `timeline/textRunOps.ts` and from there to
- * `withCheckpoint`.
- *
- * It does not know about the element's own values. Dropping the patch fields a
- * clip already has is `setTextRangeStyle`'s job, because that is where the
- * element is in hand.
+ * Shorthand for an edit that only sets. `editRunStyle` is the full form.
  */
 export function applyRunStyle(
   runs: readonly TextRun[],
@@ -478,12 +486,39 @@ export function applyRunStyle(
   patch: TextRunStyle,
   text: string,
 ): readonly TextRun[] {
+  return editRunStyle(runs, from, to, { set: patch }, text);
+}
+
+/**
+ * Apply one edit over `[from, to)`.
+ *
+ * The only producer of run geometry. It splits every run the range crosses,
+ * merges the edit onto the covered pieces, drops a merged style that has ended
+ * up empty, and merges equal neighbours back together.
+ *
+ * Returns its input **by identity** when nothing moved, which is what carries
+ * the decline contract up to `timeline/textRunOps.ts` and from there to
+ * `withCheckpoint`. That covers the common "remove a key nothing was
+ * overriding" for free: the pieces come out the way they went in.
+ *
+ * It does not know about the element's own values. Deciding which half of the
+ * edit a given field belongs in is `setTextRangeStyle`'s job, because that is
+ * where the element is in hand.
+ */
+export function editRunStyle(
+  runs: readonly TextRun[],
+  from: number,
+  to: number,
+  edit: RunStyleEdit,
+  text: string,
+): readonly TextRun[] {
   const range = snapRange(text, from, to);
   if (range == null) {
     return runs;
   }
-  const clean = coerceRunStyle(patch);
-  if (clean == null) {
+  const clean = edit.set == null ? null : coerceRunStyle(edit.set);
+  const remove = edit.remove ?? [];
+  if (clean == null && remove.length === 0) {
     return runs;
   }
 
@@ -520,7 +555,13 @@ export function applyRunStyle(
   }
   const bounds = [...inner].sort((a, b) => a - b);
   for (let i = 0; i < bounds.length - 1; i += 1) {
-    const merged = { ...runStyleAt(runs, bounds[i]), ...clean };
+    const merged: TextRunStyle = { ...runStyleAt(runs, bounds[i]), ...clean };
+    // Removals last, so an edit that both sets and removes says what it means
+    // whatever order the caller listed them in. A `face` change does exactly
+    // that: some of its four fields match the clip and some do not.
+    for (const key of remove) {
+      delete merged[key];
+    }
     if (isEmptyStyle(merged)) {
       continue;
     }

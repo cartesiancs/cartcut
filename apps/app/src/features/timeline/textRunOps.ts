@@ -26,13 +26,14 @@ import type {
   TimelineElement,
 } from "../../@types/timeline";
 import {
-  applyRunStyle,
   clearRunStyle,
   diffEdit,
   elementRunStyle,
+  editRunStyle,
   runsOf,
   sameRuns,
   shiftRuns,
+  type RunStyleEdit,
   type RunStyleKey,
 } from "../text/runs";
 import type { TimelineDocument } from "./tracks";
@@ -109,25 +110,37 @@ function withRuns(
 }
 
 /**
- * Drop the patch fields the clip already has.
+ * Split a patch into what it overrides and what it stops overriding.
  *
- * This is the rule in the module header. It runs before the write rather than
- * after it, because a run whose style is empty is never built at all and so can
- * never be stored.
+ * This is the rule in the module header, and the half that is easy to get
+ * wrong is the second one. A field equal to the clip's own value is not a
+ * no-op and it is not a request to clear the range: it is "stop overriding
+ * *this* property here". Pressing B on a stretch that is yellow and larger and
+ * then pressing it again has to give back the clip's weight and nothing else.
+ * Clearing the range instead is what used to take the colour and the size with
+ * it.
+ *
+ * It runs before the write rather than after it, because a run whose style is
+ * empty is never built at all and so can never be stored.
  */
-function overridesOnly(
-  element: TextElementType,
-  patch: TextRunStyle,
-): TextRunStyle {
+function editFor(element: TextElementType, patch: TextRunStyle): RunStyleEdit {
   const own = elementRunStyle(element);
-  const out: TextRunStyle = {};
+  const set: TextRunStyle = {};
+  const remove: RunStyleKey[] = [];
+
   for (const key of Object.keys(patch) as RunStyleKey[]) {
     const value = patch[key];
-    if (value !== undefined && value !== own[key]) {
-      (out[key] as unknown) = value;
+    if (value === undefined) {
+      continue;
+    }
+    if (value === own[key]) {
+      remove.push(key);
+    } else {
+      (set[key] as unknown) = value;
     }
   }
-  return out;
+
+  return { set, remove };
 }
 
 /**
@@ -147,21 +160,13 @@ export function setTextRangeStyle(
   if (!isRunStylable(element)) {
     return doc;
   }
-  const overrides = overridesOnly(element, patch);
-
-  // Nothing but the clip's own values: the *range* still has to be cleared,
-  // because a run there may be saying something else. Asking for white on a
-  // range somebody made red is a request to remove the run, not a no-op.
-  const next =
-    Object.keys(overrides).length === 0
-      ? clearRunStyle(runsOf(element), from, to, element.text ?? "")
-      : applyRunStyle(
-          runsOf(element),
-          from,
-          to,
-          overrides,
-          element.text ?? "",
-        );
+  const next = editRunStyle(
+    runsOf(element),
+    from,
+    to,
+    editFor(element, patch),
+    element.text ?? "",
+  );
 
   return withRuns(doc, elementId, next);
 }
