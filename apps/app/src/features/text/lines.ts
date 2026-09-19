@@ -34,5 +34,38 @@
  * not this function's.
  */
 export function splitParagraphs(text: string): string[] {
-  return (text ?? "").split(/\r\n|\r|\n/);
+  return splitParagraphsWithOffsets(text).map((paragraph) => paragraph.text);
+}
+
+/** One paragraph, with where it starts in the string it came out of. */
+export type Paragraph = { text: string; at: number };
+
+/**
+ * The same split, carrying each paragraph's offset in the original string.
+ *
+ * Per-range styling needs to map a character offset to a place on the canvas,
+ * and the offset cannot be recovered downstream: the separators here are one or
+ * two code units (`\r\n`), and the greedy wrap in `renderer/text.ts` drops
+ * exactly one space per break it makes. Searching for the line's text in the
+ * original would also find the wrong copy of a repeated line.
+ *
+ * So the producers emit the offset and nobody reconstructs it.
+ * `splitParagraphs` stays as the answer to the simpler question, and delegates,
+ * so the two can never disagree about where a break is.
+ */
+export function splitParagraphsWithOffsets(text: string): Paragraph[] {
+  const source = text ?? "";
+  const out: Paragraph[] = [];
+
+  let at = 0;
+  const breaks = /\r\n|\r|\n/g;
+  let match = breaks.exec(source);
+  while (match != null) {
+    out.push({ text: source.slice(at, match.index), at });
+    at = match.index + match[0].length;
+    match = breaks.exec(source);
+  }
+  out.push({ text: source.slice(at), at });
+
+  return out;
 }

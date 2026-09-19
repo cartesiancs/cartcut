@@ -29,6 +29,21 @@ import "./optionTabBar";
 import "./optionTextRevealSection";
 import type { OptionTab } from "./optionTabBar";
 import { beginInputScrub, scrubOn } from "../input/inputScrub";
+import {
+  textRangeFor,
+  textRangeSelectionStore,
+} from "../../states/textRangeSelectionStore";
+import { setTextRangeStyle, setTextWithRuns } from "../timeline/textRunOps";
+import {
+  controlForPath,
+  isMixed,
+  keepsFieldFocus,
+  planTextStyleWrite,
+  rangeOfField,
+  textControlsDisplay,
+  valueOr,
+  type TextStyleControl,
+} from "./textRangeControls";
 import { sweepSpec } from "../input/numberScrub";
 
 // Font size and letter spacing are whole pixels — both handlers read the field
@@ -191,6 +206,11 @@ export class OptionText extends LitElement {
       this.timelineCursor = state.cursor;
     });
 
+    // The store guards its writes, so this fires when the range actually moves
+    // and not on every pointermove of a drag through the field.
+    textRangeSelectionStore.subscribe(() => {
+      this.syncRangeFields();
+    });
     return this;
   }
 
@@ -305,6 +325,9 @@ export class OptionText extends LitElement {
             @click=${this.handleClickTextForm}
             @input=${this.handleInputText}
             @change=${this.handleCommitText}
+            @select=${this.handleTextSelection}
+            @mouseup=${this.handleTextSelection}
+            @keyup=${this.handleTextSelection}
             aria-event="text"
             rows="3"
             class="form-control bg-default text-light"
@@ -585,8 +608,156 @@ export class OptionText extends LitElement {
     });
   }
 
+  /**
+   * The one interception point for per-range styling.
+   *
+   * Every generic row on this panel writes a `{ path, value }` and knows
+   * nothing about runs, so this is where a write turns back into an intent and
+   * back again. A path outside the core set answers `null` and falls straight
+   * through to `commitStyle`, and so does every core-set path when no range is
+   * selected: `planTextStyleWrite` hands back the same list that arrived here.
+   * `textRangeControls.test.ts` pins that round trip, which is what makes "the
+   * panel behaves as it always did" a tested claim rather than a hope.
+   */
   private set(path: string[], value: unknown) {
+    const control = controlForPath(path, value);
+    if (control != null) {
+      this.applyControl(control);
+      return;
+    }
     this.commitStyle([{ path, value }]);
+  }
+
+  /**
+   * Apply one style control, to the selected range or to the whole clip.
+   *
+   * The range write names `elementId[0]` alone, unlike `commitStyle`, and
+   * deliberately: the offsets came out of that clip's text field and mean
+   * nothing in another clip's string. The text field is single-clip already,
+   * for the same reason.
+   *
+   * `withFittedTextHeights` is folded in here rather than left to
+   * `affectsTextBlock`, because a range write is not a path write and the table
+   * there cannot see it. It returns by identity when no height moved, so a pure
+   * colour change still records one clean step.
+   */
+  private applyControl(control: TextStyleControl) {
+    const elementId = this.elementId[0];
+    const plan = planTextStyleWrite(textRangeFor(elementId), control);
+
+    if (plan.kind === "element") {
+      this.commitStyle(plan.writes);
+      return;
+    }
+
+    useTimelineStore.getState().withCheckpoint((doc) => {
+      const next = setTextRangeStyle(
+        doc,
+        elementId,
+        plan.from,
+        plan.to,
+        plan.patch,
+      );
+      return next === doc ? doc : withFittedTextHeights(next, [elementId]);
+    });
+    this.syncRangeFields();
+    // For the controls the mousedown guard had to let through: the weight
+    // select and the number fields hold the caret by now, and the text field
+    // is painting nothing.
+    this.restoreFieldSelection();
+  }
+
+  /** What the controls should be showing: the range's values, or the clip's. */
+  private get shownStyle() {
+    const element = this.timeline?.[this.elementId[0]];
+    if (element?.filetype !== "text") {
+      return textControlsDisplay(
+        { options: {}, background: {} } as any,
+        null,
+      );
+    }
+    return textControlsDisplay(element, textRangeFor(this.elementId[0]));
+  }
+
+  /**
+   * Push the range's values into the controls this panel still drives by hand.
+   *
+   * `resetValue()` does the same job for a change of clip and runs only then.
+   * This is its twin for a change of *range*, and it deliberately does not
+   * touch the text field: writing `value` there would collapse the very
+   * selection that caused it.
+   */
+  private syncRangeFields() {
+    const elementId = this.elementId[0];
+    const element = useTimelineStore.getState().timeline[elementId];
+    if (element?.filetype !== "text") {
+      return;
+    }
+
+    const shown = textControlsDisplay(element, textRangeFor(elementId));
+
+    const fontColor = this.querySelector(
+      "input[aria-event='font-color']",
+    ) as HTMLInputElement | null;
+    if (fontColor != null) {
+      fontColor.value = valueOr(shown.color, element.textcolor);
+    }
+
+    const fontSize = this.querySelector(
+      "input[aria-event='font-size']",
+    ) as HTMLInputElement | null;
+    if (fontSize != null) {
+      // Emptied where the range disagrees with itself, rather than showing one
+      // of the two sizes: a number the user did not pick would be written back
+      // over the other half the moment anything else on the panel moved.
+      fontSize.value = isMixed(shown.fontsize)
+        ? ""
+        : String(shown.fontsize.kind === "one" ? shown.fontsize.value : "");
+    }
+
+    this.selectedFont = valueOr(shown.fontname, element.fontname);
+    this.selectedWeight = valueOr(
+      shown.fontweight,
+      elementFontWeight(element.fontname, element.fontweight),
+    );
+    this.isBold = valueOr(shown.bold, false);
+    this.isItalic = valueOr(shown.italic, false);
+
+    this.requestUpdate();
+  }
+
+  /**
+   * Publish what the user has dragged out in the text field.
+   *
+   * Bound to `select`, `mouseup` and `keyup` rather than to `select` alone:
+   * `select` does not fire for a selection that collapses to a caret, and that
+   * is exactly when the highlight has to go away.
+   */
+  private handleTextSelection() {
+    const elementId = this.elementId[0];
+    const field = this.textField();
+    const store = textRangeSelectionStore.getState();
+
+    if (field == null || elementId == null) {
+      store.clear();
+      return;
+    }
+
+    const range = rangeOfField({
+      selectionStart: field.selectionStart,
+      selectionEnd: field.selectionEnd,
+      valueLength: field.value.length,
+      // `rangeOfField` answers nothing for a blurred field, which is what stops
+      // a `select` arriving after focus has gone from putting the highlight
+      // back on a field that is no longer painting one.
+      hasFocus: document.activeElement === field,
+    });
+
+    if (range == null) {
+      store.clear();
+      return;
+    }
+    store.select(elementId, range.from, range.to);
   }
 
   /** A labelled number input bound to one style path. */
@@ -883,6 +1054,10 @@ export class OptionText extends LitElement {
   hide() {
     this.classList.add("d-none");
     this.isShow = false;
+    // The highlight belongs to this panel's text field. Leaving it up with the
+    // panel gone would put a teal wash on the preview that nothing on screen
+    // explains and nothing can clear.
+    textRangeSelectionStore.getState().clear();
     // The menu is `position: fixed`, so it is not hidden by the panel being
     // hidden — it would go on floating over the editor with nothing under it.
     this.closeFontMenu();
@@ -902,6 +1077,9 @@ export class OptionText extends LitElement {
 
     this.elementId = [elementId];
 
+    // A range is measured in one clip's string and means nothing in another's.
+    textRangeSelectionStore.getState().clear();
+
     this.resetValue();
   }
 
@@ -909,6 +1087,8 @@ export class OptionText extends LitElement {
     this.handleCommitText();
 
     this.elementId = elementIds;
+
+    textRangeSelectionStore.getState().clear();
 
     this.resetValue();
 
@@ -1032,8 +1212,11 @@ export class OptionText extends LitElement {
     }
 
     // The first clip's state decides the direction, so a mixed selection lands
-    // all on the same value rather than each flipping its own way.
-    this.isBold = !textElement.options.isBold;
+    // all on the same value rather than each flipping its own way. With a range
+    // selected it is the range's own answer that decides, and a mixed range
+    // turns bold *on*: that is the direction somebody pressing B in a mixed
+    // selection means, in this and in every word processor.
+    this.isBold = !valueOr(this.shownStyle.bold, false);
     this.set(["options", "isBold"], this.isBold);
 
     this.requestUpdate();
@@ -1045,7 +1228,7 @@ export class OptionText extends LitElement {
       return;
     }
 
-    this.isItalic = !textElement.options?.isItalic;
+    this.isItalic = !valueOr(this.shownStyle.italic, false);
     this.set(["options", "isItalic"], this.isItalic);
 
     this.requestUpdate();
@@ -1071,13 +1254,17 @@ export class OptionText extends LitElement {
   }
 
   handleChangeTextColor() {
-    const elementControl = document.querySelector("element-control");
-    const fontColor: any = this.querySelector("input[aria-event='font-color'");
-    const color = fontColor.value;
-    for (let index = 0; index < this.elementId.length; index++) {
-      const element = this.elementId[index];
-      elementControl.changeTextColor({ elementId: element, color: color });
+    const fontColor = this.querySelector(
+      "input[aria-event='font-color']",
+    ) as HTMLInputElement | null;
+    if (fontColor == null) {
+      return;
     }
+    // Through `applyControl` rather than a loop of `changeTextColor`, which
+    // recorded one undo step per selected clip. With no range selected this
+    // writes the same `textcolor` path, now as the one step `commitStyle` has
+    // always promised.
+    this.applyControl({ kind: "color", value: fontColor.value });
   }
 
   /** The text field itself. Absent until the panel has rendered once. */
@@ -1105,7 +1292,23 @@ export class OptionText extends LitElement {
       return;
     }
 
-    this.timelineState.updateTimeline(elementId, ["text"], field.value);
+    // `previewDocument` and not `updateTimeline`, because the string and the
+    // runs have to land together. `updateTimeline` writes one path, so the text
+    // would reach the store with the runs still measured against the previous
+    // version - and by the time `handleCommitText` ran, `setTextWithRuns` would
+    // diff the new text against itself, find no edit, and leave every styled
+    // stretch a keystroke behind. Neither call records history.
+    const store = useTimelineStore.getState();
+    const next = setTextWithRuns(store.getDocument(), elementId, field.value);
+    if (next !== store.getDocument()) {
+      store.previewDocument(next);
+    }
+
+    // The caret has moved, and the offsets a run is measured in have moved with
+    // it. Republishing here keeps the preview's highlight on the characters the
+    // field is actually showing rather than on the ones it showed a keystroke
+    // ago.
+    this.handleTextSelection();
   }
 
   /**
@@ -1140,13 +1343,20 @@ export class OptionText extends LitElement {
   }
 
   handleChangeTextSize() {
-    const elementControl = document.querySelector("element-control");
-    const fontSize: any = this.querySelector("input[aria-event='font-size'");
-    const size = fontSize.value;
-    for (let index = 0; index < this.elementId.length; index++) {
-      const element = this.elementId[index];
-      elementControl.changeTextSize({ elementId: element, size: size });
+    const fontSize = this.querySelector(
+      "input[aria-event='font-size']",
+    ) as HTMLInputElement | null;
+    if (fontSize == null) {
+      return;
     }
+    const size = Number(fontSize.value);
+    // An emptied field is how a mixed range reports itself, and it is also what
+    // a user who has selected the number and not typed yet has. Neither is a
+    // request for a size of zero.
+    if (!Number.isFinite(size) || size <= 0) {
+      return;
+    }
+    this.applyControl({ kind: "fontsize", value: size });
   }
 
   /**
@@ -1197,6 +1407,12 @@ export class OptionText extends LitElement {
 
     this.fontMenuOpen = false;
     this.fontQuery = "";
+
+    // The menu focuses its own search box on open, so the text field lost the
+    // caret and stopped painting the selection the user had dragged out.
+    // Closing is where it gets both back. After the render, because the menu's
+    // markup is still up until Lit has run.
+    requestAnimationFrame(() => this.restoreFieldSelection());
   }
 
   /**
@@ -1300,8 +1516,84 @@ export class OptionText extends LitElement {
     }
   };
 
+  /**
+   * Keep the text field's selection alive while the panel is worked.
+   *
+   * A `<textarea>` paints its selection only while it holds focus, so without
+   * this a click on the colour swatch emptied the field of any sign of the
+   * range while the preview went on highlighting it: two answers to the same
+   * question, and the one the user had just dragged out was the one that
+   * disappeared.
+   *
+   * Capture phase, so it runs before the control's own handler and before the
+   * browser moves focus. `keepsFieldFocus` is what decides, and it says no for
+   * the handful of controls that cannot work without the caret;
+   * `restoreFieldSelection` hands focus back when those are finished.
+   */
+  private onPanelMouseDown = (event: MouseEvent) => {
+    if (textRangeFor(this.elementId[0]) == null) {
+      return;
+    }
+    const target = event.target as HTMLElement | null;
+    if (target == null || target === this.textField()) {
+      return;
+    }
+    if (
+      !keepsFieldFocus({
+        tagName: target.tagName,
+        type: (target as HTMLInputElement).type ?? null,
+        isContentEditable: target.isContentEditable === true,
+        isScrubbable: target.classList?.contains("scrub-number") === true,
+      })
+    ) {
+      return;
+    }
+    event.preventDefault();
+  };
+
+  /**
+   * Focus has left the panel, so the field is painting nothing.
+   *
+   * The preview's wash has to go with it. The rule is that the two are never
+   * out of step, and this is the half of it the mousedown guard above cannot
+   * cover: a click on the timeline or the preview is a click on something this
+   * panel has no say over.
+   *
+   * `relatedTarget` is null for a click on anything unfocusable, the preview
+   * canvas included, which is the common case and reads correctly as "gone".
+   */
+  private onPanelFocusOut = (event: FocusEvent) => {
+    const next = event.relatedTarget as Node | null;
+    if (next != null && this.contains(next)) {
+      return;
+    }
+    textRangeSelectionStore.getState().clear();
+  };
+
+  /**
+   * Put focus and the selection back on the field.
+   *
+   * For the controls `keepsFieldFocus` had to let through. Called once they are
+   * finished rather than on every keystroke in them, and only while focus is
+   * still somewhere in this panel, so tabbing away is not fought.
+   */
+  private restoreFieldSelection() {
+    const range = textRangeFor(this.elementId[0]);
+    const field = this.textField();
+    if (range == null || field == null || document.activeElement === field) {
+      return;
+    }
+    if (!this.contains(document.activeElement)) {
+      return;
+    }
+    field.focus({ preventScroll: true });
+    field.setSelectionRange(range.from, range.to);
+  }
+
   connectedCallback() {
     super.connectedCallback();
+    this.addEventListener("mousedown", this.onPanelMouseDown, true);
+    this.addEventListener("focusout", this.onPanelFocusOut);
     document.addEventListener("pointerdown", this.onDocumentPointerDown, true);
     document.addEventListener("keydown", this.onDocumentKeydown);
     document.addEventListener("scroll", this.onAncestorScroll, true);
@@ -1309,6 +1601,8 @@ export class OptionText extends LitElement {
   }
 
   disconnectedCallback() {
+    this.removeEventListener("mousedown", this.onPanelMouseDown, true);
+    this.removeEventListener("focusout", this.onPanelFocusOut);
     document.removeEventListener(
       "pointerdown",
       this.onDocumentPointerDown,
@@ -1521,16 +1815,16 @@ export class OptionText extends LitElement {
     this.selectedFont = face.entry.name;
     this.selectedWeight = family.variable ? weight : face.weight;
 
-    const elementControl = document.querySelector("element-control");
-    for (const elementId of this.elementId) {
-      elementControl.changeTextFont({
-        elementId,
-        fontPath: face.entry.path,
-        fontType: face.entry.type,
-        fontName: face.entry.name,
-        fontWeight: String(this.selectedWeight),
-      });
-    }
+    // All four fields as one intent, for the reason `changeTextFont` gives: a
+    // clip or a run naming a family nothing registered an `@font-face` for
+    // draws in the fallback and says nothing about it.
+    this.applyControl({
+      kind: "face",
+      fontname: face.entry.name,
+      fontpath: face.entry.path,
+      fonttype: face.entry.type,
+      fontweight: this.selectedWeight,
+    });
 
     this.requestUpdate();
   }

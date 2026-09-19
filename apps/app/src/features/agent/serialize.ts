@@ -45,6 +45,7 @@ import { revealOf } from "../text/reveal";
 import { isRevealable } from "../timeline/textRevealOps";
 import { isMaskable } from "../timeline/maskOps";
 import type { TimelineDocument, TimelineTrack } from "../timeline/tracks";
+import { runsOf } from "../text/runs";
 import { resolveTextStyle } from "../text/style";
 
 /** Longest text echoed back in a list row. Full text comes from `get_clip`. */
@@ -360,6 +361,11 @@ export function clipDetail(
     detail.fill = style.fill;
     detail.textOpacity = style.textOpacity;
     detail.textTransform = style.textTransform;
+    // A count, never the list. The runs are unbounded authored data, like a
+    // shape's point list and a mask's drawn path, and this whitelist exists to
+    // keep those away from the tool-output cap. The number is what tells the
+    // agent that a clip it is about to rewrite has styling it cannot see.
+    detail.runCount = runsOf(element).length;
   }
 
   if (element.filetype !== "audio") {

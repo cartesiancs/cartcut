@@ -216,13 +216,22 @@ export function displayTextOf(element: TextElementType): string {
  * The background box is included because a rounded box with padding also grows
  * outward — `renderText` insets it by `-padding` on the left.
  */
-export function styleBleed(style: ResolvedTextStyle): number {
+export function styleBleed(
+  style: ResolvedTextStyle,
+  runOutlineSize = 0,
+): number {
   let bleed = 0;
 
   if (style.outline.enable) {
     // The stroke straddles the glyph outline, so only half of it is outside.
     bleed = Math.max(bleed, style.outline.size / 2);
   }
+  // A per-range outline can be wider than the clip's own, and the clip's own
+  // can be off entirely while a run turns one on, so this is a separate term
+  // rather than a larger `style.outline.size`. Defaulting to 0 is what keeps
+  // every existing caller byte-identical.
+  // `text/runs.ts#runsOutlineBleed` is what answers it.
+  bleed = Math.max(bleed, runOutlineSize / 2);
   if (style.glow.enable) {
     bleed = Math.max(bleed, style.glow.size);
   }

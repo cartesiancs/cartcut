@@ -48,6 +48,11 @@ const RE_FITTING_PATHS = new Set([
   "options.isBold",
   "options.isItalic",
   "options.textTransform",
+  // A run can ask for a larger size than the clip's, which makes its line taller
+  // and the block with it. The panel's range write is not a path write, so it
+  // folds `withFittedTextHeights` itself; this entry is for everything that
+  // reaches `runs` through `commitStyle` or the agent.
+  "runs",
 ]);
 
 /** Does writing these paths change the size of the block? */

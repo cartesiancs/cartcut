@@ -40,6 +40,7 @@ import {
   type RasterBox,
 } from "../timeline/rasterize";
 import { useTimelineStore } from "../../states/timelineStore";
+import { runsOutlineBleed } from "../text/runs";
 
 export type RasterizeResult =
   | { ok: true; elementId: string; localpath: string; box: RasterBox }
@@ -79,7 +80,13 @@ export function drawTextToCanvas(
   element: TextElementType,
   timelineCursor: number,
 ): { canvas: HTMLCanvasElement; box: RasterBox } {
-  const bleed = styleBleed(resolveTextStyle(element));
+  // The runs' own outlines count: one can be wider than the clip's, or the
+  // clip's can be off entirely while a run turns one on, and either way the
+  // stroke would be sliced off at the edge of the PNG without this.
+  const bleed = styleBleed(
+    resolveTextStyle(element),
+    runsOutlineBleed(element),
+  );
 
   // Measuring needs a context with the element's font already applied, which
   // is what `measureTextBlock` sets up. A scratch canvas is enough for that.

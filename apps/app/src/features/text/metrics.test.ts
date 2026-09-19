@@ -3,6 +3,7 @@ import {
   DEFAULT_LINE_HEIGHT,
   coerceLineHeight,
   defaultTextHeight,
+  lineAdvanceForSize,
   lineAdvanceOf,
   normalizeLineHeight,
 } from "./metrics";
@@ -99,5 +100,31 @@ describe("defaultTextHeight", () => {
 
   it("is a whole number of pixels", () => {
     expect(Number.isInteger(defaultTextHeight(52))).toBe(true);
+  });
+});
+
+describe("lineAdvanceForSize", () => {
+  it("reproduces lineAdvanceOf for the element's own size", () => {
+    for (const fontsize of [1, 12, 52, 120, 999.5]) {
+      for (const lineHeight of [undefined, 0.5, 1, 1.2, 2.75, 4]) {
+        const element = {
+          fontsize,
+          options: { lineHeight },
+        } as unknown as Parameters<typeof lineAdvanceOf>[0];
+        expect(lineAdvanceForSize(fontsize, lineHeight)).toBe(
+          lineAdvanceOf(element),
+        );
+      }
+    }
+  });
+
+  it("guards an unusable size the same way", () => {
+    expect(lineAdvanceForSize(0, 1)).toBe(1);
+    expect(lineAdvanceForSize(NaN, 1)).toBe(1);
+    expect(lineAdvanceForSize(-4, 1)).toBe(1);
+  });
+
+  it("scales with the size it is given, not with the element", () => {
+    expect(lineAdvanceForSize(100, 1.2)).toBeCloseTo(120, 10);
   });
 });

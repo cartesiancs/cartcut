@@ -132,14 +132,33 @@ export function registerDocumentFonts(
     if (element == null || typeof element !== "object") {
       continue;
     }
-    const { filetype, fontpath } = element as {
+    const { filetype, fontpath, runs } = element as {
       filetype?: string;
       fontpath?: unknown;
+      runs?: unknown;
     };
-    if (filetype !== "text" || typeof fontpath !== "string") {
+    if (filetype !== "text") {
       continue;
     }
-    ensureFontFace(parseFontPath(fontpath));
+    if (typeof fontpath === "string") {
+      ensureFontFace(parseFontPath(fontpath));
+    }
+
+    // A per-range font is a face no element's own `fontpath` names, so without
+    // this the styled stretch alone would draw in the fallback the next time
+    // the project was opened - the exact silent failure this function exists to
+    // end, one level down. Read straight off the stored field rather than
+    // through `runsOf`, because this runs before the document is in the store
+    // and a face is worth registering even if the run turns out to be junk.
+    if (Array.isArray(runs)) {
+      for (const run of runs) {
+        const path = (run as { style?: { fontpath?: unknown } } | null)?.style
+          ?.fontpath;
+        if (typeof path === "string" && path !== "") {
+          ensureFontFace(parseFontPath(path));
+        }
+      }
+    }
   }
 
   return registered.size - before;

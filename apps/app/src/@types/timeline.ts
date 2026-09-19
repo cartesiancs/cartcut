@@ -909,6 +909,53 @@ export type TextReveal = {
 };
 
 /**
+ * What one stretch of a text element overrides about the clip it sits in.
+ *
+ * Sparse: a key is present only where the range differs from the clip's own
+ * value, and a style with no keys left is not a style but a deleted run. That
+ * is what lets `features/text/runs.ts#applyRunStyle` answer "paint this range
+ * the colour it already is" by removing the run rather than storing one.
+ *
+ * **Flat, and deliberately not shaped like `options.outline`.** Sparse merge,
+ * equality and the default-deletes-the-key rule are each one loop over
+ * `RUN_STYLE_KEYS` on a flat record and three on a nested one.
+ *
+ * **The four font fields move together.** `renderer/text.ts` resolves
+ * `fontname` as a CSS family and `font/fontFaces.ts#registerDocumentFonts`
+ * walks `fontpath` to inject the `@font-face`, so a run naming a family no
+ * element names draws in the fallback the next time the project is opened.
+ * `elementControl.ts#changeTextFont` states the same rule for the clip.
+ *
+ * `fontweight` is a number here where the element's own field is a string. It
+ * reaches the canvas through `font/fontWeight.ts#fontWeightToken`, which
+ * answers a number only for a variable face: a static face is picked by file,
+ * and repeating the weight to the canvas synthesises a fake bold.
+ */
+export type TextRunStyle = {
+  fontname?: string;
+  fontpath?: string;
+  fonttype?: string;
+  fontweight?: number;
+  fontsize?: number;
+  color?: string;
+  bold?: boolean;
+  italic?: boolean;
+  outlineEnable?: boolean;
+  outlineSize?: number;
+  outlineColor?: string;
+};
+
+/**
+ * One styled stretch of a text element, as a half-open `[from, to)`.
+ *
+ * The offsets are UTF-16 code unit indices into `element.text`, which is not a
+ * choice: `textarea.selectionStart` is measured that way and its value is what
+ * lands here. `runs.ts#runsOf` snaps an offset that falls inside a surrogate
+ * pair outward, so `slice` can never produce a lone surrogate.
+ */
+export type TextRun = { from: number; to: number; style: TextRunStyle };
+
+/**
  * Text.
  *
  * Everything from `options.shadow` down is **optional on purpose**. Projects
@@ -995,6 +1042,19 @@ export type TextElementType = TimelinePlaced &
      * `blend`, `lut` and `mask` all follow.
      */
     reveal?: TextReveal;
+    /**
+     * Per-range overrides, sorted and disjoint. Absent means the clip's own
+     * style everywhere, and styling a range back to the clip's own values
+     * deletes the key, so a project nobody has styled a range in saves
+     * byte-identically to one written before the feature, and
+     * `SCHEMA_VERSION` did not move. The rule `blend`, `lut`, `mask` and
+     * `reveal` all follow.
+     *
+     * Read it through `features/text/runs.ts#runsOf`, never directly: the
+     * stored array can come from a hand-edited file, and the resolver is what
+     * clamps it to the current string.
+     */
+    runs?: TextRun[];
     widthInner: number;
   };
 

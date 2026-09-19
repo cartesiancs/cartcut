@@ -19,6 +19,7 @@ import { registerCommands } from "../registry";
 import { clipRow } from "../serialize";
 import { flatten, rejectionFor, writablePaths } from "./writable";
 import { affectsTextBlock, withFittedTextHeights } from "../../element/textFit";
+import { setTextWithRuns } from "../../timeline/textRunOps";
 
 registerCommands({
   update_clip: (params: { elementId: string; patch: Record<string, any> }) => {
@@ -62,15 +63,32 @@ registerCommands({
       affectsTextBlock(writes.map(([path]) => path)) &&
       !writes.some(([path]) => path.join(".") === "height");
 
+    // The string is the one field that cannot be a plain `setIn`. A text clip's
+    // per-range styling is stored as offsets into it, so rewriting the string
+    // without moving them leaves every styled stretch on the wrong characters.
+    // `setTextWithRuns` is the one writer that keeps the two together.
+    const textWrite = writes.find(
+      ([path, value]) =>
+        path.length === 1 && path[0] === "text" && typeof value === "string",
+    );
+
     ensureUndoBaseline();
     useTimelineStore.getState().withCheckpoint((d) => {
-      let updated: TimelineElement = d.elements[params.elementId];
+      const base =
+        textWrite == null
+          ? d
+          : setTextWithRuns(d, params.elementId, textWrite[1] as string);
+
+      let updated: TimelineElement = base.elements[params.elementId];
       for (const [path, value] of writes) {
+        if (path === textWrite?.[0]) {
+          continue;
+        }
         updated = setIn(updated, path, value);
       }
       const next = {
-        ...d,
-        elements: { ...d.elements, [params.elementId]: updated },
+        ...base,
+        elements: { ...base.elements, [params.elementId]: updated },
       };
       return rewraps
         ? withFittedTextHeights(next, [params.elementId])

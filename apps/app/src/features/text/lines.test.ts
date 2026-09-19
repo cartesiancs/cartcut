@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { splitParagraphs } from "./lines";
+import { splitParagraphs, splitParagraphsWithOffsets } from "./lines";
 
 /**
  * The whole contract of explicit line breaking, stated as strings.
@@ -51,5 +51,37 @@ describe("splitParagraphs", () => {
 
   it("treats a missing string as one empty line", () => {
     expect(splitParagraphs(undefined as unknown as string)).toEqual([""]);
+  });
+});
+
+describe("splitParagraphsWithOffsets", () => {
+  it("says the same thing splitParagraphs does", () => {
+    for (const body of ["", "one", "a\nb", "a\r\nb\rc", "a\n\nb", "trailing\n"]) {
+      expect(splitParagraphsWithOffsets(body).map((p) => p.text)).toEqual(
+        splitParagraphs(body),
+      );
+    }
+  });
+
+  it.each([
+    ["one line", "abc", [0]],
+    ["a newline", "ab\ncd", [0, 3]],
+    ["a carriage return", "ab\rcd", [0, 3]],
+    // The two-unit separator is the case a downstream reconstruction gets
+    // wrong, which is why the offsets are emitted here rather than recovered.
+    ["a CRLF", "ab\r\ncd", [0, 4]],
+    ["a blank paragraph", "a\n\nb", [0, 2, 3]],
+    ["a trailing break", "a\n", [0, 2]],
+  ])("reports the offsets for %s", (_label, body, offsets) => {
+    expect(splitParagraphsWithOffsets(body).map((p) => p.at)).toEqual(offsets);
+  });
+
+  it("gives every paragraph an offset its own text is really at", () => {
+    const body = "alpha\nbeta\r\ngamma\rbeta";
+    for (const paragraph of splitParagraphsWithOffsets(body)) {
+      expect(body.slice(paragraph.at, paragraph.at + paragraph.text.length)).toBe(
+        paragraph.text,
+      );
+    }
   });
 });

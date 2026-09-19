@@ -14,6 +14,7 @@ import {
   type TextElementOptions,
 } from "./textElement";
 import { affectsTextBlock, withFittedTextHeights } from "./textFit";
+import { setTextWithRuns } from "../timeline/textRunOps";
 import { setIn } from "../../utils/immutable";
 import { cursorAtElapsed } from "../timeline/playbackClock";
 import { projectFps } from "../editor/frameRate";
@@ -461,8 +462,39 @@ export class ElementControl extends LitElement {
     });
   }
 
+  /**
+   * The string, and the per-range styling that has to follow it.
+   *
+   * Not `commitTextFields`, because the two are one fact: a run list that has
+   * not followed the edit points at the wrong characters, and this is the only
+   * writer of `text` in the app. Routing it through `setTextWithRuns` is what
+   * makes the panel's commit, the agent's `update_clip` and the caption session
+   * all carry runs across an edit without knowing the feature exists.
+   *
+   * `withFittedTextHeights` is folded in here rather than left to
+   * `commitTextFields` for the same reason it is folded in there: the fit
+   * shares this edit's undo step, and returns by identity when nothing moved.
+   */
   changeTextValue({ elementId, value }) {
-    this.commitTextFields(elementId, [{ path: ["text"], value }]);
+    this.timelineState.withCheckpoint((doc) => {
+      const next = setTextWithRuns(doc, elementId, value);
+      if (next !== doc) {
+        return withFittedTextHeights(next, [elementId]);
+      }
+
+      if (doc.elements[elementId]?.filetype !== "text") {
+        return doc;
+      }
+
+      // The typing already reached the store, through `previewDocument` and
+      // with no history, so the write above found nothing left to do. The undo
+      // step still has to be recorded or Cmd+Z would step straight past the
+      // whole paragraph. A fresh document is how `withCheckpoint` is told that
+      // something happened, and `optionText#handleCommitText`'s equality guard
+      // upstream is what stops a field somebody merely clicked into from
+      // getting here and spending a step on nothing.
+      return { ...doc };
+    });
   }
 
   changeTextColor({ elementId, color }) {

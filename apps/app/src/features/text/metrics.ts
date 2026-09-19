@@ -76,9 +76,25 @@ export function coerceLineHeight(value: unknown): number {
  * `element.height` is deliberately not read here — that is the whole change.
  */
 export function lineAdvanceOf(element: TextElementType): number {
-  const fontsize = Number(element?.fontsize);
-  const size = Number.isFinite(fontsize) && fontsize > 0 ? fontsize : 1;
-  return size * normalizeLineHeight(element?.options?.lineHeight);
+  return lineAdvanceForSize(element?.fontsize, element?.options?.lineHeight);
+}
+
+/**
+ * The same gap, for a size that is not the element's own.
+ *
+ * A line carrying a per-range override is as tall as the largest type on it,
+ * not as tall as the clip's default, so `renderer/text.ts` needs the advance
+ * for a size it has measured rather than for a field it can read. Feeding it
+ * `element.fontsize` reproduces `lineAdvanceOf` exactly, which is what keeps a
+ * clip with no runs spacing its lines to the pixel it always did.
+ */
+export function lineAdvanceForSize(
+  fontsize: unknown,
+  lineHeight: unknown,
+): number {
+  const n = Number(fontsize);
+  const size = Number.isFinite(n) && n > 0 ? n : 1;
+  return size * normalizeLineHeight(lineHeight);
 }
 
 /**

@@ -141,6 +141,13 @@ import {
 } from "./viewport";
 import { chromeFor, type PreviewChrome } from "./playbackPreview";
 import { playbackPreviewStore } from "../../states/playbackPreviewStore";
+import { textRangeSelectionStore } from "../../states/textRangeSelectionStore";
+import {
+  OVERLAID_SELECTION_ALPHA,
+  canUnderlaySelection,
+  drawTextRangeHighlight,
+} from "../renderer/textRangeHighlight";
+import { paintTextGlyphsOnly, selectionRectsOf } from "../renderer/text";
 
 /** How much of an out-of-frame pixel survives. */
 const OUTSIDE_ALPHA = 0.28;
@@ -555,6 +562,14 @@ export class PreviewCanvas extends LitElement {
       this.scheduleDraw();
     });
 
+    // The range the user has dragged out in the option panel's text field.
+    // Ephemeral by design, so it reaches the preview through its own store
+    // rather than through the document, and it is drawn in the chrome pass
+    // below so it can never reach an export.
+    textRangeSelectionStore.subscribe(() => {
+      this.scheduleDraw();
+    });
+
     return this;
   }
 
@@ -862,6 +877,8 @@ export class PreviewCanvas extends LitElement {
       // grabbed, and a second set of eight grips sitting a few pixels from the
       // crop's own is an invitation to aim at the wrong one.
       if (this.cropSession == null) {
+        // Before the outline, so its marks stay on top of the wash.
+        this.drawTextRangeSelection(ctx);
         this.drawNullGizmos(ctx, g.scale);
         this.drawActiveOutline(ctx);
       }
@@ -973,6 +990,78 @@ export class PreviewCanvas extends LitElement {
   }
 
   /** Assumes `ctx` is already in world space. */
+  /**
+   * The teal wash behind the characters selected in the option panel.
+   *
+   * Two things about it are deliberate.
+   *
+   * **It is here and not in `renderText`.** `renderTimelineAtTime` is shared by
+   * the preview, the in-app export, the offscreen export window, the agent's
+   * contact sheet and the e2e reference render, so a highlight drawn there
+   * would be baked into the delivered file. The null gizmos are in this pass
+   * for the same reason.
+   *
+   * **The glyphs are drawn a second time, over the wash.** That is what makes
+   * it read like a browser's `::selection` rather than like a translucent box
+   * dropped on top of the words. It costs one extra text draw per frame, and
+   * only while a range is live.
+   *
+   * The second draw is not always honest, though: this pass applies no blend
+   * mode, no mask, no clip opacity and no colour grade, so on a clip carrying
+   * any of those the redrawn glyphs would not match the ones underneath.
+   * `canUnderlaySelection` is that test, and where it fails the wash goes over
+   * the top at a lower alpha instead. Visibly a compromise, and the honest one:
+   * a highlight that is slightly flat beats a clip that appears to lose its
+   * blend mode for as long as the panel is open.
+   */
+  private drawTextRangeSelection(ctx: CanvasRenderingContext2D) {
+    const range = textRangeSelectionStore.getState().range;
+    if (range == null) {
+      return;
+    }
+
+    const element: any = this.timeline[range.elementId];
+    if (element == undefined || element.filetype !== "text") {
+      return;
+    }
+    if (!isElementVisibleAtTime(this.timelineCursor, this.timeline, element)) {
+      return;
+    }
+
+    // The sampled box, not `element.width`: an animated `size` reflows the
+    // text, and the wash has to follow the wrap the renderer actually used.
+    const box = sampledBoxOf(element, this.timelineCursor);
+    const sized =
+      box.width === element.width && box.height === element.height
+        ? element
+        : { ...element, width: box.width, height: box.height };
+
+    ctx.save();
+    // The parent chain then the element's own transform, the two steps
+    // `renderElement` takes, so the wash rotates and scales with the clip.
+    const parent = parentMatrixOf(
+      this.timeline,
+      range.elementId,
+      this.timelineCursor,
+    );
+    ctx.transform(parent.a, parent.b, parent.c, parent.d, parent.e, parent.f);
+    applyElementTransform(ctx, element, this.timelineCursor);
+
+    const rects = selectionRectsOf(ctx, sized, range.from, range.to);
+    if (rects.length > 0) {
+      if (canUnderlaySelection(element, this.timelineCursor)) {
+        drawTextRangeHighlight(ctx, rects);
+        paintTextGlyphsOnly(ctx, sized, this.timelineCursor);
+      } else {
+        ctx.save();
+        ctx.globalAlpha *= OVERLAID_SELECTION_ALPHA;
+        drawTextRangeHighlight(ctx, rects);
+        ctx.restore();
+      }
+    }
+    ctx.restore();
+  }
+
   private drawActiveOutline(ctx: CanvasRenderingContext2D) {
     const element: any = this.timeline[this.activeElementId];
     if (element == undefined) {

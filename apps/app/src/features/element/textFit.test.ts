@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { fittedHeightWith, withFittedTextHeights } from "./textFit";
+import {
+  affectsTextBlock,
+  fittedHeightWith,
+  withFittedTextHeights,
+} from "./textFit";
 import { scene, textElement, imageElement } from "../renderer/testing";
 import { defaultTextHeight } from "../text/metrics";
 import type { TimelineDocument } from "../timeline/tracks";
@@ -174,5 +178,32 @@ describe("withFittedTextHeights", () => {
     expect((next.elements.b as any).height).toBeGreaterThan(
       (next.elements.a as any).height,
     );
+  });
+});
+
+describe("runs", () => {
+  it("is a path that re-fits the block", () => {
+    // A run can ask for a larger size than the clip's, which makes its line
+    // taller. Leaving it out of the table would let the selection outline and
+    // the rasterised PNG go stale against the picture.
+    expect(affectsTextBlock([["runs"]])).toBe(true);
+  });
+
+  it("grows the box for a run at a larger size", () => {
+    const plain = fittedHeightWith(ctx(), base() as never);
+    const styled = fittedHeightWith(
+      ctx(),
+      base({ runs: [{ from: 0, to: 1, style: { fontsize: 120 } }] }) as never,
+    );
+    expect(styled).toBeGreaterThan(plain);
+  });
+
+  it("leaves the box alone for a run that changes no size", () => {
+    const plain = fittedHeightWith(ctx(), base() as never);
+    const styled = fittedHeightWith(
+      ctx(),
+      base({ runs: [{ from: 0, to: 1, style: { color: "#ff0000" } }] }) as never,
+    );
+    expect(styled).toBe(plain);
   });
 });
