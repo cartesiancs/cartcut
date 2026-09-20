@@ -295,19 +295,6 @@ export class OptionText extends LitElement {
           .isShow=${this.isShow}
         ></default-transform>
 
-        <blend-mode
-          .elementId=${this.elementId}
-          .isShow=${this.isShow}
-        ></blend-mode>
-
-        <!--
-        Next to the blend mode, because the two are the same question asked
-        twice: how this clip's picture is changed before it meets the scene,
-        and how it meets it. Picking *which* filter happens in the Filter tab
-        against thumbnails; what belongs here is how strongly it applies.
-      -->
-        <option-lut-section .elementId=${this.elementId}></option-lut-section>
-
         <!--
         A textarea, not an input: a title that breaks over two lines is a thing
         the renderer can draw (text/lines.ts), and a single-line field cannot
@@ -551,6 +538,19 @@ export class OptionText extends LitElement {
             </div>
           </div>
 
+          <blend-mode
+            .elementId=${this.elementId}
+            .isShow=${this.isShow}
+          ></blend-mode>
+
+          <!--
+        Next to the blend mode, because the two are the same question asked
+        twice: how this clip's picture is changed before it meets the scene,
+        and how it meets it. Picking *which* filter happens in the Filter tab
+        against thumbnails; what belongs here is how strongly it applies.
+      -->
+          <option-lut-section .elementId=${this.elementId}></option-lut-section>
+
           ${this.renderEffects()}
         </div>
       </div>
@@ -671,10 +671,7 @@ export class OptionText extends LitElement {
   private get shownStyle() {
     const element = this.timeline?.[this.elementId[0]];
     if (element?.filetype !== "text") {
-      return textControlsDisplay(
-        { options: {}, background: {} } as any,
-        null,
-      );
+      return textControlsDisplay({ options: {}, background: {} } as any, null);
     }
     return textControlsDisplay(element, textRangeFor(this.elementId[0]));
   }
