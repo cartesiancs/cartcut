@@ -114,8 +114,10 @@
       "maintainer": "cartesiancs <jun@cartesiancs.com>",
       "synopsis": "AI video editor",
       "desktop": {
-        "MimeType": "x-scheme-handler/cartcutapp;",
-        "StartupWMClass": "Cartcut"
+        "entry": {
+          "MimeType": "x-scheme-handler/cartcutapp;",
+          "StartupWMClass": "Cartcut"
+        }
       },
       "publish": null
     },
@@ -148,7 +150,7 @@
     "electron-log": "^4.4.8",
     "electron-progressbar": "^2.0.1",
     "electron-store": "^8.1.0",
-    "electron-updater": "^6.3.9",
+    "electron-updater": "^6.8.9",
     "express": "^4.21.2",
     "fluent-ffmpeg": "^2.1.2",
     "fs-extra": "^11.1.0",
@@ -175,8 +177,8 @@
     "concurrently": "^9.0.1",
     "cross-env": "^7.0.3",
     "css-loader": "^6.7.1",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.8",
+    "electron": "^44.4.3",
+    "electron-builder": "^26.15.3",
     "electron-reload": "^2.0.0-alpha.1",
     "eslint-config-airbnb": "^19.0.4",
     "mini-css-extract-plugin": "^2.6.1",

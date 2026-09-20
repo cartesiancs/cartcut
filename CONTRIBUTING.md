@@ -27,7 +27,12 @@ about to touch is worth reading first.
 
 ### Node
 
-`.node-version` pins **20.19.0**, which is what the release builds use.
+`.node-version` pins **24.14.0**, which is what the release builds use.
+
+It has to be at least 22.12.0. Electron 44 declares `node >= 22.12.0`, and
+electron-builder 26 reaches `@noble/hashes` through a bare `require()` of an ES
+module, which only works from 22.12.0 on: on Node 20 a release build dies at
+`ERR_REQUIRE_ESM` before it packs anything.
 
 ### Dependencies
 
