@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "lit": "^3.2.1",
+    "lit": "^3.3.3",
     "uuid": "^11.0.5"
   },
   "devDependencies": {

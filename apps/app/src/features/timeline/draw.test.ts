@@ -833,7 +833,7 @@ import {
   keyframeLane,
 } from "./keyframeMarkers";
 import { bakeTrack } from "../animation/keyframes";
-import { audioElement, keys } from "../renderer/testing";
+import { keys } from "../renderer/testing";
 
 describe("keyframe diamonds", () => {
   /** An image clip with opacity keyed at the given element-relative times. */
