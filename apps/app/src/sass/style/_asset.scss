@@ -21,6 +21,22 @@
 }
 
 /*
+ * Stands in for a video tile's thumbnail until the capture lands.
+ *
+ * A fixed box rather than an empty <img>, whose src would resolve against the
+ * document and paint a broken-image glyph. The size has to match what the
+ * thumbnail will occupy: the grid decides what to capture from what is on
+ * screen, so a tile that changes height when its frame arrives re-triggers
+ * that decision for every tile below it.
+ */
+.asset-preview-pending {
+    width: 55px;
+    height: 55px;
+    border-radius: 4px;
+    background-color: #1b1f24;
+}
+
+/*
  * The "Aa" on a text-preset tile.
  *
  * Fixed height so sixty tiles of wildly different faces still line up in a

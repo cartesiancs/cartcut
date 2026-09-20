@@ -12,9 +12,8 @@
  * Plain DOM rather than a Lit component: there is no reactive state here to
  * render from. The tile drives this imperatively from the effects
  * `assetHover.ts` hands it, and following the cursor writes two inline
- * properties. A `@state` field would re-render the *tile* at pointer rate, and
- * `AssetFile.render` re-enters `captureVideoThumbnail` for any video whose
- * thumbnail is not cached yet — which fetches the whole file.
+ * properties. A `@state` field would re-render the *tile* at pointer rate, for
+ * a preview that is not part of the tile's own template anyway.
  *
  * `owner` is the tile that opened it. `move` and `close` are refused from
  * anyone else, so a tile being torn down late — the directory reloaded, and
@@ -24,6 +23,7 @@
 
 import { playbackPathFor } from "../../states/proxyStore";
 import { toLocalPath } from "../element/mediaProbe";
+import { releaseVideo } from "./releaseVideo";
 import { thumbnailCache } from "./thumbnailCache";
 import {
   applyPreviewPlacement,
@@ -107,16 +107,6 @@ function ensureOverlay(): Overlay {
 
   overlay = { root, video, image };
   return overlay;
-}
-
-/** Stop decoding. Without this a 120fps 3600x2338 file keeps a decoder alive. */
-function releaseVideo(video: HTMLVideoElement) {
-  video.pause();
-  video.removeAttribute("poster");
-  video.removeAttribute("src");
-  // `load()` is what actually releases the player; clearing `src` alone leaves
-  // the previous resource loaded.
-  video.load();
 }
 
 function paint() {

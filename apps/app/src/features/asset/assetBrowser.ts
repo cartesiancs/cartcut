@@ -87,7 +87,22 @@ export class AssetBrowser extends LitElement {
 
   private lc = new LocaleController(this);
   private unsubscribe?: () => void;
+  private observer?: IntersectionObserver;
   private loadedRevision = assetStore.getState().directoryRevision;
+
+  /**
+   * Whether this panel has ever been on screen.
+   *
+   * It mounts at app startup inside a `display: none` tab pane and Lit has no
+   * reason to re-render when the pane is finally shown, so without this the
+   * folder is read, and every `lstat` in it issued, for a session that never
+   * opens the Asset tab. The same gate `templateBrowser`, `lutBrowser` and
+   * `animationPresetBrowser` each carry, and for the same reason.
+   *
+   * The tiles gate themselves separately, so this is not what stops the
+   * expensive half; it is what stops the disk read.
+   */
+  private seen = false;
 
   createRenderRoot() {
     this.unsubscribe = assetStore.subscribe((state: IAssetStore) => {
@@ -96,16 +111,40 @@ export class AssetBrowser extends LitElement {
       if (state.directoryRevision != this.loadedRevision) {
         this.loadedRevision = state.directoryRevision;
         this.nowDirectory = state.nowDirectory;
-        this.loadDirectory(state.nowDirectory, state.directoryRevision);
+        // Remembered, not dropped: opening the tab later loads whatever the
+        // cursor has arrived at by then.
+        if (this.seen) {
+          this.loadDirectory(state.nowDirectory, state.directoryRevision);
+        }
       }
     });
 
     return this;
   }
 
+  connectedCallback(): void {
+    super.connectedCallback();
+
+    this.observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) {
+        return;
+      }
+      this.observer?.disconnect();
+      this.observer = undefined;
+
+      this.seen = true;
+      const state = assetStore.getState();
+      this.nowDirectory = state.nowDirectory;
+      this.loadDirectory(state.nowDirectory, state.directoryRevision);
+    });
+    this.observer.observe(this);
+  }
+
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.unsubscribe?.();
+    this.observer?.disconnect();
+    this.observer = undefined;
   }
 
   private async loadDirectory(dir: string, revision: number) {

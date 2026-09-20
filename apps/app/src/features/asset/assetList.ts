@@ -26,6 +26,8 @@ import {
   hoverPreview,
   type HoverPreviewSource,
 } from "./hoverPreviewOverlay";
+import { cancelThumbnail, requestThumbnail } from "./thumbnails";
+import { observeVisibility, unobserveVisibility } from "./tileVisibility";
 
 /**
  * The grid. Presentation only — `<asset-browser>` owns the directory and hands
@@ -84,7 +86,10 @@ function applyShowType(element: HTMLElement, showType: AssetShowType) {
 
 @customElement("asset-file")
 export class AssetFile extends LitElement {
-  videoBlob: string;
+  /** Whether this tile is on screen, per `tileVisibility.ts`. */
+  private visible = false;
+  /** The file URL a thumbnail is currently on order for, or "" for none. */
+  private requestedUrl = "";
 
   /**
    * Click or drag, decided by `assetPress.ts`.
@@ -123,8 +128,11 @@ export class AssetFile extends LitElement {
     // Neither bubbles, so they go on the tile itself rather than on the grid.
     this.addEventListener("pointerenter", this.handlePointerEnter);
     this.addEventListener("pointerleave", this.handlePointerLeave);
+  }
 
-    this.videoBlob = "";
+  connectedCallback(): void {
+    super.connectedCallback();
+    observeVisibility(this, this.handleVisibility);
   }
 
   disconnectedCallback(): void {
@@ -137,6 +145,9 @@ export class AssetFile extends LitElement {
     this.dispatchHover({ type: "cancel" });
     this.clearDwell();
     this.unwatchWindow();
+
+    unobserveVisibility(this);
+    this.dropThumbnailRequest();
   }
 
   @property()
@@ -164,7 +175,13 @@ export class AssetFile extends LitElement {
       _changedProperties.has("directory")
     ) {
       this.dispatchHover({ type: "cancel" });
+      // The same reuse, from the thumbnail's side: the capture still on order
+      // is for the file this tile used to be, so it is no longer ours to wait
+      // for.
+      this.dropThumbnailRequest();
     }
+
+    this.ensureThumbnail();
   }
 
   private get fullPath(): string {
@@ -189,13 +206,11 @@ export class AssetFile extends LitElement {
     }
 
     if (fileType == "video") {
-      const cached = thumbnailCache.get(fileUrl);
-      if (cached != undefined) {
-        this.videoBlob = cached.url;
-      } else {
-        this.captureVideoThumbnail(fileUrl);
-      }
-      return this.templateVideoThumbnail();
+      // A read, and nothing else. Kicking the capture off from here is what
+      // made merely painting the grid start one decode per video in the
+      // folder; `ensureThumbnail` is asked from `updated`, and only for a tile
+      // that is actually on screen.
+      return this.templateVideoThumbnail(thumbnailCache.get(fileUrl)?.url ?? "");
     }
 
     return this.template(fileType);
@@ -221,6 +236,8 @@ export class AssetFile extends LitElement {
     return html`<img
         src="${url}"
         alt=""
+        loading="lazy"
+        decoding="async"
         class="align-self-center asset-preview"
       />
       <b class="align-self-center text-ellipsis-scroll text-light text-center"
@@ -228,13 +245,26 @@ export class AssetFile extends LitElement {
       >`;
   }
 
-  templateVideoThumbnail() {
+  /**
+   * `url` is "" until the capture lands, and that case is a sized box rather
+   * than an empty `<img>`.
+   *
+   * Two reasons, and the second is the one that matters. An empty `src`
+   * resolves against the document and paints a broken-image glyph. And the
+   * tile's geometry has to hold still: intersection is decided from layout, so
+   * tiles that change height as thumbnails arrive re-trigger intersection
+   * across the rest of the grid.
+   */
+  templateVideoThumbnail(url: string) {
     return html` <div class="position-relative align-self-center">
-        <img
-          src="${this.videoBlob}"
-          alt=""
-          class="align-self-center asset-preview w-100"
-        />
+        ${url == ""
+          ? html`<div class="asset-preview-pending"></div>`
+          : html`<img
+              src="${url}"
+              alt=""
+              decoding="async"
+              class="align-self-center asset-preview w-100"
+            />`}
         <span class="material-symbols-outlined position-absolute icon-center ">
           play_arrow
         </span>
@@ -244,6 +274,61 @@ export class AssetFile extends LitElement {
         >${this.name}</b
       >`;
   }
+
+  // -------------------------------------------------------------- thumbnail
+
+  /**
+   * Ask for this tile's thumbnail, if it wants one and does not have it.
+   *
+   * Idempotent, and called from `updated` on every render: a cache hit, a
+   * request already outstanding and a tile off screen all cost one lookup.
+   * That is what lets the kick-off live outside `render` without anything
+   * having to track whether it has run.
+   */
+  private ensureThumbnail() {
+    if (!this.visible || mime.lookup(this.name).type != "video") {
+      return;
+    }
+
+    const fileUrl = this.fileUrl;
+    if (this.requestedUrl == fileUrl || thumbnailCache.has(fileUrl)) {
+      return;
+    }
+
+    this.dropThumbnailRequest();
+    this.requestedUrl = fileUrl;
+    requestThumbnail(fileUrl, this.handleThumbnail);
+  }
+
+  private dropThumbnailRequest() {
+    if (this.requestedUrl == "") {
+      return;
+    }
+
+    cancelThumbnail(this.requestedUrl, this.handleThumbnail);
+    this.requestedUrl = "";
+  }
+
+  /** A field, not a method: `cancelThumbnail` has to be handed back the same
+   * reference `requestThumbnail` was given, and `this.f.bind(this)` is a new
+   * function every time. */
+  private handleThumbnail = () => {
+    this.requestedUrl = "";
+    this.requestUpdate();
+  };
+
+  private handleVisibility = (visible: boolean) => {
+    this.visible = visible;
+
+    if (visible) {
+      this.ensureThumbnail();
+      return;
+    }
+
+    // Scrolled away with the capture still waiting for a slot. Giving the slot
+    // back is the whole point of observing: what is on screen goes first.
+    this.dropThumbnailRequest();
+  };
 
   // ------------------------------------------------------------ press gesture
 
@@ -513,70 +598,6 @@ export class AssetFile extends LitElement {
     window.removeEventListener("wheel", this.handleWindowCancel);
     window.removeEventListener("blur", this.handleWindowCancel);
     window.removeEventListener("keydown", this.handleWindowCancel);
-  }
-
-  async captureVideoThumbnail(url) {
-    const fileUrl = this.fileUrl;
-
-    try {
-      const thumbnailUrl = await new Promise((resolve, reject) => {
-        fetch(`${url}`)
-          .then((res) => {
-            return res.blob();
-          })
-          .then((blob) => {
-            const blobUrl = URL.createObjectURL(blob);
-            const videoElement = document.createElement("video");
-
-            videoElement.src = blobUrl;
-            videoElement.preload = "metadata";
-
-            videoElement.onloadedmetadata = async () => {
-              const thumbnailCanvas = document.createElement("canvas");
-
-              videoElement.addEventListener("seeked", () => {
-                let width = videoElement.videoWidth;
-                let height = videoElement.videoHeight;
-                thumbnailCanvas.width = width;
-                thumbnailCanvas.height = height;
-
-                let ctx = thumbnailCanvas.getContext("2d");
-                if (!ctx) return false;
-                ctx.drawImage(
-                  videoElement,
-                  0,
-                  0,
-                  thumbnailCanvas.width,
-                  thumbnailCanvas.height,
-                );
-
-                thumbnailCanvas.toBlob((blob: any) => {
-                  try {
-                    const newImg = document.createElement("img");
-                    const url = URL.createObjectURL(blob);
-
-                    newImg.onload = () => {
-                      URL.revokeObjectURL(url);
-                    };
-
-                    this.videoBlob = url;
-                    this.requestUpdate();
-                    // `width`/`height` are the source's own, read above to size
-                    // the canvas. The hover preview opens before its `<video>`
-                    // has metadata and uses them to avoid a reflow.
-                    thumbnailCache.set(fileUrl, { url, w: width, h: height });
-                    resolve(url);
-                  } catch (error) {}
-                });
-              });
-
-              videoElement.currentTime = 1;
-            };
-          });
-      });
-
-      return thumbnailUrl;
-    } catch (error) {}
   }
 }
 
