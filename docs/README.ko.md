@@ -12,6 +12,8 @@ AI 에이전트를 위한 영상편집 소프트웨어
 
 <p align='center'>
 
+<a href="https://cartesiancs.com/cartcut"><img alt="Download for macOS" src="https://img.shields.io/badge/Download_for-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" /></a>
+&nbsp;
 <a href="#"><img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/cartesiancs/cartcut?style=for-the-badge" /></a>
 &nbsp;
 <a href="#"><img alt="GitHub Repo stars" src="https://img.shields.io/github/license/cartesiancs/cartcut?style=for-the-badge" /></a>
