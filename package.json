@@ -1,6 +1,6 @@
 {
   "name": "cartcut-app",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "description": "Video Editor",
   "main": "main/main.js",
   "author": "cartesiancs",
@@ -129,8 +129,20 @@
     "files": [
       "!src/**/*",
       "!electron/**/*",
-      "!dev-app-update.yml"
+      "!dev-app-update.yml",
+      "!tests/**",
+      "!bin/**",
+      "!dist-web/**",
+      "!docs/**",
+      "!.github/**",
+      "!apps/*/node_modules/**",
+      "!packages/*/node_modules/**",
+      "!apps/automatic-caption/dist/**",
+      "!apps/automatic-caption/public/**",
+      "!apps/app/src/**",
+      "!apps/app/sample/**"
     ],
+    "artifactBuildCompleted": "./scripts/checkArtifactSize.mjs",
     "publish": {
       "provider": "github",
       "owner": "cartesiancs"
