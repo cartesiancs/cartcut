@@ -96,6 +96,84 @@
 }
 
 /*
+ * A text-preset tile's highlight opens rather than switching on.
+ *
+ * It is a layer of its own because what animates is a scale, and scaling the
+ * tile itself would carry the `Aa` and both labels with it. `isolation` is
+ * load-bearing: a `z-index: -1` child of a tile that is not a stacking context
+ * escapes to the nearest one and paints behind the panel's own background,
+ * where it is invisible and nothing errors.
+ *
+ * The tiles in this panel also drop Bootstrap's `overflow-hidden`, which every
+ * other asset tile keeps for the filename that scrolls on hover. Here it had
+ * nothing to clip except the overshoot, and clipping the overshoot is clipping
+ * the spring.
+ *
+ * Every number arrives from `features/font/presetMotion.ts` as a custom
+ * property on the grid. The fallbacks below are what that file resolves to
+ * today, and exist for a stylesheet loaded without the panel.
+ */
+control-ui-text .asset {
+    position: relative;
+    isolation: isolate;
+}
+
+/*
+ * The flat fill this replaces. Left on, it arrives at full strength on the
+ * first frame and leaves the scale nothing to reveal.
+ */
+control-ui-text .asset:hover {
+    background-color: transparent;
+}
+
+control-ui-text .asset::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: 12px;
+    background-color: #2a3036;
+
+    opacity: 0;
+    transform: scale(var(--preset-hover-from, .9));
+
+    /*
+     * Leaving: flat, quick, and with no spring in it. A transition declared on
+     * the resting rule is the one that runs when the pointer goes, so this pair
+     * times the exit and the pair below times the entrance.
+     */
+    transition:
+        opacity var(--preset-hover-exit, 120ms) ease-out,
+        transform var(--preset-hover-exit, 120ms) ease-out;
+}
+
+control-ui-text .asset:hover::before {
+    opacity: 1;
+    transform: scale(1);
+
+    /*
+     * The fade is shorter than the spring on purpose: the colour is there
+     * within 140ms and the last of the bounce settles under it.
+     */
+    transition:
+        opacity var(--preset-hover-fade, 140ms) ease-out,
+        transform var(--preset-hover-enter, 271ms)
+            var(--preset-hover-ease, ease-out);
+}
+
+/*
+ * Reduced motion keeps the highlight and drops the travel. Both rules, or the
+ * hovered one would restore the transform the resting one just gave up.
+ */
+@media (prefers-reduced-motion: reduce) {
+    control-ui-text .asset::before,
+    control-ui-text .asset:hover::before {
+        transform: none;
+        transition: opacity 100ms linear;
+    }
+}
+
+/*
  * The "drop a file here" affordance.
  *
  * Two properties are load-bearing rather than cosmetic:
