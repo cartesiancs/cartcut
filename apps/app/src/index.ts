@@ -12,6 +12,7 @@ import { useTimelineStore } from "./states/timelineStore";
 import { installProxyBridge } from "./features/proxy/proxyBridge";
 import { installAutosave } from "./features/project/autosaveBridge";
 import { initProjectBaseline } from "./features/project/projectDirty";
+import { installHoverMotion } from "./features/motion/hoverSpring";
 
 enableIpcWrapper();
 
@@ -89,6 +90,12 @@ import "./features/agent/bridge";
 // Installed after the components, so the counters it exposes are the ones those
 // components already registered against.
 installFrameStats();
+
+// The spring every sidebar tile's highlight opens on, as custom properties on
+// the document root. Sampled once here rather than per grid: the tiles are
+// spread across nine components and `_asset.scss` reads the same five names
+// for all of them.
+installHoverMotion(document.documentElement.style);
 
 // Reads the proxy index off disk and keeps it current. Nothing is generated
 // here — this only learns what already exists, so a session with no proxies

@@ -3,7 +3,7 @@ import {
   springDurationMs,
   springEasing,
   type Spring,
-} from "./spring";
+} from "../motion/spring";
 
 /**
  * Every duration and curve the tour animates with, resolved once.

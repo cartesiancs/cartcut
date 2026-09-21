@@ -284,6 +284,7 @@ features/record/       the screen recorder's pure logic; the windows are apps/ov
 features/reverse/      reversed media files, made by electron/lib/reversePipeline.ts
 features/speed/        the ramp's graph editor; the curve is timeline/speedCurve.ts
 features/update/       the update card; main's half is electron/lib/updateSession.ts
+features/motion/       a damped spring as a CSS linear(): the tour, the tile hover
 features/editor/       actions, menuCommands, shortcuts, frameRate
 electron/mcp/          the MCP server, the tools, the bridge to the renderer
 electron/render/       ffmpegArgs, the frame pipe, the audio envelope expression

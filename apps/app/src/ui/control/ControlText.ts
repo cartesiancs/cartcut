@@ -7,7 +7,6 @@ import {
   type PresetStyle,
   type TextPreset,
 } from "../../features/font/textPresets";
-import { presetHoverMotionStyle } from "../../features/font/presetMotion";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { withAlpha as rgba } from "../../features/text/style";
 import type { TextElementOptions } from "../../features/element/textElement";
@@ -20,13 +19,6 @@ import { defaultTextHeight } from "../../features/text/metrics";
  * 8px outline that reads as a crisp edge on a 1080p title swallows the `Aa`.
  */
 const PREVIEW_FONT_SIZE = 30;
-
-/**
- * The hover spring, as custom properties for `_asset.scss`. Sampled once at
- * module load, the way the tour's motion is: the string is the same on every
- * render, and the search box re-renders the whole grid on each keystroke.
- */
-const HOVER_MOTION_STYLE = presetHoverMotionStyle();
 
 /**
  * The "Text" asset panel: one plain-text tile, then a preset per bundled Google
@@ -230,7 +222,7 @@ export class ControlText extends LitElement {
 
   private renderPreset(preset: TextPreset) {
     return html`<div
-      class="col-6 d-flex flex-column bd-highlight mt-1 asset"
+      class="col-6 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
       title=${preset.label}
       @click=${() => this._handleClickPreset(preset)}
     >
@@ -262,9 +254,9 @@ export class ControlText extends LitElement {
         />
       </div>
 
-      <div class="row px-2" style=${HOVER_MOTION_STYLE}>
+      <div class="row px-2">
         <div
-          class="col-6 d-flex flex-column bd-highlight mt-1 asset"
+          class="col-6 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
           @click=${this._handleClickAddFont}
         >
           <div class="text-preset-preview text-preset-preview-plain">

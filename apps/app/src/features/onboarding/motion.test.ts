@@ -14,7 +14,7 @@ import {
   onboardingMotionStyle,
 } from "./motion";
 import { ONBOARDING_CARD, ONBOARDING_STEPS } from "./steps";
-import { springOvershoot, springPosition } from "./spring";
+import { springOvershoot, springPosition } from "../motion/spring";
 
 describe("onboarding motion", () => {
   // Each of the three springs was chosen for a reason that is a fact about the

@@ -8,11 +8,15 @@
 
 .asset {
     padding: .5rem;
-}
 
-.asset:hover {
-    background-color: #2a3036;
-    border-radius: 12px;
+    /*
+     * Both for the band below. `isolation` is load-bearing: a `z-index: -1`
+     * child of a tile that is not a stacking context escapes to the nearest
+     * one and paints behind the panel's own background, where it is invisible
+     * and nothing errors.
+     */
+    position: relative;
+    isolation: isolate;
 }
 
 .asset-preview {
@@ -96,37 +100,26 @@
 }
 
 /*
- * A text-preset tile's highlight opens rather than switching on.
+ * A tile's highlight opens rather than switching on.
  *
- * It is a layer of its own because what animates is a scale, and scaling the
- * tile itself would carry the `Aa` and both labels with it. `isolation` is
- * load-bearing: a `z-index: -1` child of a tile that is not a stacking context
- * escapes to the nearest one and paints behind the panel's own background,
- * where it is invisible and nothing errors.
+ * Every `.asset` in the sidebar: text presets, utilities, effects, transitions,
+ * LUTs, templates, animation presets and the file browser. It is a layer of its
+ * own because what animates is a scale, and scaling the tile itself would carry
+ * its preview and its labels with it.
  *
- * The tiles in this panel also drop Bootstrap's `overflow-hidden`, which every
- * other asset tile keeps for the filename that scrolls on hover. Here it had
- * nothing to clip except the overshoot, and clipping the overshoot is clipping
- * the spring.
+ * Every tile keeps Bootstrap's `overflow-hidden`, so the part of the overshoot
+ * that passes the tile's own edge is clipped, which at these widths is about
+ * half a pixel per side. Taking the class off was measured instead: the file
+ * browser widens a long filename to 750% on hover (`.text-ellipsis-scroll`
+ * above) and two of the utility labels are wider than their cell, so the clip
+ * is holding real content in and the bounce lives in the curve rather than in
+ * those pixels.
  *
- * Every number arrives from `features/font/presetMotion.ts` as a custom
- * property on the grid. The fallbacks below are what that file resolves to
- * today, and exist for a stylesheet loaded without the panel.
+ * Every number arrives from `features/motion/hoverSpring.ts`, installed on the
+ * document root at boot. The fallbacks below are what that file resolves to
+ * today, and exist for a stylesheet loaded without it.
  */
-control-ui-text .asset {
-    position: relative;
-    isolation: isolate;
-}
-
-/*
- * The flat fill this replaces. Left on, it arrives at full strength on the
- * first frame and leaves the scale nothing to reveal.
- */
-control-ui-text .asset:hover {
-    background-color: transparent;
-}
-
-control-ui-text .asset::before {
+.asset::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -135,7 +128,7 @@ control-ui-text .asset::before {
     background-color: #2a3036;
 
     opacity: 0;
-    transform: scale(var(--preset-hover-from, .9));
+    transform: scale(var(--asset-hover-from, .9));
 
     /*
      * Leaving: flat, quick, and with no spring in it. A transition declared on
@@ -143,11 +136,11 @@ control-ui-text .asset::before {
      * times the exit and the pair below times the entrance.
      */
     transition:
-        opacity var(--preset-hover-exit, 120ms) ease-out,
-        transform var(--preset-hover-exit, 120ms) ease-out;
+        opacity var(--asset-hover-exit, 120ms) ease-out,
+        transform var(--asset-hover-exit, 120ms) ease-out;
 }
 
-control-ui-text .asset:hover::before {
+.asset:hover::before {
     opacity: 1;
     transform: scale(1);
 
@@ -156,9 +149,9 @@ control-ui-text .asset:hover::before {
      * within 140ms and the last of the bounce settles under it.
      */
     transition:
-        opacity var(--preset-hover-fade, 140ms) ease-out,
-        transform var(--preset-hover-enter, 271ms)
-            var(--preset-hover-ease, ease-out);
+        opacity var(--asset-hover-fade, 140ms) ease-out,
+        transform var(--asset-hover-enter, 271ms)
+            var(--asset-hover-ease, ease-out);
 }
 
 /*
@@ -166,8 +159,8 @@ control-ui-text .asset:hover::before {
  * hovered one would restore the transform the resting one just gave up.
  */
 @media (prefers-reduced-motion: reduce) {
-    control-ui-text .asset::before,
-    control-ui-text .asset:hover::before {
+    .asset::before,
+    .asset:hover::before {
         transform: none;
         transition: opacity 100ms linear;
     }
