@@ -196,7 +196,7 @@ export function buildTrayModel(input: TrayInput): TrayModel {
       toolTip:
         input.screens.length > 0
           ? undefined
-          : "No screen is available to capture. Check Screen Recording permission for Cartcut.",
+          : "No screen is available to capture. Check Screen Recording permission for CartCut.",
     });
   } else if (processing) {
     items.push({
@@ -392,10 +392,10 @@ export function buildTrayModel(input: TrayInput): TrayModel {
   return {
     tooltip:
       state === "recording"
-        ? "Cartcut — recording"
+        ? "CartCut — recording"
         : state === "paused"
-          ? "Cartcut — paused"
-          : "Cartcut Recorder",
+          ? "CartCut — paused"
+          : "CartCut Recorder",
     items,
   };
 }

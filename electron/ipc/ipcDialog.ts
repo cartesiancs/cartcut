@@ -89,7 +89,7 @@ export const ipcDialog = {
       buttonLabel: "Export",
       filters: [
         {
-          name: "Cartcut Template",
+          name: "CartCut Template",
           extensions: ["cttpl"],
         },
       ],

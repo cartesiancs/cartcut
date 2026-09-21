@@ -230,7 +230,7 @@ function assertUniform(mesh: number[]): void {
     const expected = mesh[0] + (span * i) / last;
     if (Math.abs(mesh[i] - expected) / span > MESH_TOLERANCE) {
       throw new LutParseError(
-        "this .3dl uses an unevenly spaced input mesh, which Cartcut cannot " +
+        "this .3dl uses an unevenly spaced input mesh, which CartCut cannot " +
           "represent — re-export it as a .cube",
       );
     }

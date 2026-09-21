@@ -160,7 +160,7 @@ export function readProjectFailureMessage(
 ): string {
   if (result.reason === "schema") {
     return (
-      `This project was made with a different version of Cartcut ` +
+      `This project was made with a different version of CartCut ` +
       `(format v${String(result.found)}) and cannot be opened by this one ` +
       `(format v${result.expected}).`
     );

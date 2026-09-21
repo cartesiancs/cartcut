@@ -111,7 +111,7 @@ export function requestEditor(
   if (target == null || target.isDestroyed()) {
     return Promise.reject(
       new Error(
-        "Cartcut's editor window is not available. Is the app running and past its splash screen?",
+        "CartCut's editor window is not available. Is the app running and past its splash screen?",
       ),
     );
   }

@@ -137,7 +137,7 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  * field, and a tool is read on its own. It is reinforcement, so it stays short.
  */
 const INSTRUCTIONS = [
-  "Cartcut is a live video editor. Every call changes the project the user is watching, and shares their undo history.",
+  "CartCut is a live video editor. Every call changes the project the user is watching, and shares their undo history.",
   "Times are timeline milliseconds, absolute from the start of the project. Never seconds, frames or timecode.",
   "Layering is track order, never a clip property: index 0 is the top row and the front of the composite. A title or caption has to sit on a track above the picture to be seen, and move_track is how that changes.",
   "One call with many items is one undo step; N calls are N. Batch.",
@@ -279,14 +279,14 @@ export function startMcpServer(): Promise<{
         alreadyRunning: false,
         error:
           error.code === "EADDRINUSE"
-            ? `Port ${MCP_PORT} is already in use. Another Cartcut window may be running.`
+            ? `Port ${MCP_PORT} is already in use. Another CartCut window may be running.`
             : String(error.message),
       });
     });
 
     next.listen(MCP_PORT, MCP_HOST, () => {
       server = next;
-      console.log(`[mcp] Cartcut MCP server listening on ${mcpUrl()}`);
+      console.log(`[mcp] CartCut MCP server listening on ${mcpUrl()}`);
       resolve({
         ok: true,
         url: mcpUrl(),

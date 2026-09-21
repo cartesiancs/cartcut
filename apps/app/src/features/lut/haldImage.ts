@@ -63,7 +63,7 @@ export function parseImageLut(image: ImagePixels): Lut3d {
   if (layouts.length === 0) {
     throw new LutParseError(
       `a ${image.width}×${image.height} image is not a LUT in any layout ` +
-        "Cartcut knows — expected a Hald CLUT or a square-tile strip",
+        "CartCut knows — expected a Hald CLUT or a square-tile strip",
     );
   }
 

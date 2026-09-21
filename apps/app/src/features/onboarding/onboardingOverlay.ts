@@ -217,7 +217,7 @@ export class OnboardingOverlay extends LitElement {
           class="onboarding-card"
           role="dialog"
           aria-modal="true"
-          aria-label="Cartcut onboarding"
+          aria-label="CartCut onboarding"
         >
           <!-- Drawn in the order the design stacks them: the art first, the
                gradient that sinks it into the card over that, and the words on

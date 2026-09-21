@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { toMenuTemplate, type TrayModel } from "./recordTrayMenu.js";
 
 const MODEL: TrayModel = {
-  tooltip: "Cartcut Recorder",
+  tooltip: "CartCut Recorder",
   items: [
     { type: "normal", id: "start", label: "Start Recording" },
     { type: "separator" },

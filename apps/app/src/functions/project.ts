@@ -299,7 +299,7 @@ const project = {
 
   changeProjectFileValue: function ({ projectDestination }) {
     document.querySelector("#projectFile").value = projectDestination;
-    uiState.setTopBarTitle(`Cartcut - ${projectDestination}`);
+    uiState.setTopBarTitle(`CartCut - ${projectDestination}`);
   },
 };
 

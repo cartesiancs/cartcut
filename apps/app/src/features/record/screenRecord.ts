@@ -218,7 +218,7 @@ export class ScreenRecordPanel extends LitElement {
     } catch (error) {
       console.error("[record] could not preview the screen", error);
       this.previewError =
-        "Could not show the screen. Check Screen Recording permission for Cartcut in System Settings → Privacy & Security.";
+        "Could not show the screen. Check Screen Recording permission for CartCut in System Settings → Privacy & Security.";
     } finally {
       this.isStartingPreview = false;
       this.requestUpdate();

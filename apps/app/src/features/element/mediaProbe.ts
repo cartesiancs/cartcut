@@ -291,7 +291,7 @@ export async function probeMedia(
 
   if (kind == null) {
     throw new Error(
-      `Cartcut has no renderer for "${filepath}". Supported: video, image, gif and audio files.`,
+      `CartCut has no renderer for "${filepath}". Supported: video, image, gif and audio files.`,
     );
   }
 

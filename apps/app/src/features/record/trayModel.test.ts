@@ -199,7 +199,7 @@ describe("buildTrayModel", () => {
   });
 
   it("names the state in its tooltip", () => {
-    expect(buildTrayModel(INPUT).tooltip).toBe("Cartcut Recorder");
+    expect(buildTrayModel(INPUT).tooltip).toBe("CartCut Recorder");
     expect(buildTrayModel({ ...INPUT, state: "recording" }).tooltip).toMatch(
       /recording/,
     );

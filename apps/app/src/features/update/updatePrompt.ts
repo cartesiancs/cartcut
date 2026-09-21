@@ -120,7 +120,7 @@ export class UpdatePromptElement extends LitElement {
           >
           <div class="flex-grow-1 small" title=${detail}>
             <div class="fw-semibold">${this.lc.t(prompt.messageKey)}</div>
-            <div class="text-secondary">Cartcut v${view.version}</div>
+            <div class="text-secondary">CartCut v${view.version}</div>
           </div>
           <button
             type="button"

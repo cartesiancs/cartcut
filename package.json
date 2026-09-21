@@ -35,7 +35,7 @@
     "url": "https://github.com/cartesiancs/cartcut"
   },
   "build": {
-    "productName": "Cartcut",
+    "productName": "CartCut",
     "appId": "com.cartesiancs.cartcut",
     "asar": true,
     "asarUnpack": [
@@ -81,9 +81,9 @@
       "entitlements": "assets/entitlements.mac.plist",
       "entitlementsInherit": "assets/entitlements.mac.plist",
       "extendInfo": {
-        "NSCameraUsageDescription": "Cartcut uses your camera to record a picture-in-picture bubble alongside your screen.",
-        "NSMicrophoneUsageDescription": "Cartcut uses your microphone to record narration alongside your screen.",
-        "NSSpeechRecognitionUsageDescription": "Cartcut transcribes your clips on this Mac to generate captions. The audio never leaves your computer."
+        "NSCameraUsageDescription": "CartCut uses your camera to record a picture-in-picture bubble alongside your screen.",
+        "NSMicrophoneUsageDescription": "CartCut uses your microphone to record narration alongside your screen.",
+        "NSSpeechRecognitionUsageDescription": "CartCut transcribes your clips on this Mac to generate captions. The audio never leaves your computer."
       }
     },
     "dmg": {},
@@ -116,7 +116,7 @@
       "desktop": {
         "entry": {
           "MimeType": "x-scheme-handler/cartcutapp;",
-          "StartupWMClass": "Cartcut"
+          "StartupWMClass": "CartCut"
         }
       },
       "publish": null

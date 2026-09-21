@@ -273,7 +273,7 @@ async function transcribeOpenAi(wavPath: string): Promise<Transcript> {
   const key = store.get("ai_openai_key");
   if (typeof key !== "string" || key.length === 0) {
     throw new Error(
-      "No OpenAI API key is set. Add one in Cartcut's AI settings, or run a local speech-to-text server.",
+      "No OpenAI API key is set. Add one in CartCut's AI settings, or run a local speech-to-text server.",
     );
   }
 

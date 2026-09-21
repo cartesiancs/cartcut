@@ -304,7 +304,7 @@ export class ElementTimelineBottomScroll extends LitElement {
 
               <span class="text-secondary" style="font-size: 13px;">
                 ${this.isRunMcp
-                  ? html`Cartcut is listening. Run this once in your terminal,
+                  ? html`CartCut is listening. Run this once in your terminal,
                     from any folder, then just ask Claude Code to edit.`
                   : html`The editor bridge is not running.`}
               </span>

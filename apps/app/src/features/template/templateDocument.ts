@@ -131,7 +131,7 @@ export async function readTemplateDocument(
   const schemaVersion = project?.schemaVersion ?? 1;
   if (schemaVersion !== SCHEMA_VERSION) {
     throw new Error(
-      `the template was written by a different version of Cartcut (${String(
+      `the template was written by a different version of CartCut (${String(
         schemaVersion,
       )} rather than ${SCHEMA_VERSION})`,
     );
