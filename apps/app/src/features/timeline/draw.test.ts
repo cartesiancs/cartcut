@@ -169,7 +169,7 @@ describe("drawTimeline", () => {
 
   it("paints a row band across the full width", () => {
     const { canvas } = paint(doc({}));
-    expect(pixel(canvas, 350, 10)).toMatchObject({ r: 0x1e, g: 0x1f, b: 0x25 });
+    expect(pixel(canvas, 350, 10)).toMatchObject({ r: 0x17, g: 0x18, b: 0x1c });
   });
 
   it("paints a clip in its own colour", () => {
@@ -224,7 +224,7 @@ describe("drawTimeline", () => {
     expect(pixel(canvas, 45, 30)).toMatchObject({ r: 255, g: 0, b: 0 });
     expect(pixel(canvas, 220, 30)).toMatchObject({ r: 0, g: 255, b: 0 });
     // The gap between them shows the row, not a clip.
-    expect(pixel(canvas, 130, 30)).toMatchObject({ r: 0x1e, g: 0x1f, b: 0x25 });
+    expect(pixel(canvas, 130, 30)).toMatchObject({ r: 0x17, g: 0x18, b: 0x1c });
   });
 
   it("draws adjacent halves of a split with no gap and no overlap", () => {
@@ -1161,7 +1161,7 @@ const ROW_Y = 30;
  * Whether the lattice painted this column.
  *
  * `rgba(255,255,255,0.13)` over a black clip is exactly 33 grey. The bare clip
- * is 0, also grey; the row background is `#1e1f25`, which is *not* grey. Testing
+ * is 0, also grey; the row background is `#17181c`, which is *not* grey. Testing
  * for "grey and lit" separates all three without a magic range.
  */
 function isGridInk(canvas: any, x: number): boolean {
@@ -1382,7 +1382,7 @@ describe("drawMarquee", () => {
     const { canvas, ctx } = paint(doc({}));
     drawMarquee(ctx, band, loud);
     // The row colour, untouched.
-    expect(pixel(canvas, 50, 20)).toMatchObject({ r: 30, g: 31, b: 37 });
+    expect(pixel(canvas, 50, 20)).toMatchObject({ r: 23, g: 24, b: 28 });
   });
 
   it("draws nothing for a band with no width", () => {
@@ -1390,6 +1390,6 @@ describe("drawMarquee", () => {
     expect(() =>
       drawMarquee(ctx, { x: 100, y: 10, w: 0, h: 20 }, loud),
     ).not.toThrow();
-    expect(pixel(canvas, 100, 20)).toMatchObject({ r: 30, g: 31, b: 37 });
+    expect(pixel(canvas, 100, 20)).toMatchObject({ r: 23, g: 24, b: 28 });
   });
 });

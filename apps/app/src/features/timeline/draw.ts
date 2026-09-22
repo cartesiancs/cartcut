@@ -100,7 +100,7 @@ export const defaultColors: ThemeColors = {
   // Matches `$background-color` in `sass/var.scss`, so the canvas is seamless
   // with the ruler above it and the app chrome around it.
   background: "#0f1012",
-  row: "#1e1f25",
+  row: "#17181c",
   label: "#ffffff",
   selection: "#ffffff",
   playhead: "#dbdaf0",
