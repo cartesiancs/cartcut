@@ -318,8 +318,7 @@ export class FxPresetBrowser extends LitElement {
       if (presetId == null) {
         continue;
       }
-      const step =
-        presetId === this.hoveredId ? this.hoverStep : RESTING_STEP;
+      const step = presetId === this.hoveredId ? this.hoverStep : RESTING_STEP;
       const key = previewKey(presetId, step);
       const frame = previews.get(key);
       const ctx = canvas.getContext("2d");
@@ -457,7 +456,7 @@ export class FxPresetBrowser extends LitElement {
     const total = presetsOfKind(this.kind).length;
 
     return html`
-      <div class="px-2 pt-1">
+      <div class="px-0 pt-1">
         <input
           type="search"
           class="form-control form-control-sm bg-dark text-light border-secondary"

@@ -70,9 +70,9 @@ export class ControlUiFx extends LitElement {
 
   render() {
     return html`
-      <div class="d-flex gap-1 px-2">
-        ${this.tab("effect", "Effects")} ${this.tab("transition", "Transitions")}
-        ${this.tab("lut", "LUTs")}
+      <div class="d-flex gap-1 px-0">
+        ${this.tab("effect", "Effects")}
+        ${this.tab("transition", "Transitions")} ${this.tab("lut", "LUTs")}
       </div>
 
       <div class="mt-2">

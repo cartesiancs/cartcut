@@ -383,7 +383,7 @@ export class LutBrowser extends LitElement {
         @dragover=${(e: DragEvent) => e.preventDefault()}
         @drop=${(e: DragEvent) => void this.handleDrop(e)}
       >
-        <div class="px-2 pt-1 d-flex gap-1">
+        <div class="px-0 pt-1 d-flex gap-1">
           <input
             type="search"
             class="form-control form-control-sm bg-dark text-light border-secondary"

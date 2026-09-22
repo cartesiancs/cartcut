@@ -187,7 +187,9 @@ export class ControlText extends LitElement {
     const shadows: string[] = [];
     if (style.glow) {
       const blur = (style.glow.size * scale).toFixed(2);
-      shadows.push(`0 0 ${blur}px ${rgba(style.glow.color, style.glow.opacity)}`);
+      shadows.push(
+        `0 0 ${blur}px ${rgba(style.glow.color, style.glow.opacity)}`,
+      );
     }
     if (style.shadow) {
       const x = (style.shadow.offsetX * scale).toFixed(2);
@@ -229,12 +231,8 @@ export class ControlText extends LitElement {
       <div class="text-preset-preview" style=${this.previewStyle(preset)}>
         Aa
       </div>
-      <b class="text-light text-center text-preset-name"
-        >${preset.fontLabel}</b
-      >
-      <span class="text-center text-preset-style"
-        >${preset.styleLabel}</span
-      >
+      <b class="text-light text-center text-preset-name">${preset.fontLabel}</b>
+      <span class="text-center text-preset-style">${preset.styleLabel}</span>
     </div>`;
   }
 
@@ -244,7 +242,7 @@ export class ControlText extends LitElement {
     );
 
     return html`
-      <div class="px-2 pt-1">
+      <div class="px-0 py-1">
         <input
           type="search"
           class="form-control form-control-sm bg-default text-light"
