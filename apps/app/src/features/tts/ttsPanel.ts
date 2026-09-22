@@ -316,7 +316,7 @@ export class TtsPanel extends LitElement {
           <label class="flex-fill">
             <span class="text-secondary" style="font-size: 0.7rem;">Voice</span>
             <select
-              class="form-select form-select-sm bg-dark text-light"
+              class="form-select text-light"
               @change=${(event: Event) => {
                 this.voice = (event.target as HTMLSelectElement).value;
               }}
@@ -335,7 +335,7 @@ export class TtsPanel extends LitElement {
               >Language</span
             >
             <select
-              class="form-select form-select-sm bg-dark text-light"
+              class="form-select text-light"
               @change=${(event: Event) => {
                 this.language = (event.target as HTMLSelectElement).value;
               }}
@@ -376,7 +376,7 @@ export class TtsPanel extends LitElement {
               >Quality</span
             >
             <select
-              class="form-select form-select-sm bg-dark text-light"
+              class="form-select text-light"
               @change=${(event: Event) => {
                 this.steps = Number((event.target as HTMLSelectElement).value);
               }}

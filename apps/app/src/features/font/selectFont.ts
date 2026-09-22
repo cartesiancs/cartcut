@@ -25,7 +25,7 @@ export class SelectFont extends LitElement {
   template() {
     return `<select
         ref="lists"
-        class="form-select form-control bg-default text-light"
+        class="form-select text-light"
         aria-label="Default select examplsse"
       >
         <option selected>Select</option>

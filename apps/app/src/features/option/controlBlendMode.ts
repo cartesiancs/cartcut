@@ -58,7 +58,7 @@ export class BlendModeControl extends LitElement {
     return html`
       <label class="form-label text-light">Blend</label>
       <select
-        class="form-select bg-dark text-light form-select-sm mb-3"
+        class="form-select text-light mb-3"
         aria-label="blend mode"
         aria-event="blend_mode"
         .value=${this.blend}

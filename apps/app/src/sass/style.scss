@@ -394,12 +394,52 @@ keyframe-editor {
   background-color: $button-background-color;
 }
 
-// Bootstrap ships `.form-control`/`.form-select` with a #ced4da border, meant
-// for a light page. On these dark panels it reads as a white outline, brighter
-// than anything around it. Match the panel dividers instead.
-.form-control,
-.form-select {
-  border-color: $background-border-color;
+// A `<select>`, drawn as the `<input>` beside it.
+//
+// `devent-designsystem.css` takes `.form-control` off Bootstrap's skin: no
+// border, a 10px radius and no focus ring. It says nothing about
+// `.form-select`, so every select in the app kept Bootstrap's 1px border, its
+// 4px radius, its focus ring and a fill two shades lighter than the field
+// above it. This is the select half of that sheet.
+//
+// The element selector is deliberate: it catches a `<select>` whatever classes
+// it is given. The markup used to decide a select's fill and height panel by
+// panel, with `bg-dark`, `bg-default` and `form-select-sm` in whatever
+// combination was copied first, and those are gone from all eighteen of them.
+// Do not put a `bg-*` utility back on one: Bootstrap's utilities are
+// `!important` and would take the fill out of this file's hands.
+//
+// Height needs no rule. A borderless select is already `.form-control`'s 36px,
+// since the padding and the font are the same numbers and the 2px it loses is
+// the border. Every select here is a labelled full-width row rather than a
+// cell in a dense grid, so the field it lines up with is the full-size input.
+select,
+select.form-select {
+  background-color: $button-background-color;
+  border: none;
+  border-radius: 10px;
+  box-shadow: none;
+
+  // Bootstrap's chevron is drawn in #343a40 for a white field, which on this
+  // one is nearly the fill. The same path, in the colour the labels use.
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23adb5bd' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e");
+}
+
+// Focus. Bootstrap's `.form-select:focus` carries a four-pixel blue ring, and
+// its `(0,2,0)` outranks the rule above, so `box-shadow: none` there does not
+// reach it. The input has no ring at all, `devent-designsystem.css` having
+// taken `.form-control`'s away with an `!important`, so this is the same
+// decision spelled at a specificity that wins.
+select.form-select:focus {
+  box-shadow: none;
+}
+
+// Bootstrap greys a disabled select to #e9ecef, a light chip on a dark panel.
+// `.form-control:disabled` below is what an input does instead, and this is
+// the same two lines: the field stays put and the text dims.
+select.form-select:disabled {
+  background-color: $button-background-color;
+  color: #ffffffc0;
 }
 
 // A labelled switch, as a full-width row with the control at its end.

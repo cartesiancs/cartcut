@@ -108,7 +108,7 @@ export class OptionVideo extends LitElement {
             <select
               @change=${this.handleChangeFilterName}
               .value=${filter.name}
-              class="form-select bg-dark text-light form-select-sm"
+              class="form-select text-light"
               aria-label="select screen"
               aria-event="filter_name"
               style="

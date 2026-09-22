@@ -410,7 +410,7 @@ export class OptionText extends LitElement {
           <div class="mb-2 w-full d-flex gap-1">
             <select
               aria-event="font-weight"
-              class="form-select form-control bg-default text-light"
+              class="form-select text-light"
               ?disabled=${this.availableWeights().length < 2}
               @change=${this.handleChangeFontWeight}
             >
@@ -835,7 +835,7 @@ export class OptionText extends LitElement {
       <div class="mb-2">
         <label class="form-label text-light">Letter Case</label>
         <select
-          class="form-select form-select-sm bg-default text-light"
+          class="form-select text-light"
           @change=${(e: Event) =>
             this.set(
               ["options", "textTransform"],
@@ -857,7 +857,7 @@ export class OptionText extends LitElement {
       <div class="mb-2">
         <label class="form-label text-light">Fill</label>
         <select
-          class="form-select form-select-sm bg-default text-light"
+          class="form-select text-light"
           @change=${(e: Event) => this.handleChangeFillType(e)}
         >
           <option value="solid" ?selected=${style.fill.type === "solid"}>

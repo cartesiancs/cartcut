@@ -114,7 +114,7 @@ export class ParentSelectControl extends LitElement {
     return html`
       <label class="form-label text-light">Parent</label>
       <select
-        class="form-select bg-dark text-light form-select-sm mb-2"
+        class="form-select text-light mb-2"
         aria-label="parent"
         aria-event="parent"
         .value=${this.held}

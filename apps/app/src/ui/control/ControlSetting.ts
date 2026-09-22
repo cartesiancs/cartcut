@@ -294,7 +294,7 @@ export class ControlSetting extends LitElement {
       <label class="form-label text-light">${label}</label>
       <select
         data-setting=${key}
-        class="form-select bg-dark text-light form-select-sm mb-3"
+        class="form-select text-light mb-3"
         @change=${handler}
       >
         ${options.map(

@@ -479,7 +479,7 @@ export class ScreenRecordPanel extends LitElement {
 
         <div class="d-flex col gap-2">
           <select
-            class="form-select bg-dark text-light form-select-sm"
+            class="form-select text-light"
             aria-label="select screen"
             ?disabled=${this.isRecord}
             @change=${this.handleChangeSelect}

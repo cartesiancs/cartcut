@@ -267,7 +267,7 @@ export class OptionEffect extends LitElement {
           : ""}
 
         <select
-          class="form-select bg-dark text-light form-select-sm mb-1"
+          class="form-select text-light mb-1"
           .value=${effect.presetId}
           @change=${this.handleChangePreset}
         >
@@ -327,7 +327,7 @@ export class OptionEffect extends LitElement {
                 Blend
               </label>
               <select
-                class="form-select bg-dark text-light form-select-sm mb-3"
+                class="form-select text-light mb-3"
                 .value=${effect.blend ??
                 (preset?.render.type === "overlay"
                   ? (preset.render.blend ?? "screen")

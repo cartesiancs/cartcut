@@ -195,7 +195,7 @@ function selectControl(
     <div class="mb-2">
       ${label(param)}
       <select
-        class="form-select bg-dark text-light form-select-sm"
+        class="form-select text-light"
         .value=${String(value)}
         @change=${(e: Event) =>
           opts.onCommit(param.key, Number((e.target as HTMLSelectElement).value))}

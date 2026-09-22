@@ -97,7 +97,7 @@ export class ClipSpeedControl extends LitElement {
     return html`
       <label class="form-label text-light">${this.lc.t("setting.speed")}</label>
       <select
-        class="form-select bg-dark text-light form-select-sm mb-3"
+        class="form-select text-light mb-3"
         aria-label="clip speed"
         aria-event="clip_speed"
         @change=${this.handleChange}

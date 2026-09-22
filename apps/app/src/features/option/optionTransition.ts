@@ -235,7 +235,7 @@ export class OptionTransition extends LitElement {
           : ""}
 
         <select
-          class="form-select bg-dark text-light form-select-sm mb-3"
+          class="form-select text-light mb-3"
           .value=${transition.presetId}
           @change=${this.handleChangePreset}
         >

@@ -235,7 +235,7 @@ export class ClipSpeedCurveControl extends LitElement {
         template literal, and the errors land on the lines after it.
       -->
       <select
-        class="form-select bg-dark text-light form-select-sm mb-3"
+        class="form-select text-light mb-3"
         aria-label="speed ramp preset"
         aria-event="speed_curve_preset"
         @change=${this.handlePreset}
