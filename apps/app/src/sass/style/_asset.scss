@@ -10,6 +10,15 @@
     padding: .5rem;
 
     /*
+     * Every tile is a click target: a preset, a utility, a LUT, a template, a
+     * file to open, a folder to enter. None of them is a `<button>`, and
+     * Bootstrap's reboot hands the pointer to `button:not(:disabled)` and
+     * `.btn` alone. That is why every button in these panels already had it
+     * and the tiles did not.
+     */
+    cursor: pointer;
+
+    /*
      * Both for the band below. `isolation` is load-bearing: a `z-index: -1`
      * child of a tile that is not a stacking context escapes to the nearest
      * one and paints behind the panel's own background, where it is invisible
