@@ -132,7 +132,14 @@ async function persist(): Promise<void> {
   await bridge.saveSettings(state.settings);
 }
 
-/** Push the bubble layout to the overlay so its preview matches the file. */
+/**
+ * Push the bubble layout to the overlay so its preview matches the file.
+ *
+ * `displayId` is what moves the overlay window onto the screen being captured.
+ * It has to come from here because the engine owns the selection and main is
+ * told rather than asked: see `lib/overlayPlacement.ts`. A window source has no
+ * display, and sends the empty string, which main reads as "stay put".
+ */
 async function refreshOverlay(): Promise<void> {
   const selection = resolveRecordSelection({
     settings: state.settings,
@@ -141,9 +148,14 @@ async function refreshOverlay(): Promise<void> {
     microphones: state.devices.microphones,
   });
 
+  const source = state.sources.find(
+    (candidate) => candidate.id === selection.screenSourceId,
+  );
+
   await bridge.setOverlay({
     drawing: state.settings.drawing,
     recording: state.status === "recording",
+    displayId: source?.displayId ?? "",
     cameraDeviceId: selection.cameraDeviceId,
     bubbleSize: state.settings.bubbleSize,
     bubbleCorner: state.settings.bubbleCorner,

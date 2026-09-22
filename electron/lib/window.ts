@@ -153,6 +153,11 @@ const window = {
    * Sized to `bounds`, not `workAreaSize`: the work area excludes the menu bar
    * and the dock, and an overlay that stops short of them cannot draw over the
    * part of the screen that is being recorded.
+   *
+   * The primary display is only where it starts. Which screen is captured is a
+   * setting nothing has read yet at this point, so `lib/recorder.ts` moves the
+   * window onto the selected display on the engine's first overlay refresh and
+   * on every change after it.
    */
   createRecordOverlayWindow: () => {
     const primaryDisplay = screen.getPrimaryDisplay();

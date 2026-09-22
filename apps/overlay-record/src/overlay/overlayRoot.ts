@@ -265,7 +265,18 @@ export class RecordOverlay extends LitElement {
     }
   };
 
-  private onResize = () => this.paint();
+  /**
+   * The window is resized when the recorder is pointed at another display, and
+   * the bubble's box is computed in `render` from the viewport while `paint`
+   * only redraws the canvas. So a resize needs an explicit update, or the
+   * bubble keeps the previous display's layout: inset from the corner it is
+   * supposed to hug on a larger screen, and hanging off the edge on a smaller
+   * one. The canvas is sized in `draw` and is fine either way.
+   */
+  private onResize = () => {
+    this.requestUpdate();
+    this.paint();
+  };
 
   private send(message: unknown): void {
     void (window as any).electronAPI?.req?.overlayRecord?.stroke(message);

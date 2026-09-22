@@ -186,8 +186,17 @@ export const ipcOverlayRecord = {
     }
   },
 
-  /** Push state to the overlay, and set whether it takes the pointer. */
-  setOverlay: async (_event, state: { drawing: boolean }) => {
+  /**
+   * Push state to the overlay, set whether it takes the pointer, and move it
+   * onto the display being captured.
+   *
+   * Opaque beyond `drawing` and `displayId`: the rest is bubble layout the
+   * overlay renderer reads, and main has no opinion about it.
+   */
+  setOverlay: async (
+    _event,
+    state: { drawing: boolean; displayId?: string },
+  ) => {
     updateOverlay(state);
     return { status: 1 as const };
   },

@@ -14,7 +14,7 @@
  * `recordTrayMenu.ts` for why that boundary sits where it does).
  */
 
-import { BrowserWindow } from "electron";
+import { BrowserWindow, screen } from "electron";
 import log from "electron-log";
 import {
   destroyRecordTray,
@@ -24,6 +24,7 @@ import type { TrayModel } from "./recordTrayMenu.js";
 import { window as windows, mainWindow } from "./window.js";
 import { cancelSession } from "./recordSession.js";
 import { disarmDisplayMedia } from "./displayMedia.js";
+import { overlayBoundsFor, sameBounds } from "./overlayPlacement.js";
 
 let overlayWindow: BrowserWindow | null = null;
 let engineWindow: BrowserWindow | null = null;
@@ -123,6 +124,37 @@ export function setRecorderTray(model: TrayModel): void {
 }
 
 /**
+ * Put the overlay over the display being captured.
+ *
+ * The window is created on the primary display and the screen being captured is
+ * a setting, so without this the bubble stays on monitor one while the take
+ * records monitor two: invisible to the person being recorded on the screen
+ * they are recording, and drawn by the compositor into the file anyway, at a
+ * corner they never saw it in.
+ *
+ * `setResizable` around the move because **a `resizable: false` window ignores
+ * a programmatic size change on Windows**. Displays differ in size, so without
+ * the toggle a move to a second monitor would keep the first one's dimensions
+ * and leave the overlay covering part of the screen, with the bubble laid out
+ * against a frame that is not the one it is on.
+ *
+ * `bounds`, not `workArea`, for the reason `window.ts` gives: the work area
+ * excludes the menu bar and the Dock, and those are being recorded too.
+ */
+function placeOverlayOn(overlay: BrowserWindow, displayId: unknown): void {
+  const bounds = overlayBoundsFor(screen.getAllDisplays(), displayId);
+
+  if (bounds == null || sameBounds(bounds, overlay.getBounds())) {
+    return;
+  }
+
+  const wasResizable = overlay.isResizable();
+  overlay.setResizable(true);
+  overlay.setBounds(bounds);
+  overlay.setResizable(wasResizable);
+}
+
+/**
  * Push the overlay's state to it, and set whether it takes the pointer.
  *
  * Drawing mode is the only time the overlay is interactive. The rest of the
@@ -142,14 +174,21 @@ export function setRecorderTray(model: TrayModel): void {
  * depend on the overlay's own UI working. The other two — the toolbar's Done
  * button and the Escape key — are in `overlayRoot.ts`, which explains why a
  * drawing surface must carry its own way out.
+ *
+ * `displayId` is the display behind the selected capture source, and the window
+ * follows it here rather than at creation because the source is chosen after
+ * the recorder opens and can change at any time while it is idle.
  */
 export function updateOverlay(state: {
   drawing: boolean;
+  displayId?: unknown;
   [key: string]: unknown;
 }): void {
   if (!alive(overlayWindow)) {
     return;
   }
+
+  placeOverlayOn(overlayWindow, state.displayId);
 
   const drawing = state.drawing === true;
 
