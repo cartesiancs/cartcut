@@ -19,6 +19,7 @@
  * find out, so the answer is a list of ids plus rows for what was created.
  */
 
+import { activeTransaction, applyInTransaction } from "../extension/transaction";
 import { isTimelineLocked } from "../../states/timelineLockStore";
 import { useTimelineStore } from "../../states/timelineStore";
 import type { TimelineDocument } from "../timeline/tracks";
@@ -56,6 +57,19 @@ export function commit(
     );
   }
 
+  // Inside a batch the edit goes into the working document instead of the
+  // store, and no checkpoint is recorded: `runBatch` records one for the whole
+  // list at the end. Every decline rule below still applies, because this is
+  // still the only implementation of them.
+  const transaction = activeTransaction();
+  if (transaction != null) {
+    const outcome = applyInTransaction(transaction, fn);
+    if (!outcome.changed) {
+      return declined(declineReason);
+    }
+    return diffOf(outcome.before, outcome.after);
+  }
+
   const before = useTimelineStore.getState().getDocument();
 
   // Probe before committing anything. `withCheckpoint` would tell us the same
@@ -73,6 +87,17 @@ export function commit(
 
   const after = useTimelineStore.getState().getDocument();
 
+  return diffOf(before, after);
+}
+
+/**
+ * What changed between two documents, as the agent sees it.
+ *
+ * Shared by the committed path and the batched one so a step inside a batch
+ * reports exactly what it would report outside one. A second copy would drift
+ * on the day someone added a field to `EditResult`.
+ */
+function diffOf(before: TimelineDocument, after: TimelineDocument): EditResult {
   const created: string[] = [];
   const removed: string[] = [];
   const changed: string[] = [];
@@ -108,6 +133,39 @@ export function commit(
   }
 
   return result;
+}
+
+/**
+ * Record one checkpoint, or fold into the open batch.
+ *
+ * For the handful of commands that cannot use `commit` because they build
+ * their own answer while the op runs: `update_clip` needs the element it
+ * wrote, `add_subtitles` and `add_text` need the ids they minted. They used to
+ * pair `ensureUndoBaseline()` with `withCheckpoint()` by hand, which worked
+ * until batches existed and then quietly wrote straight past the collector,
+ * applying a step to the store that the rest of the batch was still building.
+ *
+ * So this is the pair, in one place, transaction-aware. Anything that records
+ * a step goes through here or through `commit`, and there is no third way.
+ */
+export function checkpoint(fn: (doc: TimelineDocument) => TimelineDocument): boolean {
+  const transaction = activeTransaction();
+  if (transaction != null) {
+    return applyInTransaction(transaction, fn).changed;
+  }
+
+  // `elements` and `tracks` rather than the document: `getDocument` builds a
+  // fresh wrapper on every call, so comparing wrappers would report a change
+  // for every edit including the ones that declined.
+  const before = useTimelineStore.getState();
+  const wasElements = before.timeline;
+  const wasTracks = before.tracks;
+
+  ensureUndoBaseline();
+  useTimelineStore.getState().withCheckpoint(fn);
+
+  const after = useTimelineStore.getState();
+  return after.timeline !== wasElements || after.tracks !== wasTracks;
 }
 
 /** What `commit` returns for an edit that turned out to be a no-op. */

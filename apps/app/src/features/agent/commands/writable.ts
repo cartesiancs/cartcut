@@ -28,7 +28,15 @@
 import type { TimelineElement } from "../../../@types/timeline";
 
 /** Property paths `update_clip` will write, by element type. */
-export const WRITABLE: Record<string, string[][]> = {
+export /**
+ * `ext` is deliberately absent from every entry below.
+ *
+ * An extension's stored data has exactly one writer, `ext_set_element_data`,
+ * which stamps the owning extension from the request rather than taking it as
+ * a parameter. Admitting a path here would let `update_clip` write under any
+ * extension's name, from Claude Code or from another extension.
+ */
+const WRITABLE: Record<string, string[][]> = {
   common: [
     ["location", "x"],
     ["location", "y"],

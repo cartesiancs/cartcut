@@ -22,6 +22,8 @@
 
 import path from "path";
 import { app } from "electron";
+
+import { isMenuOpen, setMenuOpenState } from "./menuRebuild.js";
 import {
   RING_SIZE,
   dropRing,
@@ -47,13 +49,14 @@ let installed: AutosaveRing[] = [];
 let rebuild: (() => void) | null = null;
 
 /**
- * Whether a menu is open right now.
+ * Whether a menu is open right now: `menuRebuild.ts` owns the flag.
  *
  * `Menu.setApplicationMenu` closes an open menu on macOS, so an autosave
  * landing while someone reads the File menu would snap it shut under them. The
- * rebuild is held and flushed on close instead.
+ * rebuild is held and flushed on close instead. The flag moved out when
+ * extensions needed the same rule, because two copies fed from the same two
+ * events agree right up until one of them is updated.
  */
-let menuOpen = false;
 let rebuildPending = false;
 
 export function autosaveRings(): AutosaveRing[] {
@@ -67,7 +70,7 @@ export function onAutosaveChange(handler: () => void): void {
 
 /** Told by `main.ts` from the `menu-will-show` / `menu-will-close` events. */
 export function setMenuOpen(open: boolean): void {
-  menuOpen = open;
+  setMenuOpenState(open);
   if (!open && rebuildPending) {
     rebuildPending = false;
     applyRebuild();
@@ -82,7 +85,7 @@ function applyRebuild(): void {
 async function refresh(): Promise<void> {
   rings = await listRings(autosaveRoot());
 
-  if (shouldRebuild(installed, rings, menuOpen)) {
+  if (shouldRebuild(installed, rings, isMenuOpen())) {
     applyRebuild();
     return;
   }
@@ -90,7 +93,7 @@ async function refresh(): Promise<void> {
   // Declined. If it was declined *only* because a menu is open, the rebuild
   // has to be remembered rather than dropped, or the new recovery point would
   // not appear until the next write.
-  if (menuOpen && signatureOf(installed) !== signatureOf(rings)) {
+  if (isMenuOpen() && signatureOf(installed) !== signatureOf(rings)) {
     rebuildPending = true;
   }
 }

@@ -86,6 +86,11 @@ import "./event";
 // `<element-control>` the moment the first tool call arrives.
 import "./features/agent/bridge";
 
+// The same arrangement for extensions, and after the agent bridge for the same
+// reason plus one more: an extension's first call may run an agent command, so
+// the table those commands register into has to exist first.
+import "./features/extension/bridge";
+
 // `__cartcutPerf.on()` in the console starts it; nothing runs until it does.
 // Installed after the components, so the counters it exposes are the ones those
 // components already registered against.

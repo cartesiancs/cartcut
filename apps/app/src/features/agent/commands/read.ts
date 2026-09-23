@@ -6,6 +6,7 @@
  * returned directly.
  */
 
+import { currentExtensionOwner } from "../../extension/commands";
 import { useTimelineStore } from "../../../states/timelineStore";
 import { renderOptionStore } from "../../../states/renderOptionStore";
 import { projectStore } from "../../../states/projectStore";
@@ -170,7 +171,13 @@ registerCommands({
 
   get_clip: (params: { elementId: string }) => {
     const element = requireElement(params.elementId);
-    return clipDetail(params.elementId, element, trackNameOf(params.elementId));
+    // `currentExtensionOwner` is set only while a request from the extension
+    // host is being served, so an extension sees its own stored data here and
+    // Claude Code sees none.
+    const extOwner = currentExtensionOwner();
+    return clipDetail(params.elementId, element, trackNameOf(params.elementId), {
+      ...(extOwner == null ? {} : { extOwner }),
+    });
   },
 
   /**

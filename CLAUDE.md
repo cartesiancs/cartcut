@@ -286,6 +286,8 @@ features/speed/        the ramp's graph editor; the curve is timeline/speedCurve
 features/update/       the update card; main's half is electron/lib/updateSession.ts
 features/motion/       a damped spring as a CSS linear(): the tour, the tile hover
 features/editor/       actions, menuCommands, shortcuts, frameRate
+features/extension/    the extension host's editor half: bridge, dispatch, batches
+electron/extension/    the extension host, its protocol, the webview sandbox
 electron/mcp/          the MCP server, the tools, the bridge to the renderer
 electron/render/       ffmpegArgs, the frame pipe, the audio envelope expression
 electron/lib/          ffmpeg, menus, autosave cache, recorder, speech, templates,
@@ -392,6 +394,90 @@ The handful of facts inside those that are worth stating up front:
   ⌘Z is two undo steps. Space, the arrows and Delete are not registered at all:
   an accelerator is global to the window and would fire while someone types.
 
+## Extensions
+
+`electron/extension/` runs a **VS Code shaped extension host**: one
+`utilityProcess` forked by main, shared by every extension, with no DOM, no
+store and no `electronAPI`. That process boundary is the whole protection. A
+crashed extension costs the user that extension; the timeline, the undo
+history and the unsaved project are somewhere else.
+
+Two ports, and they are not the same port. **Port R** runs host to editor
+renderer *directly*, carrying every edit, read and event, so a wedged host
+cannot block the process that owns the menu and the windows. **Port M** runs
+host to main and carries only what main alone can do: dialogs, the keychain,
+the menu, MCP tool registration. `electron/extension/protocol.ts` and `rpc.ts`
+are compiled into all three processes, and the renderer reaches them through
+the single facade `features/extension/shared.ts`.
+
+```
+electron/extension/     host, hostMain, api, rpc, protocol, manifest,
+                        permissions, scheme, webviewGuard, viewBridge, services
+apps/app/src/features/extension/   bridge, dispatch, transaction, contributions,
+                        events, keybindings, views, elementData, projectData
+packages/extension-api/ the published `cartcut` .d.ts and its README
+tests/fixtures/extensions/hello/   the fixture that exercises every seam
+```
+
+Six rules carry it:
+
+- **The editing API *is* the agent command table.** `commands.execute` goes to
+  `features/agent/registry.ts`, so an extension's edit is the same code path a
+  Claude Code tool call takes: one `commit`, one undo step, lock-respecting,
+  whitelisted by `writable.ts` going in and `serialize.ts` coming out. There is
+  no second edit path and nothing hands over the document.
+- **`commit` is the only thing that records a step.** A batch opens a collector
+  (`features/extension/transaction.ts`), `commit` folds into it, and
+  `currentDoc` returns the working document so step N sees step N-1. A batch is
+  **synchronous and closes in one tick**: an `await` would let an unrelated
+  edit land inside somebody else's undo step, so an async command is refused.
+  The three commands that used to pair `ensureUndoBaseline` with
+  `withCheckpoint` by hand now call `commit.ts#checkpoint`.
+- **Renderer extension points are data, never code.** FX presets, templates
+  and animation presets go through the existing validators with `origin:
+  "extension"`. The compositor is synchronous and "Nothing executes" still
+  holds. `PresetName` stays a closed union: a contributed animation preset is
+  a `PresetShape` under `ext:<extId>:<name>` and runs through
+  `applyPresetShape`, the same function the nineteen built-ins reach, so
+  `presetNames()` is unchanged and `tools.test.ts`'s pinned list stays green.
+  **Fonts and themes are not contributable**: `@font-face` rules are never
+  removed and `fontFaces.ts`'s `registered` set has no unregister, so a
+  contributed font could not be unloaded; and there is no token layer to theme,
+  six CSS custom properties exist in the whole stylesheet and five are
+  geometry. Both need their own groundwork first.
+- **Custom UI is a `<webview>`, forced into shape by main.**
+  `will-attach-webview` sets `sandbox`, `contextIsolation`, our preload and a
+  `persist:ext:<id>` partition, and refuses any `src` that is not
+  `cartcut-ext://<an enabled extension>/`. Two things bite: `protocol.handle`
+  registers on **one session**, so the handler is installed on each guest
+  partition too or a panel's own pages never load; and `did-attach-webview`
+  fires **before** the guest navigates, so `guest.getURL()` is empty there and a
+  navigation guard keyed on it blocks the panel's first load.
+- **Port pairs carry a generation, and the counter never resets.** The fork and
+  the page load are not ordered against each other, so two pairs really are in
+  flight on a first launch and both ends must converge on the highest. Resetting
+  the counter for a new host leaves the renderer ignoring every port the
+  replacement sends.
+- **Permissions are disclosure and API gating, not a sandbox.** A
+  `utilityProcess` has Node and it cannot be taken away; `node:vm` is not a
+  boundary and is not used. Main gates Port M against *its own* validated
+  manifest rather than anything the host reports.
+
+An extension can **stop an export**. `onWillExport` runs after the destination
+is chosen and before any phase is entered, so a veto costs nothing; it is
+bounded and fails open, because an export a broken extension could make
+impossible is worse than one that ignored a warning. `onDidExport` fires from
+`event.ts`'s `PROCESSING_FINISH` and nowhere else: `exportSession`'s
+`finalizing` is not the end, FFmpeg is still muxing there.
+
+Extension data is an optional top-level `ext` key on an element, keyed by
+extension id, plus a sixth `.ngt` entry `extensions.json`. Both follow the
+optional-field rule, so `SCHEMA_VERSION` does not move and a project nobody has
+run an extension on saves byte-identically.
+
+`features/extension/imports.test.ts` pins the wall in both directions: which
+files may reach into the subsystem, and what the subsystem may reach.
+
 ## The Claude Code bridge
 
 `electron/mcp/` runs a Streamable HTTP MCP server on `127.0.0.1:9826/mcp`,
@@ -441,6 +527,10 @@ npm run test:e2e:smoke      # ~1 min at 360p30, for iterating
 npm run test:e2e            # 5 min at 1080p60, 18,000 frames
 npm run test:e2e:check      # typecheck the suite on its own
 ```
+
+`tests/fixtures/extensions/hello/` is the extension fixture. Load it with
+Extensions ▸ Load unpacked; its `crash` and `hang` commands are there to be run,
+because surviving them is the claim the whole subsystem makes.
 
 `tests/e2e/` launches the real app, builds a project holding every element type,
 clicks the real Render button and checks the delivered file frame by frame. It

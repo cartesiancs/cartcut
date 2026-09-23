@@ -25,6 +25,8 @@
  * be used as an adjustment layer — with no second code path anywhere.
  */
 
+import { listExtensions } from "../extension/host.js";
+import { resolveContained } from "../extension/paths.js";
 import path from "path";
 import * as fsp from "fs/promises";
 import isDev from "electron-is-dev";
@@ -62,6 +64,34 @@ export function userPresetPath(): string {
   return path.join(app.getPath("userData"), "presets");
 }
 
+/**
+ * The `presets/` folder of every enabled extension that has one.
+ *
+ * Asked of the extension host's listing rather than walked directly, so a
+ * disabled extension contributes nothing and an unpacked one contributes from
+ * wherever the developer keeps it. The path is checked before it is used: the
+ * folder name comes from a manifest, and `contributes.presets` is a string a
+ * stranger wrote.
+ */
+async function extensionPresetRoots(): Promise<Array<{ extensionId: string; dir: string }>> {
+  const roots: Array<{ extensionId: string; dir: string }> = [];
+
+  for (const listing of listExtensions()) {
+    if (!listing.enabled || listing.presetsFolder == null || listing.presetsFolder === "") {
+      continue;
+    }
+    // Checked, not trusted. `contributes.presets` is a string a stranger
+    // wrote, and it is about to become a directory to walk.
+    const folder = resolveContained(listing.dir, listing.presetsFolder);
+    if (folder == null) {
+      continue;
+    }
+    roots.push({ extensionId: listing.id, dir: folder });
+  }
+
+  return roots;
+}
+
 export const presetLib = {
   /**
    * Built-in and user presets, in that order.
@@ -76,8 +106,20 @@ export const presetLib = {
    */
   list: async (): Promise<{ presets: RawPresetPayload[] }> => {
     const builtin = await scanPresetRoot(builtinPresetPath(), "builtin");
+
+    // Extensions in the middle: after the built-ins, so a shipped preset keeps
+    // its id under the registry's first-wins rule, and before the user's own,
+    // so a preset someone installed by hand still wins over one an extension
+    // brought with it.
+    const extension: RawPresetPayload[] = [];
+    for (const contributor of await extensionPresetRoots()) {
+      extension.push(
+        ...(await scanPresetRoot(contributor.dir, "extension", contributor.extensionId)),
+      );
+    }
+
     const user = await scanPresetRoot(userPresetPath(), "user");
-    return { presets: [...builtin, ...user] };
+    return { presets: [...builtin, ...extension, ...user] };
   },
 
   /** The folder to reveal when the user asks where to put presets. */

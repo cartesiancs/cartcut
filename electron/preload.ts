@@ -239,9 +239,28 @@ const request = {
     saveBufferToTempFile: (arrayBuffer, ext) =>
       ipcRenderer.invoke("stream:saveBufferToTempFile", arrayBuffer, ext),
   },
-  extension: {
-    openDir: (dir) => ipcRenderer.invoke("extension:open:dir", dir),
-    openFile: (file) => ipcRenderer.invoke("extension:open:file", file),
+  /**
+   * The Extensions panel. Everything here names an extension by **id**.
+   *
+   * No call takes a path to write or delete: `electron/extension/dirs.ts` owns
+   * where an extension lives, and a call shape that let the renderer choose
+   * the folder would be a delete primitive with a dialog in front of it.
+   */
+  ext: {
+    list: () => ipcRenderer.invoke("ext:list"),
+    hostState: () => ipcRenderer.invoke("ext:hostState"),
+    inspect: (file) => ipcRenderer.invoke("ext:inspect", file),
+    install: (file) => ipcRenderer.invoke("ext:install", file),
+    uninstall: (id) => ipcRenderer.invoke("ext:uninstall", id),
+    setEnabled: (id, enabled) => ipcRenderer.invoke("ext:setEnabled", id, enabled),
+    loadUnpacked: () => ipcRenderer.invoke("ext:loadUnpacked"),
+    openFolder: () => ipcRenderer.invoke("ext:openFolder"),
+    restart: () => ipcRenderer.invoke("ext:restart"),
+    log: (id) => ipcRenderer.invoke("ext:log", id),
+    getConfig: (id) => ipcRenderer.invoke("ext:getConfig", id),
+    setConfig: (id, key, value) => ipcRenderer.invoke("ext:setConfig", id, key, value),
+    unpackedPaths: () => ipcRenderer.invoke("ext:unpackedPaths"),
+    dataContributions: () => ipcRenderer.invoke("ext:dataContributions"),
   },
   media: {
     backgroundRemove: (path) =>
@@ -443,15 +462,43 @@ const response = {
   menu: {
     command: (callback) => ipcRenderer.on("menu:command", callback),
   },
-  timeline: {
-    get: (callback) => ipcRenderer.on("timeline:get", callback),
-    add: (callback) => ipcRenderer.on("timeline:add", callback),
+  ext: {
+    /** `(event, { state, crashes, lastError })`. Drives the "host stopped" notice. */
+    onHostState: (callback) => {
+      ipcRenderer.on("ext:host:state", callback);
+      return () => ipcRenderer.removeListener("ext:host:state", callback);
+    },
+    onExtensionState: (callback) => {
+      ipcRenderer.on("ext:extension:state", callback);
+      return () => ipcRenderer.removeListener("ext:extension:state", callback);
+    },
   },
   agent: {
     /** `(event, id, command, params)` — reply via `req.agent.respond(id, …)`. */
     onRequest: (callback) => ipcRenderer.on("agent:request", callback),
   },
 };
+
+/**
+ * Hand the extension host's port to the page.
+ *
+ * A `MessagePort` cannot cross `contextBridge`: it is a transferable, and
+ * `exposeInMainWorld` clones. `window.postMessage` with a transfer list is the
+ * documented route into the main world, and it is the only one. The renderer
+ * picks it up in `features/extension/bridge.ts` by filtering on
+ * `event.source === window`, which is what stops a page from forging one.
+ *
+ * Re-sent by main on every load, so a reloaded editor gets a fresh pair rather
+ * than a port whose other end is in a frame that no longer exists.
+ */
+ipcRenderer.on("ext:port", (event, payload) => {
+  const generation = (payload as { generation?: number } | null)?.generation ?? 0;
+  window.postMessage(
+    { type: "ext:port", generation },
+    "*",
+    event.ports as unknown as Transferable[],
+  );
+});
 
 if (process.contextIsolated) {
   try {

@@ -34,6 +34,7 @@
  * must not have destroyed the right one by looking at the wrong one.
  */
 
+import { EXTENSIONS_ENTRY } from "../extension/projectData";
 import type { ExistsFn } from "./assetsFile";
 import { openNgt, readNgtEntries, readNgtExtra } from "./projectArchive";
 import {
@@ -89,7 +90,18 @@ export type RecoverReaderPort = {
  * than an e2e hope.
  */
 export type RecoverEffectsPort = {
-  adopt(read: Extract<ReadProjectResult, { ok: true }>): void;
+  /**
+   * `extensionsEntry` is the archive's `extensions.json`, or null.
+   *
+   * Passed through rather than read by the caller, because a recovery has to
+   * restore what extensions had stored at that moment too: leaving it out
+   * would recover the timeline and silently drop the data an extension had
+   * keyed to it.
+   */
+  adopt(
+    read: Extract<ReadProjectResult, { ok: true }>,
+    extensionsEntry: string | null,
+  ): void;
   setTitle(title: string): void;
   setProjectPath(path: string): void;
   warn(message: string): void;
@@ -157,10 +169,12 @@ export async function recoverAutosave(
 
   let entries;
   let autosaveMeta: AutosaveArchiveMeta = null;
+  let extensionsEntry: string | null = null;
   try {
     const zip = await openNgt(await reader.readFile(pick.file));
     entries = await readNgtEntries(zip);
     const raw = parse(await readNgtExtra(zip, "autosave.json"));
+    extensionsEntry = await readNgtExtra(zip, EXTENSIONS_ENTRY);
     autosaveMeta =
       raw != null && typeof raw === "object"
         ? (raw as AutosaveArchiveMeta)
@@ -186,7 +200,7 @@ export async function recoverAutosave(
     return { kind: "failed", message };
   }
 
-  effects.adopt(read);
+  effects.adopt(read, extensionsEntry);
 
   // `setProjectPath` is *not* called. The session is detached, so ⌘S opens
   // Save As and the original `.ngt` cannot be overwritten with older state.
@@ -273,7 +287,8 @@ export async function recoverAutosaveEntry(payload: unknown): Promise<void> {
       exists: (fsPath) => filesystem.existFile(fsPath),
     },
     {
-      adopt: (read) => project.adoptDocument(read, pick.file),
+      adopt: (read, extensionsEntry) =>
+        project.adoptDocument(read, pick.file, extensionsEntry),
       setTitle: (title) => uiStore.getState().setTopBarTitle(title),
       // Never called. See the header.
       setProjectPath: () => {

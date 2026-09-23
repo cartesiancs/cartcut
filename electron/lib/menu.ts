@@ -1,3 +1,6 @@
+import { setMenuRebuilder } from "./menuRebuild.js";
+import { buildMenuGroups } from "../extension/menuContributions.js";
+import { extensionMenus, listExtensions } from "../extension/host.js";
 import { app, BrowserWindow, Menu } from "electron";
 import * as path from "path";
 import { mainWindow, window } from "./window.js";
@@ -38,6 +41,45 @@ function item(id: MenuCommandId) {
 }
 
 const separator = { type: "separator" };
+
+/**
+ * The Extensions menu, built from what the host reported.
+ *
+ * Every item sends the one `extension.command` id with the extension and
+ * command in the payload, the way `file.autoSaveRecover` already carries which
+ * recovery point. `MenuCommandId` stays a closed union that way, so an item
+ * with nothing behind it remains a compile error rather than a click that does
+ * nothing.
+ *
+ * No accelerators. A menu accelerator is global to the window, so a binding
+ * here would fire while the user typed into a caption; extension keybindings
+ * live in the renderer, which can see what has focus.
+ */
+function extensionMenuTemplate(): any[] {
+  const groups = buildMenuGroups(
+    extensionMenus().map((entry) => ({
+      extId: entry.extId,
+      displayName:
+        listExtensions().find((listing) => listing.id === entry.extId)?.displayName ?? entry.extId,
+      items: entry.items,
+    })),
+  );
+
+  return groups.map((group) => ({
+    label: group.displayName,
+    submenu: group.items.map((menuItem) => ({
+      label: menuItem.label,
+      click: () => {
+        mainWindow?.webContents.send("menu:command", "extension.command", {
+          extId: menuItem.extId,
+          commandId: menuItem.commandId,
+        });
+      },
+    })),
+  }));
+}
+
+
 
 /**
  * The whole menu, built fresh.
@@ -188,6 +230,12 @@ function buildTemplate(): any[] {
         ...(isDev ? [separator, { role: "toggleDevTools" }] : []),
       ],
     },
+    // Present only when something is in it. An empty Extensions menu on a
+    // machine with no extensions is a row that teaches the user nothing and
+    // that they cannot make useful without leaving the app.
+    ...(extensionMenuTemplate().length > 0
+      ? [{ label: "Extensions", submenu: extensionMenuTemplate() }]
+      : []),
     // { role: 'windowMenu' }
     {
       label: "Window",
@@ -260,3 +308,7 @@ function buildTemplate(): any[] {
 export function installMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(buildTemplate()));
 }
+
+// Registered once, so anything that changes the menu can ask for a rebuild
+// without importing this module and without knowing whether a menu is open.
+setMenuRebuilder(installMenu);

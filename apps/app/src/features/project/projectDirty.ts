@@ -29,6 +29,7 @@
  * Every `markProjectSaved` below takes its digest from the store.
  */
 
+import { extensionsEntryText } from "../extension/projectDataStore";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { useTimelineStore } from "../../states/timelineStore";
 import { projectStateDigest } from "./projectDigest";
@@ -46,6 +47,7 @@ export function currentProjectDigest(): string {
     state.timeline,
     state.tracks,
     renderOptionStore.getState().options,
+    extensionsEntryText(),
   );
 }
 

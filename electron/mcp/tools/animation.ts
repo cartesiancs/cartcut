@@ -41,7 +41,25 @@ export function registerAnimationTools(define: Registrar) {
         "axis; scale presets only.",
       inputSchema: {
         elementIds: z.array(z.string()).min(1),
-        preset: z.enum(PRESETS),
+        /*
+         * The nineteen this app ships, or one an extension contributed.
+         *
+         * A union of exactly two members, and shallow: `define.ts` records
+         * that `z.discriminatedUnion` and deep unions are the other known
+         * TS2589 generator on this path, and this is neither. The enum is kept
+         * as the first member rather than replaced by a plain string, because
+         * the enum is how the agent learns the nineteen names without reading
+         * the description.
+         */
+        preset: z.union([
+          z.enum(PRESETS),
+          z
+            .string()
+            .regex(
+              /^ext:[a-z0-9][a-z0-9-]*\.[a-z0-9][a-z0-9-]*:[a-zA-Z][a-zA-Z0-9._-]*$/,
+              "an extension preset is `ext:<publisher>.<name>:<preset>`",
+            ),
+        ]),
         durationMs: z
           .number()
           .min(1)

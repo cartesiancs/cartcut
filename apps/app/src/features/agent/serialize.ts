@@ -334,12 +334,28 @@ export function clipDetail(
   id: string,
   element: TimelineElement,
   trackName?: string,
+  /**
+   * The extension asking, if one is.
+   *
+   * Its own key from `element.ext` is added, and only its own. Claude Code
+   * never passes this, so extension data stays out of the agent's view
+   * entirely: it is somebody else's bookkeeping, it is not in
+   * `commands/writable.ts`, and it would only spend context.
+   */
+  options: { extOwner?: string } = {},
 ): Record<string, unknown> {
   const detail: Record<string, unknown> = {
     ...clipRow(id, element, trackName),
     localpath: element.localpath,
     priority: element.priority,
   };
+
+  if (options.extOwner != null) {
+    const stored = (element as { ext?: Record<string, unknown> }).ext;
+    if (stored != null && Object.prototype.hasOwnProperty.call(stored, options.extOwner)) {
+      detail.ext = stored[options.extOwner];
+    }
+  }
 
   if (element.filetype === "text") {
     detail.text = element.text;

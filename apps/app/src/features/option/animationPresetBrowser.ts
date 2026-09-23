@@ -51,10 +51,12 @@ import {
   PREVIEW_BOX,
   PREVIEW_STEPS,
   previewSamples,
+  shapePreviewSamples,
   type PreviewSample,
 } from "../animation/presetPreview";
 import {
   applyPreset,
+  applyPresetShape,
   playheadAnchor,
   presetDefaultMs,
   presetGroup,
@@ -63,6 +65,12 @@ import {
   type PresetGroup,
   type PresetName,
 } from "../animation/presets";
+import {
+  animationPresetById,
+  animationPresets,
+  isExtensionPresetId,
+  subscribeAnimationPresets,
+} from "../extension/animationPresets";
 
 /** Backing-store size of a tile canvas. Fixed, so nothing reallocates. */
 const TILE_PX = 132;
@@ -126,7 +134,13 @@ export class AnimationPresetBrowser extends LitElement {
   elementIds: string[] = [];
 
   /** The tile under the pointer, or `null`. Only this one animates. */
-  private hovered: PresetName | null = null;
+  /**
+   * The tile under the pointer, as an id rather than a closed name.
+   *
+   * A contributed preset's id is `ext:<extId>:<name>` and can never be a
+   * member of `PresetName`. The hover loop does not care which kind it is.
+   */
+  private hovered: string | null = null;
   private hoverStep = 0;
   private hoverHandle = 0;
   private teardown: Array<() => void> = [];
@@ -137,6 +151,11 @@ export class AnimationPresetBrowser extends LitElement {
     // has to repaint when the document changes — including on its own edits,
     // and on undo.
     this.teardown.push(useTimelineStore.subscribe(() => this.requestUpdate()));
+
+    // An extension can contribute a preset at any moment during activation,
+    // and takes it away when it is disabled. Without this the panel shows the
+    // set as it stood at the last unrelated repaint.
+    this.teardown.push(subscribeAnimationPresets(() => this.requestUpdate()));
 
     // Or the timeline canvas's document-level mousedown clears the selection
     // before a tile's click handler runs, and every tile would act on nothing.
@@ -194,7 +213,21 @@ export class AnimationPresetBrowser extends LitElement {
    * the only thing left to do is say why nothing happened, rather than leave
    * the click looking broken.
    */
-  private apply(preset: PresetName | null) {
+  /**
+   * `preset` is a built-in name, a contributed `ext:` id, or null for "clear".
+   *
+   * A contributed preset resolves to a shape and runs through
+   * `applyPresetShape`, which is the same function the built-in table reaches;
+   * only the lookup differs. So a tile the user clicks does the same thing
+   * whatever put it on the panel.
+   */
+  private apply(preset: string | null) {
+    const contributed = preset != null && isExtensionPresetId(preset) ? animationPresetById(preset) : null;
+    if (preset != null && isExtensionPresetId(preset) && contributed == null) {
+      toast("That preset's extension is no longer running.");
+      return;
+    }
+
     const ids = this.elementIds ?? [];
     if (ids.length === 0) {
       toast("Select a clip first.");
@@ -215,11 +248,15 @@ export class AnimationPresetBrowser extends LitElement {
         next =
           preset == null
             ? clearAnimation(next, id, bakeHz)
-            : applyPreset(next, id, preset, presetDefaultMs(preset), bakeHz, {
-                // Per clip: one playhead meets a selection at a different
-                // offset into each of them.
-                startAtMs: playheadAnchor(doc.elements[id], cursor),
-              });
+            : contributed != null
+              ? applyPresetShape(next, id, contributed.shape, contributed.shape.defaultMs, bakeHz, {
+                  startAtMs: playheadAnchor(doc.elements[id], cursor),
+                })
+              : applyPreset(next, id, preset as PresetName, presetDefaultMs(preset as PresetName), bakeHz, {
+                  // Per clip: one playhead meets a selection at a different
+                  // offset into each of them.
+                  startAtMs: playheadAnchor(doc.elements[id], cursor),
+                });
       }
       changed = next !== doc;
       return next;
@@ -243,7 +280,7 @@ export class AnimationPresetBrowser extends LitElement {
     return ids.length > 0 && ids.every((id) => !hasAnimation(timeline[id]));
   }
 
-  private startHover(preset: PresetName) {
+  private startHover(preset: string) {
     if (this.hovered === preset) {
       return;
     }
@@ -252,7 +289,7 @@ export class AnimationPresetBrowser extends LitElement {
     this.runHoverLoop();
   }
 
-  private stopHover(preset: PresetName) {
+  private stopHover(preset: string) {
     if (this.hovered !== preset) {
       return;
     }
@@ -309,9 +346,15 @@ export class AnimationPresetBrowser extends LitElement {
         continue;
       }
 
-      const preset = id as PresetName;
-      const samples = previewSamples(preset);
-      const hovering = this.hovered === preset;
+      // A contributed preset is sampled from its shape rather than from its
+      // name, because its name is not a member of the closed union. Both go
+      // through the same sampler, which runs the real move.
+      const contributed = isExtensionPresetId(id) ? animationPresetById(id) : null;
+      const samples =
+        contributed != null
+          ? shapePreviewSamples(contributed.id, contributed.shape)
+          : previewSamples(id as PresetName);
+      const hovering = this.hovered === id;
       const step = hovering ? Math.min(this.hoverStep, PREVIEW_STEPS - 1) : 0;
 
       drawTile(ctx, samples[step], hovering);
@@ -325,7 +368,7 @@ export class AnimationPresetBrowser extends LitElement {
     label: string,
     active: boolean,
     onClick: () => void,
-    hover?: PresetName,
+    hover?: string,
   ) {
     return html`
       <div
@@ -373,6 +416,7 @@ export class AnimationPresetBrowser extends LitElement {
 
   render() {
     const names = presetNames();
+    const contributed = animationPresets();
 
     return html`
       ${GROUPS.map(
@@ -408,6 +452,27 @@ export class AnimationPresetBrowser extends LitElement {
           </div>
         `,
       )}
+
+      <!--
+        Contributed presets get a heading of their own rather than being sorted
+        into In / Out / Emphasis. A stranger's move has no reliable group, and
+        a user who wonders where a tile came from should be able to see it.
+      -->
+      ${contributed.length === 0
+        ? ""
+        : html`
+            <div
+              class="text-secondary px-2 pt-2"
+              style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;"
+            >
+              Extensions
+            </div>
+            <div class="row px-2">
+              ${contributed.map((preset) =>
+                this.tile(preset.id, preset.label, false, () => this.apply(preset.id), preset.id),
+              )}
+            </div>
+          `}
     `;
   }
 }

@@ -476,6 +476,27 @@ type TimelinePlaced = {
    * enumeration index, which row a clip occupied. It now means one thing.
    */
   priority: number;
+  /**
+   * Whatever extensions have stored on this clip, keyed by extension id.
+   *
+   * The optional-field rule this codebase holds everywhere: absent when no
+   * extension has written anything, the owner's key deleted when it clears its
+   * value, and the whole object deleted when the last one goes. A project
+   * nobody has run an extension on saves byte-identically to one written
+   * before extensions existed, so `SCHEMA_VERSION` does not move.
+   *
+   * Top level rather than inside `animation`, which is the one sub-object
+   * `normalizeAnimation` rebuilds from a whitelist: anything stashed in there
+   * is deleted on the way back in. Everything else that touches an element
+   * spreads it, so this survives save, load, undo, split, trim and duplicate
+   * with no change to any of them.
+   *
+   * `features/agent/serialize.ts` shows an extension only its own key and
+   * shows Claude Code none of them, and `commands/writable.ts` has no path for
+   * it: `ext_set_element_data` is the only writer, and it stamps the owner
+   * from the request rather than taking it as a parameter.
+   */
+  ext?: Record<string, JsonValue>;
   blob: string;
   startTime: number;
   duration: number;
@@ -484,6 +505,21 @@ type TimelinePlaced = {
     color: string;
   };
 };
+
+/**
+ * Anything that survives `JSON.stringify` unchanged.
+ *
+ * The type of everything an extension stores, because the project file is
+ * JSON and a value that does not round trip through it would come back as
+ * something else on the next open.
+ */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 
 type Visual = {
   width: number;

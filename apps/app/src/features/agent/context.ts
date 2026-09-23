@@ -8,6 +8,7 @@
  * forgot to copy it.
  */
 
+import { activeTransaction } from "../extension/transaction";
 import { useTimelineStore } from "../../states/timelineStore";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { normalizeFps, snapMsToFrame } from "../timeline/frames";
@@ -15,8 +16,16 @@ import { trackById, type TimelineDocument, type TimelineTrack } from "../timelin
 import type { TimelineElement } from "../../@types/timeline";
 import { clipRow } from "./serialize";
 
+/**
+ * The document every command reads.
+ *
+ * Inside a batch this is the working document rather than the store's, so
+ * step N of a batch validates against step N-1's result. Without it, a batch
+ * that splits a clip and then trims one of the halves would look up an id that
+ * the store has never heard of.
+ */
 export function currentDoc(): TimelineDocument {
-  return useTimelineStore.getState().getDocument();
+  return activeTransaction()?.working ?? useTimelineStore.getState().getDocument();
 }
 
 export function requireElement(

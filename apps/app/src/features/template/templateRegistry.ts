@@ -42,7 +42,16 @@ import { readTemplateDocument, type NgtEntries } from "./templateDocument";
 /** One installed template folder, as the main process reports it. */
 export type InstalledTemplate = {
   id: string;
-  origin: "builtin" | "user";
+  /**
+   * Where the folder was found.
+   *
+   * `"extension"` is a third value rather than a flavour of `"user"`, for the
+   * reason `presetScan.ts` gives about presets: the browser shows where a
+   * template came from, and only a user's own may be deleted from here.
+   */
+  origin: "builtin" | "user" | "extension";
+  /** Set only for `"extension"`, so a row can name the extension that brought it. */
+  extensionId?: string;
   /** The folder, absolute, POSIX-separated. */
   dir: string;
   /** Absolute path of `template.ngt` inside it. */

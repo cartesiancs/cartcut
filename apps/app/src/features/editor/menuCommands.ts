@@ -35,6 +35,7 @@ import { useTimelineStore } from "../../states/timelineStore";
 import { atPlayhead, importPathsAt } from "../asset/importDrop";
 import { spanEnd } from "../timeline/geometry";
 import { rendererModal } from "../../utils/modal";
+import { runContributedCommand } from "../extension/bridge";
 import { startExport } from "../export/exportSession";
 import { recoverAutosaveEntry } from "../project/recoverAutosave";
 import {
@@ -277,6 +278,20 @@ const COMMANDS: Record<MenuCommandId, (payload?: unknown) => void> = {
   "view.previewZoomOut": () => previewCanvas()?.zoomPreviewOut(),
 
   // -------------------------------------------------------------------- Help
+  // -------------------------------------------------------------- Extensions
+  //
+  // Every contributed item sends this one id and carries which command it is
+  // in the payload, the same arrangement `file.autoSaveRecover` uses. That is
+  // what keeps `MenuCommandId` a closed union while the set of extension
+  // commands is only known at run time.
+  "extension.command": (payload) => {
+    const request = (payload ?? {}) as { extId?: unknown; commandId?: unknown };
+    if (typeof request.extId !== "string" || typeof request.commandId !== "string") {
+      return;
+    }
+    void runContributedCommand(request.extId, request.commandId);
+  },
+
   "help.shortcuts": () => rendererModal.shortKey.show(),
 };
 

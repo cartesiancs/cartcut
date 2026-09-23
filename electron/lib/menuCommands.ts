@@ -75,6 +75,16 @@ export type MenuCommandId =
   | "view.previewFit"
   | "view.previewZoomIn"
   | "view.previewZoomOut"
+  // Extensions
+  /**
+   * One id for every contributed item, with the command in the payload.
+   *
+   * `MenuCommandId` is a closed union so that a menu item with nothing behind
+   * it is a compile error. An extension's commands are not knowable at compile
+   * time, so they share this single id and carry which one they are as data,
+   * the way `file.autoSaveRecover` already carries which recovery point.
+   */
+  | "extension.command"
   // Help
   | "help.shortcuts";
 
@@ -206,6 +216,13 @@ export const MENU_COMMANDS: readonly MenuCommand[] = [
     accelerator: "CmdOrCtrl+-",
     rendererOwnsKey: true,
   },
+
+  // ------------------------------------------------------------- Extensions
+  //
+  // No accelerator. An extension's keybindings are the renderer's
+  // (`features/extension/keybindings.ts`), because a menu accelerator is
+  // global to the window and would fire while someone types.
+  { id: "extension.command", label: "Run Extension Command" },
 
   // ------------------------------------------------------------------- Help
   {

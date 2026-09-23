@@ -242,6 +242,7 @@ export class TemplateBrowser extends LitElement {
   render() {
     const visible = this.templates.filter((row) => this.matchesQuery(row));
     const builtin = visible.filter((row) => row.origin === "builtin");
+    const contributed = visible.filter((row) => row.origin === "extension");
     const mine = visible.filter((row) => row.origin === "user");
 
     return html`
@@ -279,6 +280,12 @@ export class TemplateBrowser extends LitElement {
           </div>`
         : ""}
       ${this.section("Templates", builtin)}
+      <!--
+        A section of its own, so a user who wonders where a template came from
+        can see it, and so the delete glyph stays off rows this panel does not
+        own. Removing one means disabling its extension.
+      -->
+      ${this.section("From Extensions", contributed)}
       ${this.section("My Templates", mine)}
     `;
   }

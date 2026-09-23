@@ -28,7 +28,13 @@ import type { TimelineDocument } from "../timeline/tracks";
 import { SCHEMA_VERSION, createTrack } from "../timeline/tracks";
 import { localSampleAt } from "../timeline/transform";
 import { emptyAnimation } from "./keyframes";
-import { applyPreset, presetDefaultMs, type PresetName } from "./presets";
+import {
+  applyPreset,
+  applyPresetShape,
+  presetDefaultMs,
+  type PresetName,
+  type PresetShape,
+} from "./presets";
 
 /**
  * How many frames a preset's motion is quantised to.
@@ -123,7 +129,14 @@ function previewDocument(): TimelineDocument {
   } as TimelineDocument;
 }
 
-const cache = new Map<PresetName, PreviewSample[]>();
+/**
+ * Keyed by the preset's id rather than by `PresetName`.
+ *
+ * A contributed preset's id is `ext:<extId>:<name>`, which is not a member of
+ * that union and never will be. The cache does not care what a key means, and
+ * widening it here is what lets one tile renderer draw both kinds.
+ */
+const cache = new Map<string, PreviewSample[]>();
 
 /**
  * The preset's motion, sampled evenly across its own duration.
@@ -140,31 +153,62 @@ export function previewSamples(
   preset: PresetName,
   steps: number = PREVIEW_STEPS,
 ): PreviewSample[] {
+  return samplesFor(preset, null, steps);
+}
+
+/**
+ * The same tile, for a preset an extension contributed.
+ *
+ * It runs the real `applyPresetShape` on the same throwaway document, so a
+ * contributed preset's tile is wrong in exactly the ways the move itself is
+ * wrong and in no others. A separate previewer would be a second opinion
+ * about what the preset does.
+ */
+export function shapePreviewSamples(
+  id: string,
+  shape: PresetShape,
+  steps: number = PREVIEW_STEPS,
+): PreviewSample[] {
+  return samplesFor(id, shape, steps);
+}
+
+function samplesFor(
+  key: string,
+  shape: PresetShape | null,
+  steps: number,
+): PreviewSample[] {
   if (steps === PREVIEW_STEPS) {
-    const hit = cache.get(preset);
+    const hit = cache.get(key);
     if (hit != null) {
       return hit;
     }
   }
 
-  const samples = computeSamples(preset, steps);
+  const samples = computeSamples(key, shape, steps);
   if (steps === PREVIEW_STEPS) {
-    cache.set(preset, samples);
+    cache.set(key, samples);
   }
   return samples;
 }
 
-function computeSamples(preset: PresetName, steps: number): PreviewSample[] {
-  const durationMs = presetDefaultMs(preset);
+/** Drop a contributed preset's tile, for when its extension unloads. */
+export function forgetPreviewSamples(key: string): void {
+  cache.delete(key);
+}
+
+function computeSamples(
+  preset: string,
+  shape: PresetShape | null,
+  steps: number,
+): PreviewSample[] {
+  const durationMs = shape?.defaultMs ?? presetDefaultMs(preset as PresetName);
   const before = previewDocument();
-  const after = applyPreset(
-    before,
-    "preview",
-    preset,
-    durationMs,
-    PREVIEW_BAKE_HZ,
-    { startAtMs: 0 },
-  );
+  const after =
+    shape != null
+      ? applyPresetShape(before, "preview", shape, durationMs, PREVIEW_BAKE_HZ, { startAtMs: 0 })
+      : applyPreset(before, "preview", preset as PresetName, durationMs, PREVIEW_BAKE_HZ, {
+          startAtMs: 0,
+        });
 
   // Declined by identity: an unknown preset, or one this element cannot
   // animate. Nothing to show, and nothing to invent.

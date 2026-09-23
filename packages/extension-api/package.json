@@ -1,0 +1,8 @@
+{
+  "name": "@cartcut/extension-api",
+  "version": "1.0.0",
+  "description": "Types for writing a Cartcut extension.",
+  "types": "cartcut.d.ts",
+  "files": ["cartcut.d.ts", "README.md"],
+  "license": "MIT"
+}
