@@ -16,10 +16,27 @@ import { electronInit } from "./lib/init.js";
 import { fontLib } from "./lib/font.js";
 import { presetLib } from "./lib/preset.js";
 import { templateLib } from "./lib/template.js";
-import { ipcExtension } from "./ipc/ipcExtension.js";
+import {
+  attachExtensionHost,
+  extensionMenus,
+  listExtensions,
+  onExtensionMenusChanged,
+  reloadExtensionHost,
+  setExtensionDialogParent,
+  setExtensionViewPoster,
+  startExtensionHost,
+  stopExtensionHost,
+} from "./extension/host.js";
+import { installExtensionProtocol, registerExtensionScheme, setExtensionDirResolver } from "./extension/scheme.js";
+import { denyWebviewsElsewhere, guardWebviews, onWebviewAttached, setWebviewExtensionIds } from "./extension/webviewGuard.js";
+import { forwardViewMessage } from "./extension/host.js";
+import { installViewBridge, postToView, registerExtensionView } from "./extension/viewBridge.js";
+import { watchUnpacked } from "./extension/watch.js";
+import { unpackedPaths } from "./extension/settings.js";
+import { scheduleMenuRebuild } from "./lib/menuRebuild.js";
+import { ipcExtensionHost } from "./ipc/ipcExtensionHost.js";
 import { ipcStore } from "./ipc/ipcStore.js";
 import { ipcApp } from "./ipc/ipcApp.js";
-import { ipcTimeline } from "./ipc/ipcTimeline.js";
 import { ipcDialog } from "./ipc/ipcDialog.js";
 import { ipcEditing } from "./ipc/ipcEditing.js";
 import { ipcFilesystem } from "./ipc/ipcFilesystem.js";
@@ -108,9 +125,6 @@ ipcMain.handle(
   "ffmpeg:extractAudioFromVideo",
   renderMain.extractAudioFromVideo,
 );
-
-ipcMain.handle("extension:timeline:get", ipcTimeline.get);
-ipcMain.handle("extension:timeline:add", ipcTimeline.add);
 
 ipcMain.handle("dialog:openDirectory", ipcDialog.openDirectory);
 ipcMain.handle("dialog:openFile", ipcDialog.openFile);
@@ -245,8 +259,19 @@ ipcMain.handle("overlayRecord:deliver", ipcOverlayRecord.deliver);
 ipcMain.handle("overlayRecord:cancel", ipcOverlayRecord.cancel);
 ipcMain.handle("overlayRecord:openFolder", ipcOverlayRecord.openFolder);
 
-ipcMain.handle("extension:open:file", ipcExtension.openFile);
-ipcMain.handle("extension:open:dir", ipcExtension.openDir);
+ipcMain.handle("ext:list", ipcExtensionHost.list);
+ipcMain.handle("ext:hostState", ipcExtensionHost.hostState);
+ipcMain.handle("ext:inspect", ipcExtensionHost.inspect);
+ipcMain.handle("ext:install", ipcExtensionHost.install);
+ipcMain.handle("ext:uninstall", ipcExtensionHost.uninstall);
+ipcMain.handle("ext:setEnabled", ipcExtensionHost.setEnabled);
+ipcMain.handle("ext:loadUnpacked", ipcExtensionHost.loadUnpacked);
+ipcMain.handle("ext:openFolder", ipcExtensionHost.openFolder);
+ipcMain.handle("ext:restart", ipcExtensionHost.restart);
+ipcMain.handle("ext:log", ipcExtensionHost.log);
+ipcMain.handle("ext:getConfig", ipcExtensionHost.getConfig);
+ipcMain.handle("ext:setConfig", ipcExtensionHost.setConfig);
+ipcMain.handle("ext:unpackedPaths", ipcExtensionHost.unpackedPaths);
 
 ipcMain.handle("selfhosted:run", ipcSelfhosted.run);
 
@@ -306,6 +331,12 @@ if (!gotTheLock) {
     }
   });
 
+  // Before `whenReady`, because `registerSchemesAsPrivileged` is only read while
+  // the protocol registry is still being assembled. Registering it later
+  // leaves `cartcut-ext://` a non-standard scheme with no origin, and every
+  // extension view becomes same-origin with every other.
+  registerExtensionScheme();
+
   app.whenReady().then(() => {
     // The editor loads hidden behind the splash and is revealed when it
     // closes, so the first thing on screen is the splash image and not a
@@ -348,6 +379,40 @@ if (!gotTheLock) {
     // The MCP tools reach the timeline through this window; without it every
     // tool call fails with "editor window is not available".
     attachBridge(mainWindow.webContents);
+
+    // The extension system, in the order its parts depend on each other.
+    //
+    // The guard goes on before anything can attach a `<webview>`, the protocol
+    // before a guest can ask for a file, and the host last because it is the
+    // only one of the three that starts a process.
+    setExtensionDirResolver((extId) => {
+      const listing = listExtensions().find((entry) => entry.id === extId);
+      return listing != null && listing.enabled ? listing.dir : null;
+    });
+    setWebviewExtensionIds(() =>
+      listExtensions().filter((entry) => entry.enabled).map((entry) => entry.id),
+    );
+    setExtensionDialogParent(() => (mainWindow?.isDestroyed() ? null : mainWindow));
+    setExtensionViewPoster(postToView);
+    onWebviewAttached((contents, extId, viewId) => registerExtensionView(contents, extId, viewId));
+    onExtensionMenusChanged(() => {
+      // Through the scheduler rather than straight to `installMenu`, because
+      // an extension can contribute items at any moment during activation and
+      // rebuilding the bar closes whatever menu the user is reading.
+      scheduleMenuRebuild();
+      watchMenuOpen();
+    });
+
+    installExtensionProtocol();
+    guardWebviews(mainWindow.webContents);
+    denyWebviewsElsewhere(() => (mainWindow?.isDestroyed() ? null : mainWindow.webContents));
+    installViewBridge(forwardViewMessage);
+    attachExtensionHost(mainWindow.webContents);
+    startExtensionHost();
+
+    // Live reload for an unpacked extension. Only the folders a developer
+    // pointed at are watched, so a user with none pays nothing.
+    watchUnpacked(unpackedPaths(), reloadExtensionHost);
 
     // Checks once, now, and reports to the update card in this window. It may
     // answer before the page has loaded; the card asks for the last answer
@@ -424,11 +489,28 @@ app.on("window-all-closed", function () {
 });
 
 // Release port 9826 on the way out, so relaunching does not hit EADDRINUSE.
-app.on("will-quit", () => {
+let extensionsStopped = false;
+
+app.on("will-quit", (event) => {
+  // Second pass. The quit below re-enters this handler once the host has had
+  // its chance, and this is where it is allowed through.
+  if (extensionsStopped) {
+    return;
+  }
+  extensionsStopped = true;
+
+  // MCP first, so no tool call can arrive while the host it would reach is
+  // being torn down.
   stopMcpServer();
 
   // Best effort. `ipcApp.forceClose` reaches `app.exit(0)`, which does not run
-  // this — but a tray icon outliving its app is the one leftover a user can
+  // this, but a tray icon outliving its app is the one leftover a user can
   // see, so it is worth removing on every path that does.
   closeRecorder();
+
+  // An extension's `deactivate` is where it flushes whatever it was holding,
+  // and this handler cannot await. So the quit is deferred once, the host is
+  // given its two seconds, and the app quits again.
+  event.preventDefault();
+  void stopExtensionHost().finally(() => app.quit());
 });

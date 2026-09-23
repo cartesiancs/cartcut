@@ -20,6 +20,9 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Store from "electron-store";
 import { registerTools } from "./tools";
+import { defineRegistrar } from "./tools/define";
+import { registerExtensionTools } from "../extension/mcpTools";
+import { onExtensionToolsChanged } from "../extension/host";
 
 const store = new Store();
 
@@ -145,6 +148,17 @@ const INSTRUCTIONS = [
   "Start with get_project_overview and list_clips rather than guessing ids.",
 ].join("\n");
 
+/**
+ * Every server this process has connected, so a tool added later can be
+ * announced to a session that is already open.
+ *
+ * A set rather than a single reference because there is one `McpServer` per
+ * session. Entries are removed when their transport closes, which is where
+ * `transports` is cleaned up too; without that this would hold a server for
+ * every Claude Code window ever opened.
+ */
+const liveServers = new Set<McpServer>();
+
 function newMcpServer(): McpServer {
   const mcp = new McpServer(
     {
@@ -154,8 +168,35 @@ function newMcpServer(): McpServer {
     { instructions: INSTRUCTIONS },
   );
   registerTools(mcp);
+
+  // Extension tools are registered per session because a tool list is
+  // assembled once, here. An extension that activates after this point
+  // reaches the session through `sendToolListChanged` below instead.
+  registerExtensionTools(defineRegistrar(mcp));
+  liveServers.add(mcp);
+
   return mcp;
 }
+
+/**
+ * Tell every open session its tool list changed.
+ *
+ * The alternative is a session that connected before an extension activated
+ * never seeing that extension's tools until the user reconnects, which reads
+ * as the extension being broken.
+ */
+function announceToolChange(): void {
+  for (const server of liveServers) {
+    try {
+      server.sendToolListChanged();
+    } catch {
+      // A session that has gone away. It is removed on transport close; a
+      // notification that raced that is not worth reporting.
+    }
+  }
+}
+
+onExtensionToolsChanged(announceToolChange);
 
 async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
   const url = new URL(req.url ?? "/", `http://${MCP_HOST}:${MCP_PORT}`);
@@ -228,7 +269,18 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
 
   // A server instance per session: `McpServer` binds to one transport, and
   // sharing one across sessions is what broke the previous implementation.
-  await newMcpServer().connect(transport);
+  const server = newMcpServer();
+
+  // Dropped when its transport goes, or `liveServers` keeps one server for
+  // every Claude Code window this app has ever seen.
+  const releaseServer = () => liveServers.delete(server);
+  const previousClose = transport.onclose;
+  transport.onclose = () => {
+    releaseServer();
+    previousClose?.();
+  };
+
+  await server.connect(transport);
   await transport.handleRequest(req, res, body);
 }
 

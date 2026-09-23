@@ -1,7 +1,6 @@
 // The subpath, not the barrel: this is the only lodash call left in the
 // renderer, and `import _ from "lodash"` would pull the whole library into the
 // bundle for one function. It used to be a global from a CDN <script>.
-import cloneDeep from "lodash/cloneDeep";
 
 import { rendererModal } from "./utils/modal";
 import { exportProgress } from "./features/export/exportProgress";
@@ -97,29 +96,6 @@ window.electronAPI.res.menu.command((evt, id, payload) => {
 // The Edit menu's items are the editor's own commands now, so a keystroke that
 // belongs to a text field needs somewhere to go. See `features/editor/textEditing`.
 installTextEditingShortcuts();
-
-window.electronAPI.res.timeline.get((event) => {
-  let timeline = cloneDeep(
-    document.querySelector("element-timeline").timeline,
-  );
-
-  event.sender.send("return:timeline:get", timeline);
-});
-
-window.electronAPI.res.timeline.add(async (event, timeline) => {
-  for (const timelineId in timeline) {
-    if (Object.hasOwnProperty.call(timeline, timelineId)) {
-      const element = timeline[timelineId];
-      const elementTimeline = document.querySelector("element-timeline");
-
-      Object.assign(elementTimeline.timeline, timeline);
-      await elementTimeline.patchElementInTimeline({
-        elementId: timelineId,
-        element: element,
-      });
-    }
-  }
-});
 
 window.addEventListener("load", (event) => {
   let toastElList = [].slice.call(document.querySelectorAll(".toast"));
