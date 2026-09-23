@@ -1,0 +1,51 @@
+{
+  "name": "hello",
+  "publisher": "acme",
+  "version": "1.0.0",
+  "displayName": "Hello",
+  "description": "The fixture extension. Exercises every seam of the extension system, including the two that are supposed to fail.",
+  "main": "main.js",
+  "engines": { "cartcut": "^1" },
+  "cartcut": {
+    "activationEvents": ["onStartup"],
+    "permissions": ["timeline.write", "project.write", "ai.tools"],
+    "contributes": {
+      "commands": [
+        { "id": "hello.say", "title": "Hello: Say", "icon": "waving_hand" },
+        { "id": "hello.batch", "title": "Hello: Batch three titles" },
+        { "id": "hello.tag", "title": "Hello: Tag the selected clip" },
+        { "id": "hello.note", "title": "Hello: Set a project note" },
+        { "id": "hello.crash", "title": "Hello: Crash the host" },
+        { "id": "hello.hang", "title": "Hello: Hang", "longRunning": true }
+      ],
+      "keybindings": [{ "command": "hello.say", "key": "mod+alt+h" }],
+      "menus": {
+        "app/extensions": [{ "command": "hello.say" }, { "command": "hello.batch" }],
+        "timeline/clip": [{ "command": "hello.tag" }]
+      },
+      "views": [
+        { "id": "hello.panel", "kind": "sidebar", "title": "Hello", "icon": "waving_hand", "page": "views/panel.html" }
+      ],
+      "configuration": {
+        "title": "Hello",
+        "properties": {
+          "hello.greeting": { "type": "string", "default": "Hello", "description": "What the title says" },
+          "hello.shout": { "type": "boolean", "default": false, "description": "Upper case it" }
+        }
+      },
+      "statusBar": [{ "id": "hello.status", "alignment": "right", "priority": 5 }],
+      "presets": "presets",
+      "tools": [
+        {
+          "name": "say_hello",
+          "description": "Add a title that greets someone, at the playhead.",
+          "inputSchema": {
+            "type": "object",
+            "properties": { "name": { "type": "string", "description": "Who to greet" } },
+            "required": ["name"]
+          }
+        }
+      ]
+    }
+  }
+}
