@@ -2348,18 +2348,26 @@ export class elementTimelineCanvas extends LitElement {
    * about different clips than the ones the user right-clicked.
    */
   extensionMenuTemplate(): string {
-    const ids = this.targetIdDuringRightClick;
-    const elements = this.currentDoc().elements;
-    const types = ids
-      .map((id) => (elements[id] as { filetype?: string } | undefined)?.filetype)
-      .filter((filetype): filetype is string => typeof filetype === "string");
+    try {
+      const ids = this.targetIdDuringRightClick;
+      const elements = this.currentDoc().elements;
+      const types = ids
+        .map((id) => (elements[id] as { filetype?: string } | undefined)?.filetype)
+        .filter((filetype): filetype is string => typeof filetype === "string");
 
-    return extensionMenuHtml(
-      clipMenuItems(contributionStore.getState(), {
-        selectionCount: ids.length,
-        selectionTypes: types,
-      }),
-    );
+      return extensionMenuHtml(
+        clipMenuItems(contributionStore.getState(), {
+          selectionCount: ids.length,
+          selectionTypes: types,
+        }),
+      );
+    } catch (error) {
+      // The menu is built as one string, so a throw here would leave the user
+      // with no context menu at all rather than with one missing an
+      // extension's rows. An extension losing its item is the smaller loss.
+      console.warn("[extension] could not build the context menu rows", error);
+      return "";
+    }
   }
 
   /**

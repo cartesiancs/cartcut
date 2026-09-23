@@ -19,6 +19,7 @@
  */
 
 import { easingNames, type EasingName } from "../animation/easing";
+import { forgetPreviewSamples } from "../animation/presetPreview";
 import type { Move, PresetShape, Stop } from "../animation/presets";
 
 /** Bumped only when the file format changes in a way an older app cannot read. */
@@ -289,6 +290,10 @@ export function setAnimationPresetsOf(
   for (const [id, preset] of presets) {
     if (preset.extId === extId) {
       presets.delete(id);
+      // The thumbnail is cached by this id, and reloading an extension keeps
+      // the id while changing the move. Without this a developer editing a
+      // preset sees the previous one until they restart the app.
+      forgetPreviewSamples(id);
       changed = true;
     }
   }
@@ -317,6 +322,7 @@ export function removeAnimationPresetsOf(extId: string): void {
   for (const [id, preset] of presets) {
     if (preset.extId === extId) {
       presets.delete(id);
+      forgetPreviewSamples(id);
       changed = true;
     }
   }
@@ -334,7 +340,17 @@ export function animationPresets(): ExtensionAnimationPreset[] {
   return [...presets.values()].sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
 }
 
-/** Test-only: start from nothing so one suite cannot see another's presets. */
+/**
+ * Test-only: start from nothing so one suite cannot see another's presets.
+ *
+ * Evicts the thumbnails too, for the reason the real paths do: the cache is
+ * keyed by preset id and outlives the registry, so clearing only the map
+ * leaves one suite's samples answering the next suite's question about the
+ * same id.
+ */
 export function __clearAnimationPresetsForTesting(): void {
+  for (const id of presets.keys()) {
+    forgetPreviewSamples(id);
+  }
   presets.clear();
 }

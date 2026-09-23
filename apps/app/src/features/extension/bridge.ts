@@ -246,11 +246,18 @@ function teardown(): void {
   endpoint?.dispose("the extension host went away");
   endpoint = null;
   setExportHookPorts(null);
-  for (const extension of contributionStore.getState().extensions) {
+  const loaded = contributionStore.getState().extensions;
+  for (const extension of loaded) {
     removePresetsOfExtension(extension.id);
     removeAnimationPresetsOf(extension.id);
   }
-  void refreshTemplateLibrary();
+  // Only when something was actually loaded. `teardown` runs on every host
+  // state that is not `ready`, which at startup is twice before any extension
+  // exists, and each call is a directory walk and a repaint of the template
+  // browser that a user with no extensions was paying for.
+  if (loaded.length > 0) {
+    void refreshTemplateLibrary();
+  }
   permissions.clear();
   contributionStore.getState().clear();
 }
@@ -434,6 +441,12 @@ export function isExtensionHostConnected(): boolean {
 
 export function installExtensionBridge(): void {
   if (installed) {
+    return;
+  }
+  // No DOM at all. This module is imported for effect, and the keybinding
+  // seam imports it, so a node suite testing that seam loads this file:
+  // without this it would throw inside `getLocationEnv` before the test ran.
+  if (typeof window === "undefined") {
     return;
   }
   // Electron only: in web and demo builds `ipcWrapper` stubs most of

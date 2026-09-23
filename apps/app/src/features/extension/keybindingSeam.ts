@@ -55,6 +55,21 @@ function bindings(): { bindings: ResolvedBinding[]; problems: BindingProblem[] }
  * also reaches the app's own modifier branch below it.
  */
 export function dispatchExtensionKeybinding(event: KeyEventLike): boolean {
+  try {
+    return resolve(event);
+  } catch (error) {
+    // Caught because of where this runs. `elementTimelineCanvas` listens on
+    // `window`, so this is on the path of every keystroke in the editor: a
+    // throw here would stop the arrow keys, Delete and every `mod+` shortcut
+    // for the rest of the session, and the cause would be an extension's
+    // keybinding. No chord an extension can currently declare reaches a
+    // throw; this is what keeps that true of the ones it declares later.
+    console.warn("[extension] a keybinding could not be resolved", error);
+    return false;
+  }
+}
+
+function resolve(event: KeyEventLike): boolean {
   const table = bindings();
   if (table.bindings.length === 0) {
     return false;
