@@ -81,14 +81,14 @@ const SCALE_ZOOMED = 12;
  * describes a move at any length the caller asks for. `easing` shapes the
  * segment *leaving* this stop, the same reading `add_keyframes` uses.
  */
-type Stop = { at: number; value: number; easing?: EasingName };
+export type Stop = { at: number; value: number; easing?: EasingName };
 
 /**
  * A position stop, **offset from where the clip already sits**.
  *
  * In pixels, unless the shape says `positionUnit: "box"`.
  */
-type Move = { at: number; x: number; y: number; easing?: EasingName };
+export type Move = { at: number; x: number; y: number; easing?: EasingName };
 
 /**
  * Smallest slide a box-relative preset may travel, in pixels.
@@ -100,7 +100,7 @@ type Move = { at: number; x: number; y: number; easing?: EasingName };
  */
 export const MIN_SLIDE_PX = 40;
 
-type PresetShape = {
+export type PresetShape = {
   /** Used when the caller does not give one. */
   defaultMs: number;
   /** Anchored to the clip's end rather than its start. */
@@ -485,9 +485,17 @@ export function presetNames(): PresetName[] {
 /** Which properties a preset drives, for error messages and validation. */
 export function presetProperties(preset: PresetName): AnimatableProperty[] {
   const shape = PRESETS[preset];
-  if (shape == null) {
-    return [];
-  }
+  return shape == null ? [] : shapeProperties(shape);
+}
+
+/**
+ * The properties a shape drives, from the shape rather than from its name.
+ *
+ * Split out so a preset that came from an extension's JSON answers the
+ * every-property-or-none question through exactly the same code as a built-in
+ * one. A second implementation would drift on the day a property was added.
+ */
+export function shapeProperties(shape: PresetShape): AnimatableProperty[] {
   const out: AnimatableProperty[] = [];
   if (shape.scale) out.push("scale");
   if (shape.opacity) out.push("opacity");
@@ -683,6 +691,30 @@ export function applyPreset(
   options: { focus?: Focus; startAtMs?: number } = {},
 ): TimelineDocument {
   const shape = PRESETS[preset];
+  return shape == null ? doc : applyPresetShape(doc, elementId, shape, durationMs, bakeHz, options);
+}
+
+/**
+ * The same move, from a shape rather than from a name.
+ *
+ * `PresetName` is a closed union and stays one: it is what makes a missing
+ * entry in `LABELS` or `GROUPS` a compile error, and what lets the MCP tool
+ * advertise a fixed list. An extension's preset cannot be a member of it, so
+ * it arrives as a shape instead and runs through this.
+ *
+ * Every rule below is therefore stated once for both: the every-property-or-none
+ * check, the clamp to the clip, the anchor beating `fromEnd`, the box unit, and
+ * the focus counter-move. An extension's preset is not a second kind of thing
+ * that happens to look similar; it is the same thing with a different source.
+ */
+export function applyPresetShape(
+  doc: TimelineDocument,
+  elementId: string,
+  shape: PresetShape,
+  durationMs: number,
+  bakeHz: number = BAKE_HZ,
+  options: { focus?: Focus; startAtMs?: number } = {},
+): TimelineDocument {
   const element = doc.elements[elementId] as any;
 
   if (shape == null || element == null) {
@@ -690,7 +722,7 @@ export function applyPreset(
   }
 
   const available = animatableProperties(element);
-  const needed = presetProperties(preset);
+  const needed = shapeProperties(shape);
   // Every property or none. A `pop` that got its scale and not its opacity
   // would be a different move, silently.
   if (!needed.every((property) => available.includes(trackFor(element, property)))) {
