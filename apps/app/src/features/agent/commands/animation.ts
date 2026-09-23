@@ -44,6 +44,7 @@ import {
 import { bakeRateFor, lanesOf } from "../../animation/keyframes";
 import {
   applyPreset,
+  applyPresetShape,
   presetDefaultMs,
   presetIsFocusable,
   presetNames,
@@ -52,6 +53,7 @@ import {
 import { spanLength, spanStart } from "../../timeline/geometry";
 import type { TimelineDocument } from "../../timeline/tracks";
 import { renderOptionStore } from "../../../states/renderOptionStore";
+import { animationPresetById, isExtensionPresetId } from "../../extension/animationPresets";
 import { commit } from "../commit";
 import { currentDoc, onFrame, requireElement } from "../context";
 import { registerCommands } from "../registry";
@@ -202,20 +204,43 @@ registerCommands({
       requireElement(doc, id);
     }
 
-    // Each preset carries the length it is meant to have — a punch is under a
-    // fifth of a second and a drift is four seconds — so an omitted duration
+    /*
+     * A preset is either one of the nineteen this app ships or one an
+     * extension contributed, and the two are told apart by the `ext:` prefix
+     * on the name. They resolve to the same thing: a shape.
+     *
+     * Only the *lookup* branches. Everything below, and everything inside
+     * `applyPresetShape`, is shared, so a contributed preset is not a second
+     * kind of move that happens to behave similarly.
+     */
+    const contributed = isExtensionPresetId(params.preset)
+      ? animationPresetById(params.preset)
+      : null;
+
+    if (isExtensionPresetId(params.preset) && contributed == null) {
+      throw new Error(
+        `"${params.preset}" is not a preset any loaded extension contributes. ` +
+          "It may have been disabled, or the extension that provided it may not be running.",
+      );
+    }
+
+    const shape = contributed?.shape ?? null;
+
+    // Each preset carries the length it is meant to have: a punch is under a
+    // fifth of a second and a drift is four seconds, so an omitted duration
     // means "the right one", not a shared default.
     const durationMs =
       params.durationMs != null
         ? Math.max(1, params.durationMs)
-        : presetDefaultMs(params.preset);
+        : (shape?.defaultMs ?? presetDefaultMs(params.preset));
 
     // A focus on a preset that cannot use it is a misunderstanding worth
     // saying out loud: the caller thinks the zoom will converge somewhere it
     // will not, and silence would leave them believing it.
-    if (params.focus != null && !presetIsFocusable(params.preset)) {
+    const focusable = shape != null ? shape.focusable === true : presetIsFocusable(params.preset);
+    if (params.focus != null && !focusable) {
       throw new Error(
-        `"${params.preset}" does not take a focus — it is not a zoom. ` +
+        `"${params.preset}" does not take a focus, because it is not a zoom. ` +
           `Focusable presets: ${presetNames().filter(presetIsFocusable).join(", ")}.`,
       );
     }
@@ -244,10 +269,15 @@ registerCommands({
       (d) =>
         ids.reduce(
           (next, id) =>
-            applyPreset(next, id, params.preset, durationMs, bakeHz, {
-              focus: params.focus,
-              startAtMs: anchors.get(id),
-            }),
+            shape != null
+              ? applyPresetShape(next, id, shape, durationMs, bakeHz, {
+                  focus: params.focus,
+                  startAtMs: anchors.get(id),
+                })
+              : applyPreset(next, id, params.preset, durationMs, bakeHz, {
+                  focus: params.focus,
+                  startAtMs: anchors.get(id),
+                }),
           d,
         ),
       "None of those clips can animate what that preset drives, or they already have those keyframes.",

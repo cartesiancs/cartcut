@@ -35,6 +35,8 @@ const FEATURE = "features/extension/";
  *   and the dirty digest.
  * - `commit.ts` and `context.ts` are the batch seam.
  * - `serialize.ts`'s caller shows an extension its own data.
+ * - `commands/animation.ts` resolves a preset an extension contributed.
+ * - `animationPresetBrowser.ts` shows contributed presets as tiles.
  * - `presetRegistry` is reached the other way round, so it is not here.
  */
 const ALLOWED_IMPORTERS = new Set([
@@ -47,6 +49,8 @@ const ALLOWED_IMPORTERS = new Set([
   "features/agent/commit.ts",
   "features/agent/context.ts",
   "features/agent/commands/read.ts",
+  "features/agent/commands/animation.ts",
+  "features/option/animationPresetBrowser.ts",
   "functions/project.ts",
   "features/project/projectDirty.ts",
   "features/project/autosaveBridge.ts",
@@ -58,9 +62,10 @@ const ALLOWED_IMPORTERS = new Set([
  *
  * Prefixes, because the point is which subsystems it may know about, not which
  * files. It may reach the agent command layer (that is how it edits), the
- * window system (that is how it shows a panel), the stores it publishes events
- * from, and the shared protocol. It may not reach the renderer, the preview,
- * the timeline canvas or the export pipeline.
+ * window system (that is how it shows a panel), the pure `timeline/` and
+ * `animation/` layers (that is what a contributed preset is made of), the
+ * stores it publishes events from, and the shared protocol. It may not reach
+ * the renderer, the preview, the timeline canvas or the export pipeline.
  */
 const ALLOWED_IMPORTS = [
   "../agent/",
@@ -68,6 +73,7 @@ const ALLOWED_IMPORTS = [
   "../editor/",
   "../fx/presetRegistry",
   "../timeline/tracks",
+  "../animation/",
   "../caption/previewLoop",
   "../renderer/testing",
   "../../states/",
