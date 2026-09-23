@@ -148,6 +148,9 @@ import { dropTargetAt } from "../asset/dropTarget";
 import { importDroppedFiles, importPathsAt } from "../asset/importDrop";
 import { isTypingEvent } from "../../utils/typingTarget";
 import { dispatchExtensionKeybinding } from "../extension/keybindingSeam";
+import { clipMenuItems, extensionMenuHtml } from "../extension/contextMenu";
+import { contributionStore } from "../extension/contributions";
+import { runContributedCommand } from "../extension/bridge";
 import { hasEditorModifier } from "../../utils/platform";
 import { mergeIds, selectionStore } from "../../states/selectionStore";
 import {
@@ -2336,6 +2339,44 @@ export class elementTimelineCanvas extends LitElement {
     return `<menu-dropdown-sub item-name="${label}" item-icon="${icon}">${items}</menu-dropdown-sub>`;
   }
 
+  /**
+   * Rows contributed by extensions, for the selection the menu opened on.
+   *
+   * Built from `targetIdDuringRightClick` rather than the live selection, for
+   * the reason that field exists: the menu describes the gesture that opened
+   * it, and a selection that changed underneath would leave the rows talking
+   * about different clips than the ones the user right-clicked.
+   */
+  extensionMenuTemplate(): string {
+    const ids = this.targetIdDuringRightClick;
+    const elements = this.currentDoc().elements;
+    const types = ids
+      .map((id) => (elements[id] as { filetype?: string } | undefined)?.filetype)
+      .filter((filetype): filetype is string => typeof filetype === "string");
+
+    return extensionMenuHtml(
+      clipMenuItems(contributionStore.getState(), {
+        selectionCount: ids.length,
+        selectionTypes: types,
+      }),
+    );
+  }
+
+  /**
+   * Run one contributed item. Reached from the inline `onclick` above.
+   *
+   * Public because the dropdown's rows are an HTML string, so the only way
+   * back into this component is through the DOM. The selection is restored
+   * first: clicking a menu row does not change the selection, but the command
+   * runs asynchronously in another process and asks for it from there.
+   */
+  public runExtensionMenuItem(extId: string, commandId: string): void {
+    if (this.targetIdDuringRightClick.length > 0) {
+      this.targetId = [...this.targetIdDuringRightClick];
+    }
+    void runContributedCommand(extId, commandId);
+  }
+
   showMenuDropdown({ x, y }) {
     document.querySelector("#menuRightClick").innerHTML = `
         <menu-dropdown-body top="${y}" left="${x}">
@@ -2345,6 +2386,7 @@ export class elementTimelineCanvas extends LitElement {
           ${this.rasterizeMenuTemplate()}
           ${this.groupMenuTemplate()}
           ${this.replaceableMenuTemplate()}
+          ${this.extensionMenuTemplate()}
           <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').removeSeletedElements()" item-name="Remove" item-icon="delete"> </menu-dropdown-item>
           <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').rippleDeleteSelected()" item-name="Remove and close gap" item-icon="delete_sweep"> </menu-dropdown-item>
         </menu-dropdown-body>`;
