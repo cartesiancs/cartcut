@@ -1,3 +1,5 @@
+import { EXTENSIONS_ENTRY, parseExtensionsEntry } from "../features/extension/projectData";
+import { extensionsExtraEntries, projectDataStore } from "../features/extension/projectDataStore";
 import { useTimelineStore } from "../states/timelineStore";
 import { rendererModal } from "../utils/modal";
 import { uiStore } from "../states/uiStore";
@@ -19,6 +21,7 @@ import {
   buildNgtBlob,
   openNgt,
   readNgtEntries,
+  readNgtExtra,
 } from "../features/project/projectArchive";
 import {
   readProjectDocument,
@@ -113,6 +116,7 @@ const project = {
     const filepath: string = picked;
 
     let entries;
+    let extensionsEntry: string | null = null;
     try {
       // One read of the archive, not two. The document and the project's
       // settings used to be pulled from separate `loadAsync` chains with no
@@ -120,9 +124,12 @@ const project = {
       // document depended on a setting. The frame rate does: it decides the
       // rate `patchDocument` re-derives baked animation at, so it has to be in
       // the store first.
-      entries = await readNgtEntries(
-        await openNgt(await filesystem.readFile(filepath)),
-      );
+      const zip = await openNgt(await filesystem.readFile(filepath));
+      entries = await readNgtEntries(zip);
+      // The sixth entry, read from the same archive so there is no second
+      // open. `readNgtEntries` asks for five by name and ignores the rest,
+      // which is what lets this be added without moving `SCHEMA_VERSION`.
+      extensionsEntry = await readNgtExtra(zip, EXTENSIONS_ENTRY);
     } catch (error) {
       project.showLoadFailure(
         `This project could not be opened — ${String(error)}.`,
@@ -144,7 +151,7 @@ const project = {
       return;
     }
 
-    project.adoptDocument(read, filepath);
+    project.adoptDocument(read, filepath, extensionsEntry);
     project.changeProjectFileValue({ projectDestination: filepath });
 
     // Baseline against what was just loaded. Without this the freshly opened
@@ -167,7 +174,13 @@ const project = {
   adoptDocument: function (
     read: Extract<ReadProjectResult, { ok: true }>,
     _source: string,
+    extensionsEntry: string | null = null,
   ): void {
+    // Before the document, so an extension woken by `project.opened` finds its
+    // own data already there rather than reading an empty store and caching
+    // the answer.
+    projectDataStore.getState().replace(parseExtensionsEntry(extensionsEntry));
+
     // Read against a *fresh* project's settings, so a field the file predates
     // falls back to the app's default rather than to whatever the previously
     // open project happened to leave in the store.
@@ -232,7 +245,10 @@ const project = {
       previewRatio,
     });
 
-    const content = await buildNgtBlob(entries);
+    // The sixth entry, or nothing at all. `extensionsExtraEntries` answers an
+    // empty object when no extension has stored anything, so a project nobody
+    // has run one on is byte-identical to a project saved before this existed.
+    const content = await buildNgtBlob(entries, extensionsExtraEntries());
     const base64 = arrayBufferToBase64(await content.arrayBuffer());
 
     // `writeFileEnsured`, never `writeFile`. The latter calls the *callback*

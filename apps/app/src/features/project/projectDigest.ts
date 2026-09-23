@@ -100,8 +100,9 @@ export function projectStateDigest(
   elements: Timeline,
   tracks: TimelineTrack[],
   options: RenderOptions,
+  extensionData: string | null = null,
 ): string {
-  return digest64(projectStateText(elements, tracks, options));
+  return digest64(projectStateText(elements, tracks, options, extensionData));
 }
 
 /**
@@ -116,11 +117,22 @@ export function projectStateText(
   elements: Timeline,
   tracks: TimelineTrack[],
   options: RenderOptions,
+  /**
+   * The `extensions.json` entry, or `null` when there is none.
+   *
+   * Included because it is saved with the project, so changing it has to make
+   * the project dirty: without this an extension could store something, the
+   * user could quit, and the quit guard would say there was nothing to save.
+   * Defaulted so every existing caller and every existing test keeps the
+   * digest it had for a project no extension has touched.
+   */
+  extensionData: string | null = null,
 ): string {
   return [
     JSON.stringify(elements),
     JSON.stringify(tracks),
     JSON.stringify(digestableOptions(options)),
+    ...(extensionData == null ? [] : [extensionData]),
   ].join("\n");
 }
 

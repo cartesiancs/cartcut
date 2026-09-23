@@ -23,6 +23,7 @@
  * visible from `__cartcutPerf` in the running app rather than reasoned about.
  */
 
+import { extensionsExtraEntries } from "../extension/projectDataStore";
 import { v4 as uuidv4 } from "uuid";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { useTimelineStore } from "../../states/timelineStore";
@@ -194,6 +195,10 @@ function realSource(): { snapshot: () => AutosaveSnapshot | null } {
           anchor: anchor,
           bytes: () =>
             buildNgtBytes(entries, {
+              // Whatever extensions have stored on this project, so a
+              // recovered autosave brings it back too. Absent when no
+              // extension has stored anything.
+              ...extensionsExtraEntries(),
               // The sixth entry. `project.load` reads five *named* entries and
               // ignores the rest, so this does not move `SCHEMA_VERSION`, and
               // it never appears in a user-saved `.ngt`. It exists so each
