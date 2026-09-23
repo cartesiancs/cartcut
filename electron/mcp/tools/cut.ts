@@ -160,4 +160,42 @@ export function registerCutTools(define: Registrar) {
     },
     tool((args) => requestEditor("set_clip_speed", args)),
   );
+
+  define(
+    "merge_clips",
+    {
+      title: "Fuse adjacent clips into one",
+      description:
+        "The inverse of split_clip: fuse a run of adjacent clips back into a single clip. " +
+        "They have to be a continuous run from the same source, in order, on one track, at the same " +
+        "speed, with each one's source window picking up where the last one left off. Anything else is " +
+        "refused whole rather than merged in part, so a selection never half collapses. " +
+        "The leftmost clip survives and keeps its id; the others are removed, and the result says which. " +
+        "Use it to undo splits that a cut no longer needs, or to tidy a timeline before exporting.",
+      inputSchema: {
+        elementIds: z.array(z.string()).min(2),
+      },
+      annotations: mutating,
+    },
+    tool((args) => requestEditor("merge_clips", args)),
+  );
+
+  define(
+    "detach_audio",
+    {
+      title: "Put a clip's sound on its own track",
+      description:
+        "Split a video clip's sound onto its own audio track, so the two can be cut, moved and " +
+        "levelled apart. Use it when the picture and the sound should stop travelling together: " +
+        "keeping a speaker's voice under a cutaway, or trimming a shot without losing the line over it. " +
+        "The video keeps its picture and stops carrying sound; get_clip then reports audioDetached on " +
+        "it. Clips with no sound to give are skipped rather than refused, so a mixed selection does the " +
+        "obvious thing.",
+      inputSchema: {
+        elementIds: z.array(z.string()).min(1),
+      },
+      annotations: mutating,
+    },
+    tool((args) => requestEditor("detach_audio", args)),
+  );
 }

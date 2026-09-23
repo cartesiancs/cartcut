@@ -22,6 +22,11 @@
  * baked at half the project's rate and stepped, visibly, until the file was
  * reloaded. `bakeRateFor` is the rule (`max(60, fps)`); reading the store for
  * it is what an agent command is allowed to do and a pure op is not.
+ *
+ * Both conversions live in `context.ts` now, as `localTime` and
+ * `projectBakeHz`. The reveal commands write to the same `revealProgress`
+ * track and need exactly these two answers, and a second copy is how one of
+ * the two families quietly stops snapping to the grid.
  */
 
 import {
@@ -41,7 +46,7 @@ import {
   resolveEasing,
   type CubicPoints,
 } from "../../animation/easing";
-import { bakeRateFor, lanesOf } from "../../animation/keyframes";
+import { lanesOf } from "../../animation/keyframes";
 import {
   applyPreset,
   applyPresetShape,
@@ -50,21 +55,21 @@ import {
   presetNames,
   type PresetName,
 } from "../../animation/presets";
-import { spanLength, spanStart } from "../../timeline/geometry";
+import { spanStart } from "../../timeline/geometry";
 import type { TimelineDocument } from "../../timeline/tracks";
-import { renderOptionStore } from "../../../states/renderOptionStore";
 import { animationPresetById, isExtensionPresetId } from "../../extension/animationPresets";
 import { commit } from "../commit";
-import { currentDoc, onFrame, requireElement } from "../context";
+import {
+  currentDoc,
+  localTime,
+  onFrame,
+  projectBakeHz,
+  requireElement,
+} from "../context";
 import { registerCommands } from "../registry";
 
 /** How near a stored keyframe a requested time has to be to mean "that one". */
 const MATCH_TOLERANCE_MS = 2;
-
-/** The rate this project's curves must be baked at. See the header. */
-function projectBakeHz(): number {
-  return bakeRateFor(renderOptionStore.getState().options.fps);
-}
 
 /** The keyframe in `lane` sitting at `atMs`, by index, or -1. */
 function indexAt(
@@ -159,30 +164,23 @@ function requireAnimatable(
     );
   }
   if (!available.includes(property)) {
+    /*
+     * The one case the tool list advertises and nothing could reach. The MCP
+     * `ANIMATABLE` enum carries `revealProgress`, so the schema accepts it, but
+     * `animatableProperties` only offers it once the clip has a `reveal` to
+     * progress through. Without this the answer names five properties and none
+     * of the two tools that would fix it.
+     */
+    if (property === "revealProgress" && element.filetype === "text") {
+      throw new Error(
+        'A text clip can animate "revealProgress" only once it has a reveal. ' +
+          "Give it one with set_text_reveal, or use apply_typewriter to write the whole move at once.",
+      );
+    }
     throw new Error(
       `A ${element.filetype} clip cannot animate "${property}". It supports: ${available.join(", ")}.`,
     );
   }
-}
-
-/**
- * An absolute timeline time as an offset from the clip's start, on the grid.
- *
- * Throws rather than clamping when it falls outside the clip — see the header.
- */
-function localTime(element: TimelineElement, atMs: number): number {
-  const start = spanStart(element);
-  const length = spanLength(element);
-  const local = onFrame(atMs) - start;
-
-  if (local < 0 || local > length) {
-    throw new Error(
-      `${Math.round(atMs)}ms is outside the clip, which runs ${Math.round(start)}–${Math.round(
-        start + length,
-      )}ms. A keyframe outside the clip would never play.`,
-    );
-  }
-  return local;
 }
 
 registerCommands({

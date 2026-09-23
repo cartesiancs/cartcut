@@ -30,6 +30,8 @@ import "./commands/mask";
 import "./commands/shape";
 import "./commands/rasterize";
 import "./commands/animation";
+import "./commands/reveal";
+import "./commands/framing";
 import "./commands/groups";
 import "./commands/contactSheet";
 import "./commands/fx";

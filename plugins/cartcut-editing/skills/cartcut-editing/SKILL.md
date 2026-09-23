@@ -310,6 +310,29 @@ was designed around, and they differ by more than an order of magnitude — a
 punch is 180ms, a drift is four seconds. A punch stretched to a second is not a
 punch.
 
+### Typing a title on
+
+A reveal shows a text clip's lettering a piece at a time. It is two things: a
+**unit**, which is what one step shows (`character`, `word` or `line`), and a
+progress from 0 to 100 that is an ordinary keyframe track, `revealProgress`.
+
+`apply_typewriter` writes both, and it is what you want:
+
+```
+apply_typewriter({ elementIds: ["..."], unit: "word", durationMs: 1200 })
+```
+
+Give it `durationMs` for a length or `unitsPerSecond` for a speed. Leave the
+easing alone: it defaults to linear, and typing on any other curve arrives
+slowing down, which reads as a stutter rather than as a person at a keyboard.
+Typing that will not fit before the clip ends is compressed rather than started
+earlier, and the result says so.
+
+`set_text_reveal` is for adjusting one afterwards, or clearing it with
+`unit: null`. It is also the only way to *create* a reveal, which matters
+because `revealProgress` does not exist until a clip has one: `set_animation`
+and `add_keyframes` both refuse the property until then.
+
 ### Zooming towards something
 
 Scale animates about the clip's **centre**, so a zoom always converges on the
@@ -324,10 +347,15 @@ counter-animate `position` yourself.
 | Want to | Use |
 |---|---|
 | Cut without deleting | `split_clip` |
+| Fuse clips a cut no longer needs | `merge_clips` |
 | Change where a clip starts or ends | `trim_clip` (absolute times) |
 | Reorder or restage clips | `move_clips` |
 | Delete outright | `delete_clips` (`ripple: true` closes the gap) |
 | Change which clip draws on top | `move_track` |
+| Keep part of the frame, hide the rest | `set_crop` (fractions, as `get_clip` reports) |
+| Flip a clip, or turn footage shot sideways | `set_mirror`, `rotate_clips` |
+| Cut picture and sound apart | `detach_audio` |
+| Type a title on, a piece at a time | `apply_typewriter` |
 | Change text, colour, position, size, opacity | `update_clip` |
 | Show the user what you did | `select_clips`, then `set_playhead` |
 

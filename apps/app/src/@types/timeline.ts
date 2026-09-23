@@ -1017,6 +1017,20 @@ export type TextElementType = TimelinePlaced &
     fontweight: string;
     fonttype: string;
     letterSpacing: number;
+    /**
+     * Absent means the whole text is shown, and clearing a reveal deletes the
+     * key, so a project nobody has revealed saves byte-identically to one
+     * written before the feature and `SCHEMA_VERSION` did not move. The rule
+     * `blend`, `lut` and `mask` all follow.
+     *
+     * Read and written at the element's **top level**, by `text/reveal.ts`'s
+     * `revealOf`, `timeline/textRevealOps.ts`'s `withReveal` and
+     * `animatableProperties` further down this file. It sat inside `options`
+     * until 2026-09, where nothing ever read it: the readers take
+     * `TimelineElement`, so they reach it through a cast either way, and the
+     * cast contradicted the declaration rather than agreeing with it.
+     */
+    reveal?: TextReveal;
     options: {
       isBold: boolean;
       isItalic: boolean;
@@ -1071,13 +1085,6 @@ export type TextElementType = TimelinePlaced &
      * fades the whole element — background box, shadow and all.
      */
     textOpacity?: number;
-    /**
-     * Absent means the whole text is shown, and clearing a reveal deletes the
-     * key — so a project nobody has revealed saves byte-identically to one
-     * written before the feature, and `SCHEMA_VERSION` did not move. The rule
-     * `blend`, `lut` and `mask` all follow.
-     */
-    reveal?: TextReveal;
     /**
      * Per-range overrides, sorted and disjoint. Absent means the clip's own
      * style everywhere, and styling a range back to the clip's own values

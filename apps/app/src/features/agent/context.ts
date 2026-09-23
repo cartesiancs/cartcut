@@ -11,7 +11,9 @@
 import { activeTransaction } from "../extension/transaction";
 import { useTimelineStore } from "../../states/timelineStore";
 import { renderOptionStore } from "../../states/renderOptionStore";
+import { bakeRateFor } from "../animation/keyframes";
 import { normalizeFps, snapMsToFrame } from "../timeline/frames";
+import { spanLength, spanStart } from "../timeline/geometry";
 import { trackById, type TimelineDocument, type TimelineTrack } from "../timeline/tracks";
 import type { TimelineElement } from "../../@types/timeline";
 import { clipRow } from "./serialize";
@@ -69,6 +71,46 @@ export function projectFps(): number {
  */
 export function onFrame(ms: number): number {
   return snapMsToFrame(ms, projectFps());
+}
+
+/**
+ * The rate this project's curves must be baked at.
+ *
+ * `bakeRateFor` is the rule (`max(60, fps)`). Every op in `keyframeOps` takes
+ * `bakeHz` as a trailing optional defaulting to 60, so a command that omits it
+ * bakes a 120fps project's curve at half the project's rate and it steps,
+ * visibly, until the file is reloaded. Reading the store for it is what an
+ * agent command is allowed to do and a pure op is not.
+ */
+export function projectBakeHz(): number {
+  return bakeRateFor(projectFps());
+}
+
+/**
+ * An absolute timeline time as an offset from the clip's start, on the grid.
+ *
+ * **Keyframe times are stored relative to the clip's own start**, while every
+ * tool in this surface speaks absolute timeline ms. Exposing the element-local
+ * form to an agent would be a trap: it has just read `list_clips`, which reports
+ * absolute times, and nothing in the parameter name would say otherwise.
+ *
+ * Throws rather than clamping when the time falls outside the clip. A keyframe
+ * past the clip's end never plays, so clamping would report success for an edit
+ * with no visible effect.
+ */
+export function localTime(element: TimelineElement, atMs: number): number {
+  const start = spanStart(element);
+  const length = spanLength(element);
+  const local = onFrame(atMs) - start;
+
+  if (local < 0 || local > length) {
+    throw new Error(
+      `${Math.round(atMs)}ms is outside the clip, which runs ${Math.round(start)}–${Math.round(
+        start + length,
+      )}ms. A keyframe outside the clip would never play.`,
+    );
+  }
+  return local;
 }
 
 /** Where the user is looking. The default `startMs` for anything newly added. */

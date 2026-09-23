@@ -254,6 +254,19 @@ export const animatableProperty = z
 export const MASK_SHAPES = ["rectangle", "star", "heart", "pen"] as const;
 
 /**
+ * What one step of a text reveal counts.
+ *
+ * A copy of `@types/timeline.ts#REVEAL_UNITS`, for the reason every copy in
+ * this file exists: `electron/` cannot import that module. `tools.test.ts`
+ * pins the two together.
+ *
+ * There is no fourth unit and no "typewriter" among them. A typewriter is this
+ * list's `character` plus a keyframed progress, which is why `apply_typewriter`
+ * is a composite tool rather than a unit.
+ */
+export const REVEAL_UNITS = ["character", "word", "line"] as const;
+
+/**
  * The parametric shapes a shape clip can be generated from.
  *
  * A copy of `@types/timeline.ts`'s `SHAPE_GEOMETRY_KINDS`, for the reason every

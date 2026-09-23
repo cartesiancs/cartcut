@@ -41,6 +41,8 @@ import { registerMediaTools } from "./tools/media";
 import { registerTextTools } from "./tools/text";
 import { registerTrackTools } from "./tools/tracks";
 import { registerAnimationTools } from "./tools/animation";
+import { registerRevealTools } from "./tools/reveal";
+import { registerFramingTools } from "./tools/framing";
 import { registerFxTools } from "./tools/fx";
 import { registerLutTools } from "./tools/lut";
 import { registerAdjustTools } from "./tools/adjust";
@@ -59,6 +61,8 @@ export function registerToolsWith(define: Registrar) {
   registerTextTools(define);
   registerTrackTools(define);
   registerAnimationTools(define);
+  registerRevealTools(define);
+  registerFramingTools(define);
   registerFxTools(define);
   registerLutTools(define);
   registerAdjustTools(define);

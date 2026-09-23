@@ -21,6 +21,7 @@ import {
   FILETYPES,
   MASK_SHAPES,
   PRESETS,
+  REVEAL_UNITS,
   SHAPE_GEOMETRY_KINDS,
   type Registrar,
   type ToolConfig,
@@ -46,6 +47,8 @@ const EXPECTED = [
   "delete_clips",
   "duplicate_clips",
   "set_clip_speed",
+  "merge_clips",
+  "detach_audio",
   // adding
   "add_media",
   "add_shape",
@@ -66,6 +69,13 @@ const EXPECTED = [
   "set_animation",
   "add_keyframes",
   "remove_keyframes",
+  // the reveal
+  "apply_typewriter",
+  "set_text_reveal",
+  // framing
+  "set_crop",
+  "set_mirror",
+  "rotate_clips",
   // transitions and effects
   "list_transition_presets",
   "list_effect_presets",
@@ -241,6 +251,18 @@ describe("every tool is usable as declared", () => {
       "../../../apps/app/src/@types/timeline"
     );
     expect([...MASK_SHAPES].sort()).toEqual([...renderer].sort());
+  });
+
+  /*
+   * A unit this list offers and `revealPlan` cannot count would store a reveal
+   * that `revealOf` rejects, which reads on screen as the whole text showing
+   * at once: the inert state, and indistinguishable from no reveal at all.
+   */
+  it("advertises exactly the reveal units the renderer counts", async () => {
+    const { REVEAL_UNITS: renderer } = await import(
+      "../../../apps/app/src/@types/timeline"
+    );
+    expect([...REVEAL_UNITS].sort()).toEqual([...renderer].sort());
   });
 
   /**

@@ -33,7 +33,9 @@ import {
   trimClipStart,
   type TimeRange,
 } from "../../timeline/clipOps";
+import { detachAudioFrom } from "../../timeline/audioOps";
 import { spanOf } from "../../timeline/geometry";
+import { mergeClips } from "../../timeline/mergeOps";
 import { withDescendants } from "../../timeline/hierarchy";
 import {
   MAX_SPEED,
@@ -333,6 +335,51 @@ registerCommands({
       ripple
         ? "Those clips are already at that speed."
         : "Those clips are already at that speed, or the new length would overlap the next clip. Pass ripple:true to push it along.",
+    );
+  },
+
+  /*
+   * The two Clip-menu edits that had a pure op and no tool.
+   *
+   * `merge_clips` is the inverse of `split_clip`, and `mergeOps` is
+   * all-or-nothing on purpose: one bad link declines the whole chain, because a
+   * partial merge leaves a selection that half collapsed with no way to tell
+   * which half.
+   */
+  merge_clips: (params: { elementIds: string[] }) => {
+    const doc = currentDoc();
+    const ids = params.elementIds ?? [];
+    if (ids.length < 2) {
+      throw new Error("merge_clips needs at least two ids in `elementIds`.");
+    }
+    for (const id of ids) {
+      requireElement(doc, id);
+    }
+
+    return commit(
+      (d) => mergeClips(d, ids),
+      "Those clips cannot be fused. A merge needs an adjacent run from the " +
+        "same source, in order, on one track, at the same speed.",
+    );
+  },
+
+  detach_audio: (params: { elementIds: string[] }) => {
+    const doc = currentDoc();
+    const ids = params.elementIds ?? [];
+    if (ids.length === 0) {
+      throw new Error("detach_audio needs at least one id in `elementIds`.");
+    }
+    for (const id of ids) {
+      requireElement(doc, id);
+    }
+
+    // `detachAudioFrom` skips clips with nothing to give rather than refusing,
+    // so a mixed selection does the obvious thing and only a selection where
+    // nothing at all can be detached declines.
+    return commit(
+      (d) => detachAudioFrom(d, ids, uuidv4),
+      "None of those clips carry sound to detach. A clip whose audio is " +
+        "already on its own track has none left to give.",
     );
   },
 });

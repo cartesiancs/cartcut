@@ -19,6 +19,13 @@
  *  - `parentId` without a reframe teleports the clip; `set_clip_parent` does
  *    the arithmetic.
  *  - a shape's `shape` point list is unbounded.
+ *  - `reveal` cannot seed its own keyframe track. `keyframeOps.isMintableTrack`
+ *    covers `intensity`, `fx:*` and `volumeDb` and nothing else, so a raw
+ *    `setIn` would leave a clip whose `revealProgress` is advertised by
+ *    `animatableProperties` and declined by every keyframe op, in silence. A
+ *    path write would also skip `coerceReveal`, storing a `fade: 0` the rule
+ *    says to delete, and a leaf path cannot mean "remove the whole field".
+ *    `set_text_reveal` owns it, and `apply_typewriter` writes the usual move.
  *
  * `update_clip`'s error message lists the writable paths for the clip at hand,
  * so an agent that guesses wrong is told what it may write instead of being
