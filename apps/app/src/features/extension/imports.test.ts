@@ -37,6 +37,7 @@ const FEATURE = "features/extension/";
  * - `serialize.ts`'s caller shows an extension its own data.
  * - `commands/animation.ts` resolves a preset an extension contributed.
  * - `animationPresetBrowser.ts` shows contributed presets as tiles.
+ * - `exportSession.ts` asks before exporting, `event.ts` tells afterwards.
  * - `presetRegistry` is reached the other way round, so it is not here.
  */
 const ALLOWED_IMPORTERS = new Set([
@@ -51,6 +52,8 @@ const ALLOWED_IMPORTERS = new Set([
   "features/agent/commands/read.ts",
   "features/agent/commands/animation.ts",
   "features/option/animationPresetBrowser.ts",
+  "features/export/exportSession.ts",
+  "event.ts",
   "functions/project.ts",
   "features/project/projectDirty.ts",
   "features/project/autosaveBridge.ts",

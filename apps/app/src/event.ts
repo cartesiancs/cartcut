@@ -2,6 +2,8 @@
 // renderer, and `import _ from "lodash"` would pull the whole library into the
 // bundle for one function. It used to be a global from a CDN <script>.
 
+import { announceDidExport } from "./features/extension/exportHooks";
+import { renderOptionStore } from "./states/renderOptionStore";
 import { rendererModal } from "./utils/modal";
 import { exportProgress } from "./features/export/exportProgress";
 import { exportStore } from "./states/exportStore";
@@ -28,6 +30,16 @@ window.electronAPI.res.render.finish((evt, detail) => {
   }
   exportProgress.finish();
   rendererModal.progressFinish.show();
+
+  // Extensions are told last, and only here. `exportSession`'s `finalizing`
+  // is not the end: FFmpeg is still muxing there, so a hook that ran at that
+  // point would be handed a path to a file that does not exist yet.
+  if (detail?.destination) {
+    announceDidExport(
+      detail.destination,
+      renderOptionStore.getState().options.exportSettings,
+    );
+  }
 });
 
 window.electronAPI.res.render.error((evt, errormsg) => {

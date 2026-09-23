@@ -12,6 +12,7 @@
  * an export outlives whatever started it.
  */
 
+import { askWillExport, vetoMessage } from "../extension/exportHooks";
 import axios from "axios";
 import { v4 as uuidv4 } from "uuid";
 import { io } from "socket.io-client";
@@ -97,8 +98,24 @@ export async function startExport(): Promise<void> {
     videoDestination,
   );
 
+  /*
+   * Extensions get one chance to stop this, here.
+   *
+   * After the destination is chosen, so an extension can see what is being
+   * written, and before any phase is entered, so a veto costs nothing and
+   * leaves the editor exactly as it was. Bounded and failing open: an
+   * extension that does not answer in time has no objection, because an
+   * export a broken extension could make impossible is worse than an export
+   * that ignored a warning.
+   */
+  const objections = await askWillExport(options.exportSettings);
+  if (objections.vetoes.length > 0) {
+    toast(vetoMessage(objections.vetoes));
+    return;
+  }
+
   // `exportProgress.begin` resets the estimate without touching the phase, and
-  // `exportStore.begin` is what sets it running. The order is load-bearing —
+  // `exportStore.begin` is what sets it running. The order is load-bearing:
   // see the comment on `begin`.
   exportProgress.begin(timeline, frameCount(options), options.fps);
   exportStore.getState().begin(videoDestination);
