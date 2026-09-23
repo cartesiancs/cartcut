@@ -172,3 +172,32 @@ describe("the boundary constants", () => {
     expect(layout.manifest).toBe(TEMPLATE_MANIFEST);
   });
 });
+
+/**
+ * Templates contributed by an extension.
+ *
+ * The same three properties the FX preset scanner has: the origin is carried,
+ * the extension is named so a listing can say where a template came from, and
+ * the field is absent rather than null when there is no extension. The last
+ * one matters because the payload crosses to the renderer and `origin` is what
+ * the browser groups on.
+ */
+describe("an extension's templates", () => {
+  it("carries the origin and the extension that brought it", async () => {
+    await makeTemplate("kenburns");
+
+    const found = await scanTemplateRoot(root, "extension", "acme.hello");
+    expect(found).toHaveLength(1);
+    expect(found[0].origin).toBe("extension");
+    expect(found[0].extensionId).toBe("acme.hello");
+  });
+
+  it("leaves the extension id absent for the app's own roots", async () => {
+    // Absent rather than null, the optional-field rule: a built-in payload is
+    // byte-identical to what it was before extensions existed.
+    await makeTemplate("shipped");
+
+    const found = await scanTemplateRoot(root, "builtin");
+    expect("extensionId" in found[0]).toBe(false);
+  });
+});

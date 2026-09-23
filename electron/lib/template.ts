@@ -17,6 +17,8 @@
  * stays as incurious about a template as `presetScan.ts` is about a preset.
  */
 
+import { listExtensions } from "../extension/host.js";
+import { resolveContained } from "../extension/paths.js";
 import path from "path";
 import * as fsp from "fs/promises";
 import isDev from "electron-is-dev";
@@ -60,8 +62,27 @@ export const templateLib = {
    */
   list: async (): Promise<{ templates: RawTemplatePayload[] }> => {
     const builtin = await scanTemplateRoot(builtinTemplatePath(), "builtin");
+
+    // Extensions in the middle, the order `preset.ts` settled on and for the
+    // same reason: a shipped template keeps its id under the registry's
+    // first-wins rule, and one the user installed by hand still wins over one
+    // an extension brought with it.
+    const extension: RawTemplatePayload[] = [];
+    for (const listing of listExtensions()) {
+      if (!listing.enabled || listing.templatesFolder == null || listing.templatesFolder === "") {
+        continue;
+      }
+      // Checked, not trusted. `contributes.templates` is a string a stranger
+      // wrote and is about to become a directory to walk.
+      const dir = resolveContained(listing.dir, listing.templatesFolder);
+      if (dir == null) {
+        continue;
+      }
+      extension.push(...(await scanTemplateRoot(dir, "extension", listing.id)));
+    }
+
     const user = await scanTemplateRoot(userTemplatePath(), "user");
-    return { templates: [...builtin, ...user] };
+    return { templates: [...builtin, ...extension, ...user] };
   },
 
   /** The folder to reveal, and the one the renderer extracts into. */

@@ -23,6 +23,16 @@
 import path from "path";
 import * as fsp from "fs/promises";
 
+/**
+ * Where a template folder came from. Must match `features/template/templateRegistry.ts`.
+ *
+ * A named type rather than an inline union, and `"extension"` a value of its
+ * own rather than a flavour of `"user"`: the browser shows where a template
+ * came from, and `templateLib.remove` has to refuse an extension's folder the
+ * way it already refuses a built-in.
+ */
+export type TemplateOrigin = "builtin" | "user" | "extension";
+
 /** What makes a folder a template. Must match `features/template/archive.ts`. */
 export const TEMPLATE_DOCUMENT = "template.ngt";
 /** The optional sidecar. Must match `features/template/archive.ts`. */
@@ -35,7 +45,9 @@ export const MAX_MANIFEST_BYTES = 64 * 1024;
 
 export type RawTemplatePayload = {
   id: string;
-  origin: "builtin" | "user";
+  origin: TemplateOrigin;
+  /** Set only for `"extension"`, so a listing can say which one brought it. */
+  extensionId?: string;
   /** The folder, POSIX-separated so the renderer sees one spelling. */
   dir: string;
   ngtPath: string;
@@ -79,7 +91,8 @@ async function firstPresent(
  */
 export async function readTemplateDir(
   dir: string,
-  origin: "builtin" | "user",
+  origin: TemplateOrigin,
+  extensionId?: string,
 ): Promise<RawTemplatePayload | null> {
   const id = path.basename(dir);
   if (!isUsableId(id)) {
@@ -110,6 +123,7 @@ export async function readTemplateDir(
   return {
     id,
     origin,
+    ...(extensionId == null ? {} : { extensionId }),
     dir: toPosix(dir),
     ngtPath: toPosix(ngtPath),
     thumbnailPath: thumbnailPath == null ? null : toPosix(thumbnailPath),
@@ -127,7 +141,8 @@ export async function readTemplateDir(
  */
 export async function scanTemplateRoot(
   root: string,
-  origin: "builtin" | "user",
+  origin: TemplateOrigin,
+  extensionId?: string,
 ): Promise<RawTemplatePayload[]> {
   let entries;
   try {
@@ -143,7 +158,7 @@ export async function scanTemplateRoot(
     if (!entry.isDirectory()) {
       continue;
     }
-    const payload = await readTemplateDir(path.join(root, entry.name), origin);
+    const payload = await readTemplateDir(path.join(root, entry.name), origin, extensionId);
     if (payload != null) {
       found.push(payload);
     }
