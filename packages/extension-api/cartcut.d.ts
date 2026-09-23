@@ -156,9 +156,7 @@ declare module "cartcut" {
      * undo, split and duplicate, and it is invisible to Claude Code. Needs the
      * `project.write` permission. Cap: 64 KB per clip.
      */
-    function getElementData<T extends JsonValue = JsonValue>(
-      elementId: string,
-    ): Promise<{ elementId: string; value: T | null }>;
+    function getElementData<T extends JsonValue = JsonValue>(elementId: string): Promise<T | null>;
     function setElementData(elementId: string, value: JsonValue | null): Promise<EditResult>;
 
     /** Fires once per undo step, not once per frame of a drag. */
@@ -170,7 +168,8 @@ declare module "cartcut" {
   }
 
   export namespace selection {
-    function get(): Promise<{ ids: string[] } | string[]>;
+    /** The selected clip ids. Empty when nothing is selected. */
+    function get(): Promise<string[]>;
     function set(elementIds: string[]): Promise<unknown>;
     const onDidChange: Event<{ ids: string[] }>;
   }
@@ -201,7 +200,7 @@ declare module "cartcut" {
      * Not undoable, and it makes the project dirty. Needs `project.write`.
      */
     const data: {
-      get<T extends JsonValue = JsonValue>(): Promise<{ value: T | null }>;
+      get<T extends JsonValue = JsonValue>(): Promise<T | null>;
       set(value: JsonValue | null): Promise<unknown>;
     };
 

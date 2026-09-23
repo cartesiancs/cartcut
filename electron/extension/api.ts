@@ -163,8 +163,14 @@ export function createExtensionApi(deps: ApiDeps): Record<string, unknown> {
     applyEditPlan: (plan: unknown) =>
       deps.callEditor("commands.execute", { name: "apply_edit_plan", params: { plan } }, LONG_TIMEOUT_MS),
 
-    getElementData: (elementId: string) =>
-      deps.callEditor("commands.execute", { name: "ext_get_element_data", params: { elementId } }),
+    /** This extension's own data on a clip, or null. Unwrapped, as above. */
+    getElementData: async (elementId: string) => {
+      const answer = (await deps.callEditor("commands.execute", {
+        name: "ext_get_element_data",
+        params: { elementId },
+      })) as { value?: unknown } | null;
+      return answer?.value ?? null;
+    },
     setElementData: (elementId: string, value: unknown) =>
       deps.callEditor("commands.execute", { name: "ext_set_element_data", params: { elementId, value } }),
 
@@ -172,7 +178,26 @@ export function createExtensionApi(deps: ApiDeps): Record<string, unknown> {
   };
 
   const selection = {
-    get: () => deps.callEditor("commands.execute", { name: "get_selection", params: {} }, SHORT_TIMEOUT_MS),
+    /**
+     * The selected ids, as a plain array.
+     *
+     * Unwrapped here rather than handed over raw. `get_selection` answers
+     * `{ ok, selected, clips }`, which is the shape a tool result wants and
+     * not what an extension asking "what is selected" expects: the fixture
+     * read `[0]` off that object, got `undefined`, and reported that nothing
+     * was selected while a clip sat highlighted on screen. An API that
+     * returns an internal command's envelope through a namespace promising
+     * ids is a trap, and this is the only place to close it.
+     */
+    get: async () => {
+      const answer = (await deps.callEditor(
+        "commands.execute",
+        { name: "get_selection", params: {} },
+        SHORT_TIMEOUT_MS,
+      )) as { selected?: unknown } | null;
+      const selected = answer?.selected;
+      return Array.isArray(selected) ? selected.filter((id): id is string => typeof id === "string") : [];
+    },
     set: (elementIds: string[]) =>
       deps.callEditor("commands.execute", { name: "select_clips", params: { elementIds } }),
     onDidChange: (listener: (params: unknown) => void) => deps.onEvent("selection.changed", listener),
@@ -190,7 +215,12 @@ export function createExtensionApi(deps: ApiDeps): Record<string, unknown> {
   const project = {
     info: () => deps.callEditor("project.info", {}, SHORT_TIMEOUT_MS),
     data: {
-      get: () => deps.callEditor("project.getData", {}, SHORT_TIMEOUT_MS),
+      get: async () => {
+        const answer = (await deps.callEditor("project.getData", {}, SHORT_TIMEOUT_MS)) as
+          | { value?: unknown }
+          | null;
+        return answer?.value ?? null;
+      },
       set: (value: unknown) => deps.callEditor("project.setData", { value }, SHORT_TIMEOUT_MS),
     },
     onDidOpen: (listener: (params: unknown) => void) => deps.onEvent("project.opened", listener),
