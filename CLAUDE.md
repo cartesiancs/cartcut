@@ -37,6 +37,15 @@ functions directly, and why the recorder tray crosses the boundary as data.
 under `apps/` and `packages/` that *do* have one are standalone Vite apps with
 their own lockfiles. This is not an npm workspace.
 
+`plugins/cartcut-editing/` is **published to users**, through the marketplace
+declared at `.claude-plugin/marketplace.json`. Its skill is the one the app's
+users get; it is no longer under `.claude/`, so editing it changes what ships.
+The plugin has to stay a subdirectory: a plugin's root `package.json` is
+installed by Claude Code, and pointing a plugin at the repository root would
+make installing it build the whole Electron app. The two versions, in
+`plugin.json` and in the marketplace entry, have to agree; `claude plugin tag`
+checks that, `claude plugin validate <path> --strict` checks the rest.
+
 FFmpeg and ffprobe live in `./bin/<platform>-<arch>/` (`darwin-arm64`,
 `darwin-x64`, `win32-x64`); `electron/lib/ffmpeg.ts` picks by `process.arch`.
 The macOS binaries must be **native**: an x86_64 ffmpeg runs under Rosetta at

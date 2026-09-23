@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "cartcut-editing",
+  "displayName": "Cartcut Editing",
+  "version": "0.5.9",
+  "description": "Edit video in the running Cartcut app: cut editing driven by a transcript, subtitles, motion, transitions and effects. Bundles the editing skill and the connection to Cartcut's local MCP bridge.",
+  "author": {
+    "name": "cartesiancs",
+    "url": "https://github.com/cartesiancs"
+  },
+  "homepage": "https://github.com/cartesiancs/cartcut",
+  "repository": "https://github.com/cartesiancs/cartcut",
+  "license": "MIT",
+  "keywords": [
+    "video",
+    "video-editing",
+    "cartcut",
+    "timeline",
+    "subtitles",
+    "transcript"
+  ],
+  "skills": "./skills/",
+  "userConfig": {
+    "mcp_token": {
+      "type": "string",
+      "title": "Cartcut MCP token",
+      "description": "Open Cartcut, click the bolt icon at the bottom right, and copy the connection command. The token is the UUID after 'Bearer '. It is generated once per machine and does not change.",
+      "required": true,
+      "sensitive": true
+    }
+  },
+  "mcpServers": "./.mcp.json"
+}

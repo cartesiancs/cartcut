@@ -1,0 +1,31 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "cartcut",
+  "description": "Claude Code plugins for Cartcut, the desktop video editor.",
+  "owner": {
+    "name": "cartesiancs",
+    "url": "https://github.com/cartesiancs"
+  },
+  "plugins": [
+    {
+      "name": "cartcut-editing",
+      "source": "./plugins/cartcut-editing",
+      "description": "Edit video in the running Cartcut app: cut editing driven by a transcript, subtitles, motion, transitions and effects. Bundles the editing skill and the connection to Cartcut's local MCP bridge.",
+      "version": "0.5.9",
+      "author": {
+        "name": "cartesiancs"
+      },
+      "homepage": "https://github.com/cartesiancs/cartcut",
+      "license": "MIT",
+      "category": "productivity",
+      "keywords": [
+        "video",
+        "video-editing",
+        "cartcut",
+        "timeline",
+        "subtitles",
+        "transcript"
+      ]
+    }
+  ]
+}

@@ -66,6 +66,27 @@ You can check out a limited demo of the website at the [following link](https://
 - Effects and Transitions
 - and more...
 
+## Editing with Claude Code
+
+Cartcut exposes its live timeline over MCP, so [Claude Code](https://claude.com/claude-code)
+can edit the project you are looking at: cutting from a transcript, adding
+subtitles, trimming, restaging clips, motion, transitions and effects. Its edits
+land in your own undo history, so ⌘Z takes them back.
+
+Install the plugin, which carries both the editing skill and the connection:
+
+```
+/plugin marketplace add cartesiancs/cartcut
+/plugin install cartcut-editing@cartcut
+```
+
+It asks for your Cartcut MCP token once. Open Cartcut, click the ⚡ icon at the
+bottom right, and copy the connection command; the token is the UUID after
+`Bearer `. Then ask for an edit in plain language.
+
+[plugins/cartcut-editing/README.md](plugins/cartcut-editing/README.md) has the
+details, including what to do when it will not connect.
+
 ## Installation
 
 First, install dependencies.

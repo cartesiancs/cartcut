@@ -351,8 +351,8 @@ Report what you actually removed afterwards, in seconds, so they can judge it:
 ## When things do not work
 
 - **Tools are missing entirely** — Cartcut is not running, or the bridge is
-  off. Ask the user to open it; the connection command is under the ⚡ icon at
-  the bottom right of the window.
+  off. Ask the user to open it. The ⚡ icon at the bottom right of the window
+  reports whether the bridge is up, and carries the connection details.
 - **"editor window is not available"** — the app is starting up, or was closed.
 - **`get_transcript` fails** — transcription needs either a local
   speech-to-text server or an OpenAI API key, both set in that same panel.
