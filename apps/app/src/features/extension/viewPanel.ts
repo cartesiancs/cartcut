@@ -35,13 +35,13 @@ export class ExtWebviewPanel extends LitElement {
   viewKey = "";
 
   /**
-   * Whether the panel is on screen.
+   * Whether the guest has been created yet.
    *
-   * A `<webview>` inside a hidden Bootstrap pane attaches into a box of no
-   * size, so the guest lays out at 0x0 and stays there until something forces
-   * a reflow. Mounting on first show avoids that, and the guest is kept
-   * afterwards: tearing it down on every tab switch would restart the
-   * extension's page and lose whatever the user had typed into it.
+   * A `<webview>` attached inside a hidden Bootstrap pane lays out at 0x0 and
+   * stays there until something forces a reflow, so the guest is created on
+   * first show rather than on first render. It is kept afterwards: tearing it
+   * down on every tab switch would restart the extension's page and lose
+   * whatever the user had typed into it.
    */
   @state()
   private mounted = false;
@@ -54,16 +54,40 @@ export class ExtWebviewPanel extends LitElement {
 
     this.unsubscribe = contributionStore.subscribe(() => this.requestUpdate());
 
-    // An `IntersectionObserver` rather than a `shown.bs.tab` listener, because
-    // the same component serves a sidebar pane, a docked window and an
-    // inspector section, and only one of those is a Bootstrap tab.
-    this.observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting) && !this.mounted) {
-        this.mounted = true;
-        this.observer?.disconnect();
-      }
-    });
+    // A `ResizeObserver` and a laid-out check, **not** an
+    // `IntersectionObserver`. Intersection sounds like the right question and
+    // is the wrong one: it is false for anything an ancestor clips, and the
+    // option column clips its own contents, so an inspector section sitting
+    // plainly on screen never intersected and its guest was never created. The
+    // symptom is a blank rectangle with nothing in any log, which is the one
+    // failure this system has already produced twice.
+    //
+    // What is actually being asked is "does this element have a box the guest
+    // can attach into", and `offsetParent` plus a height answers exactly that:
+    // null inside a `display: none` pane, real the moment the pane is shown.
+    this.observer = new ResizeObserver(() => this.mountIfLaidOut());
     this.observer.observe(this);
+  }
+
+  protected firstUpdated(): void {
+    // A `ResizeObserver` fires on observation, but only once a layout has
+    // happened. For a panel that is already visible when it mounts, this is
+    // the earlier of the two.
+    this.mountIfLaidOut();
+  }
+
+  private mountIfLaidOut(): void {
+    if (this.mounted) {
+      return;
+    }
+    // `offsetParent` is null inside a `display: none` subtree and non-null
+    // otherwise, which is the whole test. The height is the second half:
+    // a pane can be displayed and still have no room yet.
+    if (this.offsetParent == null || this.clientHeight <= 0) {
+      return;
+    }
+    this.mounted = true;
+    this.observer?.disconnect();
   }
 
   disconnectedCallback(): void {
@@ -73,7 +97,7 @@ export class ExtWebviewPanel extends LitElement {
   }
 
   private unsubscribe: (() => void) | null = null;
-  private observer: IntersectionObserver | null = null;
+  private observer: ResizeObserver | null = null;
 
   private get view(): ContributedView | null {
     return contributionStore.getState().views.find((entry) => entry.key === this.viewKey) ?? null;
