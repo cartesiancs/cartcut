@@ -887,6 +887,9 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
       render,
       params,
       origin: payload.origin,
+      // Carried through so the registry can drop exactly one extension's
+      // presets when it is disabled, without walking the filesystem again.
+      ...(payload.extensionId == null ? {} : { extensionId: payload.extensionId }),
       sources: payload.sources,
       assets: payload.assets,
     },

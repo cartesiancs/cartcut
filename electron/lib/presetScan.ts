@@ -24,6 +24,14 @@
 import path from "path";
 import * as fsp from "fs/promises";
 
+/**
+ * Where a preset folder came from. Must match `features/fx/presetTypes.ts`.
+ *
+ * Hand-copied across the boundary `electron/` may not import over, and pinned
+ * by `presetScan.test.ts` against the renderer's copy, the way `FILETYPES` is.
+ */
+export type PresetOrigin = "builtin" | "user" | "extension";
+
 /** Read as text into the payload. Must match `presetValidate.ts`. */
 export const SHADER_EXTENSIONS = [".frag", ".vert", ".glsl"];
 
@@ -66,7 +74,16 @@ const PRESET_SUBDIR_DEPTH = 1;
 export type RawPresetPayload = {
   id: string;
   dir: string;
-  origin: "builtin" | "user";
+  /**
+   * Where the folder was found.
+   *
+   * `"extension"` is a third value rather than a flavour of `"user"` because
+   * the registry has to be able to drop exactly one extension's presets when
+   * it is disabled, and because the browser shows where a preset came from.
+   */
+  origin: PresetOrigin;
+  /** Set only for `"extension"`, so the registry can unload by extension. */
+  extensionId?: string;
   manifestJson: string;
   sources: Record<string, string>;
   assets: Record<string, string>;
@@ -88,7 +105,8 @@ function toPosix(value: string): string {
  */
 export async function readPresetDir(
   dir: string,
-  origin: "builtin" | "user",
+  origin: PresetOrigin,
+  extensionId?: string,
 ): Promise<RawPresetPayload | null> {
   let manifestJson: string;
   try {
@@ -152,6 +170,7 @@ export async function readPresetDir(
     id: path.basename(dir),
     dir: toPosix(dir),
     origin,
+    ...(extensionId == null ? {} : { extensionId }),
     manifestJson,
     sources,
     assets,
@@ -169,7 +188,8 @@ export async function readPresetDir(
  */
 export async function scanPresetRoot(
   root: string,
-  origin: "builtin" | "user",
+  origin: PresetOrigin,
+  extensionId?: string,
 ): Promise<RawPresetPayload[]> {
   let entries;
   try {
@@ -188,7 +208,7 @@ export async function scanPresetRoot(
     }
     const dir = path.join(root, entry.name);
 
-    const direct = await readPresetDir(dir, origin);
+    const direct = await readPresetDir(dir, origin, extensionId);
     if (direct != null) {
       found.push(direct);
       continue;
@@ -204,7 +224,7 @@ export async function scanPresetRoot(
       if (!child.isDirectory()) {
         continue;
       }
-      const payload = await readPresetDir(path.join(dir, child.name), origin);
+      const payload = await readPresetDir(path.join(dir, child.name), origin, extensionId);
       if (payload != null) {
         found.push(payload);
       }

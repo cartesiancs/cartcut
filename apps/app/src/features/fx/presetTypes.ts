@@ -343,7 +343,9 @@ export type FxPreset = {
   render: FxRenderSpec;
   params: FxParamSpec[];
   /** Where it came from. Built-ins and user presets are otherwise identical. */
-  origin: "builtin" | "user";
+  origin: "builtin" | "user" | "extension";
+  /** Set only for an extension-contributed preset, so it can be unloaded. */
+  extensionId?: string;
   /** GLSL text, keyed by the manifest's relative filename. */
   sources: Record<string, string>;
   /** Absolute paths to media and image files, keyed by relative filename. */
@@ -360,7 +362,9 @@ export type FxPreset = {
 export type RawPresetPayload = {
   id: string;
   dir: string;
-  origin: "builtin" | "user";
+  origin: "builtin" | "user" | "extension";
+  /** Set only for an extension-contributed preset, so it can be unloaded. */
+  extensionId?: string;
   manifestJson: string;
   sources: Record<string, string>;
   assets: Record<string, string>;

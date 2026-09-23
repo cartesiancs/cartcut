@@ -158,6 +158,10 @@ export function presetsLoaded(): boolean {
   return loaded;
 }
 
+function originRank(origin: FxPreset["origin"]): number {
+  return origin === "builtin" ? 0 : origin === "extension" ? 1 : 2;
+}
+
 /** The preset with this id, or `null` when it is not installed. */
 export function presetById(id: string): FxPreset | null {
   return presets.get(id) ?? null;
@@ -169,11 +173,35 @@ export function presetsOfKind(kind: FxKind): FxPreset[] {
     .filter((preset) => preset.kind === kind)
     .sort(
       (a, b) =>
-        // Built-ins first, then by name — so the panel opens on something
-        // familiar rather than on whatever a user folder happened to be called.
-        Number(a.origin === "user") - Number(b.origin === "user") ||
-        a.name.localeCompare(b.name),
+        // Built-ins first, then what extensions brought, then the user's own
+        // folders, and by name inside each group. So the panel opens on
+        // something familiar rather than on whatever a user folder happened to
+        // be called, and a preset an extension contributed is findable as a
+        // group rather than scattered through the list.
+        originRank(a.origin) - originRank(b.origin) || a.name.localeCompare(b.name),
     );
+}
+
+/**
+ * Drop everything one extension contributed.
+ *
+ * An element still referencing one of these keeps its `presetId` and its
+ * parameters untouched and renders as a pass-through, which is the contract
+ * `presetById` already states for a preset that was never installed. So
+ * disabling an extension costs the project nothing: re-enabling it brings the
+ * look back exactly.
+ */
+export function removePresetsOfExtension(extensionId: string): void {
+  let removed = false;
+  for (const [id, preset] of presets) {
+    if (preset.extensionId === extensionId) {
+      presets.delete(id);
+      removed = true;
+    }
+  }
+  if (removed) {
+    notify();
+  }
 }
 
 /** Folders that did not validate, for a diagnostics view. */
