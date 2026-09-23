@@ -534,6 +534,8 @@ export type ExtensionListing = {
   presetsFolder: string | null;
   /** `contributes.templates`, same shape. */
   templatesFolder: string | null;
+  /** `contributes.animationPresets`, same shape. */
+  animationPresetsFolder: string | null;
 };
 
 /** What the Extensions panel shows. Rebuilt from what main knows, not the host. */
@@ -554,6 +556,7 @@ export function listExtensions(): ExtensionListing[] {
       configuration: entry.manifest?.contributes.configuration ?? null,
       presetsFolder: entry.manifest?.contributes.presets ?? null,
       templatesFolder: entry.manifest?.contributes.templates ?? null,
+      animationPresetsFolder: entry.manifest?.contributes.animationPresets ?? null,
     };
   });
 }

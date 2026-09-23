@@ -260,6 +260,7 @@ const request = {
     getConfig: (id) => ipcRenderer.invoke("ext:getConfig", id),
     setConfig: (id, key, value) => ipcRenderer.invoke("ext:setConfig", id, key, value),
     unpackedPaths: () => ipcRenderer.invoke("ext:unpackedPaths"),
+    dataContributions: () => ipcRenderer.invoke("ext:dataContributions"),
   },
   media: {
     backgroundRemove: (path) =>

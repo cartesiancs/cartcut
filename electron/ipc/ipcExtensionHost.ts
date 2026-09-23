@@ -13,6 +13,8 @@ import * as fsp from "fs/promises";
 import { dialog, shell, type IpcMainInvokeEvent } from "electron";
 
 import { extensionsRoot, isValidExtensionId } from "../extension/dirs";
+import { resolveContained } from "../extension/paths";
+import { scanDataFolder, type DataFsPorts } from "../extension/dataScan";
 import { installInspected, inspectArchive, uninstallExtension } from "../extension/installRuntime";
 import { describePermission, isPermission } from "../extension/permissions";
 import {
@@ -49,6 +51,13 @@ import { mainWindow } from "../lib/window";
  * process pasted into it.
  */
 type Answer<T> = ({ ok: true } & T) | { ok: false; error: string };
+
+/** Real `fs`, for the scanner that takes its filesystem as a parameter. */
+const dataFsPorts: DataFsPorts = {
+  readdir: (dir) => fsp.readdir(dir),
+  readFile: (file) => fsp.readFile(file, "utf8"),
+  sizeOf: async (file) => (await fsp.stat(file)).size,
+};
 
 function failed(error: unknown): { ok: false; error: string } {
   return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -252,4 +261,52 @@ export const ipcExtensionHost = {
   },
 
   unpackedPaths: async () => ({ ok: true as const, paths: unpackedPaths() }),
+
+  /**
+   * The small data files every enabled extension contributes.
+   *
+   * Served the way `preset:list` serves preset folders: main walks the disk
+   * and hands over text it has never parsed, and the renderer decides what any
+   * of it means. Main cannot import the schema, so understanding nothing here
+   * is what keeps there from being a second copy of it.
+   *
+   * Read on demand rather than pushed, because the renderer asks exactly once
+   * per host hello and a push would need its own ordering against that.
+   */
+  dataContributions: async () => {
+    try {
+      const contributions: Array<{
+        extId: string;
+        kind: "animationPresets";
+        files: Array<{ fileName: string; text: string }>;
+        skipped: Array<{ fileName: string; reason: string }>;
+      }> = [];
+
+      for (const listing of listExtensions()) {
+        if (!listing.enabled || listing.animationPresetsFolder == null) {
+          continue;
+        }
+        // Checked, not trusted: `contributes.animationPresets` is a string a
+        // stranger wrote and is about to become a directory to walk.
+        const dir = resolveContained(listing.dir, listing.animationPresetsFolder);
+        if (dir == null) {
+          continue;
+        }
+        const scan = await scanDataFolder(dir, dataFsPorts);
+        if (scan.files.length === 0 && scan.skipped.length === 0) {
+          continue;
+        }
+        contributions.push({
+          extId: listing.id,
+          kind: "animationPresets",
+          files: scan.files,
+          skipped: scan.skipped,
+        });
+      }
+
+      return { ok: true as const, contributions };
+    } catch (error) {
+      return failed(error);
+    }
+  },
 };

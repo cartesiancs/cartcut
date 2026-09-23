@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "name": "wobble",
+  "label": "Wobble",
+  "defaultMs": 600,
+  "rotation": [
+    { "at": 0, "value": 0, "easing": "ease_out" },
+    { "at": 0.35, "value": -5, "easing": "ease_in_out" },
+    { "at": 0.7, "value": 3, "easing": "ease_in_out" },
+    { "at": 1, "value": 0 }
+  ]
+}

@@ -33,7 +33,10 @@ import { windowStore } from "../window/windowStore";
 import { windowScheduler } from "../caption/previewLoop";
 import { getLocationEnv } from "../../functions/getLocationEnv";
 import { loadPresets, removePresetsOfExtension } from "../fx/presetRegistry";
+import { refreshTemplateLibrary } from "../template/templateRegistry";
+import { removeAnimationPresetsOf, setAnimationPresetsOf } from "./animationPresets";
 import { contributionStore } from "./contributions";
+import { setExportHookPorts } from "./exportHooks";
 import { createDispatch, type DispatchPorts } from "./dispatch";
 import { publishEditorEvents, type EventPublisher } from "./events";
 import { hostStateStore } from "./hostState";
@@ -242,9 +245,12 @@ function teardown(): void {
   events = null;
   endpoint?.dispose("the extension host went away");
   endpoint = null;
+  setExportHookPorts(null);
   for (const extension of contributionStore.getState().extensions) {
     removePresetsOfExtension(extension.id);
+    removeAnimationPresetsOf(extension.id);
   }
+  void refreshTemplateLibrary();
   permissions.clear();
   contributionStore.getState().clear();
 }
@@ -255,6 +261,13 @@ function connect(port: MessagePort): void {
   teardown();
 
   const dispatch = createDispatch(dispatchPorts());
+
+  // The export hooks reach the host through this endpoint and know nothing
+  // else about the transport, so `features/export/` never learns what a port
+  // is and `exportHooks.ts` stays testable against a fake.
+  setExportHookPorts({
+    ask: (method, params, timeoutMs) => endpoint?.request(method, params, { timeoutMs }) ?? null,
+  });
 
   endpoint = createRpcEndpoint(adaptMessagePort(port), {
     request: (request) => {
@@ -290,6 +303,11 @@ function connect(port: MessagePort): void {
           }
         }
         void loadPresets();
+        void loadDataContributions();
+        // Templates evict themselves: `setTemplateLibrary` drops any parsed
+        // document whose id is no longer in the listing, so a refresh after an
+        // extension goes away is the whole of the unload.
+        void refreshTemplateLibrary();
 
         events?.stop();
         events = publishEditorEvents(
@@ -303,6 +321,71 @@ function connect(port: MessagePort): void {
       return dispatch(request);
     },
   });
+}
+
+/**
+ * Read the data files every loaded extension contributes.
+ *
+ * Asked of main rather than of the host, because main owns the directories and
+ * because the host is the one process that should not be reading files on the
+ * renderer's behalf. Un-awaited by the caller, exactly as `loadPresets` is: a
+ * project referencing a contributed preset behaves as it does for any missing
+ * preset until the list arrives.
+ *
+ * Never throws. A failure here costs the extension its presets, not the
+ * editor's startup.
+ */
+async function loadDataContributions(): Promise<void> {
+  try {
+    const api = (window as never as { electronAPI?: { req?: { ext?: Record<string, Function> } } })
+      .electronAPI?.req?.ext;
+    const answer = (await api?.dataContributions?.()) as
+      | {
+          ok?: boolean;
+          contributions?: Array<{
+            extId: string;
+            kind: string;
+            files: Array<{ fileName: string; text: string }>;
+            skipped: Array<{ fileName: string; reason: string }>;
+          }>;
+        }
+      | undefined;
+
+    if (answer?.ok !== true) {
+      return;
+    }
+
+    for (const contribution of answer.contributions ?? []) {
+      if (contribution.kind !== "animationPresets") {
+        continue;
+      }
+
+      // Parsed here rather than in main, which has never read this format and
+      // would need a second copy of the schema to. A file that is not JSON is
+      // one bad file, reported and skipped.
+      const parsed: Array<{ fileName: string; json: unknown }> = [];
+      for (const file of contribution.files) {
+        try {
+          parsed.push({ fileName: file.fileName, json: JSON.parse(file.text) });
+        } catch (error) {
+          console.warn(
+            "[extension] " + contribution.extId + "/" + file.fileName + ": " + String(error),
+          );
+        }
+      }
+
+      for (const failure of setAnimationPresetsOf(contribution.extId, parsed)) {
+        console.warn(
+          "[extension] " + contribution.extId + "/" + failure.fileName + ": " + failure.errors.join("; "),
+        );
+      }
+      for (const skip of contribution.skipped) {
+        console.warn("[extension] " + contribution.extId + "/" + skip.fileName + ": " + skip.reason);
+      }
+    }
+  } catch (error) {
+    console.warn("[extension] could not read data contributions", error);
+  }
 }
 
 /**

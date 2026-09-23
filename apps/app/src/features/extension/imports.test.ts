@@ -75,6 +75,7 @@ const ALLOWED_IMPORTS = [
   "../window/",
   "../editor/",
   "../fx/presetRegistry",
+  "../template/templateRegistry",
   "../timeline/tracks",
   "../animation/",
   "../caption/previewLoop",

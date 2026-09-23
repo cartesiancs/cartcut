@@ -118,7 +118,20 @@ const contributesSchema = z
     templates: relativePath.optional(),
     fonts: relativePath.optional(),
     animationPresets: relativePath.optional(),
-    themes: relativePath.optional(),
+    /*
+     * `themes` is deliberately absent.
+     *
+     * The app has no token layer to theme: six CSS custom properties exist in
+     * the whole stylesheet and five of them are geometry. Every colour is a
+     * Sass variable compiled away at build time or a hex written inline, so a
+     * theme could only ship a stylesheet overriding hardcoded values, which
+     * would break on any unrelated change.
+     *
+     * A manifest field that accepts a folder and does nothing with it is worse
+     * than no field: an author would ship one and find out from a user. Real
+     * theme support starts with a `:root` token layer in `var.scss`, and the
+     * field arrives with it.
+     */
     tools: z.array(toolSchema).max(50).optional(),
     elementData: z.record(z.string(), z.object({ description: z.string().max(400).optional() })).optional(),
   })

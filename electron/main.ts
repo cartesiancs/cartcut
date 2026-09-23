@@ -272,6 +272,7 @@ ipcMain.handle("ext:log", ipcExtensionHost.log);
 ipcMain.handle("ext:getConfig", ipcExtensionHost.getConfig);
 ipcMain.handle("ext:setConfig", ipcExtensionHost.setConfig);
 ipcMain.handle("ext:unpackedPaths", ipcExtensionHost.unpackedPaths);
+ipcMain.handle("ext:dataContributions", ipcExtensionHost.dataContributions);
 
 ipcMain.handle("selfhosted:run", ipcSelfhosted.run);
 

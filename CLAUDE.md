@@ -433,10 +433,18 @@ Six rules carry it:
   edit land inside somebody else's undo step, so an async command is refused.
   The three commands that used to pair `ensureUndoBaseline` with
   `withCheckpoint` by hand now call `commit.ts#checkpoint`.
-- **Renderer extension points are data, never code.** Presets, templates,
-  fonts and themes go through the existing validators with `origin:
+- **Renderer extension points are data, never code.** FX presets, templates
+  and animation presets go through the existing validators with `origin:
   "extension"`. The compositor is synchronous and "Nothing executes" still
-  holds.
+  holds. `PresetName` stays a closed union: a contributed animation preset is
+  a `PresetShape` under `ext:<extId>:<name>` and runs through
+  `applyPresetShape`, the same function the nineteen built-ins reach, so
+  `presetNames()` is unchanged and `tools.test.ts`'s pinned list stays green.
+  **Fonts and themes are not contributable**: `@font-face` rules are never
+  removed and `fontFaces.ts`'s `registered` set has no unregister, so a
+  contributed font could not be unloaded; and there is no token layer to theme,
+  six CSS custom properties exist in the whole stylesheet and five are
+  geometry. Both need their own groundwork first.
 - **Custom UI is a `<webview>`, forced into shape by main.**
   `will-attach-webview` sets `sandbox`, `contextIsolation`, our preload and a
   `persist:ext:<id>` partition, and refuses any `src` that is not
@@ -454,6 +462,13 @@ Six rules carry it:
   `utilityProcess` has Node and it cannot be taken away; `node:vm` is not a
   boundary and is not used. Main gates Port M against *its own* validated
   manifest rather than anything the host reports.
+
+An extension can **stop an export**. `onWillExport` runs after the destination
+is chosen and before any phase is entered, so a veto costs nothing; it is
+bounded and fails open, because an export a broken extension could make
+impossible is worse than one that ignored a warning. `onDidExport` fires from
+`event.ts`'s `PROCESSING_FINISH` and nowhere else: `exportSession`'s
+`finalizing` is not the end, FFmpeg is still muxing there.
 
 Extension data is an optional top-level `ext` key on an element, keyed by
 extension id, plus a sixth `.ngt` entry `extensions.json`. Both follow the

@@ -128,6 +128,65 @@ api.postMessage({ hello: true });
 api.onMessage((message) => console.log(message));
 ```
 
+## Animation presets
+
+A `animationPresets/` folder of JSON files, one move per file:
+
+```jsonc
+{
+  "schema": 1,
+  "name": "wobble",
+  "label": "Wobble",
+  "defaultMs": 600,
+  "rotation": [
+    { "at": 0, "value": 0, "easing": "ease_out" },
+    { "at": 0.5, "value": -4 },
+    { "at": 1, "value": 0 }
+  ]
+}
+```
+
+`at` is a fraction of the preset's own duration, not a time, so one file
+describes the move at whatever length it is asked for. `scale` is in tenths
+and relative to the clip's own scale; `rotation` is degrees offset from the
+clip's rotation; `opacity` is 0 to 100; `position` takes `x` and `y` offsets.
+Set `"positionUnit": "box"` to measure a slide in the clip's own box lengths
+rather than pixels, and `"fromEnd": true` to anchor at the clip's tail.
+
+Yours appear in the animation panel under **Extensions**, and are named
+`ext:<publisher>.<name>:<preset>` when a command applies one. They run through
+exactly the same code as the nineteen built in, so they obey the same rules:
+every property the move drives or none, clamped to the clip, and the playhead
+wins over `fromEnd`.
+
+## Templates
+
+A `templates/` folder in the shape the app already uses: a folder per template
+holding a `template.ngt`. Yours appear in the template browser under **From
+Extensions**. They cannot be deleted from that panel, because they are not
+the user's to delete; disabling your extension removes them.
+
+## Export
+
+```js
+cartcut.exports.onWillExport((event) => {
+  if (somethingIsNotReady) {
+    event.veto("Captions are still untranslated.");
+  }
+});
+
+cartcut.exports.onDidExport(({ path }) => upload(path));
+```
+
+`onWillExport` runs after the user has picked a destination and before any
+work begins, so a veto costs nothing. It is bounded: take too long and the
+export proceeds. An extension loses its veto by being slow, rather than the
+user losing their export.
+
+`onDidExport` runs when the file is actually written, which is later than you
+might expect: the frame loop finishing is not the export finishing, because
+FFmpeg is still muxing.
+
 ## Effects, transitions and LUTs
 
 Put them in a `presets/` folder in the format the app already uses: a folder

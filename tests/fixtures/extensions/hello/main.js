@@ -73,6 +73,34 @@ async function activate(ctx) {
   );
 
   ctx.subscriptions.push(
+    cartcut.commands.registerCommand("hello.wobble", async () => {
+      const ids = await cartcut.selection.get();
+      if (ids.length === 0) {
+        await cartcut.window.showMessage("Select a clip first.", "warn");
+        return null;
+      }
+      // The preset this extension contributes, named the way every contributed
+      // one is. It runs through the app's own preset machinery.
+      return cartcut.timeline.applyAnimationPreset({
+        elementIds: ids,
+        preset: "ext:acme.hello:wobble",
+      });
+    }),
+  );
+
+  ctx.subscriptions.push(
+    cartcut.exports.onWillExport(() => {
+      ctx.log.info("export: asked, and had no objection");
+    }),
+  );
+
+  ctx.subscriptions.push(
+    cartcut.exports.onDidExport((event) => {
+      ctx.log.info("export: finished at " + (event && event.path));
+    }),
+  );
+
+  ctx.subscriptions.push(
     cartcut.commands.registerCommand("hello.crash", () => {
       // Not a throw. A throw is caught and reported; this takes the whole host
       // process down, which is the case the editor has to survive untouched.

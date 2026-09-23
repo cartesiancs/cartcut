@@ -33,6 +33,10 @@
           "title": "Hello: Tag the selected clip"
         },
         {
+          "id": "hello.wobble",
+          "title": "Hello: Wobble the selection"
+        },
+        {
           "id": "hello.note",
           "title": "Hello: Set a project note"
         },
@@ -125,7 +129,8 @@
             ]
           }
         }
-      ]
+      ],
+      "animationPresets": "animationPresets"
     }
   }
 }

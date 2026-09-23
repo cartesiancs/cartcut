@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "name": "broken",
+  "defaultMs": 400,
+  "rotation": [{ "at": 0, "value": 0 }]
+}
