@@ -1,4 +1,5 @@
 import { LitElement, html } from "lit";
+import { repeat } from "lit/directives/repeat.js";
 import { customElement, property } from "lit/decorators.js";
 import "./ControlSetting";
 import "./ControlText";
@@ -14,9 +15,12 @@ import "../../features/record/audioRecord";
 import "../../features/track/autoTrackPanel";
 import "../../features/tts/ttsPanel";
 import "../../features/window/windowHost";
+import "../../features/extension/viewPanel";
 
 import "../../../../automatic-caption/src/automaticCaption";
 
+import { contributionStore } from "../../features/extension/contributions";
+import { extensionSidebarTabs, extensionWindowPanels } from "../../features/extension/views";
 import { IUIStore, uiStore } from "../../states/uiStore";
 import { TimelineController } from "../../controllers/timeline";
 import {
@@ -93,6 +97,12 @@ export class Control extends LitElement {
   previewSize = renderOptionStore.getInitialState().options.previewSize;
 
   createRenderRoot() {
+    // Extensions connect after the first paint, and reconnect whenever the
+    // host restarts. Without this the tabs an extension contributes appear
+    // only after some unrelated edit happens to trigger a repaint, which is
+    // the same defect `subscribePresets` exists to fix for effect names.
+    contributionStore.subscribe(() => this.requestUpdate());
+
     useTimelineStore.subscribe((state) => {
       this.timeline = state.timeline;
     });
@@ -380,6 +390,10 @@ export class Control extends LitElement {
           @changeCursorType=${this._handleChangeCursorType}
         ></automatic-caption>`,
       },
+      // Whatever the loaded extensions contribute. Listed here rather than
+      // opened here: a panel that is listed but not open in `windowStore`
+      // draws nothing, so `window.showPanel` stays a store write.
+      ...extensionWindowPanels(),
     ];
   }
 
@@ -520,6 +534,22 @@ export class Control extends LitElement {
                   dashboard_customize</span
                 >
               </button>
+
+              ${repeat(
+                extensionSidebarTabs(),
+                (tab) => tab.key,
+                (tab) => html`<button
+                  class="btn-nav"
+                  data-bs-toggle="pill"
+                  data-bs-target="#${tab.paneId}"
+                  type="button"
+                  role="tab"
+                  aria-selected="false"
+                  title=${tab.title}
+                >
+                  <span class="material-symbols-outlined"> ${tab.icon}</span>
+                </button>`,
+              )}
             </div>
             <div
               class="tab-content overflow-y-scroll overflow-x-hidden  p-2 h-100"
@@ -567,6 +597,18 @@ export class Control extends LitElement {
               <div class="tab-pane fade" id="nav-filter" role="tabpanel">
                 <control-ui-filter />
               </div>
+
+              ${repeat(
+                extensionSidebarTabs(),
+                (tab) => tab.key,
+                (tab) => html`<div
+                  class="tab-pane fade h-100"
+                  id=${tab.paneId}
+                  role="tabpanel"
+                >
+                  ${tab.content}
+                </div>`,
+              )}
             </div>
           </div>
         </div>

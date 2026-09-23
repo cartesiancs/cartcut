@@ -147,6 +147,7 @@ import {
 import { dropTargetAt } from "../asset/dropTarget";
 import { importDroppedFiles, importPathsAt } from "../asset/importDrop";
 import { isTypingEvent } from "../../utils/typingTarget";
+import { dispatchExtensionKeybinding } from "../extension/keybindingSeam";
 import { hasEditorModifier } from "../../utils/platform";
 import { mergeIds, selectionStore } from "../../states/selectionStore";
 import {
@@ -1905,6 +1906,16 @@ export class elementTimelineCanvas extends LitElement {
       case "Delete":
         deleteSelection();
         return;
+    }
+
+    // Extension keybindings, after the app's own unmodified keys and before
+    // its modifier branch. The typing guard and the mask pen have already had
+    // this event, so an extension cannot take a key from a caption field or
+    // from a stroke in progress, and every chord the app itself uses was
+    // refused when the binding was registered.
+    if (dispatchExtensionKeybinding(event)) {
+      event.preventDefault();
+      return;
     }
 
     if (!mod) {
