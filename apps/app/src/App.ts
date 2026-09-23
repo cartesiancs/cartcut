@@ -1,3 +1,4 @@
+import "./features/extension/statusBar";
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { IUIStore, uiStore } from "./states/uiStore";
@@ -121,6 +122,10 @@ export class App extends LitElement {
         <!-- Long-running work — reversing a clip — in the bottom-left, clear
              of the toasts at bottom-centre. -->
         <background-tasks></background-tasks>
+        <!-- Whatever extensions have put there, in the bottom-right: the other
+             three corners belong to the task tray, the toasts and the export
+             button. -->
+        <ext-status-items></ext-status-items>
 
         <warning-demo></warning-demo>
         <onboarding-overlay></onboarding-overlay>

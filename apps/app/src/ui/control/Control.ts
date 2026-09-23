@@ -16,6 +16,7 @@ import "../../features/track/autoTrackPanel";
 import "../../features/tts/ttsPanel";
 import "../../features/window/windowHost";
 import "../../features/extension/viewPanel";
+import "../../features/extension/inspectorSections";
 
 import "../../../../automatic-caption/src/automaticCaption";
 
@@ -765,6 +766,11 @@ export class Control extends LitElement {
           <option-effect></option-effect>
           <option-transition></option-transition>
         </option-group>
+
+        <!-- Extension sections, under the app's own panels and resolved from
+             the selected clip's type the same way option-group resolves
+             those. Draws nothing when nothing matches. -->
+        <ext-inspector-sections></ext-inspector-sections>
       </div>
     `;
   }

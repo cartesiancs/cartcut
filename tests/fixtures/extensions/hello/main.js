@@ -48,14 +48,18 @@ async function activate(ctx) {
   ctx.subscriptions.push(
     cartcut.commands.registerCommand("hello.tag", async () => {
       const ids = await cartcut.selection.get();
-      const first = (ids && ids.ids ? ids.ids : ids)[0];
+      const first = ids[0];
       if (first == null) {
         await cartcut.window.showMessage("Select a clip first.", "warn");
         return null;
       }
       await cartcut.timeline.setElementData(first, { taggedAt: Date.now() });
+      // Read back through two different paths: the clip's own detail, which
+      // shows an extension its own key and shows Claude Code none, and the
+      // direct accessor.
       const clip = await cartcut.timeline.getClip(first);
-      ctx.log.info("tagged", first, "and read back", JSON.stringify(clip.ext));
+      const direct = await cartcut.timeline.getElementData(first);
+      ctx.log.info("tagged", first, JSON.stringify(clip.ext), JSON.stringify(direct));
       return clip.ext;
     }),
   );
@@ -103,6 +107,21 @@ async function activate(ctx) {
           durationMs: 2000,
         });
       },
+    }),
+  );
+
+  ctx.subscriptions.push(
+    // The inspector section asks for the selection when it mounts, and is
+    // told again whenever it changes. The app never passes an element id into
+    // a view: doing so would reload the page on every click in the timeline.
+    cartcut.ui.onViewMessage("hello.inspector", async () => {
+      await cartcut.ui.postMessageToView("hello.inspector", await cartcut.selection.get());
+    }),
+  );
+
+  ctx.subscriptions.push(
+    cartcut.selection.onDidChange(async (event) => {
+      void cartcut.ui.postMessageToView("hello.inspector", (event && event.ids) || []);
     }),
   );
 

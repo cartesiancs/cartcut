@@ -27,8 +27,9 @@ const FEATURE = "features/extension/";
  * Each of these is a seam with a reason:
  *
  * - `index.ts` starts it, for effect, exactly as it starts the agent bridge.
- * - `Control.ts` renders contributed tabs and panels.
- * - `elementTimelineCanvas.ts` holds the one keybinding seam.
+ * - `Control.ts` renders contributed tabs, panels and inspector sections.
+ * - `App.ts` mounts the status strip.
+ * - `elementTimelineCanvas.ts` holds the keybinding and context-menu seams.
  * - `menuCommands.ts` runs a contributed command from the app menu.
  * - the four project files carry extension data through save, load, autosave
  *   and the dirty digest.
@@ -38,6 +39,7 @@ const FEATURE = "features/extension/";
  */
 const ALLOWED_IMPORTERS = new Set([
   "index.ts",
+  "App.ts",
   "ui/control/Control.ts",
   "ui/control/ControlExtension.ts",
   "features/element/elementTimelineCanvas.ts",

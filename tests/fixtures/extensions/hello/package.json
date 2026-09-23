@@ -5,35 +5,108 @@
   "displayName": "Hello",
   "description": "The fixture extension. Exercises every seam of the extension system, including the two that are supposed to fail.",
   "main": "main.js",
-  "engines": { "cartcut": "^1" },
+  "engines": {
+    "cartcut": "^1"
+  },
   "cartcut": {
-    "activationEvents": ["onStartup"],
-    "permissions": ["timeline.write", "project.write", "ai.tools"],
+    "activationEvents": [
+      "onStartup"
+    ],
+    "permissions": [
+      "timeline.write",
+      "project.write",
+      "ai.tools"
+    ],
     "contributes": {
       "commands": [
-        { "id": "hello.say", "title": "Hello: Say", "icon": "waving_hand" },
-        { "id": "hello.batch", "title": "Hello: Batch three titles" },
-        { "id": "hello.tag", "title": "Hello: Tag the selected clip" },
-        { "id": "hello.note", "title": "Hello: Set a project note" },
-        { "id": "hello.crash", "title": "Hello: Crash the host" },
-        { "id": "hello.hang", "title": "Hello: Hang", "longRunning": true }
+        {
+          "id": "hello.say",
+          "title": "Hello: Say",
+          "icon": "waving_hand"
+        },
+        {
+          "id": "hello.batch",
+          "title": "Hello: Batch three titles"
+        },
+        {
+          "id": "hello.tag",
+          "title": "Hello: Tag the selected clip"
+        },
+        {
+          "id": "hello.note",
+          "title": "Hello: Set a project note"
+        },
+        {
+          "id": "hello.crash",
+          "title": "Hello: Crash the host"
+        },
+        {
+          "id": "hello.hang",
+          "title": "Hello: Hang",
+          "longRunning": true
+        }
       ],
-      "keybindings": [{ "command": "hello.say", "key": "mod+alt+h" }],
+      "keybindings": [
+        {
+          "command": "hello.say",
+          "key": "mod+alt+h"
+        }
+      ],
       "menus": {
-        "app/extensions": [{ "command": "hello.say" }, { "command": "hello.batch" }],
-        "timeline/clip": [{ "command": "hello.tag" }]
+        "app/extensions": [
+          {
+            "command": "hello.say"
+          },
+          {
+            "command": "hello.batch"
+          }
+        ],
+        "timeline/clip": [
+          {
+            "command": "hello.tag"
+          }
+        ]
       },
       "views": [
-        { "id": "hello.panel", "kind": "sidebar", "title": "Hello", "icon": "waving_hand", "page": "views/panel.html" }
+        {
+          "id": "hello.panel",
+          "kind": "sidebar",
+          "title": "Hello",
+          "icon": "waving_hand",
+          "page": "views/panel.html"
+        },
+        {
+          "id": "hello.inspector",
+          "kind": "inspector",
+          "title": "Hello",
+          "page": "views/inspector.html",
+          "elementTypes": [
+            "text"
+          ]
+        }
       ],
       "configuration": {
         "title": "Hello",
         "properties": {
-          "hello.greeting": { "type": "string", "default": "Hello", "description": "What the title says" },
-          "hello.shout": { "type": "boolean", "default": false, "description": "Upper case it" }
+          "hello.greeting": {
+            "type": "string",
+            "default": "Hello",
+            "description": "What the title says"
+          },
+          "hello.shout": {
+            "type": "boolean",
+            "default": false,
+            "description": "Upper case it"
+          }
         }
       },
-      "statusBar": [{ "id": "hello.status", "alignment": "right", "priority": 5 }],
+      "statusBar": [
+        {
+          "id": "hello.status",
+          "alignment": "right",
+          "priority": 5
+        }
+      ],
       "presets": "presets",
       "tools": [
         {
@@ -41,8 +114,15 @@
           "description": "Add a title that greets someone, at the playhead.",
           "inputSchema": {
             "type": "object",
-            "properties": { "name": { "type": "string", "description": "Who to greet" } },
-            "required": ["name"]
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Who to greet"
+              }
+            },
+            "required": [
+              "name"
+            ]
           }
         }
       ]
