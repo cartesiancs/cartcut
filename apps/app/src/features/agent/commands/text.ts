@@ -22,7 +22,7 @@ import { trackIndexOf, type TimelineDocument } from "../../timeline/tracks";
 import { createTextElement } from "../../element/textElement";
 import { captionToTimeline } from "../../caption/timing";
 import { captionLayout } from "../../caption/layout";
-import { ensureUndoBaseline } from "../checkpoint";
+import { checkpoint } from "../commit";
 import { currentDoc } from "../context";
 import { registerCommands } from "../registry";
 import { clipRow } from "../serialize";
@@ -146,12 +146,9 @@ registerCommands({
       );
     }
 
-    ensureUndoBaseline();
-
-    const store = useTimelineStore.getState();
     const createdIds: string[] = [];
 
-    store.withCheckpoint((d) => {
+    checkpoint((d) => {
       let next = d;
 
       for (const item of items) {
@@ -245,14 +242,11 @@ registerCommands({
       duration: params.durationMs,
     });
 
-    ensureUndoBaseline();
-    useTimelineStore
-      .getState()
-      .withCheckpoint((d) =>
-        placeNewElement(d, elementId, element, params.startMs, uuidv4()),
-      );
+    checkpoint((d) =>
+      placeNewElement(d, elementId, element, params.startMs, uuidv4()),
+    );
 
-    const after = useTimelineStore.getState().getDocument();
+    const after = currentDoc();
     const created = after.elements[elementId];
     if (created == null) {
       return { ok: false, reason: "The element could not be placed." };

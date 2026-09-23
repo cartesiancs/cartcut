@@ -13,7 +13,7 @@
 import { useTimelineStore } from "../../../states/timelineStore";
 import { setIn } from "../../../utils/immutable";
 import type { TimelineElement } from "../../../@types/timeline";
-import { ensureUndoBaseline } from "../checkpoint";
+import { checkpoint } from "../commit";
 import { currentDoc, requireElement } from "../context";
 import { registerCommands } from "../registry";
 import { clipRow } from "../serialize";
@@ -72,8 +72,7 @@ registerCommands({
         path.length === 1 && path[0] === "text" && typeof value === "string",
     );
 
-    ensureUndoBaseline();
-    useTimelineStore.getState().withCheckpoint((d) => {
+    checkpoint((d) => {
       const base =
         textWrite == null
           ? d
