@@ -131,6 +131,7 @@
       "!electron/**/*",
       "!dev-app-update.yml",
       "!tests/**",
+      "!examples/**",
       "!bin/**",
       "!dist-web/**",
       "!docs/**",

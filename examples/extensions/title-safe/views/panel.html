@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Title Safe</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <div id="summary" class="summary">Checking...</div>
+
+    <div class="actions">
+      <button id="fix" type="button">Move inside</button>
+      <button id="revert" type="button" class="quiet">Put back</button>
+    </div>
+
+    <!--
+      A picture of the frame, because "12px past the left" is a number and
+      "this caption, down here" is what the editor is actually looking for.
+    -->
+    <div id="preview" class="preview" hidden>
+      <div class="safe"></div>
+      <div id="boxes"></div>
+    </div>
+
+    <ul id="list" class="list"></ul>
+
+    <p class="note">
+      Measured from each clip's own box. A caption that is animated or scaled
+      may sit somewhere else at a given frame.
+    </p>
+
+    <!--
+      A file, not an inline script. The page is served with
+      `script-src 'self'`, so an inline one silently does nothing.
+    -->
+    <script src="panel.js"></script>
+  </body>
+</html>

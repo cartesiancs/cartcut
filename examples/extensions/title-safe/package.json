@@ -1,0 +1,65 @@
+{
+  "name": "title-safe",
+  "publisher": "cartesiancs",
+  "version": "1.0.0",
+  "displayName": "Title Safe",
+  "description": "Finds titles and captions that stray outside the broadcast-safe area, and moves them back in one undo step.",
+  "main": "main.js",
+  "engines": { "cartcut": "^1" },
+  "cartcut": {
+    "activationEvents": ["onStartup"],
+    "permissions": ["timeline.write", "project.write", "ai.tools"],
+    "contributes": {
+      "commands": [
+        { "id": "titleSafe.check", "title": "Title Safe: Check the project", "icon": "crop_free" },
+        { "id": "titleSafe.fixAll", "title": "Title Safe: Move everything inside" },
+        { "id": "titleSafe.revertAll", "title": "Title Safe: Put everything back" }
+      ],
+      "keybindings": [
+        { "command": "titleSafe.fixAll", "key": "mod+alt+t", "when": "selection.count >= 0" }
+      ],
+      "menus": {
+        "app/extensions": [
+          { "command": "titleSafe.check" },
+          { "command": "titleSafe.fixAll" },
+          { "command": "titleSafe.revertAll" }
+        ],
+        "timeline/clip": [{ "command": "titleSafe.fixAll", "when": "selection.type == text" }]
+      },
+      "views": [
+        {
+          "id": "titleSafe.panel",
+          "kind": "sidebar",
+          "title": "Title Safe",
+          "icon": "crop_free",
+          "page": "views/panel.html"
+        }
+      ],
+      "configuration": {
+        "title": "Title Safe",
+        "properties": {
+          "titleSafe.marginPercent": {
+            "type": "number",
+            "default": 10,
+            "minimum": 0,
+            "maximum": 25,
+            "description": "How far in from each edge the safe area sits, as a percentage of the frame."
+          },
+          "titleSafe.blockExport": {
+            "type": "boolean",
+            "default": false,
+            "description": "Stop an export while anything is still outside the safe area."
+          }
+        }
+      },
+      "statusBar": [{ "id": "titleSafe.status", "alignment": "right", "priority": 20 }],
+      "tools": [
+        {
+          "name": "check_title_safe",
+          "description": "List the text clips whose box falls outside the broadcast title-safe area, with how far out each one is. Read only.",
+          "inputSchema": { "type": "object", "properties": {} }
+        }
+      ]
+    }
+  }
+}

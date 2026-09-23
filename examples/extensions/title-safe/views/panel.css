@@ -1,0 +1,117 @@
+/*
+ * The panel styles itself. A view is a page in its own process with its own
+ * origin, so it inherits nothing from the editor: if it should look like the
+ * app, it has to say so.
+ */
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  padding: 10px;
+  font: 12px/1.45 system-ui, -apple-system, sans-serif;
+  background: #17181b;
+  color: #cfd3d8;
+}
+
+.summary {
+  font-weight: 600;
+  color: #f8f9fa;
+}
+
+.summary.clear {
+  color: #6bcb77;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+button {
+  flex: 1 1 auto;
+  padding: 5px 8px;
+  border: 1px solid #40434a;
+  border-radius: 4px;
+  background: #24262b;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #2e3138;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.quiet {
+  flex: 0 0 auto;
+}
+
+/* The frame, at whatever aspect the project is. */
+.preview {
+  position: relative;
+  width: 100%;
+  background: #0f1012;
+  border: 1px solid #2c2f35;
+  border-radius: 3px;
+  margin-bottom: 8px;
+}
+
+.safe {
+  position: absolute;
+  inset: 10%;
+  border: 1px dashed #5a6473;
+  pointer-events: none;
+}
+
+.box {
+  position: absolute;
+  border: 1px solid #e8734a;
+  background: rgba(232, 115, 74, 0.18);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.list li {
+  padding: 5px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.list li:hover {
+  background: #22242a;
+}
+
+.list .label {
+  color: #f8f9fa;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list .why {
+  color: #9aa0a6;
+  font-size: 11px;
+}
+
+.list .stuck {
+  color: #e8a34a;
+}
+
+.note {
+  color: #6f757c;
+  font-size: 11px;
+  margin: 10px 0 0;
+}
