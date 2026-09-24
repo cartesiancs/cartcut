@@ -26,6 +26,7 @@ import "./commands/media";
 import "./commands/tracks";
 import "./commands/appearance";
 import "./commands/lut";
+import "./commands/fonts";
 import "./commands/adjust";
 import "./commands/mask";
 import "./commands/shape";

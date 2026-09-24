@@ -96,14 +96,38 @@ export function registerTextTools(define: Registrar) {
   define(
     "set_text_font",
     {
-      title: "Set a text clip's font",
+      title: "Set a text clip's font and weight",
       description:
-        "Change the typeface of one or more text clips. Pass a `path` from list_fonts, or \"default\" for the " +
-        "built-in face. This writes the font's path, name and type together and registers the face with the " +
-        "canvas — setting them one at a time through update_clip would leave the clip drawing in the fallback.",
+        "Change the typeface or the weight of one or more text clips. Three ways to say it: `fontPath` " +
+        'from list_fonts (or "default"), a `family` name, or a `weight` on its own to re-weight whatever ' +
+        "face the clip already has. " +
+        "**One font file is one face here**, so picking Semibold means picking a *file*: pass `family` " +
+        "and `weight` and the nearest rung the family actually ships is chosen for you. Use list_fonts " +
+        "with groupBy \"family\" first to see which rungs exist — asking a family that ships only Regular " +
+        "for 600 gets you a synthesised fake bold, not Semibold. A variable font is the exception: one " +
+        "file covers the ladder and every rung is real. " +
+        "`weight` is 100-900 (400 Regular, 600 Semi Bold, 700 Bold). `italic` prefers a real slanted face. " +
+        "This writes the path, name, type and weight together and registers the face with the canvas — " +
+        "setting them one at a time through update_clip would leave the clip drawing in the fallback. " +
+        "For one word inside a clip, use set_text_range_style.",
       inputSchema: {
         elementIds: z.array(z.string()).min(1),
-        fontPath: z.string().describe('A path from list_fonts, or "default".'),
+        fontPath: z
+          .string()
+          .optional()
+          .describe('A path from list_fonts, or "default".'),
+        family: z
+          .string()
+          .optional()
+          .describe('A family from list_fonts groupBy "family". Use with `weight`.'),
+        weight: z
+          .number()
+          .int()
+          .min(100)
+          .max(900)
+          .optional()
+          .describe("On its own, re-weights the clip's current family."),
+        italic: z.boolean().optional(),
       },
       annotations: mutating,
     },

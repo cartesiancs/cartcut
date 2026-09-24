@@ -278,18 +278,44 @@ export function registerReadTools(define: Registrar) {
     {
       title: "List installed fonts",
       description:
-        "Fonts available to set_text_font, as {name, path}. Paged: a machine can carry hundreds. " +
-        "Pass `query` to filter by name.",
+        "Fonts available to set_text_font. Paged: a machine can carry hundreds. " +
+        "Pass `query` to filter by name. " +
+        '**Pass groupBy "family" for the weight row.** One font file is one face, so by default this ' +
+        "answers files — AktivGrotesk-Bold, -Black and -BoldItalic look like three unrelated fonts. " +
+        'Grouped, it answers {family, weights, weightLabels, variable, italic, path}, which is what tells ' +
+        "you whether a family actually ships Semibold before you ask set_text_font for 600. " +
+        "A `variable` family covers every rung from one file; a static one only the rungs listed.",
       inputSchema: {
         query: z.string().optional(),
+        groupBy: z
+          .enum(["file", "family"])
+          .optional()
+          .describe('"family" groups the files into families and reports their weights.'),
         limit: z.number().int().min(1).max(200).optional().default(50),
         offset: z.number().int().min(0).optional().default(0),
       },
       annotations: readOnly,
     },
-    // No bridge hop: the font list already lives in main, behind the same
-    // function `ipcMain.handle("font:getLists")` serves the renderer with.
+    /*
+     * Two paths, and the grouped one has to cross the bridge.
+     *
+     * The flat list lives in main, so it is answered here with no hop. Folding
+     * those files back into families is `features/font/fontWeight.ts`, a
+     * renderer module, and `electron/` cannot import `apps/app/src` — the
+     * `rootDir` pin in `.tsconfig`. A second copy of a heuristic over foundry
+     * filename conventions would diverge quietly and surface as "the weight
+     * row offers a rung the tool cannot select", so the hop is the cheaper of
+     * the two wrongs.
+     */
     tool(async (args: any) => {
+      if (args.groupBy === "family") {
+        return requestEditor("list_font_families", {
+          query: args.query,
+          limit: args.limit,
+          offset: args.offset,
+        });
+      }
+
       // `getFontList` declares an `event` parameter it never reads — it is an
       // `ipcMain.handle` handler by shape. Calling it directly is the point:
       // the font list already lives in main, so this needs no bridge hop.

@@ -4,8 +4,6 @@
  * Each of these could look like an `update_clip` patch and none of them can be
  * one:
  *
- *  - a font is three fields that have to agree, plus an `@font-face` the canvas
- *    needs or it draws in the fallback;
  *  - a filter's parameters are a positional `k=v:k=v` string;
  *  - a blend mode is a closed vocabulary that only some filetypes carry.
  *    `update_clip`'s whitelist is keyed by filetype with a shared `common`
@@ -13,6 +11,10 @@
  *    and on a group, both of which paint no layer, and spread across the five
  *    per-type lists it would report "that clip does not accept `blend`" for a
  *    clip whose real problem is that it is a group.
+ *
+ * Fonts used to live here for the first of those reasons and now live in
+ * `fonts.ts`, which also has to group the installed files into families to
+ * answer a weight.
  *
  * `set_video_filters` shares its ops with the option panel rather than
  * reimplementing them: `setVideoFilter` and `setFilterEnabled` in
@@ -23,8 +25,7 @@
  */
 
 import { useTimelineStore } from "../../../states/timelineStore";
-import { setIn } from "../../../utils/immutable";
-import { BLEND_MODES, type TimelineElement } from "../../../@types/timeline";
+import { BLEND_MODES } from "../../../@types/timeline";
 import { coerceBlend } from "../../renderer/blend";
 import type { FilterInput } from "../../renderer/filter/params";
 import {
@@ -36,7 +37,6 @@ import {
   setFilterEnabled,
   setVideoFilter,
 } from "../../timeline/filterOps";
-import { ensureFontFace, parseFontPath } from "../../font/fontFaces";
 import { commit } from "../commit";
 import { currentDoc, requireElement } from "../context";
 import { registerCommands } from "../registry";
@@ -116,53 +116,5 @@ registerCommands({
       (d) => setClipBlendMany(d, ids, blend),
       "Those clips are already in that blend mode.",
     );
-  },
-
-  set_text_font: (params: { elementIds: string[]; fontPath: string }) => {
-    const doc = currentDoc();
-    const ids = params.elementIds ?? [];
-    if (ids.length === 0) {
-      throw new Error("set_text_font needs at least one id in `elementIds`.");
-    }
-    if (typeof params.fontPath !== "string" || params.fontPath === "") {
-      throw new Error(
-        'set_text_font needs a `fontPath` from list_fonts, or "default".',
-      );
-    }
-
-    const wrongType = ids
-      .map((id) => requireElement(doc, id))
-      .filter((element) => element.filetype !== "text");
-
-    if (wrongType.length > 0) {
-      throw new Error(
-        `Only text clips have a font; got ${wrongType
-          .map((element) => element.filetype)
-          .join(", ")}.`,
-      );
-    }
-
-    const font = parseFontPath(params.fontPath);
-
-    // Injected before the commit so the very next repaint can draw with it.
-    // A canvas asked for a family it does not know falls back silently, and
-    // "the tool said ok but the text looks the same" is the worst outcome here.
-    ensureFontFace(font);
-
-    const result = commit(
-      (d) => ({
-        ...d,
-        elements: ids.reduce((elements, id) => {
-          let updated = elements[id];
-          updated = setIn(updated, ["fontpath"], font.path);
-          updated = setIn(updated, ["fontname"], font.name);
-          updated = setIn(updated, ["fonttype"], font.type);
-          return { ...elements, [id]: updated as TimelineElement };
-        }, d.elements),
-      }),
-      "Those clips are already in that font.",
-    );
-
-    return { ...result, font };
   },
 });

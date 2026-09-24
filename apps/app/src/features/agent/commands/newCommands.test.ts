@@ -43,6 +43,7 @@ import "./meta";
 import "./media";
 import "./tracks";
 import "./appearance";
+import "./fonts";
 import "./animation";
 import "./groups";
 import "./fx";
