@@ -515,3 +515,53 @@ describe("what the agent reads back", () => {
     ).toBe(true);
   });
 });
+
+/**
+ * The animator, read back.
+ *
+ * Writing it and reading it are two field-by-field projections of the same
+ * type, and both had to name `animate` explicitly. Both were missing it, so
+ * the movement was accepted, stored and reported as absent — the failure an
+ * agent cannot tell from the feature not existing. These go through the
+ * command and `get_clip`, not through the resolvers, because the resolvers
+ * were correct the whole time.
+ */
+describe("set_text_reveal stores and reports an animator", () => {
+  it("round-trips through get_clip", async () => {
+    await run("set_text_reveal", {
+      elementIds: ["title"],
+      unit: "word",
+      progress: 0,
+      animateScale: 170,
+      animateOffsetY: 50,
+      animateWindow: 2,
+      animateEasing: "ease_out",
+    });
+
+    const clip: any = await run("get_clip", { elementId: "title" });
+    expect(clip.reveal).toMatchObject({
+      unit: "word",
+      progress: 0,
+      animate: { scale: 170, offsetY: 50, window: 2, easing: "ease_out" },
+    });
+  });
+
+  it("reports no animator when there is none", async () => {
+    await run("set_text_reveal", { elementIds: ["title"], unit: "word" });
+    const clip: any = await run("get_clip", { elementId: "title" });
+    expect("animate" in clip.reveal).toBe(false);
+  });
+
+  it("drops the movement on animate:null and keeps the reveal", async () => {
+    await run("set_text_reveal", {
+      elementIds: ["title"],
+      unit: "word",
+      animateScale: 170,
+    });
+    await run("set_text_reveal", { elementIds: ["title"], animate: null });
+
+    const clip: any = await run("get_clip", { elementId: "title" });
+    expect(clip.reveal.unit).toBe("word");
+    expect("animate" in clip.reveal).toBe(false);
+  });
+});

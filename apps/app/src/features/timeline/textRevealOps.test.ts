@@ -301,3 +301,72 @@ describe("normalizeAnimation and the orphan track", () => {
     expect("revealProgress" in (before as any).animation).toBe(false);
   });
 });
+
+/**
+ * The animator, through the write path rather than through the validators.
+ *
+ * Every one of these would have passed against a build that stored the unit,
+ * the progress and nothing else, because `coerceReveal` and `revealOf` both
+ * carry `animate` correctly on their own. `withReveal` rebuilds the object
+ * field by field, and a field missing from that rebuild is dropped in silence.
+ * That is what happened, and it is why these test the document rather than the
+ * resolver.
+ */
+describe("a reveal's animator survives being written", () => {
+  const ANIMATOR = { scale: 170, offsetY: 50, window: 2, easing: "ease_out" };
+  const titled = () =>
+    doc({ title: textElement({ trackId: "v1", startTime: 0, duration: 4000 }) });
+
+  it("is stored when the reveal is created and patched in one go", () => {
+    let next = setClipTextReveal(titled(), "title", "word");
+    next = setClipTextRevealFields(next, "title", {
+      progress: 0,
+      animate: ANIMATOR,
+    });
+
+    expect((next.elements.title as any).reveal.animate).toEqual(ANIMATOR);
+  });
+
+  it("is kept when some other field is patched afterwards", () => {
+    let next = setClipTextReveal(titled(), "title", "word");
+    next = setClipTextRevealFields(next, "title", { animate: ANIMATOR });
+    next = setClipTextRevealFields(next, "title", { progress: 40 });
+
+    expect((next.elements.title as any).reveal.animate).toEqual(ANIMATOR);
+  });
+
+  it("merges a patch over the animator already there", () => {
+    let next = setClipTextReveal(titled(), "title", "word");
+    next = setClipTextRevealFields(next, "title", { animate: ANIMATOR });
+    next = setClipTextRevealFields(next, "title", { animate: { scale: 120 } });
+
+    // Changing the scale must not drop the offset: an agent adjusting one
+    // number should not have to restate the rest.
+    expect((next.elements.title as any).reveal.animate).toEqual({
+      ...ANIMATOR,
+      scale: 120,
+    });
+  });
+
+  it("is removed by an explicit null, keeping the reveal", () => {
+    let next = setClipTextReveal(titled(), "title", "word");
+    next = setClipTextRevealFields(next, "title", { animate: ANIMATOR });
+    next = setClipTextRevealFields(next, "title", { animate: null });
+
+    const reveal = (next.elements.title as any).reveal;
+    expect(reveal.unit).toBe("word");
+    // Deleted rather than left as an empty object, so a clip animated and then
+    // un-animated saves byte-identically to one nobody animated.
+    expect("animate" in reveal).toBe(false);
+  });
+
+  it("does not store an animator that would move nothing", () => {
+    let next = setClipTextReveal(titled(), "title", "word");
+    const before = next;
+    next = setClipTextRevealFields(next, "title", {
+      animate: { window: 3, scale: 100 },
+    });
+    expect("animate" in ((next.elements.title as any).reveal ?? {})).toBe(false);
+    expect(next).toBe(before);
+  });
+});

@@ -519,6 +519,15 @@ export function clipDetail(
             unit: detailReveal.unit,
             progress: detailReveal.progress,
             fade: detailReveal.fade ?? 0,
+            // Named explicitly, like the three above, and that is the trap
+            // this line exists to close: a field added to `TextReveal` and not
+            // to this projection is stored correctly and reported as absent,
+            // so an agent that sets a movement reads back a reveal that says
+            // it has none. `timeline/textRevealOps.ts#copyReveal` had the same
+            // shape and the same bug.
+            ...(detailReveal.animate == null
+              ? {}
+              : { animate: detailReveal.animate }),
           };
   }
 

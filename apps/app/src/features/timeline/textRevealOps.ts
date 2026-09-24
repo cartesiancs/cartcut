@@ -84,11 +84,23 @@ export function revealRefOf(
   return revealOf(doc.elements[elementId]);
 }
 
-/** A copy sharing nothing with its input. */
+/**
+ * A copy sharing nothing with its input.
+ *
+ * **Every optional field has to be named here.** This is the one write path,
+ * so a field the copy does not carry is a field that cannot be stored at all,
+ * and silently: the caller's value survives validation, reaches `withReveal`,
+ * and is dropped on the way into the document. `animate` was added to
+ * `TextReveal` and not to this, which made the whole text animator write
+ * successfully and do nothing.
+ */
 function copyReveal(reveal: TextReveal): TextReveal {
   const next: TextReveal = { unit: reveal.unit, progress: reveal.progress };
   if ((reveal.fade ?? DEFAULT_REVEAL_FADE) > 0) {
     next.fade = reveal.fade;
+  }
+  if (reveal.animate != null) {
+    next.animate = { ...reveal.animate };
   }
   return next;
 }
