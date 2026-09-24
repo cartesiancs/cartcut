@@ -7,6 +7,7 @@ import "./optionLutSection";
 import "./optionAdjustSection";
 import "./optionMaskSection";
 import "./optionShapeSection";
+import "./optionDecorationSection";
 import "./animationPresetBrowser";
 import "./optionTabBar";
 import type { OptionTab } from "./optionTabBar";
@@ -115,6 +116,16 @@ export class OptionShape extends LitElement {
       <option-shape-section
         .elementIds=${[this.elementId]}
       ></option-shape-section>
+
+      <!--
+        Border and drop shadow. Shape, image and video share this section
+        because they share the field: all three draw a picture inside a box.
+        Text has its own pair under Effects, which strokes the glyphs.
+      -->
+      <option-decoration-section
+        .elementIds=${[this.elementId]}
+      ></option-decoration-section>
+
       </div>
     `;
   }

@@ -169,6 +169,55 @@ export function shadowOf(
   };
 }
 
+/**
+ * The write validators, the strict twins of `strokeOf` and `shadowOf`.
+ *
+ * The asymmetry with the read guards is deliberate and is the whole reason
+ * both exist. A read guard answers `null` for a decoration that would paint
+ * nothing, because the renderer wants to know whether to open a pass. A write
+ * validator answers a **fully populated** value, because a border switched off
+ * has to keep the width it had: unchecking a box and checking it again must
+ * give back what was there, not the default.
+ *
+ * `null` here means only "that is not a decoration at all". Every field it can
+ * read is clamped, and every field it cannot is defaulted rather than
+ * refused — an absent key already means the default, so a junk `width` leaves
+ * the border where the user last saw it instead of rejecting the whole write.
+ */
+export function coerceStroke(value: unknown): ClipStroke | null {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const source = value as Record<string, unknown>;
+  return {
+    enable: source.enable === true,
+    width: readNumber(source.width, 0, MAX_STROKE_WIDTH) ?? 2,
+    color: readColor(source.color, "#000000"),
+    opacity: readNumber(source.opacity, 0, 100) ?? 100,
+    align:
+      typeof source.align === "string" && ALIGNMENTS.has(source.align)
+        ? (source.align as StrokeAlignment)
+        : "center",
+  };
+}
+
+export function coerceShadow(value: unknown): ClipShadow | null {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const source = value as Record<string, unknown>;
+  return {
+    enable: source.enable === true,
+    offsetX: readNumber(source.offsetX, -MAX_SHADOW_OFFSET, MAX_SHADOW_OFFSET) ?? 0,
+    offsetY: readNumber(source.offsetY, -MAX_SHADOW_OFFSET, MAX_SHADOW_OFFSET) ?? 8,
+    // Floored at zero because the canvas **throws** on a negative
+    // `shadowBlur`, and in a paint loop a throw is a blank frame.
+    blur: readNumber(source.blur, 0, MAX_SHADOW_BLUR) ?? 16,
+    color: readColor(source.color, "#000000"),
+    opacity: readNumber(source.opacity, 0, 100) ?? 40,
+  };
+}
+
 /** Whether either decoration would paint. */
 export function isDecorated(
   element: TimelineElement | null | undefined,

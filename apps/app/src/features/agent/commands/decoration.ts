@@ -11,24 +11,26 @@
  * blur should not have to restate its colour and offset. Anything left out is
  * left alone.
  *
+ * The writing itself is `timeline/decorationOps.ts`, which the Border and
+ * Shadow section of the option panel also calls. Sharing the ops rather than
+ * the field is what stops the two from disagreeing about what a disabled
+ * border keeps, the way `set_video_filters` shares `filterOps`.
+ *
  * `enable` defaults to true when any field of that decoration is named. Asking
  * for a 4px border and being told it wrote a disabled one would be a trap, and
  * the explicit `false` is still there for switching one off.
  */
 
-import type {
-  ClipShadow,
-  ClipStroke,
-  StrokeAlignment,
-  TimelineElement,
-} from "../../../@types/timeline";
-import { setIn } from "../../../utils/immutable";
+import type { StrokeAlignment } from "../../../@types/timeline";
+import { shadowOf, strokeOf } from "../../renderer/decoration";
 import {
   DECORATABLE_FILETYPES,
   isDecoratable,
-  shadowOf,
-  strokeOf,
-} from "../../renderer/decoration";
+  setClipShadowMany,
+  setClipStrokeMany,
+  type ShadowPatch,
+  type StrokePatch,
+} from "../../timeline/decorationOps";
 import type { TimelineDocument } from "../../timeline/tracks";
 import { commit } from "../commit";
 import { currentDoc, requireElement } from "../context";
@@ -49,39 +51,7 @@ type DecorationArgs = {
   shadowOpacity?: number;
 };
 
-/** What a clip gets when it has never carried one. */
-const STROKE_DEFAULTS: ClipStroke = {
-  enable: true,
-  width: 2,
-  color: "#000000",
-  opacity: 100,
-  align: "center",
-};
-
-const SHADOW_DEFAULTS: ClipShadow = {
-  enable: true,
-  offsetX: 0,
-  offsetY: 8,
-  blur: 16,
-  color: "#000000",
-  opacity: 40,
-};
-
-/**
- * The stored decoration, whatever shape it is in.
- *
- * `strokeOf`/`shadowOf` answer `null` for one that is switched off or that
- * would paint nothing, which is right for the renderer and wrong here: a patch
- * turning a disabled border back on must not lose the width it had. So the raw
- * field is read, and the resolvers are used only to report the result.
- */
-function storedOr<T>(element: TimelineElement, key: string, fallback: T): T {
-  const raw = (element as any)[key];
-  return raw != null && typeof raw === "object" && !Array.isArray(raw)
-    ? ({ ...fallback, ...raw } as T)
-    : ({ ...fallback } as T);
-}
-
+/** Whether the caller named any field of one decoration. */
 function anyNamed(args: DecorationArgs, prefix: "stroke" | "shadow"): boolean {
   return Object.keys(args).some(
     (key) => key.startsWith(prefix) && (args as any)[key] !== undefined,
@@ -117,47 +87,38 @@ registerCommands({
       );
     }
 
+    // Built as sparse patches and handed to the same ops the panel writes
+    // through, so "what a border is" is decided in one place. A field left out
+    // keeps whatever the clip has, which is what lets a caller change a blur
+    // without restating the offset.
+    const strokePatch: StrokePatch = {};
+    if (touchesStroke) {
+      strokePatch.enable = args.strokeEnable ?? true;
+      if (args.strokeWidth !== undefined) strokePatch.width = args.strokeWidth;
+      if (args.strokeColor !== undefined) strokePatch.color = args.strokeColor;
+      if (args.strokeOpacity !== undefined) strokePatch.opacity = args.strokeOpacity;
+      if (args.strokeAlign !== undefined) strokePatch.align = args.strokeAlign;
+    }
+
+    const shadowPatch: ShadowPatch = {};
+    if (touchesShadow) {
+      shadowPatch.enable = args.shadowEnable ?? true;
+      if (args.shadowOffsetX !== undefined) shadowPatch.offsetX = args.shadowOffsetX;
+      if (args.shadowOffsetY !== undefined) shadowPatch.offsetY = args.shadowOffsetY;
+      if (args.shadowBlur !== undefined) shadowPatch.blur = args.shadowBlur;
+      if (args.shadowColor !== undefined) shadowPatch.color = args.shadowColor;
+      if (args.shadowOpacity !== undefined) shadowPatch.opacity = args.shadowOpacity;
+    }
+
     const result = commit((d: TimelineDocument) => {
-      const elements = { ...d.elements };
-      let changed = false;
-
-      for (const id of ids) {
-        const before = elements[id];
-        let updated = before;
-
-        if (touchesStroke) {
-          const next = storedOr<ClipStroke>(before, "stroke", STROKE_DEFAULTS);
-          // Naming any field turns it on, unless `false` says otherwise. A tool
-          // that wrote a disabled border because nobody said "enable" would be
-          // reporting success for an edit with no visible effect.
-          next.enable = args.strokeEnable ?? true;
-          if (args.strokeWidth !== undefined) next.width = args.strokeWidth;
-          if (args.strokeColor !== undefined) next.color = args.strokeColor;
-          if (args.strokeOpacity !== undefined) next.opacity = args.strokeOpacity;
-          if (args.strokeAlign !== undefined) next.align = args.strokeAlign;
-          updated = setIn(updated, ["stroke"], next) as TimelineElement;
-        }
-
-        if (touchesShadow) {
-          const next = storedOr<ClipShadow>(before, "shadow", SHADOW_DEFAULTS);
-          next.enable = args.shadowEnable ?? true;
-          if (args.shadowOffsetX !== undefined) next.offsetX = args.shadowOffsetX;
-          if (args.shadowOffsetY !== undefined) next.offsetY = args.shadowOffsetY;
-          if (args.shadowBlur !== undefined) next.blur = args.shadowBlur;
-          if (args.shadowColor !== undefined) next.color = args.shadowColor;
-          if (args.shadowOpacity !== undefined) next.opacity = args.shadowOpacity;
-          updated = setIn(updated, ["shadow"], next) as TimelineElement;
-        }
-
-        if (updated !== before) {
-          elements[id] = updated;
-          changed = true;
-        }
+      let next = d;
+      if (touchesStroke) {
+        next = setClipStrokeMany(next, ids, strokePatch);
       }
-
-      // Identity, so `withCheckpoint` records no step for a decoration the
-      // clips already carry.
-      return changed ? { ...d, elements } : d;
+      if (touchesShadow) {
+        next = setClipShadowMany(next, ids, shadowPatch);
+      }
+      return next;
     }, "Those clips already carry that border and shadow.");
 
     const after = currentDoc();
