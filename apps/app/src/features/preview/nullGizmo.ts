@@ -83,6 +83,13 @@ export const NULL_KNOB_OFFSET_PX = 50;
  * Three states rather than two because a null is drawn *all the time*: `idle`
  * has to be quiet enough that several nulls do not bury the picture, and a
  * target that quiet needs a `hover` state to say what is about to be grabbed.
+ *
+ * `idle` is the anchor alone. The dashed box and the corner ticks arrive at
+ * `hover`, the grips and the knob at `active`, so the resting preview carries
+ * one small mark per null rather than a rectangle around each one.
+ * `renderer/nullGizmo.ts` holds the reasoning, which is After Effects' and
+ * Premiere's: transform chrome belongs to what is being worked on. Every state
+ * answers the pointer identically; `nullHitZoneOf` below never reads it.
  */
 export type NullGizmoState = "idle" | "hover" | "active";
 
