@@ -191,6 +191,104 @@ type Mirrorable = {
 };
 
 /**
+ * The properties a link may drive.
+ *
+ * Four, and the two that are missing are missing for reasons rather than for
+ * now.
+ *
+ * **`size` is out** because a driven box would have to reach
+ * `transform.ts#sampledBoxOf`, which is the single road the renderer, the mask,
+ * the selection outline, the eight grips, the hit test and the resize origin
+ * all travel. CLAUDE.md names that as the one place a missed call site puts the
+ * picture in one spot and the pointer's idea of it in another. Leaving `size`
+ * out means that signature never changes, which is most of why this feature is
+ * affordable at all.
+ *
+ * **`volumeDb` is out** because the audio envelope is built by FFmpeg's filter
+ * graph from the authored keyframes, not by the renderer. A linked level would
+ * play in the preview and not reach the exported file, and preview/export
+ * parity is structural here rather than maintained.
+ *
+ * `intensity`, `fx:*` and `revealProgress` each have their own sampler and are
+ * simply not wired yet.
+ */
+export const LINKABLE_PROPERTIES = [
+  "position",
+  "opacity",
+  "scale",
+  "rotation",
+] as const;
+
+export type LinkableProperty = (typeof LINKABLE_PROPERTIES)[number];
+
+/**
+ * One property derived from another property's value.
+ *
+ * This is the place an expression language would otherwise go, and it is
+ * deliberately **data rather than code**. The compositor is synchronous and
+ * "nothing executes" is a property of this codebase that the extension host,
+ * the FX preset format and the LUT registry all rest on; a JavaScript
+ * evaluator running once per element per frame would give that up for a
+ * feature a piecewise map covers.
+ *
+ * And it does cover it. The overwhelming majority of real After Effects
+ * expressions are `linear()` or `ease()` over some other property — "fade this
+ * out as the parent turns away", "grow this as the slider rises" — which is
+ * exactly `in` to `out` with a curve. What is given up is arithmetic between
+ * several sources, and that is worth the trade.
+ *
+ * Absent means the property is whatever its own keyframes and static field
+ * say, and clearing deletes the key, so a project nobody has linked saves
+ * byte-identically to one written before the feature and `SCHEMA_VERSION` did
+ * not move. Read through `features/animation/link.ts#linkOf`, never directly.
+ */
+export type PropertyLink = {
+  /** Where the value is read from. `lane` defaults to `"x"`. */
+  from: {
+    elementId: string;
+    property: AnimatableProperty;
+    lane?: "x" | "y";
+  };
+  /**
+   * Input stops, ascending, 2 to 16 of them.
+   *
+   * Two is the `linear(value, inMin, inMax, outMin, outMax)` everyone writes;
+   * more is the piecewise map that would otherwise need an `if`.
+   */
+  in: number[];
+  /** Output stops, one per input stop. */
+  out: number[];
+  /** How each segment is shaped. Absent is linear. */
+  easing?: string;
+  /**
+   * What happens outside the stops.
+   *
+   * `"clamp"` holds the end value, which is what `linear()` does and what a
+   * caller almost always means. `"extrapolate"` keeps going along the last
+   * segment's slope.
+   */
+  extend?: "clamp" | "extrapolate";
+  /**
+   * Added to the source value before it is mapped.
+   *
+   * The field that makes one link shape serve a row of clips: twelve cards on
+   * a turning null are one description twelve times with twelve offsets, not
+   * twelve descriptions.
+   */
+  offset?: number;
+};
+
+/**
+ * A clip whose properties can be driven by another clip's.
+ *
+ * The same types that carry `Animatable`, minus the two whose animation is not
+ * a transform: an effect's `intensity` and a transition have their own
+ * samplers. Absent means nothing is linked.
+ */
+type Linked = {
+  link?: Partial<Record<LinkableProperty, PropertyLink>>;
+};
+
 /**
  * A drop shadow cast by a clip's own silhouette.
  *
@@ -737,6 +835,7 @@ type Leveled = {
 export type ImageElementType = TimelinePlaced &
   Visual &
   Animatable &
+  Linked &
   Blendable &
   Gradable &
   Adjustable &
@@ -829,6 +928,7 @@ export type ShapeGeometry = {
 export type ShapeElementType = TimelinePlaced &
   Visual &
   Animatable &
+  Linked &
   Blendable &
   Gradable &
   Adjustable &
@@ -848,6 +948,7 @@ export type ShapeElementType = TimelinePlaced &
 export type VideoElementType = TimelinePlaced &
   Visual &
   Animatable &
+  Linked &
   Leveled &
   Blendable &
   Gradable &
@@ -1133,6 +1234,7 @@ export type TextRun = { from: number; to: number; style: TextRunStyle };
 export type TextElementType = TimelinePlaced &
   Visual &
   Animatable &
+  Linked &
   Blendable &
   Gradable &
   Adjustable &

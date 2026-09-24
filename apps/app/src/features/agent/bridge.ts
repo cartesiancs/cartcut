@@ -34,6 +34,7 @@ import "./commands/shape";
 import "./commands/decoration";
 import "./commands/rasterize";
 import "./commands/animation";
+import "./commands/link";
 import "./commands/reveal";
 import "./commands/framing";
 import "./commands/groups";

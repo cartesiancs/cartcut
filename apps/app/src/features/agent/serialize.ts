@@ -47,6 +47,8 @@ import { isRevealable } from "../timeline/textRevealOps";
 import { isMaskable } from "../timeline/maskOps";
 import type { TimelineDocument, TimelineTrack } from "../timeline/tracks";
 import { runsOf } from "../text/runs";
+import { linkOf } from "../animation/link";
+import { linkedPropertiesOf } from "../timeline/linkOps";
 import { resolveTextStyle } from "../text/style";
 
 /** Longest text echoed back in a list row. Full text comes from `get_clip`. */
@@ -572,6 +574,25 @@ export function clipDetail(
     detail.reversed = isReversed(element);
   }
 
+  // Driven properties, before the animation block, because a link overrides
+  // whatever that block says and a reader that saw the keyframes first would
+  // draw the wrong conclusion from them.
+  const linked = linkedPropertiesOf(element);
+  if (linked.length > 0) {
+    detail.links = linked.map((property) => {
+      const link = linkOf(element, property)!;
+      return {
+        property,
+        from: link.from,
+        in: link.in,
+        out: link.out,
+        ...(link.easing == null ? {} : { easing: link.easing }),
+        ...(link.extend == null ? {} : { extend: link.extend }),
+        ...(link.offset == null ? {} : { offset: link.offset }),
+      };
+    });
+  }
+
   const animation = (element as any).animation;
   if (canAnimate(element) && animation != null) {
     // Keyframes are *stored* relative to the clip's start and every time in
@@ -603,7 +624,15 @@ export function clipDetail(
             : {}),
         };
       }
-      return { property, active: track.isActivate === true, lanes };
+      return {
+        property,
+        active: track.isActivate === true,
+        lanes,
+        // A driven property's keyframes are kept and do not drive it, so a
+        // row that said only `active: true` would be reporting the field
+        // rather than the picture.
+        ...(linked.includes(property as any) ? { drivenByLink: true } : {}),
+      };
     });
   }
 

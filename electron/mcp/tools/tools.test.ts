@@ -22,6 +22,7 @@ import {
   MASK_SHAPES,
   PRESETS,
   REVEAL_UNITS,
+  LINKABLE,
   SHAPE_GEOMETRY_KINDS,
   STROKE_ALIGNMENTS,
   type Registrar,
@@ -74,6 +75,8 @@ const EXPECTED = [
   "add_keyframes",
   "set_keyframes",
   "remove_keyframes",
+  "set_property_link",
+  "clear_property_link",
   // the reveal
   "apply_typewriter",
   "set_text_reveal",
@@ -282,6 +285,15 @@ describe("every tool is usable as declared", () => {
       "../../../apps/app/src/@types/timeline"
     );
     expect([...SHAPE_GEOMETRY_KINDS].sort()).toEqual([...renderer].sort());
+  });
+
+  it("advertises exactly the properties a link can drive", async () => {
+    // A property offered here and absent there is a link the editor refuses;
+    // one present there and missing here is a link nobody can ask for.
+    const { LINKABLE_PROPERTIES } = await import(
+      "../../../apps/app/src/@types/timeline"
+    );
+    expect([...LINKABLE].sort()).toEqual([...LINKABLE_PROPERTIES].sort());
   });
 
   it("advertises exactly the stroke alignments the renderer draws", async () => {

@@ -50,6 +50,7 @@ import {
   type CubicPoints,
 } from "../../animation/easing";
 import { lanesOf } from "../../animation/keyframes";
+import { isLinkableProperty, linkOf } from "../../animation/link";
 import {
   addKeyframePaired,
   removeKeyframePaired,
@@ -100,6 +101,18 @@ export function animatableRefusal(
   element: TimelineElement,
   property: AnimatableProperty,
 ): string | null {
+  // A driven property is derived, so authoring keyframes on it would be
+  // writing numbers nothing reads — After Effects greys out an expression-
+  // driven property for the same reason. The existing keyframes are kept, so
+  // clearing the link brings them back.
+  if (isLinkableProperty(property) && linkOf(element, property) != null) {
+    return (
+      `"${property}" on that clip is driven by a link, so keyframes on it would ` +
+      "not be read. Clear it with clear_property_link first; its existing " +
+      "keyframes are still there and will drive it again."
+    );
+  }
+
   const available = animatableProperties(element);
   if (available.length === 0) {
     return (

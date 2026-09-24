@@ -12,6 +12,7 @@ import { requestEditor } from "../bridge";
 import {
   animatableProperty,
   EASINGS,
+  LINKABLE,
   PRESETS,
   mutating,
   tool,
@@ -226,4 +227,80 @@ export function registerAnimationTools(define: Registrar) {
     tool((args) => requestEditor("remove_keyframes", args)),
   );
 
+  define(
+    "set_property_link",
+    {
+      title: "Drive a property from another clip's property",
+      description:
+        "Make one property **derive** from another — the place an expression would go, as data. " +
+        "`in`/`out` are matching stops: the source value is found in `in` and the answer read off `out`, " +
+        "interpolated between. Outside the stops it holds the end value unless `extend` says otherwise. " +
+        "**This is what a card wheel is.** Turn a null, then link each card's opacity and scale to the " +
+        "null's rotation with `in: [-90, 0, 90], out: [0, 100, 0]`, and give each card its own phase " +
+        "through `offsets` — one offset per id, added to the source before the map. One call for the row. " +
+        "The difference from computing keyframes yourself is what happens next: move the null and " +
+        "everything derived from it follows. " +
+        "A driven property is **read-only** — its keyframes are kept but stop driving it, and " +
+        "add_keyframes and update_clip refuse it until clear_property_link. " +
+        "`size` and `volumeDb` cannot be driven; the error says why. Units are the property's own, so " +
+        "scale is in tenths and opacity is 0-100.",
+      inputSchema: {
+        elementIds: z.array(z.string()).min(1),
+        property: z.enum(LINKABLE).describe("The property to drive."),
+        fromElementId: z.string().describe("The clip to read from."),
+        fromProperty: animatableProperty.describe("The property to read."),
+        fromLane: z
+          .enum(["x", "y"])
+          .optional()
+          .describe("Which lane of a paired source property. Defaults to x."),
+        in: z
+          .array(z.number())
+          .min(2)
+          .max(16)
+          .describe("Source values, strictly ascending."),
+        out: z
+          .array(z.number())
+          .min(2)
+          .max(16)
+          .describe("What each `in` stop maps to. Same count."),
+        easing: z
+          .enum(EASINGS)
+          .optional()
+          .describe("Shapes each segment between two stops. Default linear."),
+        extend: z
+          .enum(["clamp", "extrapolate"])
+          .optional()
+          .describe("Outside the stops: hold the end (default), or keep going."),
+        offsets: z
+          .array(z.number())
+          .optional()
+          .describe(
+            "One per id, in the same order, added to the source before mapping. This is how a row of clips shares one shape.",
+          ),
+      },
+      annotations: mutating,
+    },
+    tool((args) => requestEditor("set_property_link", args)),
+  );
+
+  define(
+    "clear_property_link",
+    {
+      title: "Stop driving a property from another",
+      description:
+        "Remove a link, so the property goes back to its own static value and keyframes — which were " +
+        "kept the whole time it was driven. Omit `property` to remove every link on those clips. " +
+        "Do this before authoring keyframes on a driven property; add_keyframes refuses one while a " +
+        "link is in force rather than writing numbers nothing would read.",
+      inputSchema: {
+        elementIds: z.array(z.string()).min(1),
+        property: z
+          .enum(LINKABLE)
+          .optional()
+          .describe("Omit for every link on the clip."),
+      },
+      annotations: mutating,
+    },
+    tool((args) => requestEditor("clear_property_link", args)),
+  );
 }

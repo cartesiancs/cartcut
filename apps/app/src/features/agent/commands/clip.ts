@@ -21,6 +21,7 @@ import { flatten, rejectionFor, writablePaths } from "./writable";
 import { affectsTextBlock, withFittedTextHeights } from "../../element/textFit";
 import { setTextWithRuns } from "../../timeline/textRunOps";
 import { setClipScale } from "../../timeline/scaleOps";
+import { isLinkableProperty, linkOf } from "../../animation/link";
 
 registerCommands({
   update_clip: (params: { elementId: string; patch: Record<string, any> }) => {
@@ -56,6 +57,28 @@ registerCommands({
 
     if (outOfRange.length > 0) {
       throw new Error(outOfRange.join(" "));
+    }
+
+    // A driven property is derived, so a patch on it would write a number the
+    // renderer does not read. The whole-property paths are what a link covers:
+    // `location.x`/`location.y` for a linked `position`, and the scalars.
+    const drivenPath = writes
+      .map(([path]) => path)
+      .find((path) => {
+        const property =
+          path[0] === "location" ? "position" : (path[0] as string);
+        return (
+          isLinkableProperty(property) && linkOf(element, property) != null
+        );
+      });
+
+    if (drivenPath != null) {
+      const property =
+        drivenPath[0] === "location" ? "position" : drivenPath[0];
+      throw new Error(
+        `${drivenPath.join(".")} is driven by a link on \`${property}\`, so writing it ` +
+          "would have no effect. Clear it with clear_property_link first.",
+      );
     }
 
     // A text clip's box is measured from its text, so anything that changes
