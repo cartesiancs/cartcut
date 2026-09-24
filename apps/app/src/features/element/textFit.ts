@@ -84,9 +84,12 @@ export function fittedHeightWith(
  * sets `font` and `letterSpacing` on it every time, so nothing carries over,
  * and creating an element per keystroke is pure garbage. `rasterizeText.ts`
  * uses the same probe idea for the same reason.
+ *
+ * Exported for `measure_text`, which needs a context for exactly this and must
+ * not open a second canvas to get one.
  */
 let probe: HTMLCanvasElement | null = null;
-function probeContext(): CanvasRenderingContext2D | null {
+export function probeContext(): CanvasRenderingContext2D | null {
   if (typeof document === "undefined") {
     return null;
   }

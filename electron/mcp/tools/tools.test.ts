@@ -57,6 +57,7 @@ const EXPECTED = [
   "add_text",
   "update_clip",
   "set_text_font",
+  "measure_text",
   "set_text_range_style",
   "clear_text_range_style",
   "rasterize_text",

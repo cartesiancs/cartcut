@@ -8,6 +8,7 @@ import {
   BLEND_MODES,
   Z_ORDER_NOTE,
   mutating,
+  readOnly,
   subtitleStyle,
   tool,
   type Registrar,
@@ -132,6 +133,57 @@ export function registerTextTools(define: Registrar) {
       annotations: mutating,
     },
     tool((args) => requestEditor("set_text_font", args)),
+  );
+
+  define(
+    "measure_text",
+    {
+      title: "Measure text without rendering it",
+      description:
+        "What a text clip's type actually comes out as: per-line widths, the block's box, the baselines, " +
+        "and **`capHeight` beside `emSize`**. " +
+        "That pair is the point. `fontsize` is the em size and reaches the canvas untouched; the letters " +
+        "you measure on screen are the ink, and for a Latin face the capitals are about three quarters of " +
+        "the em — ask for 57 and a ruler finds roughly 43. So size type by dividing, not by rendering and " +
+        "comparing. Everything is in **project pixels**; the preview is drawn scaled to fit its panel, so " +
+        "pixels counted on a screenshot are neither number. " +
+        "Pass `elementId` for a clip as it stands, and any style field beside it to ask what it *would* be " +
+        "— `{elementId, fontsize: 80}` answers without writing anything. Pass `text` and a style instead " +
+        "for a clip that does not exist yet. " +
+        "`ranges` gives the on-canvas rectangles of named stretches, for lining something up against a word.",
+      inputSchema: {
+        elementId: z
+          .string()
+          .optional()
+          .describe("Measure this clip. Style fields below override it."),
+        text: z.string().optional(),
+        fontsize: z.number().min(1).max(2000).optional(),
+        fontname: z.string().optional().describe("The family, as list_fonts names it."),
+        fontweight: z.number().int().min(100).max(900).optional(),
+        bold: z.boolean().optional(),
+        italic: z.boolean().optional(),
+        letterSpacing: z.number().optional(),
+        lineHeight: z
+          .number()
+          .min(0.5)
+          .max(4)
+          .optional()
+          .describe("Leading, as a multiple of the font size. Default 1.2."),
+        width: z.number().min(1).optional().describe("The wrap box. Defaults to the clip's."),
+        ranges: z
+          .array(
+            z.object({
+              match: z.string().optional(),
+              occurrence: z.number().int().min(1).optional(),
+              from: z.number().int().min(0).optional(),
+              to: z.number().int().min(0).optional(),
+            }),
+          )
+          .optional(),
+      },
+      annotations: readOnly,
+    },
+    tool((args) => requestEditor("measure_text", args)),
   );
 
   define(

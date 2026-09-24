@@ -484,6 +484,84 @@ export function measureTextBlock(
 }
 
 /**
+ * Everything measurable about a text block, in the element's own space.
+ *
+ * `measureTextBlock` answers the three numbers `textFit` and rasterisation
+ * need. This answers the ones a caller outside the editor needs in order to
+ * lay type out without rendering it and looking: the widths, and — the whole
+ * reason this exists — `capHeight` next to `emSize`.
+ *
+ * **`fontsize` is the em size, and it is not what you measure in a screenshot.**
+ * It goes into `ctx.font` verbatim; nothing scales it. What a ruler finds on
+ * screen is the ink, and for a Latin face the capitals are roughly three
+ * quarters of the em — 57px of type measures about 43px of capital. Reporting
+ * both is what turns "the size I asked for is wrong" into one division.
+ */
+export type TextBlockMetrics = {
+  lines: Array<{
+    text: string;
+    /** Where `text[0]` sits in the element's own string. */
+    at: number;
+    width: number;
+    ascent: number;
+    descent: number;
+  }>;
+  /** The widest line. The wrap box is `element.width`, which can be wider. */
+  blockWidth: number;
+  blockHeight: number;
+  firstBaseline: number;
+  /** Baseline to baseline, averaged over the block. */
+  lineAdvance: number;
+  /** The number in `fontsize`, echoed so the two can be compared. */
+  emSize: number;
+  /** Cap height: the ink a capital H covers above the baseline. */
+  capHeight: number;
+};
+
+/**
+ * Measure a block without drawing it.
+ *
+ * Goes through `layoutFor`, so it wraps, transforms case and honours per-range
+ * styling exactly as the draw does — the same guarantee `measureTextBlock`
+ * gives rasterisation, for the same reason.
+ */
+export function measureTextDetail(
+  ctx: CanvasRenderingContext2D,
+  textElement: TextElementType,
+): TextBlockMetrics {
+  const { lines, baselines, firstBaseline, advance, fontDescent } = layoutFor(
+    ctx,
+    textElement,
+  );
+
+  // `layoutFor` leaves `ctx.font` on the element's own face, so this asks the
+  // face the block is set in rather than whatever a run last measured.
+  const capAscent = ctx.measureText("H").actualBoundingBoxAscent;
+
+  return {
+    lines: lines.map((wrapped) => ({
+      text: wrapped.line,
+      at: wrapped.at,
+      width: wrapped.width,
+      ascent: wrapped.ascent,
+      descent: wrapped.descent,
+    })),
+    blockWidth: lines.reduce((widest, line) => Math.max(widest, line.width), 0),
+    blockHeight: baselines[baselines.length - 1] + fontDescent,
+    firstBaseline,
+    lineAdvance: advance,
+    emSize: textElement.fontsize,
+    capHeight:
+      Number.isFinite(capAscent) && capAscent > 0
+        ? capAscent
+        : // No metrics to ask — a host that reports nothing for the ink box.
+          // Three quarters of the em is the ratio the common Latin faces sit
+          // at, and it is better than reporting the em as if it were the ink.
+          textElement.fontsize * 0.75,
+  };
+}
+
+/**
  * One line's band, in the element's own space.
  *
  * A named shape because two passes need it and they run at different times: the
