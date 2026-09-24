@@ -3,25 +3,24 @@ import { appendSubpath } from "../mask/draw";
 import { roundCornersEach } from "../mask/round";
 import { shapeGeometryOf } from "../shape/shapeGeometry";
 import { outlineInBox, radiusAtOf } from "../shape/shapeOutline";
+import { paintDecoration, type ClipOutline } from "./decoration";
 import type { ElementRenderFunction } from "./type";
 
 /**
- * A shape's fill.
+ * A shape's fill, and its border and drop shadow when it has them.
  *
- * Two paths, and which one runs is decided by whether the clip has a recipe.
+ * Two ways a shape is authored, and `shapeOutlineOf` below decides which:
  *
  *  - **No recipe** is every shape made before recipes existed and every polygon
- *    clicked out by hand: the stored point list, straight segments, exactly as
- *    it has always drawn. Not one line of it changed.
+ *    clicked out by hand: the stored point list, straight segments.
  *  - **A recipe** generates the outline instead, as cubics, so a corner can be
  *    rounded and an ellipse can be a real ellipse rather than a fifty-sided
  *    approximation of one.
  *
- * The recipe path draws in the **drawn box** rather than the authoring one, and
- * that is the whole reason the corner radius is in drawn pixels: the outline is
- * built at the size it will appear, so rounding happens after the stretch and a
- * 400 by 50 rectangle gets circular corners instead of elliptical ones. It is
- * the order `mask/place.ts` states, for the same reason.
+ * Both now produce a *tracer* rather than drawing, because a decorated shape
+ * needs the same path several times: once for the shadow's silhouette, once
+ * for the fill, once or twice more for the stroke. An undecorated shape takes
+ * the same single fill it always did.
  */
 export const renderShape: ElementRenderFunction<ShapeElementType> = (
   ctx,
@@ -29,37 +28,68 @@ export const renderShape: ElementRenderFunction<ShapeElementType> = (
   shapeElement,
   timelineCursor,
 ) => {
-  const { shape, option } = shapeElement;
+  const outline = shapeOutlineOf(shapeElement);
 
   // Once, not once per point. Inside the loop it was never set at all for a
   // shape with no points, leaving the fill to whatever the last element used.
-  ctx.fillStyle = option.fillColor;
+  ctx.fillStyle = shapeElement.option.fillColor;
 
-  const geometry = shapeGeometryOf(shapeElement);
-  if (geometry != null) {
-    const { width, height } = drawnBox(shapeElement);
+  paintDecoration(ctx, shapeElement, outline, () => {
     ctx.beginPath();
-    for (const nodes of outlineInBox(geometry, { width, height })) {
-      appendSubpath(ctx, roundCornersEach(nodes, radiusAtOf(geometry, nodes.length)));
-    }
+    outline.trace(ctx);
     // The default nonzero rule, so a reversed inner ring is a hole. Asking for
     // `"evenodd"` would also change what a self-intersecting outline fills.
     ctx.fill();
-    return;
-  }
-
-  const { sx, sy } = shapeDrawScale(shapeElement);
-
-  ctx.beginPath();
-
-  for (let index = 0; index < shape.length; index++) {
-    const point = shape[index];
-    ctx.lineTo(point[0] * sx, point[1] * sy);
-  }
-
-  ctx.closePath();
-  ctx.fill();
+  });
 };
+
+/**
+ * The clip's outline, whichever way it is authored.
+ *
+ * The two branches used to end in a `ctx.fill()` each; they now hand back a
+ * tracer instead, because a border and a drop shadow need the same path two or
+ * three more times and re-deriving it per pass is how the fill and its border
+ * come to disagree about where the shape is.
+ *
+ * The recipe path draws in the **drawn box** rather than the authoring one,
+ * which is why the corner radius is in drawn pixels: the outline is built at
+ * the size it will appear, so rounding happens after the stretch and a 400 by
+ * 50 rectangle gets circular corners instead of elliptical ones. It is the
+ * order `mask/place.ts` states, for the same reason.
+ */
+export function shapeOutlineOf(shapeElement: ShapeElementType): ClipOutline {
+  const geometry = shapeGeometryOf(shapeElement);
+
+  if (geometry != null) {
+    const { width, height } = drawnBox(shapeElement);
+    const subpaths = outlineInBox(geometry, { width, height });
+    return {
+      trace: (target) => {
+        for (const nodes of subpaths) {
+          appendSubpath(
+            target,
+            roundCornersEach(nodes, radiusAtOf(geometry, nodes.length)),
+          );
+        }
+      },
+    };
+  }
+
+  // Every shape made before recipes existed and every polygon clicked out by
+  // hand: the stored point list, straight segments, exactly as it has always
+  // drawn.
+  const { shape } = shapeElement;
+  const { sx, sy } = shapeDrawScale(shapeElement);
+  return {
+    trace: (target) => {
+      for (let index = 0; index < shape.length; index++) {
+        const point = shape[index];
+        target.lineTo(point[0] * sx, point[1] * sy);
+      }
+      target.closePath();
+    },
+  };
+}
 
 /**
  * The box a recipe is generated into: the size the clip is actually drawn at.

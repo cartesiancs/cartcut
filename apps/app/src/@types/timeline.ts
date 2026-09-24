@@ -192,6 +192,75 @@ type Mirrorable = {
 
 /**
 /**
+ * A drop shadow cast by a clip's own silhouette.
+ *
+ * The same shape as `TextShadow` and for the same reasons, said once for the
+ * clips that are not text. `offsetX`/`offsetY`/`blur` are in **element space**,
+ * not device pixels: the canvas shadow API is device-space and untouched by the
+ * transform, so `renderer/shadow.ts#paintShadowOnly` pushes these through the
+ * current matrix — which is what keeps a shadow identical in a zoomed preview
+ * and in the export, and what makes it rotate and scale with the clip.
+ *
+ * `TextShadow` is deliberately left as its own type rather than aliased to
+ * this. It lives at `options.shadow` on a text element and this lives at
+ * `shadow`; merging the two declarations would suggest the two paths are one
+ * and invite a writer to reach for the wrong one.
+ */
+export type ClipShadow = {
+  enable: boolean;
+  offsetX: number;
+  offsetY: number;
+  blur: number;
+  color: string;
+  /** 0-100. Folded into the shadow colour rather than `globalAlpha`. */
+  opacity: number;
+};
+
+/**
+ * How a clip's outline is drawn.
+ *
+ * `width` is in **element space**, so a stroke grows with the clip the way its
+ * picture does — the convention `ClipShadow` keeps, and the one that makes a
+ * bordered card look the same at any scale.
+ *
+ * `align` exists because the canvas only strokes centred: half the line falls
+ * inside the shape and half outside. Design tools offer all three and the
+ * difference is visible at any useful width, so `renderer/decoration.ts` builds
+ * the other two out of a clip region rather than pretending centred is enough.
+ */
+export type ClipStroke = {
+  enable: boolean;
+  width: number;
+  color: string;
+  /** 0-100. Folded into the stroke colour, as the shadow's is. */
+  opacity: number;
+  align: "inner" | "center" | "outer";
+};
+
+/** How a stroke sits against the outline it traces. */
+export const STROKE_ALIGNMENTS = ["inner", "center", "outer"] as const;
+
+export type StrokeAlignment = (typeof STROKE_ALIGNMENTS)[number];
+
+/**
+ * A clip that can carry a border and a drop shadow.
+ *
+ * Shape, image and video — the three that draw a picture inside a box. Text has
+ * its own pair under `options`, which predates this and is richer (it strokes
+ * the glyphs, not the box); a group paints nothing, and a gif is left out for
+ * now because its frames are drawn through a separate path.
+ *
+ * Absent means neither, and clearing deletes the key, so a project nobody has
+ * decorated saves byte-identically to one written before the feature and
+ * `SCHEMA_VERSION` did not move. The rule `blend`, `lut`, `mask` and `mirror`
+ * all follow. Read through `features/renderer/decoration.ts`'s `strokeOf` and
+ * `shadowOf`, never directly.
+ */
+type Decorated = {
+  stroke?: ClipStroke;
+  shadow?: ClipShadow;
+};
+
 /**
  * The part of the source frame a clip shows.
  *
@@ -674,6 +743,7 @@ export type ImageElementType = TimelinePlaced &
   Mirrorable &
   Croppable &
   Maskable &
+  Decorated &
   Replaceable & {
     filetype: "image";
   };
@@ -785,6 +855,7 @@ export type VideoElementType = TimelinePlaced &
   Mirrorable &
   Croppable &
   Maskable &
+  Decorated &
   Replaceable & {
     filetype: "video";
     /**

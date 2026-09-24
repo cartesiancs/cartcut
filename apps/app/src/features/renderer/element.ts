@@ -12,6 +12,7 @@ import {
   type TransformMemo,
 } from "../timeline/transform";
 import { blendOf, DEFAULT_BLEND, isBlendIsolating } from "./blend";
+import { isDecorated } from "./decoration";
 import { renderControlOutline } from "./controlOutline";
 import { adjustToneFor, applyFinish, finishRenderFor } from "./adjust/apply";
 import { applyLutGrade, lutGradeFor } from "./lut/apply";
@@ -207,6 +208,12 @@ export function renderElement<T extends VisualTimelineElement>(
    */
   const backdrop = context?.isolated === true ? null : backdropOf(ctx);
 
+  // Deliberately *not* suspended inside a transition, for the reason the mask
+  // and the grade are not: a border is a property of the clip, and a card that
+  // lost its border for the length of a dissolve would read as a bug rather
+  // than as a compositing decision.
+  const decorated = isDecorated(element);
+
   // The path every clip took before blend modes existed, and the one almost
   // every clip still takes. Byte-for-byte what it was: no layer is allocated,
   // no extra blit is issued, and `golden.test.ts`'s digests are the proof.
@@ -215,7 +222,12 @@ export function renderElement<T extends VisualTimelineElement>(
     grade == null &&
     tone == null &&
     finish == null &&
-    mask == null
+    mask == null &&
+    // A border or a drop shadow makes the clip several overlapping draws, which
+    // is the one thing this path cannot be exact for — the same reason text has
+    // always needed isolation. An *undecorated* clip is unaffected, which is
+    // what keeps `golden.test.ts`'s digests where they are.
+    !decorated
   ) {
     drawDirect(
       ctx,
@@ -304,8 +316,15 @@ export function renderElement<T extends VisualTimelineElement>(
   } else {
     // No surface to isolate onto — a host with no `document` and no factory
     // installed. Set the mode and draw straight through: exact for the element
-    // types that issue a single `drawImage` or a single `fill`, which is all of
-    // them except text, and never a blank frame.
+    // types that issue a single `drawImage` or a single `fill`, and never a
+    // blank frame.
+    //
+    // Text has never been in that set, and a **decorated** shape, image or
+    // video is no longer either: a shadow pass, the picture and a stroke are
+    // three draws, so under a non-`source-over` blend each blends against the
+    // one before it. The picture still lands; only the compositing of the
+    // decoration against it is approximate, which is the same bargain text has
+    // always taken here.
     //
     // A grade is simply lost here rather than approximated. There is nowhere to
     // read the clip's pixels back from without also reading the scene under it,

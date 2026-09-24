@@ -23,6 +23,7 @@ import {
   PRESETS,
   REVEAL_UNITS,
   SHAPE_GEOMETRY_KINDS,
+  STROKE_ALIGNMENTS,
   type Registrar,
   type ToolConfig,
 } from "./define";
@@ -97,6 +98,7 @@ const EXPECTED = [
   // masking
   "set_mask",
   "set_shape",
+  "set_clip_decoration",
   // groups
   "create_null",
   "group_clips",
@@ -280,6 +282,16 @@ describe("every tool is usable as declared", () => {
       "../../../apps/app/src/@types/timeline"
     );
     expect([...SHAPE_GEOMETRY_KINDS].sort()).toEqual([...renderer].sort());
+  });
+
+  it("advertises exactly the stroke alignments the renderer draws", async () => {
+    // `renderer/decoration.ts` builds `inner` and `outer` out of a clip region
+    // and falls back to `center` for anything it does not recognise, so an
+    // alignment offered here and absent there would silently centre.
+    const { STROKE_ALIGNMENTS: renderer } = await import(
+      "../../../apps/app/src/@types/timeline"
+    );
+    expect([...STROKE_ALIGNMENTS].sort()).toEqual([...renderer].sort());
   });
 
   it("advertises exactly the colour adjustments a clip can carry", async () => {

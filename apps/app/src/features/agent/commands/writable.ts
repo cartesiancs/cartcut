@@ -102,8 +102,57 @@ const WRITABLE: Record<string, string[][]> = {
     ["fill", "to"],
     ["fill", "angle"],
   ],
-  shape: [["option", "fillColor"]],
-  video: [["filter", "enable"], ["volumeDb"]],
+  shape: [
+    ["option", "fillColor"],
+    // A border and a drop shadow, as leaves: `flatten` recurses into a nested
+    // patch, so a `["stroke"]` entry would never match anything it produces.
+    // `set_clip_decoration` is the multi-clip form.
+    ["stroke", "enable"],
+    ["stroke", "width"],
+    ["stroke", "color"],
+    ["stroke", "opacity"],
+    ["stroke", "align"],
+    ["shadow", "enable"],
+    ["shadow", "offsetX"],
+    ["shadow", "offsetY"],
+    ["shadow", "blur"],
+    ["shadow", "color"],
+    ["shadow", "opacity"],
+  ],
+  image: [
+    // A border and a drop shadow, as leaves: `flatten` recurses into a nested
+    // patch, so a `["stroke"]` entry would never match anything it produces.
+    // `set_clip_decoration` is the multi-clip form.
+    ["stroke", "enable"],
+    ["stroke", "width"],
+    ["stroke", "color"],
+    ["stroke", "opacity"],
+    ["stroke", "align"],
+    ["shadow", "enable"],
+    ["shadow", "offsetX"],
+    ["shadow", "offsetY"],
+    ["shadow", "blur"],
+    ["shadow", "color"],
+    ["shadow", "opacity"],
+  ],
+  video: [
+    ["filter", "enable"],
+    ["volumeDb"],
+    // A border and a drop shadow, as leaves: `flatten` recurses into a nested
+    // patch, so a `["stroke"]` entry would never match anything it produces.
+    // `set_clip_decoration` is the multi-clip form.
+    ["stroke", "enable"],
+    ["stroke", "width"],
+    ["stroke", "color"],
+    ["stroke", "opacity"],
+    ["stroke", "align"],
+    ["shadow", "enable"],
+    ["shadow", "offsetX"],
+    ["shadow", "offsetY"],
+    ["shadow", "blur"],
+    ["shadow", "color"],
+    ["shadow", "opacity"],
+  ],
   audio: [["volumeDb"]],
   group: [["name"]],
 };
@@ -148,6 +197,15 @@ export const RANGES: Record<string, { min?: number; max?: number }> = {
   // is told the bound learns something, where a mouse drag cannot be told
   // anything and so is clamped in `setVolumeDb` instead.
   volumeDb: { min: -60, max: 0 },
+  // The border and the drop shadow, in element-space pixels so they scale with
+  // the clip. Mirrored from `renderer/decoration.ts`'s own constants.
+  "stroke.width": { min: 0, max: 500 },
+  "stroke.opacity": { min: 0, max: 100 },
+  "shadow.offsetX": { min: -1000, max: 1000 },
+  "shadow.offsetY": { min: -1000, max: 1000 },
+  // Canvas throws on a negative `shadowBlur`, so this bound is not cosmetic.
+  "shadow.blur": { min: 0, max: 500 },
+  "shadow.opacity": { min: 0, max: 100 },
 };
 
 /** Values that must be one of a fixed set. */
@@ -155,6 +213,7 @@ export const ENUMS: Record<string, readonly string[]> = {
   "options.align": ["left", "center", "right"],
   "options.textTransform": ["none", "uppercase", "lowercase"],
   "fill.type": ["solid", "gradient"],
+  "stroke.align": ["inner", "center", "outer"],
 };
 
 export function writablePaths(element: TimelineElement): string[][] {
