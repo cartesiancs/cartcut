@@ -71,6 +71,7 @@ const EXPECTED = [
   "apply_animation_preset",
   "set_animation",
   "add_keyframes",
+  "set_keyframes",
   "remove_keyframes",
   // the reveal
   "apply_typewriter",

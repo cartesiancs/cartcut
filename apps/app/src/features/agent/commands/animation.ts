@@ -35,17 +35,10 @@ import {
   type TimelineElement,
 } from "../../../@types/timeline";
 import {
-  addKeyframePaired,
   removeKeyframePaired,
-  setHandles,
   setTrackActive,
 } from "../../animation/keyframeOps";
-import {
-  easingNames,
-  projectEasing,
-  resolveEasing,
-  type CubicPoints,
-} from "../../animation/easing";
+
 import { lanesOf } from "../../animation/keyframes";
 import {
   applyPreset,
@@ -67,119 +60,22 @@ import {
   requireElement,
 } from "../context";
 import { registerCommands } from "../registry";
-
-/** How near a stored keyframe a requested time has to be to mean "that one". */
-const MATCH_TOLERANCE_MS = 2;
-
-/** The keyframe in `lane` sitting at `atMs`, by index, or -1. */
-function indexAt(
-  doc: TimelineDocument,
-  elementId: string,
-  property: AnimatableProperty,
-  lane: string,
-  atMs: number,
-): number {
-  const list = (doc.elements[elementId] as any)?.animation?.[property]?.[lane];
-  if (!Array.isArray(list)) {
-    return -1;
-  }
-  return list.findIndex(
-    (keyframe: any) =>
-      Math.abs((keyframe?.p?.[0] ?? 0) - atMs) <= MATCH_TOLERANCE_MS,
-  );
-}
-
-/**
- * Shape one segment with `curve`, on every lane the property has.
- *
- * The two anchors are looked up by time rather than carried from the write,
- * because `addKeyframe` may have merged onto an existing keyframe and the
- * *stored* value is the one the curve has to be projected against. Projecting
- * against the requested value would put the handles on a segment that is not
- * the one being drawn.
- *
- * `position` gets the same curve on both lanes: a single easing describes how
- * the move feels, and giving x and y different shapes would bend the path.
- */
-function applyEasing(
-  doc: TimelineDocument,
-  elementId: string,
-  property: AnimatableProperty,
-  lanes: string[],
-  fromMs: number,
-  toMs: number,
-  curve: CubicPoints,
-  bakeHz: number,
-): TimelineDocument {
-  let next = doc;
-
-  for (const lane of lanes) {
-    const fromIndex = indexAt(next, elementId, property, lane, fromMs);
-    const toIndex = indexAt(next, elementId, property, lane, toMs);
-    if (fromIndex < 0 || toIndex < 0 || toIndex !== fromIndex + 1) {
-      // Not adjacent — something else sits between them, so this is not the
-      // segment the caller described. Leaving it alone is the honest answer.
-      continue;
-    }
-
-    const list = (next.elements[elementId] as any).animation[property][lane];
-    const { ce, cs } = projectEasing(
-      curve,
-      { atMs: list[fromIndex].p[0], value: list[fromIndex].p[1] },
-      { atMs: list[toIndex].p[0], value: list[toIndex].p[1] },
-    );
-
-    next = setHandles(
-      next,
-      elementId,
-      property,
-      lane as any,
-      fromIndex,
-      { ce },
-      bakeHz,
-    );
-    next = setHandles(
-      next,
-      elementId,
-      property,
-      lane as any,
-      toIndex,
-      { cs },
-      bakeHz,
-    );
-  }
-
-  return next;
-}
+import {
+  MATCH_TOLERANCE_MS,
+  animatableRefusal,
+  applyWrites,
+  clearTrack,
+  prepareWrites,
+} from "./keyframeWrites";
 
 function requireAnimatable(
   element: TimelineElement,
-  elementId: string,
+  _elementId: string,
   property: AnimatableProperty,
 ): void {
-  const available = animatableProperties(element);
-  if (available.length === 0) {
-    throw new Error(
-      `A ${element.filetype} clip carries no animation. Animatable types: video, image, text, shape, group and audio.`,
-    );
-  }
-  if (!available.includes(property)) {
-    /*
-     * The one case the tool list advertises and nothing could reach. The MCP
-     * `ANIMATABLE` enum carries `revealProgress`, so the schema accepts it, but
-     * `animatableProperties` only offers it once the clip has a `reveal` to
-     * progress through. Without this the answer names five properties and none
-     * of the two tools that would fix it.
-     */
-    if (property === "revealProgress" && element.filetype === "text") {
-      throw new Error(
-        'A text clip can animate "revealProgress" only once it has a reveal. ' +
-          "Give it one with set_text_reveal, or use apply_typewriter to write the whole move at once.",
-      );
-    }
-    throw new Error(
-      `A ${element.filetype} clip cannot animate "${property}". It supports: ${available.join(", ")}.`,
-    );
+  const refusal = animatableRefusal(element, property);
+  if (refusal != null) {
+    throw new Error(refusal);
   }
 }
 
@@ -328,115 +224,74 @@ registerCommands({
       easing?: unknown;
     }>;
   }) => {
+    // The one-track shape of `set_keyframes`, kept because every saved prompt
+    // and skill that authors a single move names it.
     const doc = currentDoc();
-    const element = requireElement(doc, params.elementId);
-    requireAnimatable(element, params.elementId, params.property);
+    const prepared = prepareWrites(
+      doc,
+      [
+        {
+          elementId: params.elementId,
+          property: params.property,
+          keyframes: params.keyframes ?? [],
+        },
+      ],
+      (id) => requireElement(doc, id),
+    );
+    const bakeHz = projectBakeHz();
 
-    const entries = params.keyframes ?? [];
-    if (entries.length === 0) {
-      throw new Error("add_keyframes needs at least one entry in `keyframes`.");
+    return commit(
+      (d: TimelineDocument) => applyWrites(d, prepared, bakeHz),
+      "Those keyframes are already there.",
+    );
+  },
+
+  set_keyframes: (params: {
+    writes: Array<{
+      elementId: string;
+      property: AnimatableProperty;
+      keyframes: Array<{
+        atMs: number;
+        value?: number;
+        x?: number;
+        y?: number;
+        easing?: unknown;
+      }>;
+      replace?: boolean;
+    }>;
+  }) => {
+    const doc = currentDoc();
+    const writes = params.writes ?? [];
+    if (writes.length === 0) {
+      throw new Error("set_keyframes needs at least one entry in `writes`.");
     }
 
-    const lanes = lanesOf(params.property);
-    const paired = lanes.length > 1;
+    // Every write validated against the document as it stands, before any of
+    // them is applied. One bad time refuses the batch rather than leaving half
+    // an edit with an undo step already recorded.
+    const prepared = prepareWrites(
+      doc,
+      writes,
+      (id) => requireElement(doc, id),
+      (index) => `writes[${index}]`,
+    );
 
-    // Validated and converted up front, so a batch with one bad entry throws
-    // before anything is written rather than half-applying.
-    const writes = entries.map((entry) => {
-      const at = localTime(element, entry.atMs);
-
-      // An unknown easing is refused rather than quietly falling back to the
-      // default: a caller that asked for a snap and silently got the soft
-      // default has no way to tell, and the whole point of the parameter is
-      // that the default is too soft.
-      const curve =
-        entry.easing == null ? null : resolveEasing(entry.easing);
-      if (entry.easing != null && curve == null) {
-        throw new Error(
-          `"${String(entry.easing)}" is not an easing. Named: ${easingNames().join(", ")}. ` +
-            `Or pass [x1, y1, x2, y2] control points, as CSS writes them.`,
-        );
-      }
-
-      if (paired) {
-        if (typeof entry.x !== "number" || typeof entry.y !== "number") {
-          throw new Error(
-            `"${params.property}" needs both \`x\` and \`y\` on every keyframe.`,
-          );
-        }
-        return { at, curve, values: { x: entry.x, y: entry.y } };
-      }
-
-      if (typeof entry.value !== "number" || !Number.isFinite(entry.value)) {
-        throw new Error(
-          `"${params.property}" needs a numeric \`value\` on every keyframe.` +
-            (params.property === "scale"
-              ? " Scale is in tenths: 10 is unscaled, 12 is 120%."
-              : ""),
-        );
-      }
-      return {
-        at,
-        curve,
-        values: { x: entry.value } as Record<string, number>,
-      };
-    });
+    const cleared = writes
+      .map((write, index) => (write.replace === true ? prepared[index] : null))
+      .filter((write): write is NonNullable<typeof write> => write != null);
 
     const bakeHz = projectBakeHz();
 
     return commit((d: TimelineDocument) => {
-      // Activating first: keyframes on an inactive track exist but drive
-      // nothing, which reads to an agent as a silent failure.
-      let next = setTrackActive(
+      // Cleared first, all of them, then written. Interleaving would let a
+      // later `replace` wipe a track an earlier write in the same batch had
+      // just authored, which is never what listing two writes on one track
+      // means.
+      let next = cleared.reduce(
+        (doc2, write) => clearTrack(doc2, write.elementId, write.property, bakeHz),
         d,
-        params.elementId,
-        params.property,
-        true,
-        { atMs: writes[0].at },
-        bakeHz,
       );
-
-      for (const write of writes) {
-        for (const lane of lanes) {
-          const value = write.values[lane];
-          if (typeof value !== "number") {
-            continue;
-          }
-          next = addKeyframePaired(
-            next,
-            params.elementId,
-            params.property,
-            lane,
-            write.at,
-            value,
-            undefined,
-            bakeHz,
-          );
-        }
-      }
-
-      // Easing is applied second, and it has to be: a curve is a property of
-      // the *segment*, so projecting it needs both anchors to exist and to hold
-      // their final values. Doing it inside the add loop would project onto a
-      // neighbour that had not been written yet.
-      for (let index = 0; index < writes.length - 1; index++) {
-        const curve = writes[index].curve;
-        if (curve == null) {
-          continue;
-        }
-        next = applyEasing(
-          next,
-          params.elementId,
-          params.property,
-          lanes,
-          writes[index].at,
-          writes[index + 1].at,
-          curve,
-          bakeHz,
-        );
-      }
-
-      return next;
+      return applyWrites(next, prepared, bakeHz);
     }, "Those keyframes are already there.");
   },
 

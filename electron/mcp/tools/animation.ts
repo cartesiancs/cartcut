@@ -161,6 +161,55 @@ export function registerAnimationTools(define: Registrar) {
   );
 
   define(
+    "set_keyframes",
+    {
+      title: "Add keyframes to many clips and properties at once",
+      description:
+        "The batch form of add_keyframes, and the one to reach for past a single move: every clip, every " +
+        "property, **one call and one undo step**. A twelve-card wheel with opacity and scale on each is " +
+        "one call here and twenty-four through add_keyframes. " +
+        "One bad time or easing anywhere refuses the whole batch rather than leaving half an edit. " +
+        "`replace: true` empties that track first, so running the same batch twice does not stack keys. " +
+        "Units: opacity 0-100, rotation deg, **scale in tenths — 10 is unscaled, 12 is 120%**, size in px " +
+        "per axis (the box, not a second scale), mask position/size in % of the clip. `position`, `size`, " +
+        "`maskPosition` and `maskSize` need `x` and `y` per entry; everything else takes `value`. " +
+        "Times are absolute timeline ms and must fall inside their clip. " +
+        "**Set `easing` or the move will be soft** — with none, keyframes leave and arrive at zero " +
+        "velocity, which reads as drifting. It shapes the segment *leaving* its entry, so the last is " +
+        "ignored. `snap` is a punch-in, `overshoot` passes and returns, `anticipate` winds up first.",
+      inputSchema: {
+        writes: z
+          .array(
+            z.object({
+              elementId: z.string(),
+              property: animatableProperty,
+              keyframes: z
+                .array(
+                  z.object({
+                    atMs: z.number(),
+                    value: z.number().optional(),
+                    x: z.number().optional(),
+                    y: z.number().optional(),
+                    easing: z
+                      .union([z.enum(EASINGS), z.array(z.number()).length(4)])
+                      .optional(),
+                  }),
+                )
+                .min(1),
+              replace: z
+                .boolean()
+                .optional()
+                .describe("Empty this track before writing."),
+            }),
+          )
+          .min(1),
+      },
+      annotations: mutating,
+    },
+    tool((args) => requestEditor("set_keyframes", args)),
+  );
+
+  define(
     "remove_keyframes",
     {
       title: "Remove keyframes",
@@ -176,4 +225,5 @@ export function registerAnimationTools(define: Registrar) {
     },
     tool((args) => requestEditor("remove_keyframes", args)),
   );
+
 }
