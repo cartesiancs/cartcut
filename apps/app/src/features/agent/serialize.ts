@@ -64,6 +64,18 @@ export const TEXT_PREVIEW_CHARS = 80;
 export const MAX_KEYFRAME_TIMES = 100;
 
 /**
+ * Most runs `get_clip` will list.
+ *
+ * The list used to be withheld entirely, on the grounds that runs are
+ * unbounded authored data like a shape's point list. That was true and still
+ * left the agent unable to *read back* the styling it had just written, so a
+ * range edit could only ever be made blind. A run is four small scalars and a
+ * clip with more than this many distinct stretches is a list rather than a
+ * fact, so the cap buys the read back without threatening the output cap.
+ */
+export const MAX_TEXT_RUNS = 20;
+
+/**
  * Most group children `get_clip` will name.
  *
  * A group's membership is worth reporting — it is otherwise only discoverable
@@ -377,11 +389,23 @@ export function clipDetail(
     detail.fill = style.fill;
     detail.textOpacity = style.textOpacity;
     detail.textTransform = style.textTransform;
-    // A count, never the list. The runs are unbounded authored data, like a
-    // shape's point list and a mask's drawn path, and this whitelist exists to
-    // keep those away from the tool-output cap. The number is what tells the
-    // agent that a clip it is about to rewrite has styling it cannot see.
-    detail.runCount = runsOf(element).length;
+    // The count stays exact whatever the list does, so a truncation is visible
+    // rather than silent — the rule the keyframe lanes above follow.
+    const runs = runsOf(element);
+    detail.runCount = runs.length;
+    if (runs.length > 0) {
+      detail.runs = runs.slice(0, MAX_TEXT_RUNS).map((run) => ({
+        from: run.from,
+        to: run.to,
+        // The stretch itself, so the agent can name it back through
+        // `set_text_range_style`'s `match` without counting UTF-16 offsets.
+        text: (element.text ?? "").slice(run.from, run.to),
+        style: run.style,
+      }));
+      if (runs.length > MAX_TEXT_RUNS) {
+        detail.runsTruncated = true;
+      }
+    }
   }
 
   if (element.filetype !== "audio") {

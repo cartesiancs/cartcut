@@ -20,6 +20,7 @@ import "./commands/read";
 import "./commands/edit";
 import "./commands/clip";
 import "./commands/text";
+import "./commands/textRuns";
 import "./commands/meta";
 import "./commands/media";
 import "./commands/tracks";

@@ -111,6 +111,94 @@ export function registerTextTools(define: Registrar) {
   );
 
   define(
+    "set_text_range_style",
+    {
+      title: "Style part of a text clip",
+      description:
+        "Colour, weight, size, slant, font or outline on **one stretch** of a text clip, leaving the rest " +
+        "alone — one word in a headline, a number in a stat card, a name in a quote. " +
+        "Name the stretch with `match`, a substring of the clip's text: exact and case-sensitive, and with " +
+        "no `occurrence` it styles **every** occurrence. `occurrence` is 1-based and picks one. " +
+        "`from`/`to` are accepted instead, but they are UTF-16 code unit offsets and are easy to miscount " +
+        "over emoji and combining marks, so prefer `match`. A `match` that is not in the text is refused. " +
+        "Setting a field to the value the clip already has **stops overriding it** rather than doing " +
+        "nothing, so this is also how you undo one property of a styled range without losing the others. " +
+        "`fontweight` is the 100-900 ladder and only a variable font honours every rung; pass `fontPath` " +
+        "from list_fonts to change the face itself. Use update_clip for the whole clip.",
+      inputSchema: {
+        elementId: z.string(),
+        ranges: z
+          .array(
+            z.object({
+              match: z
+                .string()
+                .optional()
+                .describe("A substring of the clip's text. Exact, case-sensitive."),
+              occurrence: z
+                .number()
+                .int()
+                .min(1)
+                .optional()
+                .describe("Which `match` to style, 1-based. Omit for every one."),
+              from: z.number().int().min(0).optional(),
+              to: z.number().int().min(0).optional(),
+            }),
+          )
+          .min(1),
+        color: z.string().optional().describe('Hex, e.g. "#ff3355".'),
+        fontsize: z.number().min(1).max(2000).optional(),
+        fontweight: z
+          .number()
+          .int()
+          .min(100)
+          .max(900)
+          .optional()
+          .describe("Snapped to the 100-900 ladder."),
+        bold: z.boolean().optional(),
+        italic: z.boolean().optional(),
+        fontPath: z
+          .string()
+          .optional()
+          .describe("A path from list_fonts. Writes the face's name and type with it."),
+        outlineEnable: z.boolean().optional(),
+        outlineSize: z.number().min(0).max(200).optional(),
+        outlineColor: z.string().optional(),
+      },
+      annotations: mutating,
+    },
+    tool((args) => requestEditor("set_text_range_style", args)),
+  );
+
+  define(
+    "clear_text_range_style",
+    {
+      title: "Remove a text clip's per-range style",
+      description:
+        "Take a stretch of a text clip back to the clip's own style, or the whole clip when `ranges` is " +
+        "omitted. Ranges are named the same way set_text_range_style names them: `match` (every occurrence " +
+        "unless `occurrence` says which) or `from`/`to`. " +
+        "This clears every override on the range at once. To stop overriding a single property and keep " +
+        "the others, set that property back to the clip's own value with set_text_range_style instead.",
+      inputSchema: {
+        elementId: z.string(),
+        ranges: z
+          .array(
+            z.object({
+              match: z.string().optional(),
+              occurrence: z.number().int().min(1).optional(),
+              from: z.number().int().min(0).optional(),
+              to: z.number().int().min(0).optional(),
+            }),
+          )
+          .optional()
+          .describe("Omit for the whole clip."),
+      },
+      annotations: mutating,
+    },
+    tool((args) => requestEditor("clear_text_range_style", args)),
+  );
+
+  define(
     "rasterize_text",
     {
       title: "Rasterize text into an image clip",

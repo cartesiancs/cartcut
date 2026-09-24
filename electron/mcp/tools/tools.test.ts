@@ -57,6 +57,8 @@ const EXPECTED = [
   "add_text",
   "update_clip",
   "set_text_font",
+  "set_text_range_style",
+  "clear_text_range_style",
   "rasterize_text",
   "set_blend_mode",
   "set_video_filters",
