@@ -17,6 +17,14 @@
  * Laid out the way `optionShapeSection` is, and for the reason stated there:
  * the inspector column is narrow, and a slider sharing its line with a label
  * and a number box is left about seventy pixels to travel its whole range.
+ *
+ * The rest of the markup follows what the sibling sections already do rather
+ * than inventing a second look: a `form-label` titles a group, a row of
+ * `btn-xxs` buttons is how a closed choice is offered, `aria-event` names an
+ * interactive control, and a colour input scrubs through the gesture instead
+ * of committing on every `input` event. The last of those is not cosmetic —
+ * `optionShapeSection`'s header records that writing a colour straight through
+ * was what made a picker drag cost one undo step per event.
  */
 
 import { LitElement, html, type TemplateResult } from "lit";
@@ -41,10 +49,23 @@ import type { TimelineDocument } from "../timeline/tracks";
 import { GestureCommit } from "./gestureCommit";
 
 /** What each alignment is called, and the order the row offers them. */
+/**
+ * What each alignment is called in the row.
+ *
+ * Short because the column is about 200px and three `btn-xxs` share it, which
+ * is the same reason the reveal section says "Char", "Word", "Line". The full
+ * words are the `title`, where there is room for them.
+ */
 const ALIGN_LABELS: Record<StrokeAlignment, string> = {
-  inner: "Inside",
-  center: "Centre",
-  outer: "Outside",
+  inner: "In",
+  center: "Mid",
+  outer: "Out",
+};
+
+const ALIGN_TITLES: Record<StrokeAlignment, string> = {
+  inner: "Inside the outline",
+  center: "Straddling the outline",
+  outer: "Outside the outline",
 };
 
 type Row = {
@@ -66,21 +87,6 @@ const SHADOW_ROWS: Record<"offsetX" | "offsetY" | "blur" | "opacity", Row> = {
   blur: { label: "Blur", min: 0, max: 200, step: 1, suffix: "px" },
   opacity: { label: "Opacity", min: 0, max: 100, step: 1, suffix: "%" },
 };
-
-const STYLES = `
-  option-decoration-section .decor-range {
-    display: block;
-    width: 100%;
-    height: 1.1rem;
-    padding: 0;
-    margin: 0;
-  }
-  option-decoration-section .decor-swatch {
-    width: 100%;
-    height: 22px;
-    padding: 2px;
-  }
-`;
 
 @customElement("option-decoration-section")
 export class OptionDecorationSection extends LitElement {
@@ -154,23 +160,35 @@ export class OptionDecorationSection extends LitElement {
     this.requestUpdate();
   }
 
-  private renderToggle(
+  /**
+   * A group's title and its on switch on one line.
+   *
+   * The arrangement `optionAdjustSection` uses for a group heading and its
+   * Reset: the name takes the room and the control sits at the end, so two
+   * groups stacked read as two groups rather than as a list of buttons.
+   */
+  private renderHeading(
     label: string,
+    event: string,
     enabled: boolean,
     onToggle: () => void,
   ): TemplateResult {
     return html`
-      <button
-        type="button"
-        class="btn btn-sm w-100 mb-2 ${enabled
-          ? "btn-primary"
-          : "btn-default"} text-light"
-        style="font-size: 11px;"
-        data-decor-toggle=${label}
-        @click=${onToggle}
-      >
-        ${enabled ? "Disable" : "Enable"} ${label}
-      </button>
+      <div class="d-flex flex-row align-items-center gap-1 mb-2">
+        <label class="form-label text-light flex-grow-1 mb-0">${label}</label>
+        <button
+          class="btn btn-xxs ${enabled
+            ? "btn-primary"
+            : "btn-default"} text-light"
+          aria-event=${event}
+          title=${enabled ? `Turn ${label.toLowerCase()} off` : `Turn ${label.toLowerCase()} on`}
+          @click=${onToggle}
+        >
+          <span class="material-symbols-outlined icon-xs">
+            ${enabled ? "visibility" : "visibility_off"}
+          </span>
+        </button>
+      </div>
     `;
   }
 
@@ -211,7 +229,7 @@ export class OptionDecorationSection extends LitElement {
         </div>
         <input
           type="range"
-          class="form-range decor-range mt-1"
+          class="form-range option-range mt-1"
           min=${String(row.min)}
           max=${String(row.max)}
           step=${String(row.step)}
@@ -224,21 +242,31 @@ export class OptionDecorationSection extends LitElement {
     `;
   }
 
+  /**
+   * A colour, scrubbed rather than committed per event.
+   *
+   * The same shape `optionShapeSection` gives Fill Color, and for the reason
+   * its header records: a picker drag fires `input` continuously, so writing
+   * each one through `withCheckpoint` costs an undo step per event and makes
+   * the colour impossible to take back in one press.
+   */
   private renderColor(
     label: string,
+    event: string,
     value: string,
-    onPick: (next: string) => void,
+    onScrub: (next: string) => void,
   ): TemplateResult {
     return html`
       <div class="mb-2">
-        <label class="text-light mb-1 d-block" style="font-size: 11px;">
-          ${label}
-        </label>
+        <label class="form-label text-light">${label}</label>
         <input
           type="color"
-          class="form-control form-control-sm form-control-color bg-default decor-swatch"
+          aria-event=${event}
+          class="form-control bg-default form-control-color"
+          title="Choose your color"
           .value=${value}
-          @input=${(e: Event) => onPick((e.target as HTMLInputElement).value)}
+          @input=${(e: Event) => onScrub((e.target as HTMLInputElement).value)}
+          @change=${this.commit}
         />
       </div>
     `;
@@ -247,57 +275,59 @@ export class OptionDecorationSection extends LitElement {
   private renderStroke(stroke: ClipStroke): TemplateResult {
     const ids = this.targets;
     return html`
-      ${this.renderToggle("Border", stroke.enable, () =>
-        this.write((doc) =>
-          setClipStrokeMany(doc, ids, { enable: !stroke.enable }),
-        ),
-      )}
-      ${stroke.enable
-        ? html`
-            ${this.renderRow(
-              STROKE_ROWS.width,
-              stroke.width,
-              (width) => this.scrubStroke({ width }),
-              (width) =>
-                this.write((doc) => setClipStrokeMany(doc, ids, { width })),
-            )}
-            ${this.renderRow(
-              STROKE_ROWS.opacity,
-              stroke.opacity,
-              (opacity) => this.scrubStroke({ opacity }),
-              (opacity) =>
-                this.write((doc) => setClipStrokeMany(doc, ids, { opacity })),
-            )}
-            ${this.renderColor("Border colour", stroke.color, (color) =>
-              this.write((doc) => setClipStrokeMany(doc, ids, { color })),
-            )}
-            <div class="mb-2">
-              <label class="text-light mb-1 d-block" style="font-size: 11px;">
-                Align
-              </label>
-              <div class="btn-group w-100" role="group">
-                ${STROKE_ALIGNMENTS.map(
-                  (align) => html`
-                    <button
-                      type="button"
-                      class="btn btn-sm ${stroke.align === align
-                        ? "btn-primary"
-                        : "btn-default"} text-light"
-                      style="font-size: 11px;"
-                      data-decor-align=${align}
-                      @click=${() =>
-                        this.write((doc) =>
-                          setClipStrokeMany(doc, ids, { align }),
-                        )}
-                    >
-                      ${ALIGN_LABELS[align]}
-                    </button>
-                  `,
-                )}
+      <div class="mb-3">
+        ${this.renderHeading("Border", "decoration-stroke", stroke.enable, () =>
+          this.write((doc) =>
+            setClipStrokeMany(doc, ids, { enable: !stroke.enable }),
+          ),
+        )}
+        ${stroke.enable
+          ? html`
+              ${this.renderRow(
+                STROKE_ROWS.width,
+                stroke.width,
+                (width) => this.scrubStroke({ width }),
+                (width) =>
+                  this.write((doc) => setClipStrokeMany(doc, ids, { width })),
+              )}
+              ${this.renderRow(
+                STROKE_ROWS.opacity,
+                stroke.opacity,
+                (opacity) => this.scrubStroke({ opacity }),
+                (opacity) =>
+                  this.write((doc) => setClipStrokeMany(doc, ids, { opacity })),
+              )}
+              ${this.renderColor(
+                "Border Color",
+                "decoration-stroke-color",
+                stroke.color,
+                (color) => this.scrubStroke({ color }),
+              )}
+              <div class="mb-2">
+                <label class="form-label text-light">Align</label>
+                <div class="d-flex flex-row gap-1">
+                  ${STROKE_ALIGNMENTS.map(
+                    (align) => html`
+                      <button
+                        class="btn btn-xxs ${stroke.align === align
+                          ? "btn-primary"
+                          : "btn-default"} text-light flex-fill"
+                        aria-event="decoration-align-${align}"
+                        title=${ALIGN_TITLES[align]}
+                        @click=${() =>
+                          this.write((doc) =>
+                            setClipStrokeMany(doc, ids, { align }),
+                          )}
+                      >
+                        ${ALIGN_LABELS[align]}
+                      </button>
+                    `,
+                  )}
+                </div>
               </div>
-            </div>
-          `
-        : ""}
+            `
+          : ""}
+      </div>
     `;
   }
 
@@ -318,20 +348,26 @@ export class OptionDecorationSection extends LitElement {
       );
 
     return html`
-      ${this.renderToggle("Shadow", shadow.enable, () =>
-        this.write((doc) =>
-          setClipShadowMany(doc, ids, { enable: !shadow.enable }),
-        ),
-      )}
-      ${shadow.enable
-        ? html`
-            ${row("offsetX", shadow.offsetX)} ${row("offsetY", shadow.offsetY)}
-            ${row("blur", shadow.blur)} ${row("opacity", shadow.opacity)}
-            ${this.renderColor("Shadow colour", shadow.color, (color) =>
-              this.write((doc) => setClipShadowMany(doc, ids, { color })),
-            )}
-          `
-        : ""}
+      <div class="mb-3">
+        ${this.renderHeading("Shadow", "decoration-shadow", shadow.enable, () =>
+          this.write((doc) =>
+            setClipShadowMany(doc, ids, { enable: !shadow.enable }),
+          ),
+        )}
+        ${shadow.enable
+          ? html`
+              ${row("offsetX", shadow.offsetX)}
+              ${row("offsetY", shadow.offsetY)} ${row("blur", shadow.blur)}
+              ${row("opacity", shadow.opacity)}
+              ${this.renderColor(
+                "Shadow Color",
+                "decoration-shadow-color",
+                shadow.color,
+                (color) => this.scrubShadow({ color }),
+              )}
+            `
+          : ""}
+      </div>
     `;
   }
 
@@ -340,16 +376,6 @@ export class OptionDecorationSection extends LitElement {
       return html``;
     }
     const { stroke, shadow } = this.fields;
-
-    return html`
-      <style>
-        ${STYLES}
-      </style>
-      <hr class="border-secondary" />
-      <span class="text-light mb-2 d-block" style="font-size: 12px;">
-        Border and Shadow
-      </span>
-      ${this.renderStroke(stroke)} ${this.renderShadow(shadow)}
-    `;
+    return html`${this.renderStroke(stroke)}${this.renderShadow(shadow)}`;
   }
 }

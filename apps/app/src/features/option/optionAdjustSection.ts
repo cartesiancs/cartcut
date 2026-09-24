@@ -59,13 +59,6 @@ const TRACK_STYLES = `
   option-adjust-section .adjust-range[data-track="tint"]::-webkit-slider-runnable-track {
     background: linear-gradient(90deg, #3fae4f, #bdbdbd 50%, #c64fc0);
   }
-  option-adjust-section .adjust-range {
-    display: block;
-    width: 100%;
-    height: 1.1rem;
-    padding: 0;
-    margin: 0;
-  }
 `;
 
 @customElement("option-adjust-section")
@@ -192,7 +185,7 @@ export class OptionAdjustSection extends LitElement {
             : ""}
           <input
             type="range"
-            class="form-range adjust-range"
+            class="form-range option-range adjust-range"
             data-track=${coloured ? key : ""}
             min=${String(spec.min)}
             max=${String(spec.max)}

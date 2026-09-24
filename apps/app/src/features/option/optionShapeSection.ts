@@ -83,13 +83,6 @@ const ROW_SPECS: Record<RowKey, RowSpec> = {
 };
 
 const STYLES = `
-  option-shape-section .shape-range {
-    display: block;
-    width: 100%;
-    height: 1.1rem;
-    padding: 0;
-    margin: 0;
-  }
   option-shape-section .shape-corner-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -258,7 +251,7 @@ export class OptionShapeSection extends LitElement {
         </div>
         <input
           type="range"
-          class="form-range shape-range mt-1"
+          class="form-range option-range mt-1"
           min=${String(spec.min)}
           max=${String(spec.max)}
           step=${String(spec.step)}
@@ -350,7 +343,7 @@ export class OptionShapeSection extends LitElement {
         </div>
         <input
           type="range"
-          class="form-range shape-range mt-1"
+          class="form-range option-range mt-1"
           min="0"
           max=${String(ceiling)}
           step="1"
