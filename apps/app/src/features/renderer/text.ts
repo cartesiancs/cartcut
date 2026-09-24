@@ -24,7 +24,7 @@ import {
 } from "../text/metrics";
 import type { LineReveal, RevealHead } from "../text/reveal";
 import { revealOf, revealPlan, sampledRevealProgress } from "../text/reveal";
-import { paintShadowOnly } from "./shadow";
+import { matrixScale, paintShadowOnly } from "./shadow";
 import { frostBackdrop } from "./backdrop";
 import { fontWeightToken } from "../font/fontWeight";
 import type { HighlightRect } from "./textRangeHighlight";
@@ -970,7 +970,8 @@ function placeLines(
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const wrapped = lines[lineIndex];
     const cut = plan == null ? null : plan[lineIndex];
-    if (cut != null && cut.chars <= 0 && cut.head == null) {
+    // Nothing of this line has arrived yet: no band, no frost, no draw.
+    if (cut != null && cut.chars <= 0 && cut.heads.length === 0) {
       continue;
     }
 
@@ -1130,9 +1131,11 @@ function paintRevealHead(
   // spacing is applied *after* each character, so it is already included.
   const from =
     head.from === 0 ? 0 : ctx.measureText(line.slice(0, head.from)).width;
+  const to = ctx.measureText(line.slice(0, head.to)).width;
   const bleed = styleBleed(style);
 
   ctx.save();
+  applyHeadMove(ctx, head, x + from, x + to, y, ascent, descent);
   ctx.beginPath();
   ctx.rect(
     x + from,
@@ -1144,6 +1147,64 @@ function paintRevealHead(
   ctx.globalAlpha *= head.alpha;
   paintLettering(ctx, line.slice(0, head.to), x, y, style, fill);
   ctx.restore();
+}
+
+/**
+ * Move the canvas so one arriving unit is drawn where the animator wants it.
+ *
+ * **The transform goes on before the clip, and both are in the same space.**
+ * That is what makes this work at all. The unit is drawn by painting the whole
+ * prefix and clipping to the unit's own band — the trick `paintRevealHead` has
+ * always used, because `measureText` on a substring loses the kerning with the
+ * glyph before it and a separately positioned unit would slide by a fraction of
+ * a pixel as it settled, visibly, precisely because the eye is watching that
+ * glyph.
+ *
+ * Under a transform the neighbours move too, but so does the band, and a
+ * uniform scale about the unit's own centre preserves every distance from that
+ * centre proportionally — so a neighbour that was outside the band stays
+ * outside it. Nothing bleeds in, and the kerning is the font's own throughout.
+ *
+ * The blur is the one part that is not in element space: `ctx.filter` is
+ * measured in device pixels, like the canvas shadow API, so it is pushed
+ * through the matrix by the same `matrixScale` the drop shadow uses.
+ */
+function applyHeadMove(
+  ctx: CanvasRenderingContext2D,
+  head: RevealHead,
+  left: number,
+  right: number,
+  baseline: number,
+  ascent: number,
+  descent: number,
+): void {
+  const move = head.move;
+  if (move == null) {
+    return;
+  }
+
+  // The unit's own centre: the middle of its advance, and the middle of the
+  // band it occupies. Scaling and rotating about anything else would swing the
+  // unit out of its own slot.
+  const cx = (left + right) / 2;
+  const cy = baseline - ascent / 2 + descent / 2;
+
+  ctx.translate(move.offsetX, move.offsetY);
+  ctx.translate(cx, cy);
+  if (move.rotationDeg !== 0) {
+    ctx.rotate((move.rotationDeg * Math.PI) / 180);
+  }
+  if (move.scale !== 1) {
+    ctx.scale(move.scale, move.scale);
+  }
+  ctx.translate(-cx, -cy);
+
+  if (move.blur > 0) {
+    const scale = matrixScale(ctx.getTransform());
+    if (Number.isFinite(scale) && scale > 0) {
+      ctx.filter = `blur(${move.blur * scale}px)`;
+    }
+  }
 }
 
 
@@ -1260,9 +1321,11 @@ function paintStyledRevealHead(
   fill: string | CanvasGradient,
 ): void {
   const from = head.from === 0 ? 0 : prefixWidthOfDrawn(ctx, segments, head.from);
+  const to = prefixWidthOfDrawn(ctx, segments, head.to);
   const bleed = segmentsBleed(segments, style);
 
   ctx.save();
+  applyHeadMove(ctx, head, x + from, x + to, y, ascent, descent);
   ctx.beginPath();
   ctx.rect(
     x + from,
@@ -1344,6 +1407,7 @@ function paintText(
           reveal.unit,
           progress,
           reveal.fade,
+          reveal.animate ?? null,
         );
 
   ctx.lineWidth = 0;
@@ -1457,13 +1521,20 @@ function paintText(
       );
     }
 
-    // 6. The one unit still fading in, if the reveal asked for a soft edge.
-    if (cut?.head != null) {
+    // 6. The units still arriving: fading in, and moving if the reveal carries
+    //    an animator. Without one there is at most one of them, which is the
+    //    bound `TextReveal.fade` documents; `animate.window` is the only thing
+    //    that lifts it, and it costs one clipped pass per unit in flight.
+    //
+    //    Drawn in the order the plan lists them, earliest first, so a later
+    //    unit's larger scale overlaps its neighbour rather than being cut by
+    //    it — which is the way the eye reads a stagger arriving.
+    for (const head of cut?.heads ?? []) {
       if (wrapped.segments == null) {
         paintRevealHead(
           ctx,
           line,
-          cut.head,
+          head,
           drawX,
           textY,
           lineWidth,
@@ -1476,7 +1547,7 @@ function paintText(
         paintStyledRevealHead(
           ctx,
           wrapped.segments,
-          cut.head,
+          head,
           drawX,
           textY,
           lineWidth,

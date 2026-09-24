@@ -31,11 +31,13 @@
  */
 
 import type {
+  RevealAnimate,
   RevealUnit,
   TextReveal,
   TimelineElement,
 } from "../../@types/timeline";
 import { REVEAL_UNITS } from "../../@types/timeline";
+import { easeAt, resolveEasing } from "../animation/easing";
 import { sampleTrack } from "../animation/keyframes";
 
 /** `O(1)` membership, built once. */
@@ -54,20 +56,46 @@ export const DEFAULT_REVEAL_PROGRESS = 100;
 export const DEFAULT_REVEAL_FADE = 0;
 
 /**
- * The part of one unit that is on screen but not yet at full strength.
+ * The part of one unit that is on screen but not yet settled.
  *
  * `from`/`to` are character offsets into the line, so the renderer can clip to
  * exactly that unit's advance without measuring anything else.
+ *
+ * `t` runs 0 at the instant the unit arrives to 1 when it has settled, eased
+ * already. Without an animator it is unused and always 1; with one it is what
+ * every movement is interpolated over.
  */
-export type RevealHead = { from: number; to: number; alpha: number };
+export type RevealHead = {
+  from: number;
+  to: number;
+  alpha: number;
+  t: number;
+  /** The movement to apply, resolved. `null` when the reveal has no animator. */
+  move: RevealMove | null;
+};
+
+/**
+ * Where a unit is on its way in, in the element's own space.
+ *
+ * Absolute values rather than fractions, so the renderer applies them without
+ * knowing what they were interpolated from. `scale` is a multiplier, 1 settled.
+ */
+export type RevealMove = {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+  rotationDeg: number;
+  blur: number;
+};
 
 /**
  * What to draw of one wrapped line.
  *
- * `chars` is a character offset: `line.slice(0, chars)` is drawn whole. `head`,
- * when present, names the one unit that is currently fading in.
+ * `chars` is a character offset: `line.slice(0, chars)` is drawn whole and
+ * without movement. `heads` names the units still arriving, earliest first —
+ * at most one without an animator, and up to `window` of them with one.
  */
-export type LineReveal = { chars: number; head: RevealHead | null };
+export type LineReveal = { chars: number; heads: RevealHead[] };
 
 /** A fresh reveal for a unit, allocated every call. */
 export function defaultReveal(unit: RevealUnit): TextReveal {
@@ -97,6 +125,104 @@ function clampFade(value: unknown): number {
   return n == null ? DEFAULT_REVEAL_FADE : Math.min(1, Math.max(0, n));
 }
 
+/** The most units that may be in flight at once. See `RevealAnimate.window`. */
+export const MAX_REVEAL_WINDOW = 8;
+
+/** Inert defaults: an animator with nothing set changes no pixel. */
+const ANIMATE_DEFAULTS = {
+  scale: 100,
+  offsetX: 0,
+  offsetY: 0,
+  rotation: 0,
+  blur: 0,
+  opacity: 0,
+} as const;
+
+function clampNumber(value: unknown, min: number, max: number): number | null {
+  const n = finiteNumber(value);
+  return n == null ? null : Math.min(max, Math.max(min, n));
+}
+
+/**
+ * The animator on a reveal, normalised, or `null`.
+ *
+ * Runs inside the paint loop and must never throw. An animator whose every
+ * field is inert answers `null` rather than a no-op object: that is what keeps
+ * a clip with `{ animate: {} }` on the same drawing path as one with none.
+ */
+export function animateOf(raw: unknown): Required<Omit<RevealAnimate, "easing">> & {
+  easing: string | null;
+} | null {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const source = raw as Record<string, unknown>;
+
+  const next = {
+    window: clampNumber(source.window, 0, MAX_REVEAL_WINDOW) ?? 0,
+    scale: clampNumber(source.scale, 0, 1000) ?? ANIMATE_DEFAULTS.scale,
+    offsetX: clampNumber(source.offsetX, -10_000, 10_000) ?? ANIMATE_DEFAULTS.offsetX,
+    offsetY: clampNumber(source.offsetY, -10_000, 10_000) ?? ANIMATE_DEFAULTS.offsetY,
+    rotation: clampNumber(source.rotation, -3600, 3600) ?? ANIMATE_DEFAULTS.rotation,
+    blur: clampNumber(source.blur, 0, 500) ?? ANIMATE_DEFAULTS.blur,
+    opacity: clampNumber(source.opacity, 0, 100) ?? ANIMATE_DEFAULTS.opacity,
+    easing: typeof source.easing === "string" ? source.easing : null,
+  };
+
+  const moves =
+    next.scale !== ANIMATE_DEFAULTS.scale ||
+    next.offsetX !== ANIMATE_DEFAULTS.offsetX ||
+    next.offsetY !== ANIMATE_DEFAULTS.offsetY ||
+    next.rotation !== ANIMATE_DEFAULTS.rotation ||
+    next.blur !== ANIMATE_DEFAULTS.blur ||
+    next.opacity !== ANIMATE_DEFAULTS.opacity;
+
+  return moves ? next : null;
+}
+
+/**
+ * The write validator, the strict twin of `animateOf`.
+ *
+ * Every field is optional and one it cannot read is dropped rather than
+ * defaulted, the rule `coerceRunStyle` follows: an absent key already means the
+ * inert value, so a junk `scale` leaves the unit at full size instead of
+ * refusing the whole write. `null` when nothing survived.
+ */
+export function coerceRevealAnimate(value: unknown): RevealAnimate | null {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const source = value as Record<string, unknown>;
+  const next: RevealAnimate = {};
+
+  const put = (key: keyof RevealAnimate, min: number, max: number) => {
+    if (!(key in source)) {
+      return;
+    }
+    const read = clampNumber(source[key], min, max);
+    if (read != null) {
+      (next[key] as unknown) = read;
+    }
+  };
+
+  put("window", 0, MAX_REVEAL_WINDOW);
+  put("scale", 0, 1000);
+  put("offsetX", -10_000, 10_000);
+  put("offsetY", -10_000, 10_000);
+  put("rotation", -3600, 3600);
+  put("blur", 0, 500);
+  put("opacity", 0, 100);
+
+  if (typeof source.easing === "string" && resolveEasing(source.easing) != null) {
+    next.easing = source.easing;
+  }
+
+  // An animator that would move nothing is not an animator. Answering `null`
+  // deletes the key rather than storing an empty object, the
+  // default-is-absence rule the rest of this file keeps.
+  return animateOf(next) == null ? null : next;
+}
+
 /**
  * The read guard. Runs inside the paint loop, once per text clip per frame, and
  * must never throw.
@@ -111,7 +237,7 @@ export function revealOf(
   if (raw == null || typeof raw !== "object" || Array.isArray(raw)) {
     return null;
   }
-  const { unit, progress, fade } = raw as Record<string, unknown>;
+  const { unit, progress, fade, animate } = raw as Record<string, unknown>;
   if (typeof unit !== "string" || !KNOWN_UNITS.has(unit)) {
     return null;
   }
@@ -122,6 +248,10 @@ export function revealOf(
   const softness = clampFade(fade);
   if (softness > 0) {
     next.fade = softness;
+  }
+  const moving = coerceRevealAnimate(animate);
+  if (moving != null) {
+    next.animate = moving;
   }
   return next;
 }
@@ -149,7 +279,7 @@ export function coerceReveal(value: unknown): TextReveal | null {
   if (value == null || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
-  const { unit, progress, fade } = value as Record<string, unknown>;
+  const { unit, progress, fade, animate } = value as Record<string, unknown>;
   const known = coerceRevealUnit(unit);
   if (known == null) {
     return null;
@@ -173,6 +303,10 @@ export function coerceReveal(value: unknown): TextReveal | null {
   if (softness > 0) {
     next.fade = softness;
   }
+  const moving = coerceRevealAnimate(animate);
+  if (moving != null) {
+    next.animate = moving;
+  }
   return next;
 }
 
@@ -193,7 +327,13 @@ export function sameReveal(
   return (
     a.unit === b.unit &&
     a.progress === b.progress &&
-    (a.fade ?? DEFAULT_REVEAL_FADE) === (b.fade ?? DEFAULT_REVEAL_FADE)
+    (a.fade ?? DEFAULT_REVEAL_FADE) === (b.fade ?? DEFAULT_REVEAL_FADE) &&
+    // Compared through the normaliser rather than field by field, so two
+    // animators that differ only in which inert fields they spell out are one
+    // animator — which is what the panel produces when it rebuilds the object
+    // on every change.
+    JSON.stringify(animateOf(a.animate) ?? null) ===
+      JSON.stringify(animateOf(b.animate) ?? null)
   );
 }
 
@@ -371,16 +511,28 @@ export function revealPlan(
   unit: RevealUnit,
   progress: number,
   fade: number = DEFAULT_REVEAL_FADE,
+  animate: RevealAnimate | null = null,
 ): LineReveal[] {
   const total = totalUnits(lines, unit);
   if (total === 0) {
     // Nothing to count — an empty text element. Showing it whole costs nothing
     // and avoids dividing by zero to decide that.
-    return lines.map((line) => ({ chars: line.length, head: null }));
+    return lines.map((line) => ({ chars: line.length, heads: [] }));
   }
 
   const revealed = (clampRevealProgress(progress) / 100) * total;
   const softness = clampFade(fade);
+  const moving = animateOf(animate);
+
+  // How far past a unit's arrival it goes on moving, in units.
+  //
+  // Without an animator this is `fade`, and exactly one unit can be in flight
+  // because `fade` is bounded at 1 — which is the path every reveal written
+  // before the animator takes, unchanged. With one, `window` says, defaulting
+  // to `fade` when there is one so the two never contradict each other.
+  const span = moving == null ? softness : moving.window > 0 ? moving.window : softness > 0 ? softness : 1;
+
+  const curve = moving?.easing == null ? null : resolveEasing(moving.easing);
 
   const out: LineReveal[] = [];
   let consumed = 0;
@@ -388,33 +540,107 @@ export function revealPlan(
     const bounds = unitBoundaries(line, unit);
     const count = bounds.length;
 
-    if (revealed >= consumed + count) {
-      out.push({ chars: line.length, head: null });
-    } else if (revealed <= consumed) {
-      out.push({ chars: 0, head: null });
-    } else {
-      const local = revealed - consumed;
-      const whole = Math.floor(local);
-      const settled = whole === 0 ? 0 : bounds[whole - 1];
-      let chars = settled;
-      let head: RevealHead | null = null;
+    // How far into this line the reveal has travelled, in units. Unit `i` takes
+    // its turn over `local ∈ [i, i + 1)`.
+    const local = revealed - consumed;
+    consumed += count;
 
-      const fraction = local - whole;
-      if (softness > 0 && fraction > 0 && whole < count) {
-        const alpha = fraction / softness;
-        if (alpha >= 1) {
-          // Past its fade already: no reason to pay for a second pass.
-          chars = bounds[whole];
-        } else {
-          head = { from: settled, to: bounds[whole], alpha };
-        }
-      }
-      out.push({ chars, head });
+    if (local <= 0) {
+      out.push({ chars: 0, heads: [] });
+      continue;
+    }
+    if (local >= count) {
+      out.push({ chars: line.length, heads: [] });
+      continue;
     }
 
-    consumed += count;
+    if (span <= 0) {
+      /*
+       * A hard cut with no animator: a unit appears only once its turn is
+       * *over*, so `floor(local)` units are shown and nothing is in flight.
+       *
+       * This is discontinuous against the branch below as `span → 0⁺`, where a
+       * unit becomes whole at `local = i` instead. That is the behaviour this
+       * module has always had and it is the right one to keep: `fade: 0` means
+       * "no transition", and a transition of zero length that nonetheless
+       * showed the unit a whole turn early would type one character ahead of
+       * where the curve says.
+       */
+      const whole = Math.floor(local);
+      out.push({ chars: whole === 0 ? 0 : bounds[whole - 1], heads: [] });
+      continue;
+    }
+
+    // Unit `i` has settled once `local - i >= span`.
+    const settledUnits = Math.min(
+      count,
+      Math.max(0, Math.floor(local - span + 1e-9) + 1),
+    );
+    const chars = settledUnits === 0 ? 0 : bounds[settledUnits - 1];
+
+    const heads: RevealHead[] = [];
+    for (let index = settledUnits; index < count; index += 1) {
+      const past = local - index;
+      if (past <= 0) {
+        // Not arrived, and neither has anything after it.
+        break;
+      }
+
+      const linear = Math.min(1, past / span);
+      const t = curve == null ? linear : easeAt(curve, linear);
+
+      heads.push({
+        from: index === 0 ? 0 : bounds[index - 1],
+        to: bounds[index],
+        alpha: alphaFor(moving, softness, past, t),
+        t,
+        move: moving == null ? null : moveAt(moving, t),
+      });
+    }
+
+    out.push({ chars, heads });
   }
   return out;
+}
+
+/**
+ * How strongly one arriving unit is drawn.
+ *
+ * Without an animator this is the original rule exactly: `fade` is the fraction
+ * of a unit's turn spent fading, so alpha is `past / fade`. With one, the unit
+ * travels from `animate.opacity` to full over the window, eased along with
+ * everything else — which is what makes "appear and settle" one movement
+ * rather than a fade racing a scale.
+ */
+function alphaFor(
+  moving: ReturnType<typeof animateOf>,
+  softness: number,
+  past: number,
+  t: number,
+): number {
+  if (moving == null) {
+    return softness > 0 ? Math.min(1, past / softness) : 1;
+  }
+  const from = moving.opacity / 100;
+  return Math.min(1, Math.max(0, from + (1 - from) * t));
+}
+
+/** Where a unit is at `t`, interpolating from its starting state to settled. */
+function moveAt(
+  moving: NonNullable<ReturnType<typeof animateOf>>,
+  t: number,
+): RevealMove {
+  const remaining = 1 - t;
+  return {
+    // Percentages in, a multiplier out: the renderer scales by this directly.
+    scale: 1 + (moving.scale / 100 - 1) * remaining,
+    offsetX: moving.offsetX * remaining,
+    offsetY: moving.offsetY * remaining,
+    rotationDeg: moving.rotation * remaining,
+    // Floored because an overshooting easing can take `remaining` past 1 or
+    // below 0, and the canvas throws on a negative blur radius.
+    blur: Math.max(0, moving.blur * remaining),
+  };
 }
 
 /** The track under `property`, but only while it is switched on. */

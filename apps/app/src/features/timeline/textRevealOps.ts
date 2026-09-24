@@ -189,6 +189,14 @@ export function setClipTextReveal(
 export type RevealFieldPatch = {
   progress?: number;
   fade?: number;
+  /**
+   * The animator, merged field by field over whatever is there.
+   *
+   * `null` removes it outright, which is a different request from an empty
+   * patch: a caller turning a pop off has to be able to say so, and an
+   * animator that moves nothing is deleted rather than stored anyway.
+   */
+  animate?: Record<string, unknown> | null;
 };
 
 /**
@@ -215,6 +223,17 @@ export function setClipTextRevealFields(
     if (typeof value === "number" && Number.isFinite(value)) {
       merged[key] = value;
     }
+  }
+
+  if (patch.animate !== undefined) {
+    // Merged over the stored animator rather than replacing it, so changing a
+    // scale does not silently drop an offset. `null` is the one value that
+    // means "remove", and `coerceReveal` deletes an animator that would move
+    // nothing, so the key never survives as an empty object.
+    merged.animate =
+      patch.animate === null
+        ? undefined
+        : { ...(existing.animate ?? {}), ...patch.animate };
   }
 
   const next = coerceReveal(merged);

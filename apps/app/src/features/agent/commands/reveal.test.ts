@@ -410,7 +410,7 @@ describe("set_text_reveal", () => {
     it("refuses a call that asks for nothing", async () => {
       await expect(
         run("set_text_reveal", { elementIds: ["title"] }),
-      ).rejects.toThrow(/needs a `unit`, a `progress` or a `fade`/);
+      ).rejects.toThrow(/needs a `unit`, a `progress`, a `fade` or an `animate\*` field/);
     });
   });
 

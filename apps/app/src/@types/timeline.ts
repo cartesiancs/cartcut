@@ -191,6 +191,8 @@ type Mirrorable = {
 };
 
 /**
+/**
+/**
  * The part of the source frame a clip shows.
  *
  * All four numbers are fractions of the **whole source frame**, never of the
@@ -760,7 +762,8 @@ export type ShapeElementType = TimelinePlaced &
   Blendable &
   Gradable &
   Adjustable &
-  Maskable & {
+  Maskable &
+  Decorated & {
     filetype: "shape";
     oWidth: number; // 원래 shape 사이즈
     oHeight: number;
@@ -923,6 +926,54 @@ export type RevealUnit = (typeof REVEAL_UNITS)[number];
  * Not a mixin over the other visual types on purpose: a reveal counts units of
  * *text*, and a picture has none. Wiping an image on is what a mask is for.
  */
+/**
+ * The movement a unit makes as it arrives — After Effects' Text Animator, in
+ * the one shape that fits a reveal.
+ *
+ * Every field is the value a unit **starts at** and settles from; the settled
+ * state is always the clip's own. So `scale: 140` means a word appears 40%
+ * oversized and shrinks into place, and a clip whose reveal has finished is
+ * byte-identical in the picture to one that never had an animator.
+ *
+ * **No new keyframe track, and no new timing.** The progress is the same
+ * `animation.revealProgress` the reveal already uses; this only says what a
+ * unit does on its way in. That is what keeps split, trim, duplicate, paste and
+ * a frame-rate change carrying it for free, and it is the same division of
+ * labour `TextReveal` itself states: timing in the animation block, meaning
+ * here.
+ *
+ * Absent means no movement, and every field's default is inert, so a project
+ * nobody has animated saves byte-identically to one written before the feature
+ * and `SCHEMA_VERSION` did not move.
+ */
+export type RevealAnimate = {
+  /**
+   * How many units are in flight at once.
+   *
+   * **This deliberately lifts the bound `fade` documents below.** One unit at a
+   * time was chosen so the renderer paid one extra pass rather than one per
+   * unit in flight; a stagger is exactly the thing that needs several, and the
+   * cost is one clipped draw per unit still moving. Capped so a long caption
+   * cannot ask for fifty.
+   *
+   * Absent means `fade` when there is one, and otherwise 1.
+   */
+  window?: number;
+  /** Starting size, as a percentage. 100 is inert. */
+  scale?: number;
+  /** Starting offset from where the unit belongs, in element pixels. */
+  offsetX?: number;
+  offsetY?: number;
+  /** Starting rotation, in degrees, about the unit's own centre. */
+  rotation?: number;
+  /** Starting blur, in element pixels. 0 is inert. */
+  blur?: number;
+  /** Starting opacity, 0-100. Absent is 0, so a unit fades in. */
+  opacity?: number;
+  /** How the unit travels from its starting state to its settled one. */
+  easing?: string;
+};
+
 export type TextReveal = {
   unit: RevealUnit;
   /**
@@ -937,11 +988,19 @@ export type TextReveal = {
   /**
    * 0-1. How much of one unit's turn it spends fading in; 0 is a hard cut.
    *
-   * Bounded at one unit deliberately, so at most one unit is ever partially
-   * drawn and the renderer costs one extra pass rather than one per unit in
-   * flight.
+   * Bounded at one unit, so at most one unit is ever partially drawn and the
+   * renderer costs one extra pass rather than one per unit in flight. That
+   * bound holds for a reveal with no `animate`, which is every reveal written
+   * before the animator existed and the one this field was designed for.
+   * `animate.window` is how a caller asks for more, and says what it costs.
    */
   fade?: number;
+  /**
+   * What a unit does on its way in. Absent means it simply appears.
+   *
+   * Read through `text/reveal.ts#revealOf`, which supplies every default.
+   */
+  animate?: RevealAnimate;
 };
 
 /**
@@ -1122,7 +1181,8 @@ export type TextElementType = TimelinePlaced &
  */
 export type GroupElementType = TimelinePlaced &
   Visual &
-  Animatable & {
+  Animatable &
+  Linked & {
     filetype: "group";
     /** Shown on the group's bar. Every other clip is named by its source file. */
     name: string;
@@ -1180,7 +1240,8 @@ export type TemplateFill =
  */
 export type TemplateElementType = TimelinePlaced &
   Visual &
-  Animatable & {
+  Animatable &
+  Linked & {
     filetype: "template";
     /** Which installed template this is. Resolved through the registry. */
     templateId: string;
