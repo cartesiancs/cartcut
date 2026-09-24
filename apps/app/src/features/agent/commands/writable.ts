@@ -33,6 +33,7 @@
  */
 
 import type { TimelineElement } from "../../../@types/timeline";
+import { isScalable } from "../../timeline/scaleOps";
 
 /** Property paths `update_clip` will write, by element type. */
 export /**
@@ -51,6 +52,16 @@ const WRITABLE: Record<string, string[][]> = {
     ["height"],
     ["opacity"],
     ["rotation"],
+    // Uniform magnification about the centre, in tenths: 10 is unscaled. It
+    // never touches the box, which is what makes it different from `width`
+    // and `height` and why both are writable alongside it.
+    //
+    // **Not a plain `setIn`.** Neutral deletes the key rather than storing a
+    // 10, so `update_clip` routes this one through `scaleOps#setClipScale` the
+    // way it routes `text` through `setTextWithRuns`. A path write here would
+    // store the default and a project nobody had scaled would stop saving
+    // byte-identically.
+    ["scale"],
   ],
   text: [
     ["text"],
@@ -107,6 +118,10 @@ const WRITABLE: Record<string, string[][]> = {
  */
 export const RANGES: Record<string, { min?: number; max?: number }> = {
   opacity: { min: 0, max: 100 },
+  // Tenths, floored at zero and with no ceiling — `clampScaleTenths` states
+  // why: a negative factor mirrors the clip rather than shrinking it, and a
+  // clip magnified past the frame is a legitimate picture.
+  scale: { min: 0 },
   "options.outline.size": { min: 0, max: 100 },
   "options.outline.opacity": { min: 0, max: 100 },
   "options.shadow.offsetX": { min: -1000, max: 1000 },
@@ -145,7 +160,15 @@ export const ENUMS: Record<string, readonly string[]> = {
 export function writablePaths(element: TimelineElement): string[][] {
   // Audio has no picture, so the shared transform block does not apply to it —
   // its own entry is the whole of what it can be patched with.
-  const common = element.filetype === "audio" ? [] : WRITABLE.common;
+  const common =
+    element.filetype === "audio"
+      ? []
+      : // An effect and a transition are whole-frame operations rather than
+        // boxes, so they carry no scale even though they carry the rest of the
+        // transform block. `isScalable` is the one answer to that question.
+        WRITABLE.common.filter(
+          (path) => path[0] !== "scale" || isScalable(element),
+        );
   return [...common, ...(WRITABLE[element.filetype] ?? [])];
 }
 

@@ -20,6 +20,7 @@ import { clipRow } from "../serialize";
 import { flatten, rejectionFor, writablePaths } from "./writable";
 import { affectsTextBlock, withFittedTextHeights } from "../../element/textFit";
 import { setTextWithRuns } from "../../timeline/textRunOps";
+import { setClipScale } from "../../timeline/scaleOps";
 
 registerCommands({
   update_clip: (params: { elementId: string; patch: Record<string, any> }) => {
@@ -64,24 +65,37 @@ registerCommands({
       affectsTextBlock(writes.map(([path]) => path)) &&
       !writes.some(([path]) => path.join(".") === "height");
 
-    // The string is the one field that cannot be a plain `setIn`. A text clip's
-    // per-range styling is stored as offsets into it, so rewriting the string
-    // without moving them leaves every styled stretch on the wrong characters.
-    // `setTextWithRuns` is the one writer that keeps the two together.
+    // Two fields cannot be a plain `setIn`, for two different reasons.
+    //
+    // A text clip's per-range styling is stored as offsets into its string, so
+    // rewriting the string without moving them leaves every styled stretch on
+    // the wrong characters. `setTextWithRuns` is the one writer that keeps the
+    // two together.
     const textWrite = writes.find(
       ([path, value]) =>
         path.length === 1 && path[0] === "text" && typeof value === "string",
     );
 
+    // And a neutral scale **deletes the key** rather than storing a 10, which
+    // is what keeps a project nobody has scaled saving byte-identically to one
+    // written before the field existed. `setClipScale` owns that rule.
+    const scaleWrite = writes.find(
+      ([path, value]) =>
+        path.length === 1 && path[0] === "scale" && typeof value === "number",
+    );
+
     checkpoint((d) => {
-      const base =
+      let base =
         textWrite == null
           ? d
           : setTextWithRuns(d, params.elementId, textWrite[1] as string);
+      if (scaleWrite != null) {
+        base = setClipScale(base, params.elementId, scaleWrite[1] as number);
+      }
 
       let updated: TimelineElement = base.elements[params.elementId];
       for (const [path, value] of writes) {
-        if (path === textWrite?.[0]) {
+        if (path === textWrite?.[0] || path === scaleWrite?.[0]) {
           continue;
         }
         updated = setIn(updated, path, value);

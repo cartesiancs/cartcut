@@ -25,6 +25,7 @@ import {
   isDynamicElement,
   spanEnd,
   spanLength,
+  spanStart,
   sourceDurationOf,
   speedOf,
 } from "../timeline/geometry";
@@ -573,6 +574,13 @@ export function clipDetail(
 
   const animation = (element as any).animation;
   if (canAnimate(element) && animation != null) {
+    // Keyframes are *stored* relative to the clip's start and every time in
+    // this surface is absolute, so they are rebased here — the same conversion
+    // `get_keyframes` does. They were reported raw, which meant `get_clip` and
+    // `get_keyframes` answered different numbers for the same keyframe on any
+    // clip that did not start at zero, and the one that looked right was
+    // whichever the reader happened to check first.
+    const start = spanStart(element);
     detail.animation = animatableProperties(element).map((property) => {
       const track = animation[property] ?? {};
       const lanes: Record<string, unknown> = {};
@@ -589,7 +597,7 @@ export function clipDetail(
           count: list.length,
           times: list
             .slice(0, MAX_KEYFRAME_TIMES)
-            .map((keyframe: any) => ms(keyframe?.p?.[0] ?? 0)),
+            .map((keyframe: any) => ms(start + (keyframe?.p?.[0] ?? 0))),
           ...(list.length > MAX_KEYFRAME_TIMES
             ? { truncated: true, note: "Use get_keyframes to page through them." }
             : {}),

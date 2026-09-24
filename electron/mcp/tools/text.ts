@@ -78,8 +78,10 @@ export function registerTextTools(define: Registrar) {
     {
       title: "Change a clip's properties",
       description:
-        "Edit appearance: position, size, opacity, rotation; for text the words, colour, size and alignment; " +
-        "for a shape its fill colour; for a group its name. " +
+        "Edit appearance: position, size, opacity, rotation, scale; for text the words, colour, size and " +
+        "alignment; for a shape its fill colour; for a group its name. " +
+        "**`scale` and `size` are different things.** Scale is uniform, about the centre, in tenths (10 is " +
+        "unscaled, 12 is 120%) and never touches the box; width and height are the box itself. " +
         "Timing is deliberately not writable here — startTime, duration and trim are coupled by invariants — " +
         "so use trim_clip and move_clips for that, set_clip_speed for speed, set_text_font for fonts, and " +
         "set_video_filters for filters. The error message lists what this clip accepts.",
