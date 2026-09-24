@@ -78,6 +78,16 @@ type SetTextRevealParams = {
   unit?: RevealUnit | null;
   progress?: number;
   fade?: number;
+  /** `null` removes the movement and keeps the reveal. */
+  animate?: null;
+  animateWindow?: number;
+  animateScale?: number;
+  animateOffsetX?: number;
+  animateOffsetY?: number;
+  animateRotation?: number;
+  animateBlur?: number;
+  animateOpacity?: number;
+  animateEasing?: string;
 };
 
 /** The ids, checked for existence and for carrying a reveal at all. */
@@ -228,6 +238,13 @@ registerCommands({
     checkNumbers("set_text_reveal", params as Record<string, unknown>, [
       "progress",
       "fade",
+      "animateWindow",
+      "animateScale",
+      "animateOffsetX",
+      "animateOffsetY",
+      "animateRotation",
+      "animateBlur",
+      "animateOpacity",
     ]);
 
     if (
@@ -248,12 +265,39 @@ registerCommands({
     if (params.fade !== undefined) {
       patch.fade = params.fade;
     }
+
+    // The animator arrives as flat `animate*` arguments, for the reason
+    // `set_shape` takes `arcStart`/`arcSweep` flat: an agent changing how far a
+    // word rises should not have to restate its scale. They are folded into one
+    // object here and merged over the stored animator by the op.
+    const animate: Record<string, unknown> = {};
+    for (const [key, value] of [
+      ["window", params.animateWindow],
+      ["scale", params.animateScale],
+      ["offsetX", params.animateOffsetX],
+      ["offsetY", params.animateOffsetY],
+      ["rotation", params.animateRotation],
+      ["blur", params.animateBlur],
+      ["opacity", params.animateOpacity],
+      ["easing", params.animateEasing],
+    ] as const) {
+      if (value !== undefined) {
+        animate[key] = value;
+      }
+    }
+
+    if (params.animate === null) {
+      patch.animate = null;
+    } else if (Object.keys(animate).length > 0) {
+      patch.animate = animate;
+    }
+
     const hasPatch = Object.keys(patch).length > 0;
 
     if (params.unit === undefined && !hasPatch) {
       throw new Error(
-        "set_text_reveal needs a `unit`, a `progress` or a `fade`. " +
-          "Pass unit:null to remove the reveal.",
+        "set_text_reveal needs a `unit`, a `progress`, a `fade` or an `animate*` field. " +
+          "Pass unit:null to remove the reveal, or animate:null to remove just the movement.",
       );
     }
 

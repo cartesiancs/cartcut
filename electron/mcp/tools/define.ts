@@ -267,6 +267,24 @@ export const MASK_SHAPES = ["rectangle", "star", "heart", "pen"] as const;
 export const REVEAL_UNITS = ["character", "word", "line"] as const;
 
 /**
+ * The properties a link may drive.
+ *
+ * A copy of `@types/timeline.ts`'s `LINKABLE_PROPERTIES`, for the reason every
+ * copy in this file exists: `electron/` cannot import that module.
+ * `tools.test.ts` pins the two together.
+ */
+export const LINKABLE = ["position", "opacity", "scale", "rotation"] as const;
+
+/**
+ * How a clip's border sits against the outline it traces.
+ *
+ * A copy of `@types/timeline.ts`'s `STROKE_ALIGNMENTS`, for the reason every
+ * copy in this file exists: `electron/` cannot import that module.
+ * `tools.test.ts` pins the two together.
+ */
+export const STROKE_ALIGNMENTS = ["inner", "center", "outer"] as const;
+
+/**
  * The parametric shapes a shape clip can be generated from.
  *
  * A copy of `@types/timeline.ts`'s `SHAPE_GEOMETRY_KINDS`, for the reason every

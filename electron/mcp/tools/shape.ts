@@ -12,7 +12,13 @@
 
 import { z } from "zod";
 import { requestEditor } from "../bridge";
-import { SHAPE_GEOMETRY_KINDS, mutating, tool, type Registrar } from "./define";
+import {
+  SHAPE_GEOMETRY_KINDS,
+  STROKE_ALIGNMENTS,
+  mutating,
+  tool,
+  type Registrar,
+} from "./define";
 
 /** Shared by `set_shape` and `add_shape`, so the two cannot drift apart. */
 export const shapeGeometryFields = {
@@ -77,5 +83,51 @@ export function registerShapeTools(define: Registrar) {
       annotations: mutating,
     },
     tool((args) => requestEditor("set_shape", args)),
+  );
+
+  define(
+    "set_clip_decoration",
+    {
+      title: "Put a border and a drop shadow on clips",
+      description:
+        "A stroke around a shape, image or video clip and a soft shadow under it — the card border and the " +
+        "lift every layout has, across as many clips as you like in one undo step. " +
+        "**Do not build a border out of two stacked shapes**; that is what this replaces. " +
+        "A shape's border follows its real outline, so a rounded rectangle's corners are rounded and a " +
+        "star's border follows its points. An image or video is bordered on its box. " +
+        "Sizes are in the clip's own pixels, so a border grows when the clip is scaled, and the shadow " +
+        "rotates with it. `strokeAlign` matters at any useful width: \"inner\" keeps the border inside the " +
+        "outline, \"outer\" outside it, \"center\" straddles. " +
+        "Naming any field of a decoration switches it on; pass `strokeEnable`/`shadowEnable` false to turn " +
+        "one off. Fields left out keep what they had. " +
+        "**Text has its own pair**, which strokes the letters rather than the box — use update_clip with " +
+        "options.outline and options.shadow for that.",
+      inputSchema: {
+        elementIds: z.array(z.string()).min(1),
+        strokeEnable: z.boolean().optional(),
+        strokeWidth: z.number().min(0).max(500).optional().describe("Clip pixels."),
+        strokeColor: z.string().optional().describe('Hex, e.g. "#1a1a1a".'),
+        strokeOpacity: z.number().min(0).max(100).optional(),
+        strokeAlign: z.enum(STROKE_ALIGNMENTS).optional(),
+        shadowEnable: z.boolean().optional(),
+        shadowOffsetX: z.number().min(-1000).max(1000).optional(),
+        shadowOffsetY: z
+          .number()
+          .min(-1000)
+          .max(1000)
+          .optional()
+          .describe("Positive is downwards, which is where light usually is."),
+        shadowBlur: z.number().min(0).max(500).optional(),
+        shadowColor: z.string().optional(),
+        shadowOpacity: z
+          .number()
+          .min(0)
+          .max(100)
+          .optional()
+          .describe("A card shadow is faint: 20 to 40, not 100."),
+      },
+      annotations: mutating,
+    },
+    tool((args) => requestEditor("set_clip_decoration", args)),
   );
 }

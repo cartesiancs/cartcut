@@ -131,3 +131,63 @@ export function projectEasing(
     cs: [from.atMs + x2 * spanMs, from.value + y2 * spanValue],
   };
 }
+
+/**
+ * Evaluate a CSS easing at `x`, in the unit square.
+ *
+ * A CSS `cubic-bezier(x1, y1, x2, y2)` is a curve from (0,0) to (1,1), so this
+ * answers "how far along is the value when the time is `x`". Both axes are
+ * clamped into `[0, 1]`, which is what a progress fraction always is; `y` is
+ * deliberately *not* clamped, because `overshoot` and `anticipate` leave the
+ * range on purpose and clamping them would flatten exactly the part that makes
+ * them read.
+ *
+ * **The absolute-coordinate twin is `keyframes.ts#solveBezierU`,** and the two
+ * are separate rather than duplicated by accident. That one inverts x over a
+ * segment whose control abscissae are real times a user can drag anywhere, so
+ * it carries a bracket and a bisection fallback for a plateau. This one runs on
+ * the unit square where x is weakly monotonic by construction, and is called
+ * once per unit per frame rather than once per baked sample.
+ */
+export function easeAt(curve: CubicPoints, x: number): number {
+  const t = Math.min(1, Math.max(0, x));
+  const [x1, y1, x2, y2] = curve;
+
+  // Linear, and the common case: `[0, 0, 1, 1]` is the identity curve.
+  if (x1 === 0 && y1 === 0 && x2 === 1 && y2 === 1) {
+    return t;
+  }
+
+  let lo = 0;
+  let hi = 1;
+  let u = t;
+
+  for (let i = 0; i < 20; i++) {
+    const at = unitBezier(x1, x2, u);
+    const err = at - t;
+    if (Math.abs(err) < 1e-6) {
+      break;
+    }
+    if (err > 0) {
+      hi = u;
+    } else {
+      lo = u;
+    }
+    const slope = unitBezierSlope(x1, x2, u);
+    const next = slope > 1e-9 ? u - err / slope : Number.NaN;
+    u = Number.isFinite(next) && next > lo && next < hi ? next : (lo + hi) / 2;
+  }
+
+  return unitBezier(y1, y2, u);
+}
+
+/** A cubic from 0 to 1 with control values `a` and `b`, at parameter `u`. */
+function unitBezier(a: number, b: number, u: number): number {
+  const v = 1 - u;
+  return 3 * v * v * u * a + 3 * v * u * u * b + u * u * u;
+}
+
+function unitBezierSlope(a: number, b: number, u: number): number {
+  const v = 1 - u;
+  return 3 * v * v * a + 6 * v * u * (b - a) + 3 * u * u * (1 - b);
+}

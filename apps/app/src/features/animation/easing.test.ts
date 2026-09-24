@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  easeAt,
   easingNames,
   projectEasing,
   resolveEasing,
@@ -102,5 +103,44 @@ describe("projectEasing", () => {
         expect(handle[0]).toBeLessThanOrEqual(to.atMs);
       }
     }
+  });
+});
+
+describe("easeAt", () => {
+  it("is the identity for linear", () => {
+    const curve = resolveEasing("linear")!;
+    for (const x of [0, 0.25, 0.5, 0.75, 1]) {
+      expect(easeAt(curve, x)).toBeCloseTo(x, 6);
+    }
+  });
+
+  it("pins both endpoints for every named curve", () => {
+    for (const name of easingNames()) {
+      const curve = resolveEasing(name)!;
+      expect(easeAt(curve, 0)).toBeCloseTo(0, 5);
+      expect(easeAt(curve, 1)).toBeCloseTo(1, 5);
+    }
+  });
+
+  it("clamps the input but not the output", () => {
+    const curve = resolveEasing("overshoot")!;
+    expect(easeAt(curve, -1)).toBeCloseTo(0, 5);
+    expect(easeAt(curve, 2)).toBeCloseTo(1, 5);
+    // Leaving the range is the whole point of this curve, and clamping `y`
+    // would flatten exactly the part that makes it read as an overshoot.
+    expect(easeAt(curve, 0.7)).toBeGreaterThan(1);
+  });
+
+  it("winds up before it goes, for anticipate", () => {
+    expect(easeAt(resolveEasing("anticipate")!, 0.2)).toBeLessThan(0);
+  });
+
+  it("separates the curves it is handed", () => {
+    // Different inputs must disagree, or this suite would pass against an
+    // evaluator that ignored the curve and returned `x`.
+    const at = (name: string) => easeAt(resolveEasing(name)!, 0.25);
+    expect(at("ease_out")).toBeGreaterThan(at("linear"));
+    expect(at("ease_in")).toBeLessThan(at("linear"));
+    expect(at("snap")).toBeGreaterThan(at("ease_out"));
   });
 });

@@ -22,7 +22,9 @@ import {
   MASK_SHAPES,
   PRESETS,
   REVEAL_UNITS,
+  LINKABLE,
   SHAPE_GEOMETRY_KINDS,
+  STROKE_ALIGNMENTS,
   type Registrar,
   type ToolConfig,
 } from "./define";
@@ -57,6 +59,9 @@ const EXPECTED = [
   "add_text",
   "update_clip",
   "set_text_font",
+  "measure_text",
+  "set_text_range_style",
+  "clear_text_range_style",
   "rasterize_text",
   "set_blend_mode",
   "set_video_filters",
@@ -68,7 +73,10 @@ const EXPECTED = [
   "apply_animation_preset",
   "set_animation",
   "add_keyframes",
+  "set_keyframes",
   "remove_keyframes",
+  "set_property_link",
+  "clear_property_link",
   // the reveal
   "apply_typewriter",
   "set_text_reveal",
@@ -93,6 +101,7 @@ const EXPECTED = [
   // masking
   "set_mask",
   "set_shape",
+  "set_clip_decoration",
   // groups
   "create_null",
   "group_clips",
@@ -276,6 +285,25 @@ describe("every tool is usable as declared", () => {
       "../../../apps/app/src/@types/timeline"
     );
     expect([...SHAPE_GEOMETRY_KINDS].sort()).toEqual([...renderer].sort());
+  });
+
+  it("advertises exactly the properties a link can drive", async () => {
+    // A property offered here and absent there is a link the editor refuses;
+    // one present there and missing here is a link nobody can ask for.
+    const { LINKABLE_PROPERTIES } = await import(
+      "../../../apps/app/src/@types/timeline"
+    );
+    expect([...LINKABLE].sort()).toEqual([...LINKABLE_PROPERTIES].sort());
+  });
+
+  it("advertises exactly the stroke alignments the renderer draws", async () => {
+    // `renderer/decoration.ts` builds `inner` and `outer` out of a clip region
+    // and falls back to `center` for anything it does not recognise, so an
+    // alignment offered here and absent there would silently centre.
+    const { STROKE_ALIGNMENTS: renderer } = await import(
+      "../../../apps/app/src/@types/timeline"
+    );
+    expect([...STROKE_ALIGNMENTS].sort()).toEqual([...renderer].sort());
   });
 
   it("advertises exactly the colour adjustments a clip can carry", async () => {

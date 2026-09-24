@@ -76,13 +76,17 @@ export function registerRevealTools(define: Registrar) {
       title: "Set how much of a text clip is shown",
       description:
         "The reveal itself, without the keyframes: what one step counts (`unit`), how much is shown " +
-        "(`progress`, 0-100, where 100 shows everything and changes nothing on screen), and how soft " +
-        "each step's edge is (`fade`, 0-1 of one step's turn, where 0 is a hard cut). Pass unit:null to " +
-        "remove the reveal, which removes its revealProgress track with it. A clip needs a reveal " +
-        "before set_animation, add_keyframes and get_keyframes will touch `revealProgress`; this is " +
-        "what gives it one. For an ordinary typewriter use apply_typewriter, which writes the reveal " +
-        "and the move together. `progress` is only what the track falls back to, so on a keyframed clip " +
-        "the curve wins at every frame and the result says so. Text clips only.",
+        "(`progress`, 0-100, where 100 shows everything and changes nothing), how soft each step's edge " +
+        "is (`fade`), and **what a unit does as it arrives** — the `animate*` fields, After Effects' " +
+        "Text Animator. " +
+        "Each `animate*` value is where a unit **starts** and settles from the clip's own: " +
+        "`animateScale: 140` makes a word appear 40% oversized and shrink into place, `animateOffsetY: 20` " +
+        "makes it rise. `animateWindow` is how many units move at once — 1 bounces one at a time, 3 is a " +
+        "stagger. `animateOpacity` is the opacity it starts at, 0 by default, so 100 moves without fading. " +
+        "animate:null drops the movement; unit:null removes the reveal and its revealProgress track. " +
+        "A clip needs a reveal before set_animation and add_keyframes will touch `revealProgress`; this is " +
+        "what gives it one, and apply_typewriter writes the reveal and the move together. " +
+        "`progress` is only the track's fallback, so on a keyframed clip the curve wins. Text clips only.",
       inputSchema: {
         elementIds: z.array(z.string()).min(1),
         unit: z
@@ -104,6 +108,46 @@ export function registerRevealTools(define: Registrar) {
           .describe(
             "How much of one step's turn it spends fading in. 0 is a hard cut.",
           ),
+        animate: z
+          .null()
+          .optional()
+          .describe("null removes the movement and keeps the reveal."),
+        animateWindow: z
+          .number()
+          .min(0)
+          .max(8)
+          .optional()
+          .describe("Units moving at once. 1 is one at a time; 3 is a stagger."),
+        animateScale: z
+          .number()
+          .min(0)
+          .max(1000)
+          .optional()
+          .describe("Size a unit starts at, as a percentage. 100 is inert."),
+        animateOffsetX: z.number().min(-10000).max(10000).optional(),
+        animateOffsetY: z
+          .number()
+          .min(-10000)
+          .max(10000)
+          .optional()
+          .describe("Offset a unit starts at, in clip pixels. Positive is down."),
+        animateRotation: z
+          .number()
+          .min(-3600)
+          .max(3600)
+          .optional()
+          .describe("Degrees a unit starts rotated, about its own centre."),
+        animateBlur: z.number().min(0).max(500).optional(),
+        animateOpacity: z
+          .number()
+          .min(0)
+          .max(100)
+          .optional()
+          .describe("Opacity a unit starts at. 0 fades in; 100 does not fade."),
+        animateEasing: z
+          .enum(EASINGS)
+          .optional()
+          .describe("How a unit travels from its starting state to settled."),
       },
       annotations: mutating,
     },

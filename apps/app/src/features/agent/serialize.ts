@@ -25,6 +25,7 @@ import {
   isDynamicElement,
   spanEnd,
   spanLength,
+  spanStart,
   sourceDurationOf,
   speedOf,
 } from "../timeline/geometry";
@@ -46,6 +47,8 @@ import { isRevealable } from "../timeline/textRevealOps";
 import { isMaskable } from "../timeline/maskOps";
 import type { TimelineDocument, TimelineTrack } from "../timeline/tracks";
 import { runsOf } from "../text/runs";
+import { linkOf } from "../animation/link";
+import { linkedPropertiesOf } from "../timeline/linkOps";
 import { resolveTextStyle } from "../text/style";
 
 /** Longest text echoed back in a list row. Full text comes from `get_clip`. */
@@ -62,6 +65,18 @@ export const TEXT_PREVIEW_CHARS = 80;
  * pages properly when the curve itself is what matters.
  */
 export const MAX_KEYFRAME_TIMES = 100;
+
+/**
+ * Most runs `get_clip` will list.
+ *
+ * The list used to be withheld entirely, on the grounds that runs are
+ * unbounded authored data like a shape's point list. That was true and still
+ * left the agent unable to *read back* the styling it had just written, so a
+ * range edit could only ever be made blind. A run is four small scalars and a
+ * clip with more than this many distinct stretches is a list rather than a
+ * fact, so the cap buys the read back without threatening the output cap.
+ */
+export const MAX_TEXT_RUNS = 20;
 
 /**
  * Most group children `get_clip` will name.
@@ -377,11 +392,23 @@ export function clipDetail(
     detail.fill = style.fill;
     detail.textOpacity = style.textOpacity;
     detail.textTransform = style.textTransform;
-    // A count, never the list. The runs are unbounded authored data, like a
-    // shape's point list and a mask's drawn path, and this whitelist exists to
-    // keep those away from the tool-output cap. The number is what tells the
-    // agent that a clip it is about to rewrite has styling it cannot see.
-    detail.runCount = runsOf(element).length;
+    // The count stays exact whatever the list does, so a truncation is visible
+    // rather than silent — the rule the keyframe lanes above follow.
+    const runs = runsOf(element);
+    detail.runCount = runs.length;
+    if (runs.length > 0) {
+      detail.runs = runs.slice(0, MAX_TEXT_RUNS).map((run) => ({
+        from: run.from,
+        to: run.to,
+        // The stretch itself, so the agent can name it back through
+        // `set_text_range_style`'s `match` without counting UTF-16 offsets.
+        text: (element.text ?? "").slice(run.from, run.to),
+        style: run.style,
+      }));
+      if (runs.length > MAX_TEXT_RUNS) {
+        detail.runsTruncated = true;
+      }
+    }
   }
 
   if (element.filetype !== "audio") {
@@ -492,6 +519,15 @@ export function clipDetail(
             unit: detailReveal.unit,
             progress: detailReveal.progress,
             fade: detailReveal.fade ?? 0,
+            // Named explicitly, like the three above, and that is the trap
+            // this line exists to close: a field added to `TextReveal` and not
+            // to this projection is stored correctly and reported as absent,
+            // so an agent that sets a movement reads back a reveal that says
+            // it has none. `timeline/textRevealOps.ts#copyReveal` had the same
+            // shape and the same bug.
+            ...(detailReveal.animate == null
+              ? {}
+              : { animate: detailReveal.animate }),
           };
   }
 
@@ -547,8 +583,34 @@ export function clipDetail(
     detail.reversed = isReversed(element);
   }
 
+  // Driven properties, before the animation block, because a link overrides
+  // whatever that block says and a reader that saw the keyframes first would
+  // draw the wrong conclusion from them.
+  const linked = linkedPropertiesOf(element);
+  if (linked.length > 0) {
+    detail.links = linked.map((property) => {
+      const link = linkOf(element, property)!;
+      return {
+        property,
+        from: link.from,
+        in: link.in,
+        out: link.out,
+        ...(link.easing == null ? {} : { easing: link.easing }),
+        ...(link.extend == null ? {} : { extend: link.extend }),
+        ...(link.offset == null ? {} : { offset: link.offset }),
+      };
+    });
+  }
+
   const animation = (element as any).animation;
   if (canAnimate(element) && animation != null) {
+    // Keyframes are *stored* relative to the clip's start and every time in
+    // this surface is absolute, so they are rebased here — the same conversion
+    // `get_keyframes` does. They were reported raw, which meant `get_clip` and
+    // `get_keyframes` answered different numbers for the same keyframe on any
+    // clip that did not start at zero, and the one that looked right was
+    // whichever the reader happened to check first.
+    const start = spanStart(element);
     detail.animation = animatableProperties(element).map((property) => {
       const track = animation[property] ?? {};
       const lanes: Record<string, unknown> = {};
@@ -565,13 +627,21 @@ export function clipDetail(
           count: list.length,
           times: list
             .slice(0, MAX_KEYFRAME_TIMES)
-            .map((keyframe: any) => ms(keyframe?.p?.[0] ?? 0)),
+            .map((keyframe: any) => ms(start + (keyframe?.p?.[0] ?? 0))),
           ...(list.length > MAX_KEYFRAME_TIMES
             ? { truncated: true, note: "Use get_keyframes to page through them." }
             : {}),
         };
       }
-      return { property, active: track.isActivate === true, lanes };
+      return {
+        property,
+        active: track.isActivate === true,
+        lanes,
+        // A driven property's keyframes are kept and do not drive it, so a
+        // row that said only `active: true` would be reporting the field
+        // rather than the picture.
+        ...(linked.includes(property as any) ? { drivenByLink: true } : {}),
+      };
     });
   }
 

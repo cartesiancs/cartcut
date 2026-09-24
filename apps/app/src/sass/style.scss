@@ -629,6 +629,23 @@ body.is-scrubbing * {
   margin: 0;
 }
 
+// The inspector's slider. Full width on its own line, because the column is
+// about 200px and a slider sharing a line with a label and a number box has
+// roughly seventy pixels to travel its whole range.
+//
+// One definition rather than one per section: the Adjust, Shape and Border
+// sections each carried a byte-identical copy of this in their own `<style>`
+// block, which is three places to change a track height and two chances to
+// forget. `option-adjust-section` still keeps its own rules for the two
+// gradient tracks, which are genuinely its own.
+.option-range {
+  display: block;
+  width: 100%;
+  height: 1.1rem;
+  padding: 0;
+  margin: 0;
+}
+
 .offcanvas-header {
   padding: 0.2rem 0.2rem;
 }

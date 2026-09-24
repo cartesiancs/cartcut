@@ -1,6 +1,7 @@
 import type { VideoElementType } from "../../@types/timeline";
 import { loadedAssetStore } from "../asset/loadedAssetStore";
 import { VideoFilterPipeline } from "./filter/videoPipeline";
+import { boxOutline, paintDecoration } from "./decoration";
 import type { ElementRenderFunction } from "./type";
 
 export const renderVideoWithoutWait: ElementRenderFunction<VideoElementType> = (
@@ -58,20 +59,32 @@ const _renderVideo = (
   // it, which is why audio once kept playing over a cut.
   // `features/timeline/playback.ts` owns that, driven from the preview's draw
   // path where every handle is visited whether it is on screen or not.
-  if (videoElement.filter.enable) {
-    store.videoFilterPipeline.render(
-      ctx,
-      videoElement,
-      loadedVideo,
-      waitFilter,
-    );
-  } else {
-    ctx.drawImage(
-      loadedVideo.object,
-      0,
-      0,
-      videoElement.width,
-      videoElement.height,
-    );
-  }
+  // The silhouette is the box: both branches below fill `0,0,w,h`, so a shadow
+  // cast from the box is a shadow cast from the picture. A chroma key is the
+  // one case where that is a simplification — the keyed-out region still casts
+  // — and it is the right one: the shadow belongs to the clip, and a shadow
+  // that changed shape frame by frame as the key moved would read as a bug.
+  paintDecoration(
+    ctx,
+    videoElement,
+    boxOutline(videoElement.width, videoElement.height),
+    () => {
+      if (videoElement.filter.enable) {
+        store.videoFilterPipeline!.render(
+          ctx,
+          videoElement,
+          loadedVideo,
+          waitFilter,
+        );
+      } else {
+        ctx.drawImage(
+          loadedVideo.object,
+          0,
+          0,
+          videoElement.width,
+          videoElement.height,
+        );
+      }
+    },
+  );
 };

@@ -84,11 +84,23 @@ export function revealRefOf(
   return revealOf(doc.elements[elementId]);
 }
 
-/** A copy sharing nothing with its input. */
+/**
+ * A copy sharing nothing with its input.
+ *
+ * **Every optional field has to be named here.** This is the one write path,
+ * so a field the copy does not carry is a field that cannot be stored at all,
+ * and silently: the caller's value survives validation, reaches `withReveal`,
+ * and is dropped on the way into the document. `animate` was added to
+ * `TextReveal` and not to this, which made the whole text animator write
+ * successfully and do nothing.
+ */
 function copyReveal(reveal: TextReveal): TextReveal {
   const next: TextReveal = { unit: reveal.unit, progress: reveal.progress };
   if ((reveal.fade ?? DEFAULT_REVEAL_FADE) > 0) {
     next.fade = reveal.fade;
+  }
+  if (reveal.animate != null) {
+    next.animate = { ...reveal.animate };
   }
   return next;
 }
@@ -189,6 +201,14 @@ export function setClipTextReveal(
 export type RevealFieldPatch = {
   progress?: number;
   fade?: number;
+  /**
+   * The animator, merged field by field over whatever is there.
+   *
+   * `null` removes it outright, which is a different request from an empty
+   * patch: a caller turning a pop off has to be able to say so, and an
+   * animator that moves nothing is deleted rather than stored anyway.
+   */
+  animate?: Record<string, unknown> | null;
 };
 
 /**
@@ -215,6 +235,17 @@ export function setClipTextRevealFields(
     if (typeof value === "number" && Number.isFinite(value)) {
       merged[key] = value;
     }
+  }
+
+  if (patch.animate !== undefined) {
+    // Merged over the stored animator rather than replacing it, so changing a
+    // scale does not silently drop an offset. `null` is the one value that
+    // means "remove", and `coerceReveal` deletes an animator that would move
+    // nothing, so the key never survives as an empty object.
+    merged.animate =
+      patch.animate === null
+        ? undefined
+        : { ...(existing.animate ?? {}), ...patch.animate };
   }
 
   const next = coerceReveal(merged);

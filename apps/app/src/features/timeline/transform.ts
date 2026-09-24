@@ -21,6 +21,7 @@
 
 import type { Timeline, TimelineElement } from "../../@types/timeline";
 import { sampleBaked } from "../animation/keyframes";
+import { resolveLinks, type SampleOverrides } from "../animation/link";
 import { toRadian } from "../math/geom";
 import { MAX_GROUP_DEPTH, parentOf } from "./hierarchy";
 import { scaleTenthsOf } from "./scaleOps";
@@ -210,6 +211,7 @@ const MIN_SAMPLED_SCALE = 0.001;
 export function localSampleAt(
   element: TimelineElement | null | undefined,
   cursor: number,
+  links?: SampleOverrides | null,
 ): LocalSample {
   const any = element as any;
   if (any == null) {
@@ -227,15 +229,34 @@ export function localSampleAt(
   const staticX = any.location?.x ?? 0;
   const staticY = any.location?.y ?? 0;
 
+  /*
+   * A driven property replaces both the static field and the keyframe track.
+   *
+   * That order is the whole contract: a link *is* the value, the way an
+   * expression is in After Effects, so keyframes on a linked property are kept
+   * but stop driving it. The keyframe commands refuse to write one while a
+   * link is in force, so this is never a silent disagreement between two
+   * things a caller wrote.
+   *
+   * `links` is optional and absent by default, which is what makes this change
+   * byte-identical for every caller that has not opted in. The renderer and
+   * `worldMatrixOf` pass it; the pure ops and every box read do not need to,
+   * because `size` is deliberately not linkable.
+   */
+  const driven = links ?? null;
+
   return {
-    x: track(any, "position", "ax", staticX, cursor),
-    y: track(any, "position", "ay", staticY, cursor),
-    rotationDeg: track(any, "rotation", "ax", any.rotation ?? 0, cursor),
+    x: driven?.positionX ?? track(any, "position", "ax", staticX, cursor),
+    y: driven?.positionY ?? track(any, "position", "ay", staticY, cursor),
+    rotationDeg:
+      driven?.rotation ?? track(any, "rotation", "ax", any.rotation ?? 0, cursor),
     scale: Math.max(
       MIN_SAMPLED_SCALE,
-      track(any, "scale", "ax", scaleTenthsOf(any), cursor) / 10,
+      (driven?.scale ?? track(any, "scale", "ax", scaleTenthsOf(any), cursor)) /
+        10,
     ),
-    opacity: track(any, "opacity", "ax", any.opacity ?? 100, cursor),
+    opacity:
+      driven?.opacity ?? track(any, "opacity", "ax", any.opacity ?? 100, cursor),
     // Floored at zero rather than above it, which is the one way this differs
     // from `scale`. A clip of zero width is a legitimate picture — it covers
     // no pixels — whereas a scale of zero would be reached only on the way to
@@ -287,8 +308,9 @@ export function sampledBoxOf(
 export function localMatrixOf(
   element: TimelineElement | null | undefined,
   cursor: number,
+  links?: SampleOverrides | null,
 ): Mat {
-  const sample = localSampleAt(element, cursor);
+  const sample = localSampleAt(element, cursor, links);
 
   // The centre of the box *being drawn*, not of the one stored. Reading
   // `element.width` here is exact until a size track is switched on, and then
@@ -389,7 +411,13 @@ export function worldMatrixOf(
   let acc = inherited ?? IDENTITY;
   for (let i = chain.length - 1; i >= 0; i--) {
     const id = chain[i];
-    acc = multiply(acc, localMatrixOf(elements[id], cursor));
+    // Resolved per level, because a link is a property of the element it sits
+    // on and an ancestor's driven rotation has to reach its children exactly
+    // the way an authored one does.
+    acc = multiply(
+      acc,
+      localMatrixOf(elements[id], cursor, resolveLinks(elements, id, cursor)),
+    );
     memo?.set(id, acc);
   }
 
@@ -442,7 +470,10 @@ export function inheritedOpacityOf(
       break;
     }
     seen.add(id);
-    alpha *= clamp01(localSampleAt(elements[id], cursor).opacity / 100);
+    alpha *= clamp01(
+      localSampleAt(elements[id], cursor, resolveLinks(elements, id, cursor))
+        .opacity / 100,
+    );
     id = parentOf(elements, id);
     depth++;
   }

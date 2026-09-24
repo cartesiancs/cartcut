@@ -83,13 +83,6 @@ const ROW_SPECS: Record<RowKey, RowSpec> = {
 };
 
 const STYLES = `
-  option-shape-section .shape-range {
-    display: block;
-    width: 100%;
-    height: 1.1rem;
-    padding: 0;
-    margin: 0;
-  }
   option-shape-section .shape-corner-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -258,7 +251,7 @@ export class OptionShapeSection extends LitElement {
         </div>
         <input
           type="range"
-          class="form-range shape-range mt-1"
+          class="form-range option-range mt-1"
           min=${String(spec.min)}
           max=${String(spec.max)}
           step=${String(spec.step)}
@@ -327,30 +320,40 @@ export class OptionShapeSection extends LitElement {
                 this.write((doc) => setClipShapeGeometryMany(doc, ids, setAll(value)));
               }}
             />
-            ${perCorner
-              ? html`<button
-                  class="btn btn-xs ${this.linkedCorners
-                    ? "btn-primary"
-                    : "btn-default"} text-light m-0 p-0"
-                  style="width: 20px; height: 20px;"
-                  title=${this.linkedCorners
-                    ? "Corners are linked. Click to set each one."
-                    : "Corners are separate. Click to link them."}
-                  @click=${() => {
-                    this.linkedCorners = !this.linkedCorners;
-                    this.requestUpdate();
-                  }}
-                >
-                  <span class="material-symbols-outlined icon-xs">
-                    ${this.linkedCorners ? "link" : "link_off"}
-                  </span>
-                </button>`
-              : ""}
+            ${
+              // Centred by flex, with the padding left alone. `p-0` is dead
+              // here: the design system's `.btn` and our own `.btn-xs` both
+              // declare padding `!important`, so whatever the markup asks for
+              // the content box is 2x10 inside the 20px square. Inline layout
+              // then left the glyph at the left edge of that box, sitting on a
+              // baseline below its middle: 4px right of centre and 2px low.
+              // Flex centres the icon's 10x10 em box instead, and what
+              // overflows the content box overflows it symmetrically.
+              perCorner
+                ? html`<button
+                    class="btn btn-xs ${this.linkedCorners
+                      ? "btn-primary"
+                      : "btn-default"} text-light m-0 d-flex align-items-center justify-content-center"
+                    style="width: 20px; height: 20px;"
+                    title=${this.linkedCorners
+                      ? "Corners are linked. Click to set each one."
+                      : "Corners are separate. Click to link them."}
+                    @click=${() => {
+                      this.linkedCorners = !this.linkedCorners;
+                      this.requestUpdate();
+                    }}
+                  >
+                    <span class="material-symbols-outlined icon-xs">
+                      ${this.linkedCorners ? "link" : "link_off"}
+                    </span>
+                  </button>`
+                : ""
+            }
           </div>
         </div>
         <input
           type="range"
-          class="form-range shape-range mt-1"
+          class="form-range option-range mt-1"
           min="0"
           max=${String(ceiling)}
           step="1"

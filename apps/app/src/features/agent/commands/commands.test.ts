@@ -34,6 +34,7 @@ import "./clip";
 import "./media";
 import "./tracks";
 import "./appearance";
+import "./fonts";
 import "./animation";
 import "./groups";
 

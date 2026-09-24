@@ -12,6 +12,7 @@ import { requestEditor } from "../bridge";
 import {
   animatableProperty,
   EASINGS,
+  LINKABLE,
   PRESETS,
   mutating,
   tool,
@@ -161,6 +162,55 @@ export function registerAnimationTools(define: Registrar) {
   );
 
   define(
+    "set_keyframes",
+    {
+      title: "Add keyframes to many clips and properties at once",
+      description:
+        "The batch form of add_keyframes, and the one to reach for past a single move: every clip, every " +
+        "property, **one call and one undo step**. A twelve-card wheel with opacity and scale on each is " +
+        "one call here and twenty-four through add_keyframes. " +
+        "One bad time or easing anywhere refuses the whole batch rather than leaving half an edit. " +
+        "`replace: true` empties that track first, so running the same batch twice does not stack keys. " +
+        "Units: opacity 0-100, rotation deg, **scale in tenths — 10 is unscaled, 12 is 120%**, size in px " +
+        "per axis (the box, not a second scale), mask position/size in % of the clip. `position`, `size`, " +
+        "`maskPosition` and `maskSize` need `x` and `y` per entry; everything else takes `value`. " +
+        "Times are absolute timeline ms and must fall inside their clip. " +
+        "**Set `easing` or the move will be soft** — with none, keyframes leave and arrive at zero " +
+        "velocity, which reads as drifting. It shapes the segment *leaving* its entry, so the last is " +
+        "ignored. `snap` is a punch-in, `overshoot` passes and returns, `anticipate` winds up first.",
+      inputSchema: {
+        writes: z
+          .array(
+            z.object({
+              elementId: z.string(),
+              property: animatableProperty,
+              keyframes: z
+                .array(
+                  z.object({
+                    atMs: z.number(),
+                    value: z.number().optional(),
+                    x: z.number().optional(),
+                    y: z.number().optional(),
+                    easing: z
+                      .union([z.enum(EASINGS), z.array(z.number()).length(4)])
+                      .optional(),
+                  }),
+                )
+                .min(1),
+              replace: z
+                .boolean()
+                .optional()
+                .describe("Empty this track before writing."),
+            }),
+          )
+          .min(1),
+      },
+      annotations: mutating,
+    },
+    tool((args) => requestEditor("set_keyframes", args)),
+  );
+
+  define(
     "remove_keyframes",
     {
       title: "Remove keyframes",
@@ -175,5 +225,82 @@ export function registerAnimationTools(define: Registrar) {
       annotations: mutating,
     },
     tool((args) => requestEditor("remove_keyframes", args)),
+  );
+
+  define(
+    "set_property_link",
+    {
+      title: "Drive a property from another clip's property",
+      description:
+        "Make one property **derive** from another — the place an expression would go, as data. " +
+        "`in`/`out` are matching stops: the source value is found in `in` and the answer read off `out`, " +
+        "interpolated between. Outside the stops it holds the end value unless `extend` says otherwise. " +
+        "**This is what a card wheel is.** Turn a null, then link each card's opacity and scale to the " +
+        "null's rotation with `in: [-90, 0, 90], out: [0, 100, 0]`, and give each card its own phase " +
+        "through `offsets` — one offset per id, added to the source before the map. One call for the row. " +
+        "The difference from computing keyframes yourself is what happens next: move the null and " +
+        "everything derived from it follows. " +
+        "A driven property is **read-only** — its keyframes are kept but stop driving it, and " +
+        "add_keyframes and update_clip refuse it until clear_property_link. " +
+        "`size` and `volumeDb` cannot be driven; the error says why. Units are the property's own, so " +
+        "scale is in tenths and opacity is 0-100.",
+      inputSchema: {
+        elementIds: z.array(z.string()).min(1),
+        property: z.enum(LINKABLE).describe("The property to drive."),
+        fromElementId: z.string().describe("The clip to read from."),
+        fromProperty: animatableProperty.describe("The property to read."),
+        fromLane: z
+          .enum(["x", "y"])
+          .optional()
+          .describe("Which lane of a paired source property. Defaults to x."),
+        in: z
+          .array(z.number())
+          .min(2)
+          .max(16)
+          .describe("Source values, strictly ascending."),
+        out: z
+          .array(z.number())
+          .min(2)
+          .max(16)
+          .describe("What each `in` stop maps to. Same count."),
+        easing: z
+          .enum(EASINGS)
+          .optional()
+          .describe("Shapes each segment between two stops. Default linear."),
+        extend: z
+          .enum(["clamp", "extrapolate"])
+          .optional()
+          .describe("Outside the stops: hold the end (default), or keep going."),
+        offsets: z
+          .array(z.number())
+          .optional()
+          .describe(
+            "One per id, in the same order, added to the source before mapping. This is how a row of clips shares one shape.",
+          ),
+      },
+      annotations: mutating,
+    },
+    tool((args) => requestEditor("set_property_link", args)),
+  );
+
+  define(
+    "clear_property_link",
+    {
+      title: "Stop driving a property from another",
+      description:
+        "Remove a link, so the property goes back to its own static value and keyframes — which were " +
+        "kept the whole time it was driven. Omit `property` to remove every link on those clips. " +
+        "Do this before authoring keyframes on a driven property; add_keyframes refuses one while a " +
+        "link is in force rather than writing numbers nothing would read.",
+      inputSchema: {
+        elementIds: z.array(z.string()).min(1),
+        property: z
+          .enum(LINKABLE)
+          .optional()
+          .describe("Omit for every link on the clip."),
+      },
+      annotations: mutating,
+    },
+    tool((args) => requestEditor("clear_property_link", args)),
   );
 }

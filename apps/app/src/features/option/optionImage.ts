@@ -8,6 +8,7 @@ import "./controlBlendMode";
 import "./controlClipOrientation";
 import "./controlClipCrop";
 import "./optionLutSection";
+import "./optionDecorationSection";
 import "./optionAdjustSection";
 import "./optionMaskSection";
 import "./animationPresetBrowser";
@@ -118,6 +119,16 @@ export class OptionImage extends LitElement {
       <option-lut-section
         .elementId=${this.elementId}
       ></option-lut-section>
+
+      <!--
+        Border and drop shadow. Shape, image and video share this section
+        because they share the field: all three draw a picture inside a box.
+        Text has its own pair under Effects, which strokes the glyphs.
+      -->
+      <option-decoration-section
+        .elementIds=${[this.elementId]}
+      ></option-decoration-section>
+
 
       <background-remove
         imagePath=${this.bgRemoveImagePath}

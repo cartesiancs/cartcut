@@ -191,6 +191,175 @@ type Mirrorable = {
 };
 
 /**
+ * The properties a link may drive.
+ *
+ * Four, and the two that are missing are missing for reasons rather than for
+ * now.
+ *
+ * **`size` is out** because a driven box would have to reach
+ * `transform.ts#sampledBoxOf`, which is the single road the renderer, the mask,
+ * the selection outline, the eight grips, the hit test and the resize origin
+ * all travel. CLAUDE.md names that as the one place a missed call site puts the
+ * picture in one spot and the pointer's idea of it in another. Leaving `size`
+ * out means that signature never changes, which is most of why this feature is
+ * affordable at all.
+ *
+ * **`volumeDb` is out** because the audio envelope is built by FFmpeg's filter
+ * graph from the authored keyframes, not by the renderer. A linked level would
+ * play in the preview and not reach the exported file, and preview/export
+ * parity is structural here rather than maintained.
+ *
+ * `intensity`, `fx:*` and `revealProgress` each have their own sampler and are
+ * simply not wired yet.
+ */
+export const LINKABLE_PROPERTIES = [
+  "position",
+  "opacity",
+  "scale",
+  "rotation",
+] as const;
+
+export type LinkableProperty = (typeof LINKABLE_PROPERTIES)[number];
+
+/**
+ * One property derived from another property's value.
+ *
+ * This is the place an expression language would otherwise go, and it is
+ * deliberately **data rather than code**. The compositor is synchronous and
+ * "nothing executes" is a property of this codebase that the extension host,
+ * the FX preset format and the LUT registry all rest on; a JavaScript
+ * evaluator running once per element per frame would give that up for a
+ * feature a piecewise map covers.
+ *
+ * And it does cover it. The overwhelming majority of real After Effects
+ * expressions are `linear()` or `ease()` over some other property — "fade this
+ * out as the parent turns away", "grow this as the slider rises" — which is
+ * exactly `in` to `out` with a curve. What is given up is arithmetic between
+ * several sources, and that is worth the trade.
+ *
+ * Absent means the property is whatever its own keyframes and static field
+ * say, and clearing deletes the key, so a project nobody has linked saves
+ * byte-identically to one written before the feature and `SCHEMA_VERSION` did
+ * not move. Read through `features/animation/link.ts#linkOf`, never directly.
+ */
+export type PropertyLink = {
+  /** Where the value is read from. `lane` defaults to `"x"`. */
+  from: {
+    elementId: string;
+    property: AnimatableProperty;
+    lane?: "x" | "y";
+  };
+  /**
+   * Input stops, ascending, 2 to 16 of them.
+   *
+   * Two is the `linear(value, inMin, inMax, outMin, outMax)` everyone writes;
+   * more is the piecewise map that would otherwise need an `if`.
+   */
+  in: number[];
+  /** Output stops, one per input stop. */
+  out: number[];
+  /** How each segment is shaped. Absent is linear. */
+  easing?: string;
+  /**
+   * What happens outside the stops.
+   *
+   * `"clamp"` holds the end value, which is what `linear()` does and what a
+   * caller almost always means. `"extrapolate"` keeps going along the last
+   * segment's slope.
+   */
+  extend?: "clamp" | "extrapolate";
+  /**
+   * Added to the source value before it is mapped.
+   *
+   * The field that makes one link shape serve a row of clips: twelve cards on
+   * a turning null are one description twelve times with twelve offsets, not
+   * twelve descriptions.
+   */
+  offset?: number;
+};
+
+/**
+ * A clip whose properties can be driven by another clip's.
+ *
+ * The same types that carry `Animatable`, minus the two whose animation is not
+ * a transform: an effect's `intensity` and a transition have their own
+ * samplers. Absent means nothing is linked.
+ */
+type Linked = {
+  link?: Partial<Record<LinkableProperty, PropertyLink>>;
+};
+
+/**
+ * A drop shadow cast by a clip's own silhouette.
+ *
+ * The same shape as `TextShadow` and for the same reasons, said once for the
+ * clips that are not text. `offsetX`/`offsetY`/`blur` are in **element space**,
+ * not device pixels: the canvas shadow API is device-space and untouched by the
+ * transform, so `renderer/shadow.ts#paintShadowOnly` pushes these through the
+ * current matrix — which is what keeps a shadow identical in a zoomed preview
+ * and in the export, and what makes it rotate and scale with the clip.
+ *
+ * `TextShadow` is deliberately left as its own type rather than aliased to
+ * this. It lives at `options.shadow` on a text element and this lives at
+ * `shadow`; merging the two declarations would suggest the two paths are one
+ * and invite a writer to reach for the wrong one.
+ */
+export type ClipShadow = {
+  enable: boolean;
+  offsetX: number;
+  offsetY: number;
+  blur: number;
+  color: string;
+  /** 0-100. Folded into the shadow colour rather than `globalAlpha`. */
+  opacity: number;
+};
+
+/**
+ * How a clip's outline is drawn.
+ *
+ * `width` is in **element space**, so a stroke grows with the clip the way its
+ * picture does — the convention `ClipShadow` keeps, and the one that makes a
+ * bordered card look the same at any scale.
+ *
+ * `align` exists because the canvas only strokes centred: half the line falls
+ * inside the shape and half outside. Design tools offer all three and the
+ * difference is visible at any useful width, so `renderer/decoration.ts` builds
+ * the other two out of a clip region rather than pretending centred is enough.
+ */
+export type ClipStroke = {
+  enable: boolean;
+  width: number;
+  color: string;
+  /** 0-100. Folded into the stroke colour, as the shadow's is. */
+  opacity: number;
+  align: "inner" | "center" | "outer";
+};
+
+/** How a stroke sits against the outline it traces. */
+export const STROKE_ALIGNMENTS = ["inner", "center", "outer"] as const;
+
+export type StrokeAlignment = (typeof STROKE_ALIGNMENTS)[number];
+
+/**
+ * A clip that can carry a border and a drop shadow.
+ *
+ * Shape, image and video — the three that draw a picture inside a box. Text has
+ * its own pair under `options`, which predates this and is richer (it strokes
+ * the glyphs, not the box); a group paints nothing, and a gif is left out for
+ * now because its frames are drawn through a separate path.
+ *
+ * Absent means neither, and clearing deletes the key, so a project nobody has
+ * decorated saves byte-identically to one written before the feature and
+ * `SCHEMA_VERSION` did not move. The rule `blend`, `lut`, `mask` and `mirror`
+ * all follow. Read through `features/renderer/decoration.ts`'s `strokeOf` and
+ * `shadowOf`, never directly.
+ */
+type Decorated = {
+  stroke?: ClipStroke;
+  shadow?: ClipShadow;
+};
+
+/**
  * The part of the source frame a clip shows.
  *
  * All four numbers are fractions of the **whole source frame**, never of the
@@ -666,12 +835,14 @@ type Leveled = {
 export type ImageElementType = TimelinePlaced &
   Visual &
   Animatable &
+  Linked &
   Blendable &
   Gradable &
   Adjustable &
   Mirrorable &
   Croppable &
   Maskable &
+  Decorated &
   Replaceable & {
     filetype: "image";
   };
@@ -757,10 +928,12 @@ export type ShapeGeometry = {
 export type ShapeElementType = TimelinePlaced &
   Visual &
   Animatable &
+  Linked &
   Blendable &
   Gradable &
   Adjustable &
-  Maskable & {
+  Maskable &
+  Decorated & {
     filetype: "shape";
     oWidth: number; // 원래 shape 사이즈
     oHeight: number;
@@ -775,6 +948,7 @@ export type ShapeElementType = TimelinePlaced &
 export type VideoElementType = TimelinePlaced &
   Visual &
   Animatable &
+  Linked &
   Leveled &
   Blendable &
   Gradable &
@@ -782,6 +956,7 @@ export type VideoElementType = TimelinePlaced &
   Mirrorable &
   Croppable &
   Maskable &
+  Decorated &
   Replaceable & {
     filetype: "video";
     /**
@@ -923,6 +1098,54 @@ export type RevealUnit = (typeof REVEAL_UNITS)[number];
  * Not a mixin over the other visual types on purpose: a reveal counts units of
  * *text*, and a picture has none. Wiping an image on is what a mask is for.
  */
+/**
+ * The movement a unit makes as it arrives — After Effects' Text Animator, in
+ * the one shape that fits a reveal.
+ *
+ * Every field is the value a unit **starts at** and settles from; the settled
+ * state is always the clip's own. So `scale: 140` means a word appears 40%
+ * oversized and shrinks into place, and a clip whose reveal has finished is
+ * byte-identical in the picture to one that never had an animator.
+ *
+ * **No new keyframe track, and no new timing.** The progress is the same
+ * `animation.revealProgress` the reveal already uses; this only says what a
+ * unit does on its way in. That is what keeps split, trim, duplicate, paste and
+ * a frame-rate change carrying it for free, and it is the same division of
+ * labour `TextReveal` itself states: timing in the animation block, meaning
+ * here.
+ *
+ * Absent means no movement, and every field's default is inert, so a project
+ * nobody has animated saves byte-identically to one written before the feature
+ * and `SCHEMA_VERSION` did not move.
+ */
+export type RevealAnimate = {
+  /**
+   * How many units are in flight at once.
+   *
+   * **This deliberately lifts the bound `fade` documents below.** One unit at a
+   * time was chosen so the renderer paid one extra pass rather than one per
+   * unit in flight; a stagger is exactly the thing that needs several, and the
+   * cost is one clipped draw per unit still moving. Capped so a long caption
+   * cannot ask for fifty.
+   *
+   * Absent means `fade` when there is one, and otherwise 1.
+   */
+  window?: number;
+  /** Starting size, as a percentage. 100 is inert. */
+  scale?: number;
+  /** Starting offset from where the unit belongs, in element pixels. */
+  offsetX?: number;
+  offsetY?: number;
+  /** Starting rotation, in degrees, about the unit's own centre. */
+  rotation?: number;
+  /** Starting blur, in element pixels. 0 is inert. */
+  blur?: number;
+  /** Starting opacity, 0-100. Absent is 0, so a unit fades in. */
+  opacity?: number;
+  /** How the unit travels from its starting state to its settled one. */
+  easing?: string;
+};
+
 export type TextReveal = {
   unit: RevealUnit;
   /**
@@ -937,11 +1160,19 @@ export type TextReveal = {
   /**
    * 0-1. How much of one unit's turn it spends fading in; 0 is a hard cut.
    *
-   * Bounded at one unit deliberately, so at most one unit is ever partially
-   * drawn and the renderer costs one extra pass rather than one per unit in
-   * flight.
+   * Bounded at one unit, so at most one unit is ever partially drawn and the
+   * renderer costs one extra pass rather than one per unit in flight. That
+   * bound holds for a reveal with no `animate`, which is every reveal written
+   * before the animator existed and the one this field was designed for.
+   * `animate.window` is how a caller asks for more, and says what it costs.
    */
   fade?: number;
+  /**
+   * What a unit does on its way in. Absent means it simply appears.
+   *
+   * Read through `text/reveal.ts#revealOf`, which supplies every default.
+   */
+  animate?: RevealAnimate;
 };
 
 /**
@@ -1003,6 +1234,7 @@ export type TextRun = { from: number; to: number; style: TextRunStyle };
 export type TextElementType = TimelinePlaced &
   Visual &
   Animatable &
+  Linked &
   Blendable &
   Gradable &
   Adjustable &
@@ -1122,7 +1354,8 @@ export type TextElementType = TimelinePlaced &
  */
 export type GroupElementType = TimelinePlaced &
   Visual &
-  Animatable & {
+  Animatable &
+  Linked & {
     filetype: "group";
     /** Shown on the group's bar. Every other clip is named by its source file. */
     name: string;
@@ -1180,7 +1413,8 @@ export type TemplateFill =
  */
 export type TemplateElementType = TimelinePlaced &
   Visual &
-  Animatable & {
+  Animatable &
+  Linked & {
     filetype: "template";
     /** Which installed template this is. Resolved through the registry. */
     templateId: string;
