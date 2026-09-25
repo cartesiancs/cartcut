@@ -81,6 +81,19 @@ npm run dev      # tsc --watch for main, webpack --watch for the renderer
 npm run start    # electron .
 ```
 
+Or one terminal, with the app kept on the latest build:
+
+```
+npm run dev:hot
+```
+
+A new renderer bundle reloads the editor window (a stylesheet-only change is
+swapped in place, and keeps the open project), and a new `main/` build restarts
+Electron. Either one throws away the open project and its undo history, and
+Auto Save's recovery point is the way back. `npm run start:hot` is the app half
+alone, next to an `npm run dev` you already have running. None of this exists in
+a packaged build.
+
 `npm run dev` does **not** build `apps/overlay-record`, the screen recorder's
 own Vite app: it has its own lockfile and its own tsc. Build it by hand after
 changing anything under it, or the recorder windows load a stale bundle.

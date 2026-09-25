@@ -63,6 +63,7 @@ import { attachBridge } from "./mcp/bridge.js";
 import { initAutosave, onAutosaveChange, setMenuOpen } from "./lib/autosave.js";
 import { installMenu } from "./lib/menu.js";
 import { startMcpServer, stopMcpServer } from "./mcp/server.js";
+import { hotReloadEnabled, watchRendererBundle } from "./lib/devReload.js";
 import Store from "electron-store";
 
 const store = new Store();
@@ -364,6 +365,11 @@ if (!gotTheLock) {
         log.warn("[nav] blocked navigation to", url);
       }
     });
+
+    // Development only, and only under `npm run start:hot`. See `devReload.ts`.
+    if (hotReloadEnabled(isDev, process.env)) {
+      watchRendererBundle(mainWindow.webContents, path.join(app.getAppPath(), "apps/app/dist"));
+    }
 
     const revealEditor = () => {
       if (!splashWindow.isDestroyed()) splashWindow.destroy();
