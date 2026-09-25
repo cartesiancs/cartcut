@@ -223,7 +223,8 @@ function buildTemplate(): any[] {
         // the document being thrown away is the one under test, so the item is
         // simply gone. Reloading during development is a restart
         // (`npm run start`), which is what picks up a new main-process build
-        // anyway.
+        // anyway, or `npm run start:hot`, which does both on every build and
+        // is opted into per session (`lib/devReload.ts`).
         //
         // The devtools stay, under `isDev` — they read the page rather than
         // replacing it. `lib/window.ts` opens them on the same condition.

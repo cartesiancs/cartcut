@@ -6,7 +6,9 @@
   "author": "cartesiancs",
   "scripts": {
     "start": "electron .",
+    "start:hot": "node scripts/devElectron.mjs",
     "dev": "npm run build:speech && concurrently \"npm run compile\" \"npm run bundle:src\"",
+    "dev:hot": "npm run build:speech && concurrently -k -n main,renderer,app \"npm run compile\" \"npm run bundle:src\" \"npm run start:hot\"",
     "compile": "tsc -w -p ./.tsconfig",
     "bundle": "npm run bundle:src",
     "vendor:sync": "node scripts/syncVendor.mjs",

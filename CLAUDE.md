@@ -56,12 +56,20 @@ roughly half speed and says nothing. `lipo -archs bin/darwin-arm64/ffmpeg`.
 ```
 npm run dev      # tsc --watch (main) + webpack --watch (renderer)
 npm run start    # electron .   (run in a second terminal)
+npm run dev:hot  # dev + start:hot in one terminal: reload on every build
 npm test         # vitest run
 npx tsc --noEmit -p ./.tsconfig    # typecheck the main process
 npx webpack --mode=development     # build the renderer once
 npm run build:overlay              # the screen recorder's own Vite app
 npm run build:speech               # the native STT sidecar (Swift, macOS only)
 ```
+
+**Hot reload is development-only and opt-in.** `start:hot`
+(`scripts/devElectron.mjs`) restarts Electron when `main/` changes and sets
+`CARTCUT_HOT_RELOAD=1`; `electron/lib/devReload.ts` then reloads the editor
+window on a new renderer bundle (or swaps `style.css` alone in place), but only
+when `isDev` is also true. A reload drops the document and the undo history, so
+`npm run start` and the e2e harness never get it.
 
 `npm run dev` does **not** build `apps/overlay-record`; build it yourself after
 touching it or the recorder windows load a stale bundle. It does build
