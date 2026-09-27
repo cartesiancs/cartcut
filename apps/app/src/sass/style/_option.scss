@@ -412,6 +412,91 @@ input.opt-num::-webkit-outer-spin-button {
 }
 
 /*
+ * A multi-line field: the text of a title, and nothing else in the inspector.
+ *
+ * `resize: vertical` and a floor rather than a fixed height, because a title
+ * that breaks over four lines is a thing the renderer draws and a field that
+ * cannot show it is a field you edit blind.
+ */
+textarea.opt-textarea {
+  display: block;
+  width: 100%;
+  min-height: 64px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid $opt-line;
+  border-radius: 7px;
+  background-color: $opt-field;
+  color: $opt-text;
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+textarea.opt-textarea:focus,
+input.opt-text-input:focus {
+  border-color: #4a5158;
+  outline: none;
+  box-shadow: none;
+  color: $opt-bright;
+}
+
+/* A single-line field: the font search, and anything else that takes a word. */
+input.opt-text-input {
+  display: block;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid $opt-line;
+  border-radius: 7px;
+  background-color: $opt-field;
+  color: $opt-text;
+  font-size: 11px;
+}
+
+/*
+ * A full-width button that opens a menu and reports what is chosen: the font
+ * picker. Its name takes the room and the caret stays pinned, so a long family
+ * ellipses against the caret rather than pushing it out of the button.
+ */
+.opt-picker {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 28px;
+  padding: 0 6px 0 9px;
+  margin: 0;
+  border: 1px solid $opt-line;
+  border-radius: 7px;
+  background-color: $opt-field;
+  color: $opt-text;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease-out;
+}
+
+.opt-picker:hover {
+  border-color: $opt-line-strong;
+}
+
+.opt-picker > .opt-picker-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.opt-picker > .material-symbols-outlined {
+  flex: none;
+  font-size: 16px;
+  color: $opt-label;
+}
+
+/*
  * `appearance` and `background-repeat` are both load-bearing. `style.scss` gives
  * every bare `select` the chevron as a `background-image` and leaves the rest to
  * Bootstrap's `.form-select`, which this one does not wear: without them the
