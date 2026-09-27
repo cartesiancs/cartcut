@@ -77,82 +77,39 @@ export class OptionTabBar extends LitElement {
   }
 
   render() {
-    // Four clip tabs do not fit a narrow inspector column at the stock size,
-    // and `.btn` is `nowrap`: the fourth ran off the edge and the third was cut
-    // to "Animati". Shrinking and truncating the label only traded that for
-    // "M··" and "A··" — at the harness's window size each button is about 32
-    // CSS pixels, and no label fits in that.
+    // Four tabs do not fit the column at its stock width: the fourth ran off
+    // the edge and the third was cut to "Animati", and shrinking the label only
+    // traded that for "M.." and "A..". So the bar is a size container, and
+    // below the width where four names fit each tab is its icon with the name
+    // as a tooltip. A container query rather than a media query, because what
+    // decides it is the column, which the user can resize, not the window.
     //
-    // So past three tabs the bar is a size container. The buttons share the
-    // row equally and may shrink (`min-width: 0`); below the width where four
-    // names fit, each is a legible icon with its name as a tooltip, and above
-    // it the name sits under the icon. A container query rather than a media
-    // query, because what matters is the column, which the user can resize,
-    // not the window.
+    // Three or fewer keep their names at every width (`opt-tabs-few`): the
+    // query asks about the whole bar, so it would hide a two-tab bar's names in
+    // a column where they fit.
     //
-    // Only past three. The project settings bar passes two and draws its icon
-    // and label inline; it keeps exactly the markup it had.
+    // `option-tabs-crowded` and `option-tab-label` earn their place by being
+    // what `tests/e2e/specs/adjust-panel.spec.ts` measures: it sizes the
+    // container by that class and counts the labels that are displayed.
     const crowded = this.tabs.length > 3;
-    if (!crowded) {
-      return html`
-        <div class="d-flex gap-1 mb-2">
-          ${this.tabs.map(
-            (tab) => html`
-              <button
-                class="btn btn-xs ${this.active === tab.id
-                  ? "btn-primary"
-                  : "btn-default"} text-light flex-fill"
-                data-panel=${tab.id}
-                @click=${() => this.select(tab.id)}
-              >
-                <span class="material-symbols-outlined icon-xs">${tab.icon}</span>
-                ${tab.label}
-              </button>
-            `,
-          )}
-        </div>
-      `;
-    }
     return html`
-      <style>
-        option-tab-bar .option-tabs-crowded {
-          container-type: inline-size;
-        }
-        option-tab-bar .option-tabs-crowded .option-tab-icon {
-          font-size: 16px;
-          line-height: 1;
-        }
-        option-tab-bar .option-tabs-crowded .option-tab-label {
-          display: none;
-          font-size: 11px;
-        }
-        @container (min-width: 280px) {
-          option-tab-bar .option-tabs-crowded .option-tab-icon {
-            font-size: x-small;
-          }
-          option-tab-bar .option-tabs-crowded .option-tab-label {
-            display: block;
-          }
-        }
-      </style>
-      <div class="option-tabs-crowded mb-2">
-        <div class="d-flex gap-1">
+      <div
+        class="opt-tabs ${crowded ? "option-tabs-crowded" : "opt-tabs-few"}"
+      >
+        <div class="opt-tabs-row d-flex">
           ${this.tabs.map(
             (tab) => html`
               <button
-                class="btn btn-xs ${this.active === tab.id
-                  ? "btn-primary"
-                  : "btn-default"} text-light flex-fill"
-                style="min-width: 0; flex-basis: 0;"
+                type="button"
+                class="opt-tab ${this.active === tab.id ? "is-on" : ""}"
                 data-panel=${tab.id}
                 title=${tab.label}
                 aria-label=${tab.label}
+                aria-selected=${this.active === tab.id ? "true" : "false"}
                 @click=${() => this.select(tab.id)}
               >
-                <span class="material-symbols-outlined option-tab-icon text-light"
-                  >${tab.icon}</span
-                >
-                <span class="option-tab-label text-truncate">${tab.label}</span>
+                <span class="material-symbols-outlined">${tab.icon}</span>
+                <span class="option-tab-label opt-tab-label">${tab.label}</span>
               </button>
             `,
           )}

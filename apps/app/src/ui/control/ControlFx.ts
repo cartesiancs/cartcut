@@ -47,6 +47,18 @@ export class ControlUiFx extends LitElement {
   }
 
   /**
+   * Show one of the three grids, from outside.
+   *
+   * The inspector's LUT section offers a `+` that has to land the user on the
+   * grid, and the sidebar pill alone only opens this tab: without this it would
+   * open on whichever grid was last looked at, which for a first-time click is
+   * Effects.
+   */
+  openPanel(panel: FxPanel) {
+    this.select(panel);
+  }
+
+  /**
    * `btn-xs` and `flex-fill`, not the `btn-sm` two tabs used to wear.
    *
    * The sidebar column is about 430px wide and `overflow-x` is hidden on the

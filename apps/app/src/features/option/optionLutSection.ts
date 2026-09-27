@@ -1,15 +1,24 @@
 /**
- * The LUT row inside a clip's inspector.
+ * The LUT section inside a clip's inspector.
  *
  * One component included by all five clip inspectors rather than five copies of
- * the same three controls — which is what `Gradable` being a mixin over exactly
+ * the same three controls, which is what `Gradable` being a mixin over exactly
  * those five types means in the UI.
  *
  * Deliberately *not* a preset picker. Choosing a look is a visual decision made
- * against eighty thumbnails in the LUT panel; a dropdown of eighty names is
- * a worse version of that and would invite people to pick by name. What belongs
+ * against eighty thumbnails in the LUT panel; a dropdown of eighty names is a
+ * worse version of that and would invite people to pick by name. What belongs
  * here is what the panel cannot show: which LUT this clip currently has, how
  * strongly it applies, and how to take it off.
+ *
+ * So this is the shape every choose-one section in the inspector takes: the name
+ * at one end of the head and a `+` at the other, which opens the grid the choice
+ * is actually made in. With one chosen, the `+` becomes the way to take it off
+ * and the body carries what there is to adjust.
+ *
+ * Nothing in here may say "filter": `VideoElementType.filter` already owns that
+ * word for the chroma key and the blurs, and `tests/e2e/specs/lut-panel.spec.ts`
+ * reads this component's text and every title in it to hold that line.
  */
 
 import { LitElement, html } from "lit";
@@ -26,6 +35,7 @@ import {
   setClipLutIntensity,
 } from "../timeline/lutOps";
 import { GestureCommit } from "./gestureCommit";
+import { iconButton, section, sliderField } from "./optionKit";
 
 @customElement("option-lut-section")
 export class OptionLutSection extends LitElement {
@@ -63,8 +73,7 @@ export class OptionLutSection extends LitElement {
     return lutOf(this.element);
   }
 
-  private handleScrub = (event: Event): void => {
-    const value = Number((event.target as HTMLInputElement).value);
+  private handleScrub = (value: number): void => {
     const id = this.elementId;
     // Through `GestureCommit`, so a drag across the whole slider collapses into
     // one undo step rather than a hundred.
@@ -77,12 +86,39 @@ export class OptionLutSection extends LitElement {
     this.requestUpdate();
   };
 
+  private handleTyped = (value: number): void => {
+    const id = this.elementId;
+    this.gesture.flush();
+    useTimelineStore
+      .getState()
+      .withCheckpoint((doc) => setClipLutIntensity(doc, id, value));
+    this.requestUpdate();
+  };
+
   private handleClear = (): void => {
     const id = this.elementId;
     useTimelineStore
       .getState()
       .withCheckpoint((doc) => setClipLut(doc, id, null));
     this.requestUpdate();
+  };
+
+  /**
+   * Take the user to the grid the choice is made in.
+   *
+   * Two steps, because they are two different switches: the sidebar pill opens
+   * the Fx tab through Bootstrap's own delegated handler, and `openPanel` picks
+   * which of that tab's three grids is showing. Clicking the pill alone lands on
+   * whichever grid was last looked at.
+   *
+   * Both lookups are `document.querySelector` against a tag, which is how the
+   * rest of this codebase reaches across components. `global.d.ts` widens its
+   * return to `any`, so neither result is typed and neither is asserted to be
+   * there: the column is reachable with no Fx tab at all.
+   */
+  private handleBrowse = (): void => {
+    document.querySelector('[data-bs-target="#nav-fx"]')?.click?.();
+    document.querySelector("control-ui-fx")?.openPanel?.("lut");
   };
 
   render() {
@@ -92,55 +128,48 @@ export class OptionLutSection extends LitElement {
     const ref = this.ref;
     const preset = ref == null ? null : presetById(ref.presetId);
 
-    return html`
-      <div class="mt-2">
-        <label class="form-label text-light">LUT</label>
-        ${ref == null
-          ? html`<div class="text-secondary mb-3" style="font-size: 11px;">
-              None
-            </div>`
-          : html`
-              <div class="d-flex align-items-center gap-2 mb-3">
-                <span
-                  class="text-light flex-grow-1"
-                  style="font-size: 11px; white-space: nowrap;
-                         overflow: hidden; text-overflow: ellipsis;"
-                  title=${ref.presetId}
-                >
-                  ${preset?.name ??
-                  // A project can name a LUT this machine does not have. It
-                  // renders ungraded and says so, rather than looking like the
-                  // LUT simply stopped working.
-                  `${ref.presetId} (not installed)`}
-                </span>
-                <button
-                  class="btn btn-sm btn-outline-secondary"
-                  style="font-size: 11px;"
-                  @click=${this.handleClear}
-                >
-                  Remove
-                </button>
-              </div>
-              <div class="d-flex align-items-center gap-2">
-                <input
-                  type="range"
-                  class="form-range"
-                  min="0"
-                  max="100"
-                  step="1"
-                  .value=${String(ref.intensity)}
-                  @input=${this.handleScrub}
-                  @change=${this.handleCommit}
-                />
-                <span
-                  class="text-secondary"
-                  style="font-size: 11px; width: 3ch; text-align: right;"
-                >
-                  ${Math.round(ref.intensity)}
-                </span>
-              </div>
-            `}
-      </div>
-    `;
+    if (ref == null) {
+      return section({
+        title: "LUT",
+        actions: iconButton({
+          icon: "add",
+          title: "Browse LUTs",
+          onClick: this.handleBrowse,
+        }),
+      });
+    }
+
+    return section({
+      title: "LUT",
+      actions: iconButton({
+        icon: "close",
+        title: "Remove",
+        onClick: this.handleClear,
+      }),
+      body: html`
+        <div class="opt-field">
+          <span class="opt-chip" title=${ref.presetId}>
+            ${preset?.name ??
+            // A project can name a LUT this machine does not have. It renders
+            // ungraded and says so, rather than looking like the LUT simply
+            // stopped working.
+            `${ref.presetId} (not installed)`}
+          </span>
+        </div>
+        <div class="opt-field">
+          ${sliderField({
+            label: "Intensity",
+            suffix: "%",
+            value: ref.intensity,
+            min: 0,
+            max: 100,
+            onScrub: this.handleScrub,
+            onCommit: this.handleCommit,
+            onTyped: this.handleTyped,
+            onInvalid: () => this.requestUpdate(),
+          })}
+        </div>
+      `,
+    });
   }
 }

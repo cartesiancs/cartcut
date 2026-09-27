@@ -1,30 +1,24 @@
 /**
- * The Border and Shadow section, in the Media pane.
+ * The Border and Shadow sections, in the Media pane.
  *
- * A section rather than a tab, for the reason `optionShapeSection.ts` gives:
- * the tab bar is already four wide, and these are properties of the clip
- * rather than modes of working on it. It is shown for the three types that
- * draw a picture inside a box — shape, image and video. Text has its own pair
- * under Effects, which strokes the glyphs rather than the box, and the two are
- * deliberately not merged: they answer different questions and a user who
- * found "Border" in both places would reasonably expect the same thing.
+ * Sections rather than tabs, for the reason `optionShapeSection.ts` gives: the
+ * tab bar is already four wide, and these are properties of the clip rather
+ * than modes of working on it. Shown for the three types that draw a picture
+ * inside a box: shape, image and video. Text has its own pair under Effects,
+ * which strokes the glyphs rather than the box, and the two are deliberately
+ * not merged: they answer different questions and a user who found "Border" in
+ * both places would reasonably expect the same thing.
+ *
+ * Both are off until they are switched on, so each head carries the eye and
+ * each body appears with it. That is the same control `optionShapeSection` uses
+ * to fold its controls away, and the difference is worth knowing: there the eye
+ * is component state, here it is `enable` on the clip, because a border that is
+ * off is a fact about the project rather than about where the user is looking.
  *
  * Every write goes through `timeline/decorationOps.ts`, the same ops
  * `set_clip_decoration` uses, so the panel and the agent cannot disagree about
  * what a border is. A slider drag goes through `GestureCommit`, so one drag is
  * one undo step however many values it passed through.
- *
- * Laid out the way `optionShapeSection` is, and for the reason stated there:
- * the inspector column is narrow, and a slider sharing its line with a label
- * and a number box is left about seventy pixels to travel its whole range.
- *
- * The rest of the markup follows what the sibling sections already do rather
- * than inventing a second look: a `form-label` titles a group, a row of
- * `btn-xxs` buttons is how a closed choice is offered, `aria-event` names an
- * interactive control, and a colour input scrubs through the gesture instead
- * of committing on every `input` event. The last of those is not cosmetic —
- * `optionShapeSection`'s header records that writing a colour straight through
- * was what made a picker drag cost one undo step per event.
  */
 
 import { LitElement, html, type TemplateResult } from "lit";
@@ -47,13 +41,13 @@ import {
 } from "../timeline/decorationOps";
 import type { TimelineDocument } from "../timeline/tracks";
 import { GestureCommit } from "./gestureCommit";
+import { colorField, eyeButton, section, sliderField } from "./optionKit";
 
-/** What each alignment is called, and the order the row offers them. */
 /**
  * What each alignment is called in the row.
  *
- * Short because the column is about 200px and three `btn-xxs` share it, which
- * is the same reason the reveal section says "Char", "Word", "Line". The full
+ * Short because the column is about 200px and three cells share it, which is
+ * the same reason the reveal section says "Char", "Word", "Line". The full
  * words are the `title`, where there is room for them.
  */
 const ALIGN_LABELS: Record<StrokeAlignment, string> = {
@@ -160,184 +154,113 @@ export class OptionDecorationSection extends LitElement {
     this.requestUpdate();
   }
 
-  /**
-   * A group's title and its on switch on one line.
-   *
-   * The arrangement `optionAdjustSection` uses for a group heading and its
-   * Reset: the name takes the room and the control sits at the end, so two
-   * groups stacked read as two groups rather than as a list of buttons.
-   */
-  private renderHeading(
-    label: string,
-    event: string,
-    enabled: boolean,
-    onToggle: () => void,
-  ): TemplateResult {
-    return html`
-      <div class="d-flex flex-row align-items-center gap-1 mb-2">
-        <label class="form-label text-light flex-grow-1 mb-0">${label}</label>
-        <button
-          class="btn btn-xxs ${enabled
-            ? "btn-primary"
-            : "btn-default"} text-light"
-          aria-event=${event}
-          title=${enabled ? `Turn ${label.toLowerCase()} off` : `Turn ${label.toLowerCase()} on`}
-          @click=${onToggle}
-        >
-          <span class="material-symbols-outlined icon-xs">
-            ${enabled ? "visibility" : "visibility_off"}
-          </span>
-        </button>
-      </div>
-    `;
-  }
-
-  private renderRow(
+  /** One named value, wrapped so a sibling field's margin applies to it. */
+  private field(
     row: Row,
     value: number,
     onScrub: (next: number) => void,
     onTyped: (next: number) => void,
   ): TemplateResult {
     return html`
-      <div class="mb-2">
-        <div
-          class="d-flex align-items-center justify-content-between"
-          style="gap: 8px;"
-        >
-          <label class="text-light text-truncate mb-0" style="font-size: 11px;">
-            ${row.label}${row.suffix === "" ? "" : ` (${row.suffix})`}
-          </label>
-          <input
-            type="number"
-            class="form-control form-control-sm bg-default text-light text-end px-1 py-0 flex-shrink-0"
-            style="width: 3.8em; font-size: 11px; height: 20px;"
-            min=${String(row.min)}
-            max=${String(row.max)}
-            step=${String(row.step)}
-            .value=${String(Math.round(value))}
-            @change=${(e: Event) => {
-              const next = Number((e.target as HTMLInputElement).value);
-              if (!Number.isFinite(next)) {
-                // Put the box back to what the document says rather than
-                // writing a NaN.
-                this.requestUpdate();
-                return;
-              }
-              onTyped(next);
-            }}
-          />
-        </div>
-        <input
-          type="range"
-          class="form-range option-range mt-1"
-          min=${String(row.min)}
-          max=${String(row.max)}
-          step=${String(row.step)}
-          .value=${String(value)}
-          @input=${(e: Event) =>
-            onScrub(Number((e.target as HTMLInputElement).value))}
-          @change=${this.commit}
-        />
-      </div>
-    `;
-  }
-
-  /**
-   * A colour, scrubbed rather than committed per event.
-   *
-   * The same shape `optionShapeSection` gives Fill Color, and for the reason
-   * its header records: a picker drag fires `input` continuously, so writing
-   * each one through `withCheckpoint` costs an undo step per event and makes
-   * the colour impossible to take back in one press.
-   */
-  private renderColor(
-    label: string,
-    event: string,
-    value: string,
-    onScrub: (next: string) => void,
-  ): TemplateResult {
-    return html`
-      <div class="mb-2">
-        <label class="form-label text-light">${label}</label>
-        <input
-          type="color"
-          aria-event=${event}
-          class="form-control bg-default form-control-color"
-          title="Choose your color"
-          .value=${value}
-          @input=${(e: Event) => onScrub((e.target as HTMLInputElement).value)}
-          @change=${this.commit}
-        />
+      <div class="opt-field">
+        ${sliderField({
+          label: row.label,
+          suffix: row.suffix,
+          value,
+          min: row.min,
+          max: row.max,
+          step: row.step,
+          bipolar: row.min < 0,
+          onScrub,
+          onCommit: this.commit,
+          onTyped,
+          onInvalid: () => this.requestUpdate(),
+        })}
       </div>
     `;
   }
 
   private renderStroke(stroke: ClipStroke): TemplateResult {
     const ids = this.targets;
-    return html`
-      <div class="mb-3">
-        ${this.renderHeading("Border", "decoration-stroke", stroke.enable, () =>
+    return section({
+      title: "Border",
+      actions: eyeButton(
+        stroke.enable,
+        stroke.enable ? "Turn border off" : "Turn border on",
+        () =>
           this.write((doc) =>
             setClipStrokeMany(doc, ids, { enable: !stroke.enable }),
           ),
-        )}
-        ${stroke.enable
-          ? html`
-              ${this.renderRow(
-                STROKE_ROWS.width,
-                stroke.width,
-                (width) => this.scrubStroke({ width }),
-                (width) =>
-                  this.write((doc) => setClipStrokeMany(doc, ids, { width })),
-              )}
-              ${this.renderRow(
-                STROKE_ROWS.opacity,
-                stroke.opacity,
-                (opacity) => this.scrubStroke({ opacity }),
-                (opacity) =>
-                  this.write((doc) => setClipStrokeMany(doc, ids, { opacity })),
-              )}
-              ${this.renderColor(
-                "Border Color",
-                "decoration-stroke-color",
-                stroke.color,
-                (color) => this.scrubStroke({ color }),
-              )}
-              <div class="mb-2">
-                <label class="form-label text-light">Align</label>
-                <div class="d-flex flex-row gap-1">
-                  ${STROKE_ALIGNMENTS.map(
-                    (align) => html`
-                      <button
-                        class="btn btn-xxs ${stroke.align === align
-                          ? "btn-primary"
-                          : "btn-default"} text-light flex-fill"
-                        aria-event="decoration-align-${align}"
-                        title=${ALIGN_TITLES[align]}
-                        @click=${() =>
-                          this.write((doc) =>
-                            setClipStrokeMany(doc, ids, { align }),
-                          )}
-                      >
-                        ${ALIGN_LABELS[align]}
-                      </button>
-                    `,
-                  )}
-                </div>
+        "decoration-stroke",
+      ),
+      body: stroke.enable
+        ? html`
+            ${this.field(
+              STROKE_ROWS.width,
+              stroke.width,
+              (width) => this.scrubStroke({ width }),
+              (width) =>
+                this.write((doc) => setClipStrokeMany(doc, ids, { width })),
+            )}
+            ${this.field(
+              STROKE_ROWS.opacity,
+              stroke.opacity,
+              (opacity) => this.scrubStroke({ opacity }),
+              (opacity) =>
+                this.write((doc) => setClipStrokeMany(doc, ids, { opacity })),
+            )}
+            <div class="opt-field">
+              ${colorField({
+                label: "Color",
+                value: stroke.color,
+                event: "decoration-stroke-color",
+                onScrub: (color) => this.scrubStroke({ color }),
+                onCommit: this.commit,
+              })}
+            </div>
+            <div class="opt-field">
+              <div class="opt-row">
+                <label class="opt-label">Align</label>
               </div>
-            `
-          : ""}
-      </div>
-    `;
+              <div
+                class="opt-seg"
+                role="group"
+                aria-label="Border alignment"
+                style="margin-top: 6px;"
+              >
+                ${STROKE_ALIGNMENTS.map(
+                  (align) => html`
+                    <button
+                      type="button"
+                      class="opt-seg-item ${stroke.align === align
+                        ? "is-on"
+                        : ""}"
+                      aria-event="decoration-align-${align}"
+                      aria-pressed=${stroke.align === align ? "true" : "false"}
+                      title=${ALIGN_TITLES[align]}
+                      @click=${() =>
+                        this.write((doc) =>
+                          setClipStrokeMany(doc, ids, { align }),
+                        )}
+                    >
+                      ${ALIGN_LABELS[align]}
+                    </button>
+                  `,
+                )}
+              </div>
+            </div>
+          `
+        : undefined,
+    });
   }
 
   private renderShadow(shadow: ClipShadow): TemplateResult {
     const ids = this.targets;
-    const row = (
+    const field = (
       key: keyof typeof SHADOW_ROWS,
       value: number,
     ): TemplateResult =>
-      this.renderRow(
+      this.field(
         SHADOW_ROWS[key],
         value,
         (next) => this.scrubShadow({ [key]: next } as ShadowPatch),
@@ -347,28 +270,34 @@ export class OptionDecorationSection extends LitElement {
           ),
       );
 
-    return html`
-      <div class="mb-3">
-        ${this.renderHeading("Shadow", "decoration-shadow", shadow.enable, () =>
+    return section({
+      title: "Shadow",
+      actions: eyeButton(
+        shadow.enable,
+        shadow.enable ? "Turn shadow off" : "Turn shadow on",
+        () =>
           this.write((doc) =>
             setClipShadowMany(doc, ids, { enable: !shadow.enable }),
           ),
-        )}
-        ${shadow.enable
-          ? html`
-              ${row("offsetX", shadow.offsetX)}
-              ${row("offsetY", shadow.offsetY)} ${row("blur", shadow.blur)}
-              ${row("opacity", shadow.opacity)}
-              ${this.renderColor(
-                "Shadow Color",
-                "decoration-shadow-color",
-                shadow.color,
-                (color) => this.scrubShadow({ color }),
-              )}
-            `
-          : ""}
-      </div>
-    `;
+        "decoration-shadow",
+      ),
+      body: shadow.enable
+        ? html`
+            ${field("offsetX", shadow.offsetX)}
+            ${field("offsetY", shadow.offsetY)} ${field("blur", shadow.blur)}
+            ${field("opacity", shadow.opacity)}
+            <div class="opt-field">
+              ${colorField({
+                label: "Color",
+                value: shadow.color,
+                event: "decoration-shadow-color",
+                onScrub: (color) => this.scrubShadow({ color }),
+                onCommit: this.commit,
+              })}
+            </div>
+          `
+        : undefined,
+    });
   }
 
   render() {

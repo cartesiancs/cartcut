@@ -9,13 +9,16 @@
  * Takes a list of ids: with several clips selected it shows the first clip's
  * values and writes to all of them, which is how the mask section behaves.
  *
- * Laid out as CapCut lays it out — the name and the value on one line, the
- * slider full width beneath. The inspector column is narrow, and a slider
- * sharing its line with a label and a number box was left about seventy
- * pixels to travel a range of two hundred.
+ * One section per group, each with its Reset in the head, which is the
+ * arrangement every other section in the inspector has (`optionKit.ts`). Inside
+ * a group the name and the value sit on one line and the slider runs full width
+ * beneath, as CapCut lays it out: the inspector column is narrow, and a slider
+ * sharing its line with a label and a number box was left about seventy pixels
+ * to travel a range of two hundred.
  *
- * Double-clicking a slider's name puts it back to zero — Lightroom's gesture,
- * and the one people reach for when they have lost track of where neutral was.
+ * Double-clicking a slider's name puts it back to zero, which is Lightroom's
+ * gesture and the one people reach for when they have lost track of where
+ * neutral was.
  */
 
 import { LitElement, html } from "lit";
@@ -44,19 +47,24 @@ import {
   setClipAdjustMany,
 } from "../timeline/adjustOps";
 import { GestureCommit } from "./gestureCommit";
+import { sliderField, textButton } from "./optionKit";
 
 /**
- * The two controls whose direction *is* a colour get a track that says so —
- * which way is warm, which way is magenta — without a label. Every other
- * slider keeps the stock track. Written as literal rules rather than through a
- * custom property, because a pseudo-element's background is the one place a
- * `var()` set on the input is easy to lose to the framework's own rule.
+ * The two controls whose direction *is* a colour get a track that says so:
+ * which way is warm, which way is magenta, without a label. Every other slider
+ * keeps the stock track.
+ *
+ * Aimed at the row rather than at the input, so the slider itself needs no
+ * class of its own and `optionKit`'s `sliderField` stays the only thing that
+ * decides what a slider is made of. The row's own `[data-adjust]` outranks
+ * `_option.scss`'s `input[type="range"].opt-slider`, which is what makes the
+ * gradient stick.
  */
 const TRACK_STYLES = `
-  option-adjust-section .adjust-range[data-track="temperature"]::-webkit-slider-runnable-track {
+  option-adjust-section [data-adjust="temperature"] input[type="range"]::-webkit-slider-runnable-track {
     background: linear-gradient(90deg, #3b7fd9, #bdbdbd 50%, #e8b33a);
   }
-  option-adjust-section .adjust-range[data-track="tint"]::-webkit-slider-runnable-track {
+  option-adjust-section [data-adjust="tint"] input[type="range"]::-webkit-slider-runnable-track {
     background: linear-gradient(90deg, #3fae4f, #bdbdbd 50%, #c64fc0);
   }
 `;
@@ -126,6 +134,11 @@ export class OptionAdjustSection extends LitElement {
     this.requestUpdate();
   }
 
+  private typed(key: ColorAdjustmentKey, value: number): void {
+    const ids = this.targets;
+    this.write((doc) => setClipAdjustMany(doc, ids, { [key]: value }));
+  }
+
   private resetKey(key: ColorAdjustmentKey): void {
     const ids = this.targets;
     this.write((doc) => setClipAdjustMany(doc, ids, { [key]: 0 }));
@@ -136,65 +149,28 @@ export class OptionAdjustSection extends LitElement {
     this.write((doc) => resetClipAdjustMany(doc, ids, group));
   }
 
-  private typed(key: ColorAdjustmentKey, event: Event): void {
-    const value = Number((event.target as HTMLInputElement).value);
-    if (!Number.isFinite(value)) {
-      this.requestUpdate();
-      return;
-    }
-    const ids = this.targets;
-    this.write((doc) => setClipAdjustMany(doc, ids, { [key]: value }));
-  }
-
   private renderRow(key: ColorAdjustmentKey, values: ColorAdjustments) {
     const spec = ADJUSTMENTS[key];
     const value = values[key] ?? 0;
-    const bipolar = spec.min < 0;
-    const coloured = key === "temperature" || key === "tint";
     return html`
-      <div class="mb-2" data-adjust=${key}>
-        <div class="d-flex align-items-center justify-content-between" style="gap: 8px;">
-          <label
-            class="text-light text-truncate mb-0"
-            style="font-size: 11px; cursor: default; user-select: none;
-                   ${value === 0 ? "opacity: 0.65;" : ""}"
-            title=${this.label("adjust.reset_hint", "Double-click a name to reset it.")}
-            @dblclick=${() => this.resetKey(key)}
-          >
-            ${this.label(labelKeyOf(key), spec.label)}
-          </label>
-          <input
-            type="number"
-            class="form-control form-control-sm bg-default text-light text-end px-1 py-0 flex-shrink-0"
-            style="width: 3.8em; font-size: 11px; height: 20px;"
-            min=${String(spec.min)}
-            max=${String(spec.max)}
-            step="1"
-            .value=${String(Math.round(value))}
-            @change=${(e: Event) => this.typed(key, e)}
-          />
-        </div>
-        <div class="position-relative mt-1">
-          ${bipolar
-            ? html`<span
-                aria-hidden="true"
-                style="position: absolute; left: 50%; top: 50%; width: 1px; height: 12px;
-                       transform: translate(-50%, -50%); background: #ffffff66;
-                       pointer-events: none;"
-              ></span>`
-            : ""}
-          <input
-            type="range"
-            class="form-range option-range adjust-range"
-            data-track=${coloured ? key : ""}
-            min=${String(spec.min)}
-            max=${String(spec.max)}
-            step="1"
-            .value=${String(value)}
-            @input=${(e: Event) => this.scrub(key, Number((e.target as HTMLInputElement).value))}
-            @change=${this.commit}
-          />
-        </div>
+      <div class="opt-field" data-adjust=${key}>
+        ${sliderField({
+          label: this.label(labelKeyOf(key), spec.label),
+          value,
+          min: spec.min,
+          max: spec.max,
+          bipolar: spec.min < 0,
+          dim: value === 0,
+          labelTitle: this.label(
+            "adjust.reset_hint",
+            "Double-click a name to reset it.",
+          ),
+          onLabelDblClick: () => this.resetKey(key),
+          onScrub: (next) => this.scrub(key, next),
+          onCommit: this.commit,
+          onTyped: (next) => this.typed(key, next),
+          onInvalid: () => this.requestUpdate(),
+        })}
       </div>
     `;
   }
@@ -202,21 +178,27 @@ export class OptionAdjustSection extends LitElement {
   private renderGroup(group: AdjustGroup, values: ColorAdjustments) {
     const keys = keysOfGroup(group);
     const moved = keys.some((key) => (values[key] ?? 0) !== 0);
+    // `data-adjust-group` on the card, so the group's Reset is the first button
+    // inside it. `tests/e2e/specs/adjust-panel.spec.ts` clicks it by exactly
+    // that description, and a collapse toggle added to this head would take the
+    // position and silently reset nothing.
     return html`
-      <div class="mb-3" data-adjust-group=${group}>
-        <div class="d-flex align-items-center mb-2">
-          <span class="text-light fw-semibold flex-grow-1" style="font-size: 12px;">
+      <div class="opt-section" data-adjust-group=${group}>
+        <div class="opt-head">
+          <span class="opt-head-title">
             ${this.label(groupLabelKeyOf(group), group)}
           </span>
-          <button
-            class="btn btn-xs btn-default text-light ${moved ? "" : "invisible"}"
-            style="font-size: 10px;"
-            @click=${() => this.resetGroup(group)}
-          >
-            ${this.label("adjust.reset", "Reset")}
-          </button>
+          <div class="opt-head-actions">
+            ${textButton({
+              label: this.label("adjust.reset", "Reset"),
+              disabled: !moved,
+              onClick: () => this.resetGroup(group),
+            })}
+          </div>
         </div>
-        ${keys.map((key) => this.renderRow(key, values))}
+        <div class="opt-body">
+          ${keys.map((key) => this.renderRow(key, values))}
+        </div>
       </div>
     `;
   }
@@ -231,17 +213,21 @@ export class OptionAdjustSection extends LitElement {
       <style>
         ${TRACK_STYLES}
       </style>
-      <div class="mt-1">
-        ${ADJUST_GROUPS.map((group) => this.renderGroup(group, values))}
-        <button
-          class="btn btn-sm btn-default text-light w-100 mb-3"
-          style="font-size: 11px;"
-          ?disabled=${!moved}
-          @click=${() => this.resetGroup()}
-        >
-          ${this.label("adjust.reset_all", "Reset all")}
-        </button>
-      </div>
+      ${ADJUST_GROUPS.map((group) => this.renderGroup(group, values))}
+      <!--
+        The last button in the component, which is how the e2e suite finds it.
+        Anything added after this has to be something it can click without
+        resetting the clip's grade.
+      -->
+      <button
+        type="button"
+        class="opt-text-btn"
+        style="width: 100%; justify-content: center; height: 26px;"
+        ?disabled=${!moved}
+        @click=${() => this.resetGroup()}
+      >
+        ${this.label("adjust.reset_all", "Reset all")}
+      </button>
     `;
   }
 }
