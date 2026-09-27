@@ -46,6 +46,7 @@ import {
 import { renderParamControls } from "../fx/fxParamControls";
 import { GestureCommit } from "./gestureCommit";
 import { beginInputScrub } from "../input/inputScrub";
+import { section, sliderField } from "./optionKit";
 
 const ALIGNMENTS: Array<{ value: TransitionAlignment; label: string }> = [
   { value: "start", label: "Start at cut" },
@@ -188,14 +189,12 @@ export class OptionTransition extends LitElement {
     this.commit((doc) => setTransitionAlignment(doc, id, alignment));
   };
 
-  private handleChangeDuration = (e: Event) => {
-    const ms = Number((e.target as HTMLInputElement).value);
+  private handleChangeDuration = (ms: number) => {
     const id = this.elementId;
     this.commit((doc) => setTransitionDuration(doc, id, ms));
   };
 
-  private handleScrubDuration = (e: Event) => {
-    const ms = Number((e.target as HTMLInputElement).value);
+  private handleScrubDuration = (ms: number) => {
     const id = this.elementId;
     this.gesture.apply((doc) => setTransitionDuration(doc, id, ms));
     this.requestUpdate();
@@ -223,117 +222,116 @@ export class OptionTransition extends LitElement {
     const frozen = this.frozenMs(transition);
 
     return html`
-      <div class="p-2">
-        <label class="form-label text-light">Transition</label>
+      ${section({
+        title: "Transition",
+        grow: true,
+        actions: html`
+          <select
+            class="opt-select"
+            aria-label="transition preset"
+            .value=${transition.presetId}
+            @change=${this.handleChangePreset}
+          >
+            ${
+              // A preset that is not installed still appears, selected, so the
+              // dropdown does not silently show a different one as current.
+              preset == null
+                ? html`<option value=${transition.presetId}>
+                    ${transition.presetId} (missing)
+                  </option>`
+                : ""
+            }
+            ${installed.map(
+              (entry) =>
+                html`<option value=${entry.id}>
+                  ${entry.name}${entry.origin === "user" ? " *" : ""}
+                </option>`,
+            )}
+          </select>
+        `,
+      })}
+      ${section({
+        title: "Settings",
+        body: html`
+          ${preset == null
+            ? html`<div class="opt-hint" style="margin-bottom: 8px;">
+                <span class="material-symbols-outlined opt-hint-icon"
+                  >warning</span
+                >
+                Not installed. This cut renders as a plain cut, and its
+                settings are kept.
+              </div>`
+            : ""}
 
-        ${preset == null
-          ? html`<div class="alert alert-warning p-2" style="font-size: 11px;">
-              The preset <code>${transition.presetId}</code> is not installed.
-              This cut renders as a plain cut, and its settings are kept — they
-              come back if the preset is installed again.
-            </div>`
-          : ""}
+          <div class="opt-field">
+            <div class="opt-row">
+              <label class="opt-label">Alignment</label>
+            </div>
+            <div
+              class="opt-seg"
+              role="group"
+              aria-label="Alignment"
+              style="margin-top: 6px;"
+            >
+              ${this.optionsWithLimits(transition).map(
+                (entry) => html`
+                  <button
+                    type="button"
+                    class="opt-seg-item ${transition.alignment === entry.value
+                      ? "is-on"
+                      : ""}"
+                    aria-pressed=${transition.alignment === entry.value
+                      ? "true"
+                      : "false"}
+                    title=${entry.real <= 0
+                      ? "No footage beyond the cut this way, so frames would be held"
+                      : Math.round(entry.real) + "ms of real footage this way"}
+                    @click=${() => this.handleChangeAlignment(entry.value)}
+                  >
+                    ${entry.label}
+                  </button>
+                `,
+              )}
+            </div>
+          </div>
 
-        <select
-          class="form-select text-light mb-3"
-          .value=${transition.presetId}
-          @change=${this.handleChangePreset}
-        >
-          ${
-            // A preset that is not installed still appears, selected, so the
-            // dropdown does not silently show a different one as current.
-            preset == null
-              ? html`<option value=${transition.presetId}>
-                  ${transition.presetId} (missing)
-                </option>`
-              : ""
-          }
-          ${installed.map(
-            (entry) =>
-              html`<option value=${entry.id}>
-                ${entry.name}${entry.origin === "user" ? " ·" : ""}
-              </option>`,
-          )}
-        </select>
+          <div class="opt-field">
+            ${sliderField({
+              label: "Duration",
+              suffix: "ms",
+              value: transition.duration,
+              min: 40,
+              max: Math.round(finiteMax),
+              step: 10,
+              onScrub: this.handleScrubDuration,
+              onCommit: this.handleChangeDuration,
+              onTyped: this.handleChangeDuration,
+              onInvalid: () => this.requestUpdate(),
+            })}
+          </div>
 
-        <label class="form-label text-secondary" style="font-size: 11px;">
-          Alignment
-        </label>
-        <div class="btn-group w-100 mb-1" role="group">
-          ${this.optionsWithLimits(transition).map(
-            (entry) => html`
-              <button
-                type="button"
-                class="btn btn-sm ${transition.alignment === entry.value
-                  ? "btn-primary"
-                  : "btn-default"} text-light"
-                title=${entry.real <= 0
-                  ? "No footage beyond the cut this way — frames would be held"
-                  : Math.round(entry.real) + "ms of real footage this way"}
-                @click=${() => this.handleChangeAlignment(entry.value)}
-              >
-                ${entry.label}
-              </button>
-            `,
-          )}
-        </div>
+          <div
+            class="opt-hint"
+            style=${clamped || frozen > 0 ? "color: #d6a44a;" : ""}
+          >
+            <span class="material-symbols-outlined opt-hint-icon"
+              >${clamped || frozen > 0 ? "warning" : "straighten"}</span
+            >
+            ${clamped
+              ? "Shortened to " +
+                Math.round(transition.duration) +
+                "ms: the clips are only that long. " +
+                Math.round(transition.requestedDuration ?? 0) +
+                "ms is remembered, and returns if they get longer."
+              : frozen > 0
+                ? Math.round(frozen) +
+                  "ms of this holds a frozen frame: the clips have no footage" +
+                  " beyond the cut. Trim one back to blend real frames."
+                : "Up to " + Math.round(finiteMax) + "ms at this cut."}
+          </div>
 
-        <label class="form-label text-secondary" style="font-size: 11px;">
-          Duration
-        </label>
-        <div class="d-flex gap-2 align-items-center">
-          <input
-            type="range"
-            class="form-range"
-            min="40"
-            max=${Math.round(finiteMax)}
-            step="10"
-            .value=${String(transition.duration)}
-            @input=${this.handleScrubDuration}
-            @change=${this.handleChangeDuration}
-          />
-          <input
-            type="number"
-            class="form-control bg-default text-light form-control-sm scrub-number"
-            style="width: 6rem;"
-            min="40"
-            step="10"
-            .value=${String(Math.round(transition.duration))}
-            @mousedown=${(e: MouseEvent) =>
-              // Five ms a pixel: a second of transition is 200px of travel.
-              beginInputScrub(e, {
-                sensitivity: 5,
-                step: 10,
-                min: 40,
-                max: Math.round(finiteMax),
-                decimals: 0,
-              })}
-            @change=${this.handleChangeDuration}
-          />
-        </div>
-        <div
-          class="${clamped || frozen > 0
-            ? "text-warning"
-            : "text-secondary"} mb-3"
-          style="font-size: 10px;"
-        >
-          ${clamped
-            ? "Shortened to " +
-              Math.round(transition.duration) +
-              "ms — the clips are only that long. " +
-              Math.round(transition.requestedDuration ?? 0) +
-              "ms is remembered, and returns if they get longer."
-            : frozen > 0
-              ? Math.round(frozen) +
-                "ms of this holds a frozen frame: the clips have no footage" +
-                " beyond the cut. Trim one back to blend real frames."
-              : "Up to " + Math.round(finiteMax) + "ms at this cut."}
-        </div>
-
-        ${preset != null && preset.params.length > 0
-          ? html`
-              <hr class="border-secondary" />
-              ${renderParamControls({
+          ${preset != null && preset.params.length > 0
+            ? renderParamControls({
                 params: preset.params,
                 values: transition.params,
                 onScrub: (key, value) => {
@@ -349,18 +347,20 @@ export class OptionTransition extends LitElement {
                     setTransitionParams(doc, id, { [key]: value }),
                   );
                 },
-              })}
-            `
-          : ""}
+              })
+            : ""}
+        `,
+      })}
 
-        <hr class="border-secondary" />
-        <button
-          class="btn btn-sm btn-default text-danger w-100"
-          @click=${this.handleRemove}
-        >
-          Remove transition
-        </button>
-      </div>
+      <button
+        type="button"
+        class="opt-text-btn"
+        style="width: 100%; justify-content: center; height: 26px;
+               color: #d97b7b; margin-top: 2px;"
+        @click=${this.handleRemove}
+      >
+        Remove transition
+      </button>
     `;
   }
 }

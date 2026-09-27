@@ -167,6 +167,14 @@ export function textButton(spec: TextButtonSpec): TemplateResult {
 
 // -------------------------------------------------------------------- fields
 
+/** How many places a box needs to show every value a step can reach. */
+function decimalsFor(step: number): number {
+  if (!Number.isFinite(step) || step <= 0 || Number.isInteger(step)) {
+    return 0;
+  }
+  return Math.min(4, Math.max(0, Math.ceil(-Math.log10(step))));
+}
+
 /** Where a value sits in its range, as the percentage the track is filled to. */
 export function fillPercent(value: number, min: number, max: number): string {
   if (!(max > min) || !Number.isFinite(value)) {
@@ -185,6 +193,13 @@ export interface SliderFieldSpec {
   max: number;
   step?: number;
   /**
+   * Places the number box shows. Derived from `step` when it is left out, so a
+   * whole-number slider shows a whole number and an fx parameter stepping by
+   * 0.01 shows two places. Rounding every box to an integer was the first try
+   * and it made a 0 to 1 parameter read as 0 or 1 with nothing in between.
+   */
+  decimals?: number;
+  /**
    * The value the track is drawn against, when it is not `value`: a radius
    * whose box is smaller than the number typed into it, for instance.
    */
@@ -199,8 +214,15 @@ export interface SliderFieldSpec {
   onLabelDblClick?: () => void;
   /** Every `input` of a drag. Expected to go through `GestureCommit`. */
   onScrub: (next: number) => void;
-  /** The drag's end. Expected to flush the gesture. */
-  onCommit: () => void;
+  /**
+   * The drag's end, carrying the value the head came to rest on.
+   *
+   * Most callers flush a `GestureCommit` and ignore the argument. It is there
+   * for the ones that commit a value rather than a gesture: reading it off a
+   * closure from the render that installed the listener writes whatever the
+   * value was *before* the drag.
+   */
+  onCommit: (next: number) => void;
   /** A number typed into the box. Only ever called with a finite value. */
   onTyped: (next: number) => void;
   /**
@@ -219,6 +241,7 @@ export interface SliderFieldSpec {
  */
 export function sliderField(spec: SliderFieldSpec): TemplateResult {
   const step = spec.step ?? 1;
+  const places = spec.decimals ?? decimalsFor(step);
   const shown = spec.rangeValue ?? spec.value;
   const at = fillPercent(shown, spec.min, spec.max);
   // A bipolar track is filled between the middle and the head, whichever side
@@ -249,7 +272,7 @@ export function sliderField(spec: SliderFieldSpec): TemplateResult {
         min=${String(spec.min)}
         max=${String(spec.max)}
         step=${String(step)}
-        .value=${String(Math.round(spec.value))}
+        .value=${spec.value.toFixed(places)}
         @change=${(event: Event) => {
           const next = Number((event.target as HTMLInputElement).value);
           if (!Number.isFinite(next)) {
@@ -287,7 +310,8 @@ function rangeInput(
     .value=${String(shown)}
     @input=${(event: Event) =>
       spec.onScrub(Number((event.target as HTMLInputElement).value))}
-    @change=${spec.onCommit}
+    @change=${(event: Event) =>
+      spec.onCommit(Number((event.target as HTMLInputElement).value))}
   />`;
 }
 

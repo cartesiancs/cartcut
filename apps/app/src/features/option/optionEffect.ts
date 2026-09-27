@@ -39,6 +39,7 @@ import { GestureCommit } from "./gestureCommit";
 import { scrubOn } from "../input/inputScrub";
 import { sweepSpec } from "../input/numberScrub";
 import "./controlKeyframeNav";
+import { section, sliderField } from "./optionKit";
 
 const SCRUB_INTENSITY = scrubOn(sweepSpec(0, 100, 1));
 
@@ -223,8 +224,7 @@ export class OptionEffect extends LitElement {
     );
   }
 
-  private handleScrubIntensity = (e: Event) => {
-    const value = Number((e.target as HTMLInputElement).value);
+  private handleScrubIntensity = (value: number) => {
     const id = this.elementId;
     this.gesture.apply(
       this.write(id, "intensity", value, (doc) =>
@@ -234,8 +234,7 @@ export class OptionEffect extends LitElement {
     this.requestUpdate();
   };
 
-  private handleCommitIntensity = (e: Event) => {
-    const value = Number((e.target as HTMLInputElement).value);
+  private handleCommitIntensity = (value: number) => {
     const id = this.elementId;
     this.commit(
       this.write(id, "intensity", value, (doc) =>
@@ -255,103 +254,98 @@ export class OptionEffect extends LitElement {
     const isOverlay = preset?.render.type === "overlay";
 
     return html`
-      <div class="p-2">
-        <label class="form-label text-light">Effect</label>
-
-        ${preset == null
-          ? html`<div class="alert alert-warning p-2" style="font-size: 11px;">
-              The preset <code>${effect.presetId}</code> is not installed. This
-              effect does nothing for now, and its settings are kept — they come
-              back if the preset is installed again.
-            </div>`
-          : ""}
-
-        <select
-          class="form-select text-light mb-1"
-          .value=${effect.presetId}
-          @change=${this.handleChangePreset}
-        >
+      ${section({
+        title: "Effect",
+        grow: true,
+        actions: html`
+          <select
+            class="opt-select"
+            aria-label="effect preset"
+            .value=${effect.presetId}
+            @change=${this.handleChangePreset}
+          >
+            ${
+              // A preset that is not installed still appears, selected, so the
+              // dropdown does not silently show a different one as current.
+              preset == null
+                ? html`<option value=${effect.presetId}>
+                    ${effect.presetId} (missing)
+                  </option>`
+                : ""
+            }
+            ${installed.map(
+              (entry) => html`<option value=${entry.id}>${entry.name}</option>`,
+            )}
+          </select>
+        `,
+      })}
+      ${section({
+        title: "Settings",
+        body: html`
           ${preset == null
-            ? html`<option value=${effect.presetId}>
-                ${effect.presetId} (missing)
-              </option>`
+            ? html`<div class="opt-hint" style="margin-bottom: 8px;">
+                <span class="material-symbols-outlined opt-hint-icon"
+                  >warning</span
+                >
+                Not installed. This effect does nothing for now, and its
+                settings are kept.
+              </div>`
+            : html`<div class="opt-hint" style="margin-bottom: 8px;">
+                <span class="material-symbols-outlined opt-hint-icon"
+                  >layers</span
+                >
+                Applies to every layer beneath this track.
+              </div>`}
+
+          <div class="opt-field">
+            ${sliderField({
+              label: "Intensity",
+              suffix: "%",
+              value: effect.intensity,
+              min: 0,
+              max: 100,
+              trailing: html`<control-keyframe-nav
+                .elementId=${this.elementId}
+                .property=${"intensity"}
+                .label=${"Intensity"}
+              ></control-keyframe-nav>`,
+              onScrub: this.handleScrubIntensity,
+              onCommit: this.handleCommitIntensity,
+              onTyped: this.handleCommitIntensity,
+              onInvalid: () => this.requestUpdate(),
+            })}
+          </div>
+
+          ${isOverlay
+            ? html`<div class="opt-field">
+                <div class="opt-row">
+                  <label class="opt-label">Blend</label>
+                  <select
+                    class="opt-select"
+                    style="width: 60%;"
+                    aria-label="effect blend"
+                    .value=${effect.blend ??
+                    (preset?.render.type === "overlay"
+                      ? (preset.render.blend ?? "screen")
+                      : "screen")}
+                    @change=${this.handleChangeBlend}
+                  >
+                    ${BLEND_MODES.map(
+                      (mode) =>
+                        html`<option value=${mode.value}>${mode.label}</option>`,
+                    )}
+                  </select>
+                </div>
+              </div>`
             : ""}
-          ${installed.map(
-            (entry) => html`<option value=${entry.id}>${entry.name}</option>`,
-          )}
-        </select>
-
-        <div class="text-secondary mb-3" style="font-size: 10px;">
-          Applies to every layer beneath this track. Drag the track up or down
-          to change what it touches.
-        </div>
-
-        <label class="form-label text-secondary" style="font-size: 11px;">
-          Intensity
-        </label>
-        <div class="d-flex gap-2 align-items-center mb-3">
-          <input
-            type="range"
-            class="form-range"
-            min="0"
-            max="100"
-            step="1"
-            .value=${String(effect.intensity)}
-            @input=${this.handleScrubIntensity}
-            @change=${this.handleCommitIntensity}
-          />
-          <input
-            type="number"
-            class="form-control bg-default text-light form-control-sm scrub-number"
-            style="width: 5rem;"
-            min="0"
-            max="100"
-            step="1"
-            .value=${String(Math.round(effect.intensity))}
-            @mousedown=${SCRUB_INTENSITY}
-            @change=${this.handleCommitIntensity}
-          />
-          <control-keyframe-nav
-            .elementId=${this.elementId}
-            .property=${"intensity"}
-            .label=${"Intensity"}
-          ></control-keyframe-nav>
-        </div>
-
-        ${isOverlay
-          ? html`
-              <label
-                class="form-label text-secondary"
-                style="font-size: 11px;"
-              >
-                Blend
-              </label>
-              <select
-                class="form-select text-light mb-3"
-                .value=${effect.blend ??
-                (preset?.render.type === "overlay"
-                  ? (preset.render.blend ?? "screen")
-                  : "screen")}
-                @change=${this.handleChangeBlend}
-              >
-                ${BLEND_MODES.map(
-                  (mode) =>
-                    html`<option value=${mode.value}>${mode.label}</option>`,
-                )}
-              </select>
-            `
-          : ""}
-
-        ${preset != null && preset.params.length > 0
-          ? html`
-              <hr class="border-secondary" />
-              ${renderParamControls({
+          ${preset != null && preset.params.length > 0
+            ? renderParamControls({
                 params: preset.params,
                 values: effect.params,
                 // The manifest gets the last word on what may be animated.
                 // `animatableProperties` offers a track for any parameter whose
-                // stored value is a number, which a `select`'s is too; only
-                // here is the declared type in scope to refuse it.
+                // stored value is a number, which a select's is too; only here
+                // is the declared type in scope to refuse it.
                 keyframe: {
                   elementId: this.elementId,
                   trackFor: (param) =>
@@ -361,19 +355,17 @@ export class OptionEffect extends LitElement {
                 },
                 onScrub: (key, value) => {
                   const id = this.elementId;
-                  this.gesture.apply(
-                    this.paramWrite(id, key, value),
-                  );
+                  this.gesture.apply(this.paramWrite(id, key, value));
                   this.requestUpdate();
                 },
                 onCommit: (key, value) => {
                   const id = this.elementId;
                   this.commit(this.paramWrite(id, key, value));
                 },
-              })}
-            `
-          : ""}
-      </div>
+              })
+            : ""}
+        `,
+      })}
     `;
   }
 }

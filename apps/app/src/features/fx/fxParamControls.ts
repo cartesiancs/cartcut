@@ -26,6 +26,7 @@ import type { FxParamSpec, FxParamValues } from "./presetTypes";
 import { scrubOn } from "../input/inputScrub";
 import { sweepSpec } from "../input/numberScrub";
 import "../option/controlKeyframeNav";
+import { iconButton, sliderField } from "../option/optionKit";
 
 export type ParamChange = (key: string, value: number | string | boolean | number[]) => void;
 
@@ -79,12 +80,16 @@ function valueOf(param: FxParamSpec, values: FxParamValues) {
   }
 }
 
-function label(param: FxParamSpec): TemplateResult {
-  return html`<label class="form-label text-secondary" style="font-size: 11px;">
-    ${param.label}
-  </label>`;
-}
-
+/**
+ * One parameter, drawn the way every other named value in the inspector is:
+ * name at one end of the row, value at the other, and a slider full width
+ * beneath when there is a range to sweep.
+ *
+ * Shared by the effect and the transition panels, and therefore the one place
+ * a manifest's parameters get their look. They were Bootstrap rows here, which
+ * is why an effect's Intensity and its preset's own parameters used to sit in
+ * two different layouts inside one panel.
+ */
 function numberControl(
   param: Extract<FxParamSpec, { type: "number" }>,
   values: FxParamValues,
@@ -97,41 +102,26 @@ function numberControl(
   const track = opts.keyframe?.trackFor(param) ?? null;
 
   return html`
-    <div class="mb-2">
-      ${label(param)}
-      <div class="d-flex gap-2 align-items-center">
-        <input
-          type="range"
-          class="form-range"
-          min=${param.min}
-          max=${param.max}
-          step=${step}
-          .value=${String(value)}
-          @input=${(e: Event) =>
-            opts.onScrub(param.key, Number((e.target as HTMLInputElement).value))}
-          @change=${(e: Event) =>
-            opts.onCommit(param.key, Number((e.target as HTMLInputElement).value))}
-        />
-        <input
-          type="number"
-          class="form-control bg-default text-light form-control-sm scrub-number"
-          style="width: 5.5rem;"
-          min=${param.min}
-          max=${param.max}
-          step=${step}
-          .value=${String(value)}
-          @mousedown=${scrubOn(sweepSpec(param.min, param.max, step))}
-          @change=${(e: Event) =>
-            opts.onCommit(param.key, Number((e.target as HTMLInputElement).value))}
-        />
-        ${track == null || opts.keyframe == null
-          ? ""
-          : html`<control-keyframe-nav
-              .elementId=${opts.keyframe.elementId}
-              .property=${track}
-              .label=${param.label}
-            ></control-keyframe-nav>`}
-      </div>
+    <div class="opt-field">
+      ${sliderField({
+        label: param.label,
+        value,
+        min: param.min,
+        max: param.max,
+        step,
+        bipolar: param.min < 0,
+        trailing:
+          track == null || opts.keyframe == null
+            ? undefined
+            : html`<control-keyframe-nav
+                .elementId=${opts.keyframe.elementId}
+                .property=${track}
+                .label=${param.label}
+              ></control-keyframe-nav>`,
+        onScrub: (next) => opts.onScrub(param.key, next),
+        onCommit: (next) => opts.onCommit(param.key, next),
+        onTyped: (next) => opts.onCommit(param.key, next),
+      })}
     </div>
   `;
 }
@@ -142,22 +132,34 @@ function colorControl(
   opts: ParamControlOptions,
 ): TemplateResult {
   const value = valueOf(param, values) as string;
+  const hex = value.startsWith("#") ? value : "#" + value;
   return html`
-    <div class="mb-2">
-      ${label(param)}
-      <input
-        type="color"
-        class="form-control bg-default text-light form-control-sm"
-        .value=${value.startsWith("#") ? value : "#" + value}
-        @input=${(e: Event) =>
-          opts.onScrub(param.key, (e.target as HTMLInputElement).value)}
-        @change=${(e: Event) =>
-          opts.onCommit(param.key, (e.target as HTMLInputElement).value)}
-      />
+    <div class="opt-field">
+      <div class="opt-row">
+        <label class="opt-label" title=${param.label}>${param.label}</label>
+        <span class="opt-value">${hex.toUpperCase()}</span>
+        <input
+          type="color"
+          class="opt-swatch"
+          title=${param.label}
+          .value=${hex}
+          @input=${(e: Event) =>
+            opts.onScrub(param.key, (e.target as HTMLInputElement).value)}
+          @change=${(e: Event) =>
+            opts.onCommit(param.key, (e.target as HTMLInputElement).value)}
+        />
+      </div>
     </div>
   `;
 }
 
+/**
+ * A flag, as the eye every other on/off in the inspector uses.
+ *
+ * Not a Bootstrap checkbox any more, which is why the per-instance `id` the
+ * label's `for` needed is gone: two panels can mount the same preset at once,
+ * and both checkboxes then carried the same id.
+ */
 function boolControl(
   param: Extract<FxParamSpec, { type: "bool" }>,
   values: FxParamValues,
@@ -165,22 +167,16 @@ function boolControl(
 ): TemplateResult {
   const value = valueOf(param, values) as boolean;
   return html`
-    <div class="form-check mb-2">
-      <input
-        type="checkbox"
-        class="form-check-input"
-        id=${"fxparam-" + param.key}
-        .checked=${value}
-        @change=${(e: Event) =>
-          opts.onCommit(param.key, (e.target as HTMLInputElement).checked)}
-      />
-      <label
-        class="form-check-label text-secondary"
-        style="font-size: 11px;"
-        for=${"fxparam-" + param.key}
-      >
-        ${param.label}
-      </label>
+    <div class="opt-field">
+      <div class="opt-row">
+        <label class="opt-label" title=${param.label}>${param.label}</label>
+        ${iconButton({
+          icon: value ? "visibility" : "visibility_off",
+          title: param.label,
+          on: value,
+          onClick: () => opts.onCommit(param.key, !value),
+        })}
+      </div>
     </div>
   `;
 }
@@ -192,19 +188,28 @@ function selectControl(
 ): TemplateResult {
   const value = valueOf(param, values) as number;
   return html`
-    <div class="mb-2">
-      ${label(param)}
-      <select
-        class="form-select text-light"
-        .value=${String(value)}
-        @change=${(e: Event) =>
-          opts.onCommit(param.key, Number((e.target as HTMLSelectElement).value))}
-      >
-        ${param.options.map(
-          (option) =>
-            html`<option value=${String(option.value)}>${option.label}</option>`,
-        )}
-      </select>
+    <div class="opt-field">
+      <div class="opt-row">
+        <label class="opt-label" title=${param.label}>${param.label}</label>
+        <select
+          class="opt-select"
+          style="width: 60%;"
+          aria-label=${param.label}
+          .value=${String(value)}
+          @change=${(e: Event) =>
+            opts.onCommit(
+              param.key,
+              Number((e.target as HTMLSelectElement).value),
+            )}
+        >
+          ${param.options.map(
+            (option) =>
+              html`<option value=${String(option.value)}>
+                ${option.label}
+              </option>`,
+          )}
+        </select>
+      </div>
     </div>
   `;
 }
@@ -232,24 +237,26 @@ function pointControl(
   };
 
   return html`
-    <div class="mb-2">
-      ${label(param)}
-      <div class="d-flex gap-2">
-        ${([0, 1] as const).map(
-          (index) => html`
-            <input
-              type="number"
-              class="form-control bg-default text-light form-control-sm scrub-number"
-              min=${param.min}
-              max=${param.max}
-              step=${step}
-              .value=${String(value[index])}
-              @mousedown=${scrub}
-              @change=${(e: Event) =>
-                write(index, (e.target as HTMLInputElement).value)}
-            />
-          `,
-        )}
+    <div class="opt-field">
+      <div class="opt-row">
+        <label class="opt-label" title=${param.label}>${param.label}</label>
+        <div class="opt-row-controls">
+          ${([0, 1] as const).map(
+            (index) => html`
+              <input
+                type="number"
+                class="opt-num scrub-number"
+                min=${param.min}
+                max=${param.max}
+                step=${step}
+                .value=${String(value[index])}
+                @mousedown=${scrub}
+                @change=${(e: Event) =>
+                  write(index, (e.target as HTMLInputElement).value)}
+              />
+            `,
+          )}
+        </div>
       </div>
     </div>
   `;
