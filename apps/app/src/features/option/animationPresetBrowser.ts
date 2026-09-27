@@ -71,6 +71,7 @@ import {
   isExtensionPresetId,
   subscribeAnimationPresets,
 } from "../extension/animationPresets";
+import { section } from "./optionKit";
 
 /** Backing-store size of a tile canvas. Fixed, so nothing reallocates. */
 const TILE_PX = 132;
@@ -418,61 +419,65 @@ export class AnimationPresetBrowser extends LitElement {
     const names = presetNames();
     const contributed = animationPresets();
 
+    // A card per group, so the three grids read as In, Out and Emphasis rather
+    // than as one long grid with captions dropped into it. The tiles are
+    // unchanged: they are `.asset` tiles, which is what every other preset grid
+    // in the app uses and where this panel's look already came from.
     return html`
-      ${GROUPS.map(
-        (group) => html`
-          <div
-            class="text-secondary px-2 pt-2"
-            style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;"
-          >
-            ${group.label}
-          </div>
-          <div class="row px-2">
-            <!--
-              "None" leads the In row rather than sitting in a row of its own.
-              It is the absence of an entrance, the list it heads is the
-              entrances, and a single tile on a line of three reads as a gap.
-            -->
-            ${group.id === "in"
-              ? this.tile(NONE_ID, "None", this.isCleared, () =>
-                  this.apply(null),
-                )
-              : ""}
-            ${names
-              .filter((name) => presetGroup(name) === group.id)
-              .map((name) =>
-                this.tile(
-                  name,
-                  presetLabel(name),
-                  false,
-                  () => this.apply(name),
-                  name,
-                ),
-              )}
-          </div>
-        `,
+      ${GROUPS.map((group) =>
+        section({
+          title: group.label,
+          body: html`
+            <div class="row">
+              <!--
+                "None" leads the In row rather than sitting in a row of its own.
+                It is the absence of an entrance, the list it heads is the
+                entrances, and a single tile on a line of three reads as a gap.
+              -->
+              ${group.id === "in"
+                ? this.tile(NONE_ID, "None", this.isCleared, () =>
+                    this.apply(null),
+                  )
+                : ""}
+              ${names
+                .filter((name) => presetGroup(name) === group.id)
+                .map((name) =>
+                  this.tile(
+                    name,
+                    presetLabel(name),
+                    false,
+                    () => this.apply(name),
+                    name,
+                  ),
+                )}
+            </div>
+          `,
+        }),
       )}
 
       <!--
-        Contributed presets get a heading of their own rather than being sorted
-        into In / Out / Emphasis. A stranger's move has no reliable group, and
-        a user who wonders where a tile came from should be able to see it.
+        Contributed presets get a section of their own rather than being sorted
+        into In / Out / Emphasis. A stranger's move has no reliable group, and a
+        user who wonders where a tile came from should be able to see it.
       -->
       ${contributed.length === 0
         ? ""
-        : html`
-            <div
-              class="text-secondary px-2 pt-2"
-              style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;"
-            >
-              Extensions
-            </div>
-            <div class="row px-2">
-              ${contributed.map((preset) =>
-                this.tile(preset.id, preset.label, false, () => this.apply(preset.id), preset.id),
-              )}
-            </div>
-          `}
+        : section({
+            title: "Extensions",
+            body: html`
+              <div class="row">
+                ${contributed.map((preset) =>
+                  this.tile(
+                    preset.id,
+                    preset.label,
+                    false,
+                    () => this.apply(preset.id),
+                    preset.id,
+                  ),
+                )}
+              </div>
+            `,
+          })}
     `;
   }
 }
