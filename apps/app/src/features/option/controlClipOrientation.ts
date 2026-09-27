@@ -30,6 +30,7 @@ import {
   reverseClips,
   unreverseClips,
 } from "../reverse/reverseSession";
+import { iconButton, section, textButton } from "./optionKit";
 
 @customElement("clip-orientation")
 export class ClipOrientationControl extends LitElement {
@@ -74,36 +75,43 @@ export class ClipOrientationControl extends LitElement {
     const { h, v } = mirrorOf(element);
     const id = this.elementId;
 
-    return html`
-      <label class="form-label text-light">Orientation</label>
-      <div class="d-flex gap-2 mb-3">
-        <button
-          type="button"
-          class="btn btn-sm ${h ? "btn-primary" : "btn-default"} text-light flex-fill"
-          aria-pressed=${h ? "true" : "false"}
-          aria-event="mirror_h"
-          title="Mirror the picture left to right"
-          @click=${() => mirrorClips([id], "h")}
-        >
-          ↔ Mirror
-        </button>
-        <button
-          type="button"
-          class="btn btn-sm ${v ? "btn-primary" : "btn-default"} text-light flex-fill"
-          aria-pressed=${v ? "true" : "false"}
-          aria-event="mirror_v"
-          title="Flip the picture top to bottom"
-          @click=${() => mirrorClips([id], "v")}
-        >
-          ↕ Flip
-        </button>
-        ${element.filetype === "video" && canReverseHere()
+    // The two mirrors sit in the head, as the mask's invert and pen do: they
+    // are instant acts on the whole clip rather than values to set. Reverse
+    // does not join them, because it is the one here that takes minutes and has
+    // to report progress in words.
+    return section({
+      title: "Orientation",
+      actions: html`
+        ${iconButton({
+          icon: "swap_horiz",
+          title: "Mirror the picture left to right",
+          on: h,
+          event: "mirror_h",
+          onClick: () => mirrorClips([id], "h"),
+        })}
+        ${iconButton({
+          icon: "swap_vert",
+          title: "Flip the picture top to bottom",
+          on: v,
+          event: "mirror_v",
+          onClick: () => mirrorClips([id], "v"),
+        })}
+      `,
+      body:
+        element.filetype === "video" && canReverseHere()
           ? this.reverseButton(element)
-          : ""}
-      </div>
-    `;
+          : undefined,
+    });
   }
 
+  /**
+   * Reverse, as the section's one body row.
+   *
+   * Four states in one button, which is why it is a word rather than a glyph:
+   * queued, running with a percentage, already reversed, and offered. The
+   * running one is the reason this is not an icon in the head beside the
+   * mirrors, where there is no room for "Reversing 45%".
+   */
   private reverseButton(element: TimelineElement) {
     const id = this.elementId;
     const task = taskFor("reverse", id);
@@ -111,46 +119,42 @@ export class ClipOrientationControl extends LitElement {
     if (task != null) {
       const label =
         task.stage === "queued"
-          ? "Waiting…"
+          ? "Waiting"
           : task.fraction == null
-            ? "Reversing…"
+            ? "Reversing"
             : `Reversing ${Math.floor(task.fraction * 100)}%`;
-      return html`<button
-        type="button"
-        class="btn btn-sm btn-default text-light flex-fill"
-        aria-event="reverse"
-        disabled
-      >
-        ${label}
-      </button>`;
+      return html`<div class="opt-row">
+        <span class="opt-label">${label}</span>
+      </div>`;
     }
 
     if (isReversed(element)) {
-      return html`<button
-        type="button"
-        class="btn btn-sm btn-primary text-light flex-fill"
-        aria-pressed="true"
-        aria-event="reverse"
-        title="Play forwards again"
-        @click=${() => unreverseClips([id])}
-      >
-        ⟲ Reversed
-      </button>`;
+      return html`<div class="opt-seg" role="group" aria-label="Playback direction">
+        <button
+          type="button"
+          class="opt-seg-item is-on"
+          aria-pressed="true"
+          aria-event="reverse"
+          title="Play forwards again"
+          @click=${() => unreverseClips([id])}
+        >
+          <span class="material-symbols-outlined">fast_rewind</span>
+          Reversed
+        </button>
+      </div>`;
     }
 
     if (!isReversible(element)) {
-      return "";
+      return undefined;
     }
 
-    return html`<button
-      type="button"
-      class="btn btn-sm btn-default text-light flex-fill"
-      aria-pressed="false"
-      aria-event="reverse"
-      title="Play this clip backwards"
-      @click=${() => reverseClips([id])}
-    >
-      ⟲ Reverse
-    </button>`;
+    return html`<div class="opt-row">
+      ${textButton({
+        label: "Reverse",
+        title: "Play this clip backwards",
+        event: "reverse",
+        onClick: () => reverseClips([id]),
+      })}
+    </div>`;
   }
 }

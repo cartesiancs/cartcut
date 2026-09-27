@@ -37,6 +37,7 @@ import { addKeyframe } from "../animation/keyframeOps";
 import { animatableProperties } from "../../@types/timeline";
 import { projectBakeHz } from "../editor/frameRate";
 import "./controlKeyframeNav";
+import { section } from "./optionKit";
 
 @customElement("audio-volume")
 export class AudioVolume extends LitElement {
@@ -71,33 +72,30 @@ export class AudioVolume extends LitElement {
   }
 
   render() {
-    return html`
-      <label class="form-label text-light">${this.lc.t("setting.volume")}</label>
-      <div class="d-flex flex-row justify-content-between bd-highlight mb-2">
-        <div
-          class="d-flex flex-row gap-2 justify-content-start align-items-center"
-        >
-          <number-input
-            aria-event="volume"
-            @onChange=${this.handleVolume}
-            value="0"
-            .min=${MIN_VOLUME_DB}
-            .max=${MAX_VOLUME_DB}
-            sensitivity="0.15"
-          ></number-input>
-          <span class="text-secondary" style="font-size: 12px;">dB</span>
-        </div>
-        <div class="d-flex flex-row gap-2 justify-content-end">
-          ${this.canAnimate()
-            ? html`<control-keyframe-nav
-                .elementId=${this.elementId}
-                .property=${"volumeDb"}
-                .label=${"level"}
-              ></control-keyframe-nav>`
-            : ""}
-        </div>
-      </div>
-    `;
+    // The whole section is one value, so it is one line: the name at the head's
+    // start, the field and its stopwatch at the end. The same shape Blend,
+    // Parent and Speed take.
+    return section({
+      title: this.lc.t("setting.volume"),
+      actions: html`
+        <number-input
+          aria-event="volume"
+          @onChange=${this.handleVolume}
+          value="0"
+          .min=${MIN_VOLUME_DB}
+          .max=${MAX_VOLUME_DB}
+          sensitivity="0.15"
+        ></number-input>
+        <span class="opt-label">dB</span>
+        ${this.canAnimate()
+          ? html`<control-keyframe-nav
+              .elementId=${this.elementId}
+              .property=${"volumeDb"}
+              .label=${"level"}
+            ></control-keyframe-nav>`
+          : ""}
+      `,
+    });
   }
 
   /**

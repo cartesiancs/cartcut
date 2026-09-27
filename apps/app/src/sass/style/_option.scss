@@ -133,7 +133,8 @@ $opt-bright: #f1f3f5;
  * and at the inherited size the three left the column about forty-seven pixels
  * of label, which clipped both names to "P..." and "S...".
  */
-.opt-row number-input {
+.opt-row number-input,
+.opt-head-actions number-input {
   font-size: 11px;
 }
 
@@ -158,11 +159,13 @@ $opt-bright: #f1f3f5;
  * own `.keyframe-nav .btn` rule already has to do the same. Scoped to `.opt-row`
  * so the keyframe editor's own navigator is untouched.
  */
-.opt-row .keyframe-nav .material-symbols-outlined {
+.opt-row .keyframe-nav .material-symbols-outlined,
+.opt-head-actions .keyframe-nav .material-symbols-outlined {
   font-size: 14px;
 }
 
-.opt-row .keyframe-nav .btn {
+.opt-row .keyframe-nav .btn,
+.opt-head-actions .keyframe-nav .btn {
   display: flex;
   align-items: center;
   justify-content: center;
