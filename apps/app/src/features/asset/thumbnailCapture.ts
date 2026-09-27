@@ -28,12 +28,14 @@ import type { Thumbnail } from "./thumbnailCache";
 /**
  * Longest edge of the stored thumbnail, in pixels.
  *
- * `_asset.scss` shows a tile preview at 55px, so this is comfortable headroom
- * at 2x DPR and leaves room for the tile to grow. The version this replaces
- * sized its canvas to `videoWidth`/`videoHeight` and kept a full 3600x2338 PNG
- * per file, which is several thousand times the pixels anybody sees.
+ * A grid tile's well is about 120px wide at the panel's default width and grows
+ * with the panel, so 256 is a crisp frame at 2x DPR with room left over. It was
+ * 160, sized against a 55px preview, which the grid outgrew: `cover` fills the
+ * well, and a thumbnail upscaled to fill it is visibly soft. The version before
+ * that sized its canvas to `videoWidth`/`videoHeight` and kept a full 3600x2338
+ * PNG per file, which is several thousand times the pixels anybody sees.
  */
-export const THUMBNAIL_MAX_PX = 160;
+export const THUMBNAIL_MAX_PX = 256;
 
 /**
  * How long one capture may take before it is abandoned.

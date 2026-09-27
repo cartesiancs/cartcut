@@ -43,6 +43,7 @@ import {
   type MaskFieldPatch,
 } from "../timeline/maskOps";
 import { GestureCommit } from "./gestureCommit";
+import { iconButton, section } from "./optionKit";
 import "./controlKeyframeNav";
 import "../../components/input/input";
 
@@ -244,17 +245,26 @@ export class OptionMaskSection extends LitElement {
     `;
   }
 
+  /**
+   * One named field: its name, its boxes, and its stopwatch.
+   *
+   * The boxes stay `<number-input>`, which carries its own shadow styles and is
+   * shared with `default-transform`: a blue draggable number is the one thing in
+   * the inspector that says "this value scrubs", and restyling it here would
+   * change that panel too.
+   */
   private row(
     label: string,
     inputs: unknown,
     property: AnimatableProperty | null,
   ) {
     return html`
-      <label class="form-label text-light">${label}</label>
-      <div class="d-flex flex-row justify-content-between bd-highlight mb-2">
-        <div class="d-flex flex-row gap-2 justify-content-start">${inputs}</div>
-        <div class="d-flex flex-row gap-2 justify-content-end">
-          ${property == null ? "" : this.keyButton(property)}
+      <div class="opt-field">
+        <div class="opt-row">
+          <label class="opt-label" title=${label}>${label}</label>
+          <div class="opt-row-controls">
+            ${inputs} ${property == null ? "" : this.keyButton(property)}
+          </div>
         </div>
       </div>
     `;
@@ -266,33 +276,59 @@ export class OptionMaskSection extends LitElement {
     }
     const mask = this.mask;
 
+    // One bordered group, not four separate pills: four icons with one of them
+    // chosen is a single closed choice, and clicking the chosen one again is how
+    // the mask comes off.
     const shapes = html`
-      <div class="d-flex flex-row gap-1 mb-3">
-        ${MASK_SHAPES.map(
-          (shape) => html`
-            <button
-              class="btn btn-xxs ${mask?.shape === shape
-                ? "btn-primary"
-                : "btn-default"} text-light flex-fill"
-              aria-event="mask-shape-${shape}"
-              title=${shape}
-              @click=${() => this.handleShape(shape)}
-            >
-              <span class="material-symbols-outlined icon-xs">
-                ${SHAPE_ICON[shape]}
-              </span>
-            </button>
-          `,
-        )}
+      <div class="opt-field">
+        <div class="opt-seg" role="group" aria-label="Mask shape">
+          ${MASK_SHAPES.map(
+            (shape) => html`
+              <button
+                type="button"
+                class="opt-seg-item ${mask?.shape === shape ? "is-on" : ""}"
+                aria-event="mask-shape-${shape}"
+                aria-pressed=${mask?.shape === shape ? "true" : "false"}
+                title=${shape}
+                @click=${() => this.handleShape(shape)}
+              >
+                <span class="material-symbols-outlined">
+                  ${SHAPE_ICON[shape]}
+                </span>
+              </button>
+            `,
+          )}
+        </div>
       </div>
     `;
 
     if (mask == null) {
-      return html`<div class="mt-2">${shapes}</div>`;
+      return section({ title: "Mask", body: shapes });
     }
 
-    return html`
-      <div class="mt-2">
+    // Invert and the pen sit in the head rather than under the numbers: they act
+    // on the whole mask, and the five rows between them and the title read as
+    // theirs when they sit below it.
+    return section({
+      title: "Mask",
+        actions: html`
+        ${iconButton({
+          icon: "invert_colors",
+          title: "Invert",
+          on: mask.invert === true,
+          event: "mask-invert",
+          onClick: () => this.commitField({ invert: mask.invert !== true }),
+        })}
+        ${iconButton({
+          icon: "stylus",
+          title: "Draw",
+          on: this.penActive,
+          disabled: this.elementIds.length !== 1,
+          event: "mask-draw",
+          onClick: () => this.togglePen(),
+        })}
+      `,
+      body: html`
         ${shapes}
         ${this.row(
           "Position",
@@ -405,33 +441,7 @@ export class OptionMaskSection extends LitElement {
           ></number-input>`,
           "maskRoundness",
         )}
-
-        <div class="d-flex flex-row gap-1">
-          <button
-            class="btn btn-xxs ${mask.invert === true
-              ? "btn-primary"
-              : "btn-default"} text-light flex-fill"
-            aria-event="mask-invert"
-            title="invert"
-            @click=${() => this.commitField({ invert: mask.invert !== true })}
-          >
-            <span class="material-symbols-outlined icon-xs">
-              invert_colors
-            </span>
-          </button>
-          <button
-            class="btn btn-xxs ${this.penActive
-              ? "btn-primary"
-              : "btn-default"} text-light flex-fill"
-            aria-event="mask-draw"
-            title="draw"
-            ?disabled=${this.elementIds.length !== 1}
-            @click=${() => this.togglePen()}
-          >
-            <span class="material-symbols-outlined icon-xs"> stylus </span>
-          </button>
-        </div>
-      </div>
-    `;
+      `,
+    });
   }
 }

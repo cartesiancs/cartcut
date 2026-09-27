@@ -64,6 +64,7 @@ import {
   viewportFor,
   type GraphViewport,
 } from "../speed/curveGraph";
+import { eyeButton, section } from "./optionKit";
 
 /** Plot height in CSS px. Tall enough that a doubling is a visible distance. */
 const PLOT_HEIGHT = 120;
@@ -84,15 +85,6 @@ const COLORS = {
 /** The rates that get a gridline and a label. */
 const TICKS = [0.25, 0.5, 1, 2, 4];
 
-/**
- * Unique per instance, for the switch's `id` and its label's `for`.
- *
- * Keyed on the element id was the first try and is wrong: both option panels
- * mount this control, so two of them can hold the same clip id at once and the
- * label would point at whichever input the document happened to reach first.
- */
-let nextControlId = 0;
-
 @customElement("clip-speed-curve")
 export class ClipSpeedCurveControl extends LitElement {
   private lc = new LocaleController(this);
@@ -106,7 +98,6 @@ export class ClipSpeedCurveControl extends LitElement {
    * clip after a ramped one would show it armed for no reason.
    */
   private locallyArmed = false;
-  private readonly controlId = `speed-ramp-${++nextControlId}`;
 
   @property()
   elementId = "";
@@ -190,32 +181,28 @@ export class ClipSpeedCurveControl extends LitElement {
 
     const armed = this.armed;
 
-    return html`
-      <div class="form-check form-switch form-switch-row mb-2">
-        <label class="form-check-label text-light" for=${this.controlId}>
-          ${this.lc.t("setting.speed_ramp")}
-        </label>
-
-        <input
-          class="form-check-input"
-          type="checkbox"
-          role="switch"
-          id=${this.controlId}
-          aria-event="speed_ramp_toggle"
-          .checked=${armed}
-          @change=${this.handleToggle}
-        />
-      </div>
-      ${armed ? this.graph() : ``}
-    `;
+    // The eye, as Border and Shadow have it, rather than the Bootstrap switch
+    // this used to carry: the ramp is a feature that is off until it is turned
+    // on, and the graph is what appears when it is.
+    return section({
+      title: this.lc.t("setting.speed_ramp"),
+      actions: eyeButton(
+        armed,
+        armed ? "Turn the ramp off" : "Turn the ramp on",
+        () => this.handleToggle(!armed),
+        "speed_ramp_toggle",
+      ),
+      body: armed ? this.graph() : undefined,
+    });
   }
 
   /** The graph and its presets, rendered only while the section is armed. */
   private graph() {
     return html`
       <canvas
-        class="w-100 mb-1"
-        style="height: ${PLOT_HEIGHT}px; border-radius: 4px; cursor: crosshair;"
+        class="w-100"
+        style="height: ${PLOT_HEIGHT}px; border-radius: 7px; cursor: crosshair;
+               display: block; margin-bottom: 8px;"
         aria-label="speed ramp"
         aria-event="speed_curve"
         @pointerdown=${this.handlePointerDown}
@@ -235,7 +222,7 @@ export class ClipSpeedCurveControl extends LitElement {
         template literal, and the errors land on the lines after it.
       -->
       <select
-        class="form-select text-light mb-3"
+        class="opt-select"
         aria-label="speed ramp preset"
         aria-event="speed_curve_preset"
         @change=${this.handlePreset}
@@ -258,8 +245,7 @@ export class ClipSpeedCurveControl extends LitElement {
    * preset uses, which leaves `speed` at the mean the ramp was running so the
    * clip keeps its length and its neighbours stay put.
    */
-  private handleToggle = (event: Event) => {
-    const on = (event.currentTarget as HTMLInputElement).checked;
+  private handleToggle = (on: boolean) => {
     if (!on) {
       this.commit(null);
     }
@@ -271,22 +257,11 @@ export class ClipSpeedCurveControl extends LitElement {
   };
 
   updated() {
-    // The switch, imperatively, for the reason `clip-speed` writes its own
-    // `select.value` in `updated`. `?checked` was the first try and it is an
-    // *attribute* binding: once a real click has set an input's dirty flag the
-    // browser stops applying the attribute, so selecting a plain clip after a
-    // ramped one left the switch reading on over a hidden graph. `.checked` is
-    // a property binding and does not have that problem; this second write
-    // covers a render where the bound value did not change but the DOM did.
-    const toggle = this.querySelector<HTMLInputElement>(
-      "input[aria-event='speed_ramp_toggle']",
-    );
-    if (toggle != null) {
-      const armed = this.armed;
-      if (toggle.checked !== armed) {
-        toggle.checked = armed;
-      }
-    }
+    // Nothing imperative for the toggle any more. It was a Bootstrap checkbox,
+    // whose dirty flag stops the browser applying a `checked` *attribute*, so
+    // selecting a plain clip after a ramped one left the switch reading on over
+    // a hidden graph and needed a write here to correct it. The eye is a button
+    // drawn from `armed` on every render and cannot go out of step.
 
     // The preset select is a verb and holds no state, so it is re-pointed at
     // its own label on every render rather than at anything in the document.

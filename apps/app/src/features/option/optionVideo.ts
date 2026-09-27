@@ -32,6 +32,7 @@ import "./animationPresetBrowser";
 import "./optionTabBar";
 import type { OptionTab } from "./optionTabBar";
 import { scrubOn } from "../input/inputScrub";
+import { eyeButton, iconButton, section } from "./optionKit";
 
 // The shaders read the blur strength with `parseInt`, hence whole steps; the
 // chroma-key threshold is a fraction and above 1 keys out the whole frame.
@@ -102,62 +103,73 @@ export class OptionVideo extends LitElement {
     // Every field binds with `.value`, not a `value` attribute. The attribute
     // is a *default* that lit sets once, so the controls used to show
     // "Chroma Key" and the hardcoded defaults no matter what the clip carried.
+    // Named rows, the way every other section states a value: what the filter
+    // is, then the one or two numbers that filter takes. The fields used to sit
+    // in one flex line with no names at all, so a chroma key showed a colour
+    // well and a box labelled "f".
     const filterEditor =
       filter == null
         ? ""
-        : html`<div class="d-flex col-12">
-            <select
-              @change=${this.handleChangeFilterName}
-              .value=${filter.name}
-              class="form-select text-light"
-              aria-label="select screen"
-              aria-event="filter_name"
-              style="
-              height: fit-content;
-          "
-            >
-              <option value="chromakey">Chroma Key</option>
-              <option value="blur">Blur</option>
-              <option value="radialblur">Radial Blur</option>
-            </select>
+        : html`
+            <div class="opt-field">
+              <div class="opt-row">
+                <label class="opt-label">Kind</label>
+                <select
+                  @change=${this.handleChangeFilterName}
+                  .value=${filter.name}
+                  class="opt-select"
+                  style="width: 60%;"
+                  aria-label="select screen"
+                  aria-event="filter_name"
+                >
+                  <option value="chromakey">Chroma Key</option>
+                  <option value="blur">Blur</option>
+                  <option value="radialblur">Radial Blur</option>
+                </select>
+              </div>
+            </div>
 
             <!-- One field for both blurs. They were two inputs differing only
                  in which one carried d-none, which is how the hidden one kept
                  whatever had last been typed into it. -->
-            <input
-              @change=${this.handleChangeStrength}
-              @mousedown=${SCRUB_FILTER_STRENGTH}
-              type="number"
-              aria-event="filter_strength"
-              min="0"
-              step="1"
-              class="form-control bg-default text-light scrub-number ${isChromakey
-                ? "d-none"
-                : ""}"
-              .value=${String(filter.strength ?? "")}
-            />
+            <div class="opt-field ${isChromakey ? "d-none" : ""}">
+              <div class="opt-row">
+                <label class="opt-label">Strength</label>
+                <input
+                  @change=${this.handleChangeStrength}
+                  @mousedown=${SCRUB_FILTER_STRENGTH}
+                  type="number"
+                  aria-event="filter_strength"
+                  min="0"
+                  step="1"
+                  class="opt-num scrub-number"
+                  .value=${String(filter.strength ?? "")}
+                />
+              </div>
+            </div>
 
-            <div class="d-flex row gap-2 ${isChromakey ? "" : "d-none"}">
-              <input
-                @change=${this.handleChangeChromakey}
-                type="color"
-                aria-event="chromakey_color"
-                class="form-control bg-default text-light"
-                .value=${filter.color ?? "#000000"}
-              />
+            <div class="opt-field ${isChromakey ? "" : "d-none"}">
+              <div class="opt-row">
+                <label class="opt-label">Key color</label>
+                <input
+                  @change=${this.handleChangeChromakey}
+                  type="color"
+                  aria-event="chromakey_color"
+                  class="opt-swatch"
+                  .value=${filter.color ?? "#000000"}
+                />
+              </div>
+            </div>
 
-              <div class="input-group mb-3">
-                <span
-                  class="input-group-text bg-default text-light"
-                  id="basic-addon2"
-                  >f</span
-                >
+            <div class="opt-field ${isChromakey ? "" : "d-none"}">
+              <div class="opt-row">
+                <label class="opt-label">Tolerance</label>
                 <input
                   @change=${this.handleChangeChromakey}
                   @mousedown=${SCRUB_CHROMAKEY_THRESHOLD}
                   type="number"
                   aria-event="chromakey_force"
-                  class="form-control bg-default text-light scrub-number"
+                  class="opt-num scrub-number"
                   .value=${String(filter.threshold ?? "")}
                   step="0.01"
                   min="0"
@@ -165,7 +177,7 @@ export class OptionVideo extends LitElement {
                 />
               </div>
             </div>
-          </div>`;
+          `;
 
     return html`
       <option-tab-bar
@@ -265,40 +277,41 @@ export class OptionVideo extends LitElement {
       ></option-decoration-section>
 
 
-      <button
-        type="button"
-        class="btn btn-sm mb-2 mt-2 ${this.enableFilter
-          ? "btn-primary"
-          : "btn-default"}  text-light"
-        @click=${this.handleClickEnableFilter}
-      >
-        ${!this.enableFilter ? "Enable" : "Disable"} Filter
-      </button>
+      <!--
+        Two states on one head, because the clip carries two flags: the eye is
+        the clip-wide switch, and the plus or the cross is whether there is a
+        filter under it at all. Both were full-width buttons reading "Enable
+        Filter" and "Add Filter", which is four words for what the section name
+        and two glyphs now say.
 
-      <div class="mb-4 ${this.enableFilter ? "" : "d-none"}">
-        <label class="form-label text-light">Filter List</label>
-        <div class="d-flex row gap-2">${filterEditor}</div>
-
-        <button
-          type="button"
-          class="btn btn-sm mt-2 w-100 bg-dark text-light ${filter == null
-            ? ""
-            : "d-none"}"
-          @click=${this.handleClickAddFilter}
-        >
-          Add Filter
-        </button>
-
-        <button
-          type="button"
-          class="btn btn-sm mt-2 w-100 bg-dark text-light ${filter == null
-            ? "d-none"
-            : ""}"
-          @click=${this.handleClickRemoveFilter}
-        >
-          Remove Filter
-        </button>
-      </div>
+        Called a filter and not a LUT, deliberately. VideoElementType.filter
+        owns the word here for the chroma key and the blurs; the grade is the
+        LUT section above.
+      -->
+      ${section({
+        title: "Filter",
+        actions: html`
+          ${this.enableFilter && filter != null
+            ? iconButton({
+                icon: "close",
+                title: "Remove the filter",
+                onClick: this.handleClickRemoveFilter,
+              })
+            : this.enableFilter
+              ? iconButton({
+                  icon: "add",
+                  title: "Add a filter",
+                  onClick: this.handleClickAddFilter,
+                })
+              : ""}
+          ${eyeButton(
+            this.enableFilter,
+            this.enableFilter ? "Turn the filter off" : "Turn the filter on",
+            () => this.handleClickEnableFilter(),
+          )}
+        `,
+        body: this.enableFilter && filter != null ? filterEditor : undefined,
+      })}
 
       <!-- <div class="mb-4">
         <label class="form-label text-light">Animate Preset</label>

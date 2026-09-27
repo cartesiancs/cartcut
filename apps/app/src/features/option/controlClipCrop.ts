@@ -31,6 +31,7 @@ import {
 } from "../timeline/cropOps";
 import { CROP_ASPECTS, ratioOf } from "../crop/aspects";
 import { cropChanged, cropKey, cropSetAspect } from "../crop/cropSession";
+import { iconButton, section, textButton } from "./optionKit";
 
 /** The longest side of a preset's glyph, in CSS pixels. */
 const RATIO_GLYPH_PX = 16;
@@ -120,47 +121,46 @@ export class ClipCropControl extends LitElement {
     const session = this.session;
     const cropped = isCropped(cropOf(element));
 
-    return html`
-      <label class="form-label text-light">Crop</label>
-      <div class="d-flex gap-2 mb-2">
-        <button
-          type="button"
-          class="btn btn-sm ${session != null
-            ? "btn-primary"
-            : "btn-default"} text-light flex-fill"
-          aria-pressed=${session != null ? "true" : "false"}
-          aria-event="crop"
-          title="Reframe this clip to part of its source"
-          @click=${() =>
-            session == null ? this.start() : this.finish("Enter")}
-        >
-          <span class="material-symbols-outlined icon-xs">crop_free</span>
-          ${session == null ? "Crop" : "Apply"}
-        </button>
-        ${session != null
-          ? html`<button
-              type="button"
-              class="btn btn-sm btn-default text-light"
-              aria-event="crop_cancel"
-              title="Leave the crop unchanged"
-              @click=${() => this.finish("Escape")}
-            >
-              Cancel
-            </button>`
-          : cropped
-            ? html`<button
-                type="button"
-                class="btn btn-sm btn-default text-light"
-                aria-event="crop_reset"
-                title="Show the whole frame again"
-                @click=${() => this.reset()}
-              >
-                Reset
-              </button>`
-            : ""}
-      </div>
-      ${session == null ? "" : this.aspectStrip(session)}
-    `;
+    // Entering the crop is a mode, so the head carries what to do about that
+    // mode and nothing else: start it, or finish it two ways. The aspect
+    // presets are the body, and only exist while the mode is running.
+    return section({
+      title: "Crop",
+      actions:
+        session != null
+          ? html`
+              ${textButton({
+                label: "Apply",
+                title: "Keep this crop",
+                event: "crop",
+                onClick: () => this.finish("Enter"),
+              })}
+              ${textButton({
+                label: "Cancel",
+                title: "Leave the crop unchanged",
+                event: "crop_cancel",
+                onClick: () => this.finish("Escape"),
+              })}
+            `
+          : html`
+              ${cropped
+                ? textButton({
+                    label: "Reset",
+                    title: "Show the whole frame again",
+                    event: "crop_reset",
+                    onClick: () => this.reset(),
+                  })
+                : ""}
+              ${iconButton({
+                icon: "crop_free",
+                title: "Reframe this clip to part of its source",
+                on: cropped,
+                event: "crop",
+                onClick: () => this.start(),
+              })}
+            `,
+      body: session == null ? undefined : this.aspectStrip(session),
+    });
   }
 
   /**
@@ -179,16 +179,41 @@ export class ClipCropControl extends LitElement {
           flex-wrap: wrap;
           gap: 4px;
         }
+        /*
+          A cell of its own shape rather than a segmented-control cell: the
+          glyph is a box in the aspect's own proportions, so the row cannot be
+          the equal shares .opt-seg divides itself into.
+
+          No backticks in here. This sits inside a lit html template literal,
+          and one would end the template.
+        */
         clip-crop .crop-aspect {
+          appearance: none;
           display: flex;
           flex-direction: column;
           align-items: center;
           justify-content: flex-end;
           gap: 3px;
           min-width: 40px;
-          padding: 4px 2px;
+          padding: 5px 4px;
+          border: 1px solid rgba(255, 255, 255, 0.07);
+          border-radius: 7px;
+          background-color: #16191c;
+          color: #7f878f;
           font-size: 10px;
           line-height: 1;
+          cursor: pointer;
+          transition:
+            background-color 140ms ease-out,
+            color 140ms ease-out;
+        }
+        clip-crop .crop-aspect:hover {
+          background-color: #1f2327;
+          color: #c3c9cf;
+        }
+        clip-crop .crop-aspect.is-on {
+          background-color: #2a3036;
+          color: #f1f3f5;
         }
         clip-crop .crop-aspect-glyph {
           display: block;
@@ -196,7 +221,7 @@ export class ClipCropControl extends LitElement {
           border-radius: 1px;
         }
       </style>
-      <div class="crop-aspects mb-3">
+      <div class="crop-aspects">
         ${CROP_ASPECTS.map((aspect) => {
           const ratio = ratioOf(aspect, session.frame);
           const drawable = aspect.ratio !== null && aspect.ratio !== "frame";
@@ -211,9 +236,9 @@ export class ClipCropControl extends LitElement {
           return html`
             <button
               type="button"
-              class="btn btn-xs crop-aspect ${session.aspectId === aspect.id
-                ? "btn-primary"
-                : "btn-default"} text-light"
+              class="crop-aspect ${session.aspectId === aspect.id
+                ? "is-on"
+                : ""}"
               aria-pressed=${session.aspectId === aspect.id ? "true" : "false"}
               aria-event=${`crop_aspect_${aspect.id}`}
               title=${`Lock the crop to ${aspect.label}`}
@@ -236,9 +261,12 @@ export class ClipCropControl extends LitElement {
           `;
         })}
       </div>
-      <div class="text-secondary mb-3" style="font-size: 11px;">
-        ${cropChanged(session) ? "Enter to apply, Escape to cancel." : ""}
-      </div>
+      ${cropChanged(session)
+        ? html`<div class="opt-hint" style="margin-top: 8px;">
+            <span class="material-symbols-outlined opt-hint-icon">keyboard</span>
+            Enter to apply, Escape to cancel.
+          </div>`
+        : ""}
     `;
   }
 }

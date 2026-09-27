@@ -23,20 +23,15 @@ export class BackgroundRemove extends LitElement {
     return html`
       <button
         type="button"
-        class="btn btn-sm mb-2 btn-default  text-light"
+        class="opt-text-btn"
+        style="width: 100%; justify-content: center; height: 26px;"
+        ?disabled=${this.isLoad}
         @click=${this.handleClickRemove}
       >
-        <div
-          class="spinner-border ${this.isLoad ? "" : "d-none"}"
-          style="
-    width: 12px;
-    height: 12px;
-"
-          role="status"
-        >
-          <span class="visually-hidden">Loading...</span>
-        </div>
-        AI Background Remove
+        <span class="material-symbols-outlined" style="font-size: 14px;">
+          ${this.isLoad ? "hourglass_top" : "auto_fix"}
+        </span>
+        ${this.isLoad ? "Removing" : "Remove background"}
       </button>
     `;
   }

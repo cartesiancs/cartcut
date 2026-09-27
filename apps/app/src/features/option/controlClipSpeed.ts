@@ -37,6 +37,7 @@ import {
   SPEED_PRESETS,
 } from "../timeline/speedOps";
 import { speedCurveOf } from "../timeline/speedCurve";
+import { section } from "./optionKit";
 
 @customElement("clip-speed")
 export class ClipSpeedControl extends LitElement {
@@ -94,27 +95,32 @@ export class ClipSpeedControl extends LitElement {
     // nobody chose, and a live one rendered as "0.4009824491765815x".
     const ramped = speedCurveOf(element) != null;
 
-    return html`
-      <label class="form-label text-light">${this.lc.t("setting.speed")}</label>
-      <select
-        class="form-select text-light mb-3"
-        aria-label="clip speed"
-        aria-event="clip_speed"
-        @change=${this.handleChange}
-      >
-        ${ramped
-          ? html`<option value="ramp">
-              ${this.lc.t("setting.speed_ramp_option")} (${speed.toFixed(2)}x)
-            </option>`
-          : ``}
-        ${(ramped ? SPEED_PRESETS : speedOptionsFor(speed)).map(
-          (option) =>
-            html`<option value=${String(option)}>
-              ${formatSpeedOption(option)}x
-            </option>`,
-        )}
-      </select>
-    `;
+    // A section whose whole content is one control, so the dropdown sits in the
+    // head and takes its spare width: the shape Blend and Parent already have.
+    return section({
+      title: this.lc.t("setting.speed"),
+      grow: true,
+      actions: html`
+        <select
+          class="opt-select"
+          aria-label="clip speed"
+          aria-event="clip_speed"
+          @change=${this.handleChange}
+        >
+          ${ramped
+            ? html`<option value="ramp">
+                ${this.lc.t("setting.speed_ramp_option")} (${speed.toFixed(2)}x)
+              </option>`
+            : ``}
+          ${(ramped ? SPEED_PRESETS : speedOptionsFor(speed)).map(
+            (option) =>
+              html`<option value=${String(option)}>
+                ${formatSpeedOption(option)}x
+              </option>`,
+          )}
+        </select>
+      `,
+    });
   }
 
   /**

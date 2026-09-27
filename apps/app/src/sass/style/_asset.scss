@@ -20,100 +20,236 @@
     isolation: isolate;
 }
 
-.asset-preview {
-    max-width: 55px;
-    max-height: 55px;
+/*
+ * ------------------------------------------------------- the file browser
+ *
+ * `<asset-list>`'s tiles only. The sidebar's other tile grids (LUTs, text
+ * presets, templates, utilities) are Bootstrap columns inside a `.row` and
+ * share nothing below; `.asset` above is the whole of what they have in common.
+ */
+
+asset-list {
+    /*
+     * A custom element with no styles is `display: inline`, and an inline box
+     * is not a containing block the grid below can resolve `1fr` against.
+     * Nothing errors; the columns just come out wrong.
+     */
+    display: block;
 }
 
 /*
- * Stands in for a video tile's thumbnail until the capture lands.
+ * `auto-fill` rather than a fixed column count.
  *
- * A fixed box rather than an empty <img>, whose src would resolve against the
- * document and paint a broken-image glyph. The size has to match what the
- * thumbnail will occupy: the grid decides what to capture from what is on
- * screen, so a tile that changes height when its frame arrives re-triggers
- * that decision for every tile below it.
+ * The panel is a percentage of the window (`uiStore`'s
+ * `resize.horizontal.panel`, 30 by default) and is draggable on top of that, so
+ * any fixed count is either cramped in a narrow panel or enormous in a wide
+ * one. The track floor decides instead: about three across at the default
+ * width, more as the panel grows, and never a tile whose name has room for two
+ * characters.
  */
-.asset-preview-pending {
-    width: 55px;
-    height: 55px;
-    border-radius: 4px;
-    background-color: #1b1f24;
+.asset-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    /*
+     * Small because each tile carries its own padding, and that padding is what
+     * the hover plate fills. Widening this separates the plates rather than the
+     * pictures.
+     */
+    gap: 2px;
+    align-content: start;
+    padding: .25rem 0 .75rem;
+}
+
+.asset-rows {
+    display: flex;
+    flex-direction: column;
+    padding: .25rem 0 .75rem;
+}
+
+/*
+ * One tile: a well of a fixed shape, then one line of name.
+ *
+ * **The well's height never depends on the picture in it.** `aspect-ratio` on
+ * the well, `flex: none` on both children and a pinned height on the name are
+ * the whole of it: the tile's width decides the well's height, the image is
+ * fitted to the well rather than the reverse, and the caption therefore sits at
+ * the same y in every tile whatever shape the media is.
+ *
+ * That also holds the tile's geometry still while a thumbnail is being
+ * captured, which `tileVisibility.ts` depends on: intersection is decided from
+ * layout, so a tile that changes height when its frame lands re-triggers that
+ * decision for every tile below it.
+ */
+.asset-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 5px;
+}
+
+.asset-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 6px;
+}
+
+/*
+ * A tighter plate than the sidebar's other tiles, whose 12px is set against a
+ * much taller LUT swatch. This is the well's own 6px plus the tile's padding.
+ */
+.asset-tile::before,
+.asset-row::before {
+    border-radius: 9px;
+}
+
+.asset-thumb {
+    position: relative;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, .08);
+    border-radius: 6px;
+    /*
+     * Also the empty state. A video tile renders no `<img>` at all until its
+     * capture lands, because an empty `src` resolves against the document and
+     * paints a broken-image glyph, so this fill is what stands in, at exactly
+     * the size the frame will occupy.
+     */
+    background-color: #15171a;
+    transition: border-color 140ms ease-out;
+}
+
+.asset:hover > .asset-thumb {
+    border-color: rgba(255, 255, 255, .18);
+}
+
+/*
+ * `cover`, so a folder of sixty different aspect ratios reads as one grid. The
+ * whole frame is one dwell away on the hover preview, which is the place that
+ * shows a picture at its own shape.
+ */
+.asset-thumb > .asset-thumb-img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/*
+ * Two classes, and deliberately: `material-symbols/outlined` is imported
+ * *after* this file in `style.scss`, so its `.material-symbols-outlined`
+ * (24px, `inline-block`) outranks any single-class rule written here.
+ */
+.asset-thumb > .asset-thumb-icon {
+    font-size: 28px;
+    color: #5c646d;
+}
+
+/* A folder is the one tile with no picture to look at, so its mark carries. */
+.asset-thumb-folder > .asset-thumb-icon {
+    font-size: 32px;
+    color: #98a1ab;
+}
+
+/* Says "video" without covering the frame it marks. */
+.asset-thumb > .asset-thumb-badge {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 17px;
+    height: 17px;
+    border-radius: 999px;
+    background-color: rgba(8, 9, 11, .58);
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+    color: #f1f3f5;
+    font-size: 12px;
+}
+
+/*
+ * The filename, deliberately quiet: in a grid of pictures the name is a label,
+ * and one per tile in bright bold text makes a column of captions the loudest
+ * thing in the panel.
+ *
+ * A `<span>`, not the `<b>` this used to be. `devent-designsystem.css` pins `b`
+ * to `font-weight: 400 !important`, so a lighter weight is not available on
+ * that element at any specificity.
+ *
+ * `height` is the point of the rule, not `line-height`: one line always, so
+ * every tile in the folder is exactly as tall as every other.
+ */
+.asset-name {
+    flex: none;
+    width: 100%;
+    height: 15px;
+    color: #7f878f;
+    font-size: 11px;
+    font-weight: 300;
+    line-height: 15px;
+    letter-spacing: .1px;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: color 140ms ease-out;
+}
+
+.asset:hover > .asset-name {
+    color: #c3c9cf;
 }
 
 /*
  * List mode: one row per entry, sized for reading names rather than for looking
- * at frames.
+ * at frames. `applyShowType` in `features/asset/assetList.ts` swaps the class.
  *
- * `applyShowType` in `features/asset/assetList.ts` adds this alongside
- * `flex-row`. The preview, the icon, the caption's gap and the tile's own
- * padding all come down together, because the row is as tall as whichever of
- * them is tallest; leaving one at its grid size keeps the whole row there.
- *
- * The name's alignment is not here: `text-center` is Bootstrap's and carries
- * `!important`, so `nameClass` decides it instead.
+ * A square slot, so every name in the column starts at the same x whatever the
+ * media's shape. The same well, the same crop, one third the size.
  */
-.asset-row {
-    padding: .15rem .5rem;
+.asset-row > .asset-thumb {
+    width: 34px;
+    aspect-ratio: 1;
+    border-radius: 5px;
 }
 
-.asset-row > b {
-    margin-top: 0;
+.asset-row > .asset-name {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    height: 17px;
+    font-size: 12px;
+    line-height: 17px;
+}
+
+.asset-row .asset-thumb > .asset-thumb-icon {
+    font-size: 19px;
+}
+
+.asset-row .asset-thumb-folder > .asset-thumb-icon {
+    font-size: 21px;
 }
 
 /*
- * One slot of the same size for every leading mark, whatever it is: a folder
- * icon, a draft icon, a still, a video thumbnail. Each of them sizes itself
- * otherwise — an icon by its font size, a picture by its aspect ratio — and a
- * column of names that each start at a different x is the thing a list is for
- * reading.
+ * At 34px there is no corner to put a 17px badge in, so it becomes a scrim over
+ * the whole chip rather than a mark beside the picture.
  */
-.asset-row > .icon-lg {
-    font-size: 1.6rem;
-    width: 30px;
-    height: 30px;
-    line-height: 30px;
-    text-align: center;
-}
-
-/*
- * The name asks for the full width of the row on its own (`.text-ellipsis`), so
- * flex resolves the overflow by shrinking every item that will shrink. The
- * preview is not one of them.
- */
-.asset-row > :not(b) {
-    flex-shrink: 0;
-}
-
-.asset-row .asset-preview,
-.asset-row .asset-preview-pending {
-    width: 30px;
-    height: 30px;
-    max-width: 30px;
-    max-height: 30px;
-}
-
-/* A letterbox rather than a crop, so the slot can be square and the frame not. */
-.asset-row .asset-preview {
-    object-fit: contain;
-}
-
-/* The video thumbnail's own wrapper, which `position-absolute` badge sits in. */
-.asset-row > .position-relative {
-    width: 30px;
-    height: 30px;
-}
-
-/*
- * The play badge is sized and placed against the thumbnail it marks. At the
- * package's 24px default it is nearly as wide as a 30px row thumbnail, and the
- * grid's off-centre offsets then put most of it outside the frame.
- */
-.asset-row .icon-center {
-    font-size: 16px;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
+.asset-row .asset-thumb > .asset-thumb-badge {
+    inset: 0;
+    width: auto;
+    height: auto;
+    border-radius: 0;
+    background-color: rgba(8, 9, 11, .28);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    font-size: 13px;
 }
 
 /*
@@ -372,9 +508,4 @@
     outline: 0;
     border: none;
     margin: 0px;
-}
-
-.icon-center {
-    left: 25%;
-    top: 10%;
 }

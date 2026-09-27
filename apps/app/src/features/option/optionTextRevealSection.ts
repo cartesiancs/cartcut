@@ -49,6 +49,7 @@ import {
 import { GestureCommit } from "./gestureCommit";
 import "./controlKeyframeNav";
 import "../../components/input/input";
+import { section } from "./optionKit";
 
 /** One word each. The panel has no prose in it, deliberately. */
 const UNIT_LABEL: Record<RevealUnit, string> = {
@@ -231,11 +232,12 @@ export class OptionTextRevealSection extends LitElement {
 
   private row(label: string, inputs: unknown, keyed: boolean) {
     return html`
-      <label class="form-label text-light">${label}</label>
-      <div class="d-flex flex-row justify-content-between bd-highlight mb-2">
-        <div class="d-flex flex-row gap-2 justify-content-start">${inputs}</div>
-        <div class="d-flex flex-row gap-2 justify-content-end">
-          ${keyed ? this.keyButton() : ""}
+      <div class="opt-field">
+        <div class="opt-row">
+          <label class="opt-label" title=${label}>${label}</label>
+          <div class="opt-row-controls">
+            ${inputs}${keyed ? this.keyButton() : ""}
+          </div>
         </div>
       </div>
     `;
@@ -247,33 +249,41 @@ export class OptionTextRevealSection extends LitElement {
     }
     const reveal = this.reveal;
 
+    // A closed choice of three, so one bordered group rather than three pills.
     const units = html`
-      <div class="d-flex flex-row gap-1 mb-2">
-        ${REVEAL_UNITS.map(
-          (unit) => html`
-            <button
-              class="btn btn-xxs ${
-                reveal?.unit === unit ? "btn-primary" : "btn-default"
-              } text-light flex-fill"
-              aria-event="reveal-unit-${unit}"
-              title=${unit}
-              @click=${() => this.handleUnit(unit)}
-            >
-              ${UNIT_LABEL[unit]}
-            </button>
-          `,
-        )}
+      <div class="opt-field">
+        <div class="opt-seg" role="group" aria-label="Reveal unit">
+          ${REVEAL_UNITS.map(
+            (unit) => html`
+              <button
+                type="button"
+                class="opt-seg-item ${reveal?.unit === unit ? "is-on" : ""}"
+                aria-event="reveal-unit-${unit}"
+                aria-pressed=${reveal?.unit === unit ? "true" : "false"}
+                title=${unit}
+                @click=${() => this.handleUnit(unit)}
+              >
+                ${UNIT_LABEL[unit]}
+              </button>
+            `,
+          )}
+        </div>
       </div>
     `;
 
     const typewriter = html`
-      <div class="d-flex flex-row gap-2 mb-3 align-items-center">
+      <div class="opt-field d-flex flex-row gap-2 align-items-center">
         <button
-          class="btn btn-xxs btn-default text-light flex-fill"
+          type="button"
+          class="opt-text-btn"
+          style="flex: 1 1 auto; justify-content: center;"
           aria-event="reveal-typewriter"
+          title="Reveal one unit at a time, at this interval"
           @click=${() => this.handleTypewriter()}
         >
-          <span class="material-symbols-outlined icon-xs">keyboard</span>
+          <span class="material-symbols-outlined" style="font-size: 14px;"
+            >keyboard</span
+          >
           Typewriter
         </button>
         <number-input
@@ -290,17 +300,12 @@ export class OptionTextRevealSection extends LitElement {
     `;
 
     if (reveal == null) {
-      return html`
-        <div class="mt-2">
-          <label class="form-label text-light">Reveal</label>
-          ${units}${typewriter}
-        </div>
-      `;
+      return section({ title: "Reveal", body: html`${units}${typewriter}` });
     }
 
-    return html`
-      <div class="mt-2">
-        <label class="form-label text-light">Reveal</label>
+    return section({
+      title: "Reveal",
+      body: html`
         ${units}${typewriter}
         ${this.row(
           "Progress",
@@ -337,7 +342,7 @@ export class OptionTextRevealSection extends LitElement {
           `,
           false,
         )}
-      </div>
-    `;
+      `,
+    });
   }
 }

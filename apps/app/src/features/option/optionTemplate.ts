@@ -13,6 +13,7 @@ import {
   setTemplateFillOffset,
 } from "../timeline/templateOps";
 import "./controlDefaultTransform";
+import { iconButton, section } from "./optionKit";
 
 /**
  * The side panel for a template: its transform, and its slots.
@@ -196,19 +197,19 @@ export class OptionTemplate extends LitElement {
     );
 
     return html`
-      <div class="d-flex align-items-center gap-2">
+      <div class="d-flex align-items-center gap-1">
         <button
-          class="btn btn-sm ${filled == null
-            ? "btn-default"
-            : "btn-primary"} text-light flex-fill text-start text-truncate"
+          type="button"
+          class="opt-picker"
           aria-event="template-slot-media"
           data-slot=${slot.slotId}
+          title=${filled == null ? slot.label : this.fileNameOf(filled.localpath)}
           @click=${() => this.chooseMedia(slot)}
         >
-          <span class="material-symbols-outlined align-middle icon-sm"
+          <span class="material-symbols-outlined"
             >${filled == null ? "add_photo_alternate" : "movie"}</span
           >
-          <span class="align-middle ms-1"
+          <span class="opt-picker-name"
             >${filled == null
               ? slot.label
               : this.fileNameOf(filled.localpath)}</span
@@ -216,24 +217,30 @@ export class OptionTemplate extends LitElement {
         </button>
         ${filled == null
           ? ""
-          : html`<button
-              class="btn btn-sm btn-default text-light"
-              aria-event="template-slot-clear"
-              data-slot=${slot.slotId}
-              @click=${() => this.clearSlot(slot)}
-            >
-              <span class="material-symbols-outlined icon-sm">close</span>
-            </button>`}
+          : iconButton({
+              icon: "close",
+              title: "Empty this slot",
+              event: "template-slot-clear",
+              onClick: () => this.clearSlot(slot),
+            })}
       </div>
       ${filled == null || maxOffset <= 0
         ? ""
         : html`<div class="d-flex align-items-center gap-2 mt-1">
-            <span class="material-symbols-outlined icon-sm text-secondary"
+            <span
+              class="material-symbols-outlined"
+              style="font-size: 14px; color: #7f878f;"
+              title="Where in the source this slot starts"
               >content_cut</span
             >
             <input
               type="range"
-              class="form-range"
+              class="opt-slider"
+              style=${`--opt-fill: ${
+                maxOffset <= 0
+                  ? 0
+                  : Math.round((filled.offsetMs / maxOffset) * 100)
+              }%; margin-top: 0;`}
               min="0"
               max=${maxOffset}
               step="1"
@@ -256,12 +263,14 @@ export class OptionTemplate extends LitElement {
 
     return html`
       <div class="d-flex align-items-center gap-2">
-        <span class="material-symbols-outlined icon-sm text-secondary"
+        <span
+          class="material-symbols-outlined"
+          style="font-size: 14px; color: #7f878f;"
           >title</span
         >
         <input
           type="text"
-          class="form-control form-control-sm bg-default text-light"
+          class="opt-text-input"
           aria-event="template-slot-text"
           data-slot=${slot.slotId}
           .value=${value}
@@ -281,10 +290,13 @@ export class OptionTemplate extends LitElement {
     // A template that is not installed has no slot list — the contract
     // `templateFor` states. The name still shows, because it is on the element.
     if (templateFor(element.templateId) == null) {
-      return html`<div class="d-flex align-items-center gap-2 px-2 text-warning">
-        <span class="material-symbols-outlined icon-sm">error</span>
-        <span class="text-truncate">${element.name}</span>
-      </div>`;
+      return section({
+        title: "Template",
+        body: html`<div class="opt-hint" style="color: #d6a44a;">
+          <span class="material-symbols-outlined opt-hint-icon">warning</span>
+          ${element.name} is not installed.
+        </div>`,
+      });
     }
 
     const slots = this.slots();
@@ -292,22 +304,18 @@ export class OptionTemplate extends LitElement {
       return "";
     }
 
-    return html`
-      <div class="px-2 mt-2">
-        <label class="form-label text-light">Slots</label>
-        <div class="d-flex flex-column gap-2">
-          ${slots.map(
-            (slot) => html`
-              <div>
-                ${slot.kind === "text"
-                  ? this.textRow(slot)
-                  : this.mediaRow(slot)}
-              </div>
-            `,
-          )}
-        </div>
-      </div>
-    `;
+    return section({
+      title: "Slots",
+      body: html`
+        ${slots.map(
+          (slot) => html`
+            <div class="opt-field">
+              ${slot.kind === "text" ? this.textRow(slot) : this.mediaRow(slot)}
+            </div>
+          `,
+        )}
+      `,
+    });
   }
 
   render() {

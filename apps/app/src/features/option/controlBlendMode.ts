@@ -21,6 +21,7 @@ import { useTimelineStore } from "../../states/timelineStore";
 import { blendOf, coerceBlend } from "../renderer/blend";
 import { setClipBlend } from "../timeline/blendOps";
 import { BLEND_GROUPS } from "./blendGroups";
+import { section } from "./optionKit";
 
 @customElement("blend-mode")
 export class BlendModeControl extends LitElement {
@@ -55,30 +56,35 @@ export class BlendModeControl extends LitElement {
   }
 
   render() {
-    return html`
-      <label class="form-label text-light">Blend</label>
-      <select
-        class="form-select text-light mb-3"
-        aria-label="blend mode"
-        aria-event="blend_mode"
-        .value=${this.blend}
-        @change=${this.handleChange}
-      >
-        ${BLEND_GROUPS.map((group) =>
-          group.label === ""
-            ? group.modes.map(
-                (mode) =>
-                  html`<option value=${mode.value}>${mode.label}</option>`,
-              )
-            : html`<optgroup label=${group.label}>
-                ${group.modes.map(
+    // A section whose whole content is one control, so the control sits in the
+    // head and takes its spare width rather than opening a body for one row.
+    return section({
+      title: "Blend",
+      grow: true,
+      actions: html`
+        <select
+          class="opt-select"
+          aria-label="blend mode"
+          aria-event="blend_mode"
+          .value=${this.blend}
+          @change=${this.handleChange}
+        >
+          ${BLEND_GROUPS.map((group) =>
+            group.label === ""
+              ? group.modes.map(
                   (mode) =>
                     html`<option value=${mode.value}>${mode.label}</option>`,
-                )}
-              </optgroup>`,
-        )}
-      </select>
-    `;
+                )
+              : html`<optgroup label=${group.label}>
+                  ${group.modes.map(
+                    (mode) =>
+                      html`<option value=${mode.value}>${mode.label}</option>`,
+                  )}
+                </optgroup>`,
+          )}
+        </select>
+      `,
+    });
   }
 
   /**

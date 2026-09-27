@@ -1,0 +1,727 @@
+/*
+ * ------------------------------------------------------ the inspector's look
+ *
+ * One stylesheet for every `option-*` panel, so a section added next year looks
+ * like the ten already there without copying anything.
+ *
+ * Its palette is `_asset.scss`'s, deliberately: the sidebar and the inspector
+ * are the two panels flanking the preview, and they read as one app only if the
+ * same greys mean the same things in both. Muted label #7f878f, live text
+ * #c3c9cf, a well at #15171a, hairlines at 7% white, 140ms ease-out.
+ *
+ * Nothing in here uses `.btn`. The design system and `style.scss` both declare
+ * `.btn` padding `!important`, so a 22px icon square built on it cannot have its
+ * own padding and centres its glyph 4px off (see the note in
+ * `optionShapeSection.ts`). Every control below is a bare element with its box
+ * stated in full.
+ */
+
+$opt-card: #15171a;
+$opt-line: rgba(255, 255, 255, 0.07);
+$opt-line-strong: rgba(255, 255, 255, 0.12);
+$opt-field: #1a1d20;
+$opt-raised: #2a3036;
+$opt-label: #7f878f;
+$opt-text: #c3c9cf;
+$opt-bright: #f1f3f5;
+
+/* ------------------------------------------------------------------ section */
+
+/*
+ * A card per section. The inspector used to be one flat column of labels and
+ * controls, where a slider belonging to Border and a slider belonging to Shadow
+ * were told apart only by the words above them.
+ */
+.opt-section {
+  border: 1px solid $opt-line;
+  border-radius: 10px;
+  background-color: $opt-card;
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+
+/*
+ * Title at one end, controls at the other. A section that can be empty offers
+ * `+` here; a section that is always present offers the eye.
+ */
+.opt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 6px 4px 9px;
+}
+
+/*
+ * A word, and only a word. A glyph beside it is a second name for the same
+ * thing, and eleven of those down a 200px column read as a list of pictures.
+ * Icons live where they are the choice being made: the kind row, the mask
+ * shapes, the alignment cells, the tabs.
+ */
+.opt-head-title {
+  min-width: 0;
+  color: $opt-text;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.opt-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+/*
+ * A control that takes the head's spare width rather than sitting at its end:
+ * Blend's dropdown, and anything else whose whole section is one field.
+ */
+.opt-head-actions.opt-head-grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.opt-body {
+  padding: 8px 9px 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* -------------------------------------------------------------------- rows */
+
+.opt-field + .opt-field {
+  margin-top: 8px;
+}
+
+.opt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
+}
+
+.opt-label {
+  min-width: 0;
+  margin-bottom: 0;
+  color: $opt-label;
+  font-size: 11px;
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 140ms ease-out;
+}
+
+/* Says the name is a target without a second affordance beside it. */
+.opt-field:hover > .opt-row > .opt-label {
+  color: $opt-text;
+}
+
+/*
+ * A scrub field, at the size every other value in a section is.
+ *
+ * `number-input` carries its own shadow styles, so this reaches it the one way
+ * a light-DOM rule can: its display span and its edit box both inherit
+ * `font-size`, and the host is outside the shadow root.
+ *
+ * Not cosmetic. A Position or Size row carries two of these and a stopwatch,
+ * and at the inherited size the three left the column about forty-seven pixels
+ * of label, which clipped both names to "P..." and "S...".
+ */
+.opt-field number-input,
+.opt-head-actions number-input {
+  font-size: 11px;
+}
+
+/* The controls at a row's end: the value boxes, and the stopwatch after them. */
+.opt-row-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/*
+ * The stopwatch beside a row's value, at the size every other glyph in a
+ * section is, and in a square rather than in `.btn-xxs`'s padding.
+ *
+ * Measured, not chosen. A Position row is 189px: two scrub fields take 75, and
+ * at `.icon-xsm`'s 16px in `.btn-xxs`'s box this navigator took 58 more, which
+ * left the label 32px for a word that needs 42 and clipped it to "Positio...".
+ * At 14px in a 16px square it takes 48, and the label has 46.
+ *
+ * `!important` because `.btn-xxs` declares its padding that way; `style.scss`'s
+ * own `.keyframe-nav .btn` rule already has to do the same. Scoped to `.opt-row`
+ * so the keyframe editor's own navigator is untouched.
+ */
+.opt-row .keyframe-nav .material-symbols-outlined,
+.opt-head-actions .keyframe-nav .material-symbols-outlined {
+  font-size: 14px;
+}
+
+.opt-row .keyframe-nav .btn,
+.opt-head-actions .keyframe-nav .btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+/* A value that is read rather than typed: a preset's name, a hex, a count. */
+.opt-value {
+  flex: none;
+  color: $opt-text;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.opt-chip {
+  display: block;
+  min-width: 0;
+  padding: 3px 8px;
+  border: 1px solid $opt-line;
+  border-radius: 7px;
+  background-color: $opt-field;
+  color: $opt-text;
+  font-size: 11px;
+  line-height: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.opt-empty {
+  color: #666d75;
+  font-size: 11px;
+}
+
+.opt-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  color: #757c84;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.opt-hint > .opt-hint-icon {
+  flex: none;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+/* ------------------------------------------------------------------ buttons */
+
+/*
+ * The square icon button in a section head, and the only one: `+`, `x`, the
+ * eye, the corner link. Flex centres the glyph's em box, which inline layout
+ * does not (it sits the glyph on a baseline below the box's middle).
+ */
+.opt-icon-btn {
+  appearance: none;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background-color: transparent;
+  color: $opt-label;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out,
+    border-color 140ms ease-out;
+}
+
+.opt-icon-btn > .material-symbols-outlined {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.opt-icon-btn:hover:not(:disabled) {
+  background-color: #22262b;
+  color: $opt-text;
+}
+
+.opt-icon-btn.is-on {
+  border-color: $opt-line-strong;
+  background-color: $opt-raised;
+  color: $opt-bright;
+}
+
+.opt-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.opt-icon-btn:focus-visible {
+  outline: 1px solid #5a6067;
+  outline-offset: 1px;
+}
+
+/* A word instead of a glyph, at the same height: Reset, Remove. */
+.opt-text-btn {
+  appearance: none;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  margin: 0;
+  border: 1px solid $opt-line;
+  border-radius: 7px;
+  background-color: transparent;
+  color: $opt-label;
+  font-size: 10px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.opt-text-btn:hover:not(:disabled) {
+  background-color: #22262b;
+  color: $opt-text;
+}
+
+.opt-text-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ------------------------------------------------------------- segmented */
+
+/*
+ * A closed choice: shape kinds, mask shapes, stroke alignment. One bordered
+ * group with hairlines between the cells rather than a row of separate pills,
+ * so four icons read as one control with one of them chosen.
+ */
+.opt-seg {
+  display: flex;
+  border: 1px solid $opt-line;
+  border-radius: 8px;
+  background-color: #16191c;
+  overflow: hidden;
+}
+
+.opt-seg-item {
+  appearance: none;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 25px;
+  padding: 0 4px;
+  margin: 0;
+  border: none;
+  background-color: transparent;
+  color: $opt-label;
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.opt-seg-item > .material-symbols-outlined {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.opt-seg-item + .opt-seg-item {
+  border-left: 1px solid $opt-line;
+}
+
+.opt-seg-item:hover:not(:disabled) {
+  background-color: #1f2327;
+  color: $opt-text;
+}
+
+.opt-seg-item.is-on {
+  background-color: $opt-raised;
+  color: $opt-bright;
+}
+
+.opt-seg-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------- fields */
+
+/*
+ * The number box. A bare `input`, not `.form-control`: the design system pins
+ * that class's radius, padding and focus ring with `!important`, which is what
+ * every option panel was working around with six utility classes and an inline
+ * style apiece.
+ */
+input.opt-num {
+  flex: none;
+  width: 3.6em;
+  height: 21px;
+  padding: 0 5px;
+  border: 1px solid $opt-line;
+  border-radius: 7px;
+  background-color: $opt-field;
+  color: $opt-text;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  transition: border-color 140ms ease-out;
+}
+
+input.opt-num.opt-num-center {
+  text-align: center;
+  width: 100%;
+}
+
+input.opt-num:hover {
+  border-color: $opt-line-strong;
+}
+
+input.opt-num:focus {
+  border-color: #4a5158;
+  outline: none;
+  box-shadow: none;
+  color: $opt-bright;
+}
+
+/* Chromium's spin buttons take the right ~16px, which at 3.6em is the value. */
+input.opt-num::-webkit-inner-spin-button,
+input.opt-num::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/*
+ * A multi-line field: the text of a title, and nothing else in the inspector.
+ *
+ * `resize: vertical` and a floor rather than a fixed height, because a title
+ * that breaks over four lines is a thing the renderer draws and a field that
+ * cannot show it is a field you edit blind.
+ */
+textarea.opt-textarea {
+  display: block;
+  width: 100%;
+  min-height: 64px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid $opt-line;
+  border-radius: 7px;
+  background-color: $opt-field;
+  color: $opt-text;
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+textarea.opt-textarea:focus,
+input.opt-text-input:focus {
+  border-color: #4a5158;
+  outline: none;
+  box-shadow: none;
+  color: $opt-bright;
+}
+
+/* A single-line field: the font search, and anything else that takes a word. */
+input.opt-text-input {
+  display: block;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid $opt-line;
+  border-radius: 7px;
+  background-color: $opt-field;
+  color: $opt-text;
+  font-size: 11px;
+}
+
+/*
+ * A full-width button that opens a menu and reports what is chosen: the font
+ * picker. Its name takes the room and the caret stays pinned, so a long family
+ * ellipses against the caret rather than pushing it out of the button.
+ */
+.opt-picker {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 28px;
+  padding: 0 6px 0 9px;
+  margin: 0;
+  border: 1px solid $opt-line;
+  border-radius: 7px;
+  background-color: $opt-field;
+  color: $opt-text;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease-out;
+}
+
+.opt-picker:hover {
+  border-color: $opt-line-strong;
+}
+
+.opt-picker > .opt-picker-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.opt-picker > .material-symbols-outlined {
+  flex: none;
+  font-size: 16px;
+  color: $opt-label;
+}
+
+/*
+ * `appearance` and `background-repeat` are both load-bearing. `style.scss` gives
+ * every bare `select` the chevron as a `background-image` and leaves the rest to
+ * Bootstrap's `.form-select`, which this one does not wear: without them the
+ * chevron tiles across the whole field and the native arrow is drawn on top of
+ * the tiles.
+ */
+select.opt-select {
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  padding: 0 24px 0 8px;
+  background-repeat: no-repeat;
+  border: 1px solid $opt-line;
+  border-radius: 7px;
+  background-color: $opt-field;
+  background-position: right 7px center;
+  background-size: 11px 11px;
+  color: $opt-text;
+  font-size: 11px;
+}
+
+/*
+ * The colour swatch. Chromium draws `input[type=color]`'s well inset inside the
+ * control's own padding and border, so both have to go or the colour shows as a
+ * postage stamp in a grey frame.
+ */
+input.opt-swatch {
+  appearance: none;
+  flex: none;
+  width: 34px;
+  height: 21px;
+  padding: 0;
+  border: 1px solid $opt-line-strong;
+  border-radius: 7px;
+  background-color: transparent;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+input.opt-swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+input.opt-swatch::-webkit-color-swatch {
+  border: none;
+  border-radius: 6px;
+}
+
+/* ---------------------------------------------------------------- slider */
+
+/*
+ * Full width on its own line under its label, for the reason `.option-range`
+ * records: the column is about 200px, and a slider sharing a line with a label
+ * and a number box has seventy pixels to travel its whole range.
+ *
+ * `--opt-fill` is the travelled part, in percent, set inline by whoever renders
+ * the input. Without it the track is uniform, which is correct but quieter.
+ *
+ * Every rule carries the element selector because `style.scss` paints a 2.2rem
+ * pill thumb on bare `input[type="range"]`, and a single class cannot outrank
+ * `input[type="range"]::-webkit-slider-thumb` at equal specificity.
+ */
+input[type="range"].opt-slider {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 14px;
+  margin: 6px 0 0;
+  padding: 0;
+  background: transparent;
+  outline: none;
+}
+
+input[type="range"].opt-slider::-webkit-slider-runnable-track {
+  height: 3px;
+  border: none;
+  border-radius: 999px;
+  box-shadow: none;
+  /*
+   * Two stops rather than one, so a slider that runs both ways fills from its
+   * centre outwards. `--opt-fill-from` is the middle for those and 0% for the
+   * rest, which is why it defaults to 0% and a one-sided slider sets only
+   * `--opt-fill`.
+   */
+  background: linear-gradient(
+    to right,
+    #2a2f34 0 var(--opt-fill-from, 0%),
+    #6c757d var(--opt-fill-from, 0%) var(--opt-fill, 0%),
+    #2a2f34 var(--opt-fill, 0%) 100%
+  );
+}
+
+input[type="range"].opt-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  /* Centres the head on the 3px track. */
+  margin-top: calc((3px - 11px) / 2);
+  border: none;
+  border-radius: 50%;
+  background: #cdd2d8;
+  box-shadow: none;
+  cursor: pointer;
+  transition: background 120ms ease-out;
+}
+
+input[type="range"].opt-slider:hover::-webkit-slider-thumb {
+  background: #ffffff;
+}
+
+input[type="range"].opt-slider:active::-webkit-slider-thumb {
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(205, 210, 216, 0.18);
+}
+
+/* The neutral mark on a slider that runs both ways. */
+.opt-slider-wrap {
+  position: relative;
+}
+
+.opt-slider-wrap > .opt-slider-zero {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1px;
+  height: 9px;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.2);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------- tabs */
+
+/*
+ * The Media / Adjust / Animation / Mask switch, as one inset track with the
+ * active pane raised out of it.
+ *
+ * A size container, for the reason `optionTabBar.ts` records: four names do not
+ * fit the column at its stock width, and shrinking the label only traded the
+ * clipped fourth tab for "M.." and "A..". Below the width where the names fit,
+ * each tab is its icon with the name as a tooltip.
+ */
+.opt-tabs {
+  container-type: inline-size;
+  padding: 3px;
+  margin-bottom: 8px;
+  border: 1px solid $opt-line;
+  border-radius: 10px;
+  background-color: #121416;
+}
+
+/*
+ * The flex line is a child of the container, not the container itself: a
+ * `container-type: inline-size` element is its own containment context, and a
+ * query on it cannot be answered by its own layout.
+ */
+.opt-tabs > .opt-tabs-row {
+  display: flex;
+  gap: 2px;
+}
+
+.opt-tab {
+  appearance: none;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 4px;
+  margin: 0;
+  border: none;
+  border-radius: 7px;
+  background-color: transparent;
+  color: $opt-label;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.opt-tab > .material-symbols-outlined {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.opt-tab > .opt-tab-label {
+  display: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.opt-tab:hover:not(.is-on) {
+  color: $opt-text;
+}
+
+.opt-tab.is-on {
+  background-color: $opt-raised;
+  color: $opt-bright;
+}
+
+@container (min-width: 268px) {
+  .opt-tab > .material-symbols-outlined {
+    font-size: 14px;
+  }
+
+  .opt-tab > .opt-tab-label {
+    display: block;
+  }
+}
+
+/*
+ * Three tabs or fewer always carry their names. The query above is about the
+ * bar's width rather than one tab's, so it would hide a two-tab bar's names in
+ * a narrow column where they fit perfectly well.
+ */
+.opt-tabs-few .opt-tab > .opt-tab-label {
+  display: block;
+}
+
+.opt-tabs-few .opt-tab > .material-symbols-outlined {
+  font-size: 14px;
+}

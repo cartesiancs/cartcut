@@ -1,17 +1,21 @@
 /**
- * The Shape section: a clip's parametric outline, in the Media pane.
+ * The Shape section: a clip's parametric outline, and its fill, in the Media
+ * pane.
  *
- * A section rather than a tab. The tab bar is already four wide and turns into
- * a size container past that (`optionTabBar.ts`), and this is a property of the
+ * A section rather than a tab. The tab bar is already four wide and turns into a
+ * size container past that (`optionTabBar.ts`), and this is a property of the
  * shape rather than a mode of working on it, so it sits with the fill colour it
  * belongs beside.
  *
+ * **A fixed section, not a choose-one.** The clip *is* a shape, so there is
+ * nothing to add and nothing to take off: its head carries the eye that folds
+ * the controls away rather than the `+` the LUT section offers. Which of the two
+ * a section shows is the whole difference between the two kinds in the
+ * inspector, and both are drawn by `optionKit.ts`.
+ *
  * Every write goes through `timeline/shapeOps.ts`, the same ops `set_shape`
  * uses, and a slider drag goes through `GestureCommit`, so one drag is one undo
- * step however many values it passed through. Laid out the way
- * `optionAdjustSection` is laid out, and for the reason stated there: the
- * inspector column is narrow, and a slider sharing its line with a label and a
- * number box is left about seventy pixels to travel its whole range.
+ * step however many values it passed through.
  *
  * **A shape with no recipe is offered one.** That is every polygon clicked out
  * by hand and every shape made before recipes existed. Choosing a kind replaces
@@ -44,6 +48,7 @@ import {
   setClipShapeGeometryMany,
 } from "../timeline/shapeOps";
 import { GestureCommit } from "./gestureCommit";
+import { eyeButton, iconButton, section, sliderField } from "./optionKit";
 
 /** The icon each kind is offered under, in the order the row shows them. */
 const KIND_ICONS: Record<ShapeGeometryKind, string> = {
@@ -87,6 +92,7 @@ const STYLES = `
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 4px;
+    margin-top: 6px;
   }
 `;
 
@@ -104,6 +110,12 @@ export class OptionShapeSection extends LitElement {
    * drag would make true.
    */
   private linkedCorners = true;
+
+  /**
+   * Whether the section's controls are showing. Component state for the same
+   * reason: it is where the user is looking.
+   */
+  private open = true;
 
   private gesture = new GestureCommit();
   private teardown: Array<() => void> = [];
@@ -233,44 +245,24 @@ export class OptionShapeSection extends LitElement {
     const spec = ROW_SPECS[key];
     const value = this.rowValue(key, geometry);
     return html`
-      <div class="mb-2" data-shape-row=${key}>
-        <div class="d-flex align-items-center justify-content-between" style="gap: 8px;">
-          <label class="text-light text-truncate mb-0" style="font-size: 11px;">
-            ${spec.label}${spec.suffix === "" ? "" : ` (${spec.suffix})`}
-          </label>
-          <input
-            type="number"
-            class="form-control form-control-sm bg-default text-light text-end px-1 py-0 flex-shrink-0"
-            style="width: 3.8em; font-size: 11px; height: 20px;"
-            min=${String(spec.min)}
-            max=${String(spec.max)}
-            step=${String(spec.step)}
-            .value=${String(value)}
-            @change=${(e: Event) => this.typed(key, e)}
-          />
-        </div>
-        <input
-          type="range"
-          class="form-range option-range mt-1"
-          min=${String(spec.min)}
-          max=${String(spec.max)}
-          step=${String(spec.step)}
-          .value=${String(value)}
-          @input=${(e: Event) =>
-            this.scrub(this.patchFor(key, Number((e.target as HTMLInputElement).value)))}
-          @change=${this.commit}
-        />
+      <div class="opt-field" data-shape-row=${key}>
+        ${sliderField({
+          label: spec.label,
+          suffix: spec.suffix,
+          value,
+          min: spec.min,
+          max: spec.max,
+          step: spec.step,
+          onScrub: (next) => this.scrub(this.patchFor(key, next)),
+          onCommit: this.commit,
+          onTyped: (next) => this.typed(key, next),
+          onInvalid: () => this.requestUpdate(),
+        })}
       </div>
     `;
   }
 
-  private typed(key: RowKey, event: Event): void {
-    const value = Number((event.target as HTMLInputElement).value);
-    if (!Number.isFinite(value)) {
-      // Put the box back to what the document says rather than writing a NaN.
-      this.requestUpdate();
-      return;
-    }
+  private typed(key: RowKey, value: number): void {
     const patch = this.patchFor(key, value);
     const ids = this.targets;
     this.write((doc) => setClipShapeGeometryMany(doc, ids, patch));
@@ -288,6 +280,7 @@ export class OptionShapeSection extends LitElement {
     const ceiling = this.radiusCeiling;
     const perCorner = geometry.kind === "rectangle";
     const labels = ["Top left", "Top right", "Bottom right", "Bottom left"];
+    const ids = this.targets;
 
     const setAll = (value: number): ShapeGeometryPatch => ({ radius: value });
     const setOne = (index: number, value: number): ShapeGeometryPatch => {
@@ -297,73 +290,36 @@ export class OptionShapeSection extends LitElement {
     };
 
     return html`
-      <div class="mb-2" data-shape-row="radius">
-        <div class="d-flex align-items-center justify-content-between" style="gap: 8px;">
-          <label class="text-light text-truncate mb-0" style="font-size: 11px;">
-            Corner radius
-          </label>
-          <div class="d-flex align-items-center" style="gap: 4px;">
-            <input
-              type="number"
-              class="form-control form-control-sm bg-default text-light text-end px-1 py-0 flex-shrink-0"
-              style="width: 3.8em; font-size: 11px; height: 20px;"
-              min="0"
-              step="1"
-              .value=${String(Math.round(radii[0]))}
-              @change=${(e: Event) => {
-                const value = Number((e.target as HTMLInputElement).value);
-                if (!Number.isFinite(value)) {
+      <div class="opt-field" data-shape-row="radius">
+        ${sliderField({
+          label: "Corner radius",
+          value: Math.round(radii[0]),
+          // The box accepts any radius, so a number past the ceiling is kept
+          // rather than rejected; the track can only draw as far as it goes.
+          rangeValue: Math.min(ceiling, Math.round(radii[0])),
+          min: 0,
+          max: ceiling,
+          trailing: perCorner
+            ? iconButton({
+                icon: this.linkedCorners ? "link" : "link_off",
+                title: this.linkedCorners
+                  ? "Corners are linked. Click to set each one."
+                  : "Corners are separate. Click to link them.",
+                on: this.linkedCorners,
+                onClick: () => {
+                  this.linkedCorners = !this.linkedCorners;
                   this.requestUpdate();
-                  return;
-                }
-                const ids = this.targets;
-                this.write((doc) => setClipShapeGeometryMany(doc, ids, setAll(value)));
-              }}
-            />
-            ${
-              // Centred by flex, with the padding left alone. `p-0` is dead
-              // here: the design system's `.btn` and our own `.btn-xs` both
-              // declare padding `!important`, so whatever the markup asks for
-              // the content box is 2x10 inside the 20px square. Inline layout
-              // then left the glyph at the left edge of that box, sitting on a
-              // baseline below its middle: 4px right of centre and 2px low.
-              // Flex centres the icon's 10x10 em box instead, and what
-              // overflows the content box overflows it symmetrically.
-              perCorner
-                ? html`<button
-                    class="btn btn-xs ${this.linkedCorners
-                      ? "btn-primary"
-                      : "btn-default"} text-light m-0 d-flex align-items-center justify-content-center"
-                    style="width: 20px; height: 20px;"
-                    title=${this.linkedCorners
-                      ? "Corners are linked. Click to set each one."
-                      : "Corners are separate. Click to link them."}
-                    @click=${() => {
-                      this.linkedCorners = !this.linkedCorners;
-                      this.requestUpdate();
-                    }}
-                  >
-                    <span class="material-symbols-outlined icon-xs">
-                      ${this.linkedCorners ? "link" : "link_off"}
-                    </span>
-                  </button>`
-                : ""
-            }
-          </div>
-        </div>
-        <input
-          type="range"
-          class="form-range option-range mt-1"
-          min="0"
-          max=${String(ceiling)}
-          step="1"
-          .value=${String(Math.min(ceiling, Math.round(radii[0])))}
-          @input=${(e: Event) =>
-            this.scrub(setAll(Number((e.target as HTMLInputElement).value)))}
-          @change=${this.commit}
-        />
+                },
+              })
+            : undefined,
+          onScrub: (next) => this.scrub(setAll(next)),
+          onCommit: this.commit,
+          onTyped: (next) =>
+            this.write((doc) => setClipShapeGeometryMany(doc, ids, setAll(next))),
+          onInvalid: () => this.requestUpdate(),
+        })}
         ${perCorner && !this.linkedCorners
-          ? html`<div class="shape-corner-grid mt-1">
+          ? html`<div class="shape-corner-grid">
               ${
                 // Laid out **where the corners are**, not in the order they are
                 // stored. The column is too narrow to carry a written label
@@ -374,8 +330,7 @@ export class OptionShapeSection extends LitElement {
                   (index) => html`
                     <input
                       type="number"
-                      class="form-control form-control-sm bg-default text-light text-center px-1 py-0"
-                      style="font-size: 11px; height: 20px;"
+                      class="opt-num opt-num-center"
                       data-corner=${index}
                       title=${labels[index]}
                       aria-label=${labels[index]}
@@ -388,7 +343,6 @@ export class OptionShapeSection extends LitElement {
                           this.requestUpdate();
                           return;
                         }
-                        const ids = this.targets;
                         this.write((doc) =>
                           setClipShapeGeometryMany(doc, ids, setOne(index, value)),
                         );
@@ -405,20 +359,19 @@ export class OptionShapeSection extends LitElement {
 
   private renderKindRow(current: ShapeGeometryKind | null): TemplateResult {
     return html`
-      <div class="d-flex gap-1 mb-2">
+      <div class="opt-seg" role="group" aria-label="Shape kind">
         ${SHAPE_GEOMETRY_KINDS.map(
           (kind) => html`
             <button
-              class="btn btn-xxs ${current === kind
-                ? "btn-primary"
-                : "btn-default"} text-light m-0 flex-grow-1"
+              type="button"
+              class="opt-seg-item ${current === kind ? "is-on" : ""}"
               data-shape-kind=${kind}
               title=${KIND_LABELS[kind]}
+              aria-label=${KIND_LABELS[kind]}
+              aria-pressed=${current === kind ? "true" : "false"}
               @click=${() => this.chooseKind(kind)}
             >
-              <span class="material-symbols-outlined icon-xs">
-                ${KIND_ICONS[kind]}
-              </span>
+              <span class="material-symbols-outlined">${KIND_ICONS[kind]}</span>
             </button>
           `,
         )}
@@ -431,42 +384,55 @@ export class OptionShapeSection extends LitElement {
       return html``;
     }
     const geometry = this.geometry;
+    const fill = this.fillColor;
 
     return html`
       <style>
         ${STYLES}
       </style>
-      <div class="mb-3">
-        <label class="form-label text-light">Shape</label>
-        ${this.renderKindRow(geometry?.kind ?? null)}
-        ${geometry == null
-          ? html`<div class="text-light" style="font-size: 10px; opacity: 0.7;">
-              This shape was drawn by hand. Choosing a kind replaces its
-              outline.
-            </div>`
-          : html`
-              ${ROWS[geometry.kind].map((key) => this.renderRow(key, geometry))}
-              ${this.renderCorners(geometry)}
-            `}
-      </div>
-
-      <div class="mb-2">
-        <label class="form-label text-light">Fill Color</label>
-        <input
-          type="color"
-          aria-event="font-color"
-          class="form-control bg-default form-control-color"
-          title="Choose your color"
-          .value=${this.fillColor}
-          @input=${(e: Event) => {
-            const value = (e.target as HTMLInputElement).value;
-            const ids = this.targets;
-            this.gesture.apply((doc) => setClipFillColorMany(doc, ids, value));
-            this.requestUpdate();
-          }}
-          @change=${this.commit}
-        />
-      </div>
+      ${section({
+        title: "Shape",
+        actions: eyeButton(this.open, this.open ? "Hide" : "Show", () => {
+          this.open = !this.open;
+          this.requestUpdate();
+        }),
+        body: this.open
+          ? html`
+              <div class="opt-field">${this.renderKindRow(geometry?.kind ?? null)}</div>
+              ${geometry == null
+                ? html`<div class="opt-field opt-hint">
+                    <span class="material-symbols-outlined opt-hint-icon"
+                      >info</span
+                    >
+                    Drawn by hand. A kind replaces the outline.
+                  </div>`
+                : html`
+                    ${ROWS[geometry.kind].map((key) => this.renderRow(key, geometry))}
+                    ${this.renderCorners(geometry)}
+                  `}
+            `
+          : undefined,
+      })}
+      ${section({
+        title: "Fill",
+        actions: html`
+          <span class="opt-value">${fill.toUpperCase()}</span>
+          <input
+            type="color"
+            class="opt-swatch"
+            aria-event="font-color"
+            title="Fill color"
+            .value=${fill}
+            @input=${(e: Event) => {
+              const value = (e.target as HTMLInputElement).value;
+              const ids = this.targets;
+              this.gesture.apply((doc) => setClipFillColorMany(doc, ids, value));
+              this.requestUpdate();
+            }}
+            @change=${this.commit}
+          />
+        `,
+      })}
     `;
   }
 }
