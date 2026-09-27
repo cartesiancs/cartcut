@@ -84,6 +84,15 @@ It asks for your Cartcut MCP token once. Open Cartcut, click the ⚡ icon at the
 bottom right, and copy the connection command; the token is the UUID after
 `Bearer `. Then ask for an edit in plain language.
 
+The skill is also on the skills CLI, for Claude Code and for other agents:
+
+```
+npx skills add cartesiancs/cartcut --skill cartcut-editing -a claude-code -g
+```
+
+That route installs the skill alone, so run the ⚡ panel's `claude mcp add` line
+afterwards to connect the bridge. Take one route or the other, not both.
+
 [plugins/cartcut-editing/README.md](plugins/cartcut-editing/README.md) has the
 details, including what to do when it will not connect.
 

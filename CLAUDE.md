@@ -46,6 +46,14 @@ make installing it build the whole Electron app. The two versions, in
 `plugin.json` and in the marketplace entry, have to agree; `claude plugin tag`
 checks that, `claude plugin validate <path> --strict` checks the rest.
 
+The same skill ships a **second way**, through `npx skills add
+cartesiancs/cartcut`, which finds it by parsing `marketplace.json` and following
+the plugin's `./`-prefixed `source`. That path and that prefix are load-bearing
+for a route no `claude plugin` command exercises, and that route installs the
+skill alone: it does not read `.mcp.json`, so its users connect the bridge with
+the ⚡ panel's `claude mcp add` line. `npx skills add cartesiancs/cartcut --list`
+is the check, and must report one skill.
+
 FFmpeg and ffprobe live in `./bin/<platform>-<arch>/` (`darwin-arm64`,
 `darwin-x64`, `win32-x64`); `electron/lib/ffmpeg.ts` picks by `process.arch`.
 The macOS binaries must be **native**: an x86_64 ffmpeg runs under Rosetta at
