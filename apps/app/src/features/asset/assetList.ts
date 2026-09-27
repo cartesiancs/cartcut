@@ -1,6 +1,6 @@
 import { path } from "../../functions/path";
 import mime from "../../functions/mime";
-import { LitElement, PropertyValues, html } from "lit";
+import { LitElement, PropertyValues, TemplateResult, html, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { getLocationEnv } from "../../functions/getLocationEnv";
@@ -49,7 +49,13 @@ export class AssetList extends LitElement {
   }
 
   render() {
-    return html`<div class="row px-2">
+    // Bootstrap's `.row` is gone from here on purpose. It is a flex line with
+    // negative side margins, so a fixed `col-*` was the only way to say how
+    // many tiles fit; `_asset.scss`'s grid decides that from the panel's real
+    // width instead.
+    return html`<div
+      class=${this.showType == "grid" ? "asset-grid" : "asset-rows"}
+    >
       ${repeat(
         this.entries,
         (entry) => entry.name,
@@ -70,38 +76,55 @@ export class AssetList extends LitElement {
   }
 }
 
+/** Every tile carries these for its whole life, whichever mode it is in. */
+const TILE_CLASSES = ["overflow-hidden", "asset"] as const;
+
 /**
- * Layout for one item. Both `asset-file` and `asset-folder` swap between a
- * three-across grid cell and a full-width row.
+ * Layout for one item. Both `asset-file` and `asset-folder` swap between a grid
+ * cell and a full-width row, and the two classes are mutually exclusive: the
+ * grid parent is a CSS grid and the list parent a flex column, so the tile only
+ * has to say which shape it takes, not how wide it is.
  */
 function applyShowType(element: HTMLElement, showType: AssetShowType) {
-  if (showType == "grid") {
-    element.classList.remove("col-12", "flex-row", "asset-row");
-    element.classList.add("col-4", "flex-column");
-  } else {
-    element.classList.remove("col-4", "flex-column");
-    element.classList.add("col-12", "flex-row", "asset-row");
-  }
+  const grid = showType == "grid";
+
+  element.classList.toggle("asset-tile", grid);
+  element.classList.toggle("asset-row", !grid);
 }
 
 /**
- * The filename's classes. A grid caption sits under the preview and is centred;
- * a row's name reads from the left, beside it.
+ * One tile: a well of a fixed shape, then one line of name.
  *
- * The alignment is decided here rather than in `_asset.scss` because
- * `text-center` is Bootstrap's and carries `!important`, which no rule keyed on
- * `.asset-row` could outrank. The row case has to not ask for it.
+ * Shared by `asset-file` and `asset-folder`, and by every branch inside the
+ * file's own `render`, so a folder, a still, a video and an unrecognised file
+ * all put their name in the same element in the same place. That is what lets
+ * `_asset.scss` pin its height, and a pinned height is what keeps the caption
+ * of a 9:16 clip level with the caption of a 16:9 one beside it.
  *
- * Every tile clips. A name too long for its tile used to be *marquee'd* on
- * hover — `.text-ellipsis-scroll` widened it to 750% and animated a translate
- * across it — which spent most of its five-second cycle showing the gap between
- * two passes, so resting on a tile read as the name disappearing. The whole
- * name is on the hover preview's own caption now, where there is room for it.
+ * A `<span>`, not the `<b>` this used to be: `devent-designsystem.css` pins `b`
+ * to `font-weight: 400 !important`.
+ *
+ * Every tile clips its name. A name too long for its tile used to be
+ * *marquee'd* on hover: `.text-ellipsis-scroll` widened it to 750% and animated
+ * a translate across it, which spent most of its five-second cycle showing the
+ * gap between two passes, so resting on a tile read as the name disappearing.
+ * The whole name is on the hover preview's own caption now, where there is room
+ * for it.
  */
-function nameClass(showType: AssetShowType) {
-  const align = showType == "grid" ? "text-center" : "text-start";
+function templateTile(
+  name: string,
+  well: TemplateResult,
+  wellClass = "",
+): TemplateResult {
+  return html`<div class="asset-thumb ${wellClass}">${well}</div>
+    <span class="asset-name">${name}</span>`;
+}
 
-  return `align-self-center text-ellipsis text-light ${align}`;
+/** The glyph a file with no picture of its own gets. */
+function templateIcon(glyph: string): TemplateResult {
+  return html`<span class="material-symbols-outlined asset-thumb-icon"
+    >${glyph}</span
+  >`;
 }
 
 @customElement("asset-file")
@@ -129,15 +152,10 @@ export class AssetFile extends LitElement {
   constructor() {
     super();
 
-    this.classList.add(
-      "col-4",
-      "d-flex",
-      "flex-column",
-      "bd-highlight",
-      "overflow-hidden",
-      "mt-1",
-      "asset",
-    );
+    // `asset-tile` rather than nothing: `applyShowType` runs from `updated`,
+    // which is after the first paint, so the grid has to be what a tile starts
+    // as. It is also `assetStore`'s default.
+    this.classList.add(...TILE_CLASSES, "asset-tile");
 
     this.addEventListener("pointerdown", this.handlePointerDown);
     this.addEventListener("pointermove", this.handlePointerMove);
@@ -242,51 +260,49 @@ export class AssetFile extends LitElement {
       audio: "audio_file",
       unknown: "draft",
     };
-    return html`<span
-        class="material-symbols-outlined icon-lg align-self-center"
-      >
-        ${fileIcon[filetype] ?? fileIcon.unknown}
-      </span>
-      <b class=${nameClass(this.showType)}>${this.name}</b>`;
+
+    return templateTile(
+      this.name,
+      templateIcon(fileIcon[filetype] ?? fileIcon.unknown),
+    );
   }
 
   templateImage(url) {
-    return html`<img
+    return templateTile(
+      this.name,
+      html`<img
         src="${url}"
         alt=""
         loading="lazy"
         decoding="async"
-        class="align-self-center asset-preview"
-      />
-      <b class=${nameClass(this.showType)}>${this.name}</b>`;
+        class="asset-thumb-img"
+      />`,
+    );
   }
 
   /**
-   * `url` is "" until the capture lands, and that case is a sized box rather
-   * than an empty `<img>`.
+   * `url` is "" until the capture lands, and that case renders no `<img>` at
+   * all: an empty `src` resolves against the document and paints a broken-image
+   * glyph, and the well behind it is already the right size and the right
+   * colour, so there is nothing for a placeholder element to do.
    *
-   * Two reasons, and the second is the one that matters. An empty `src`
-   * resolves against the document and paints a broken-image glyph. And the
-   * tile's geometry has to hold still: intersection is decided from layout, so
-   * tiles that change height as thumbnails arrive re-trigger intersection
-   * across the rest of the grid.
+   * The play badge is drawn either way. It is the only thing that tells a video
+   * from a still while the frame is still being captured.
    */
   templateVideoThumbnail(url: string) {
-    return html` <div class="position-relative align-self-center">
-        ${url == ""
-          ? html`<div class="asset-preview-pending"></div>`
-          : html`<img
-              src="${url}"
-              alt=""
-              decoding="async"
-              class="align-self-center asset-preview w-100"
-            />`}
-        <span class="material-symbols-outlined position-absolute icon-center ">
-          play_arrow
-        </span>
-      </div>
-
-      <b class=${nameClass(this.showType)}>${this.name}</b>`;
+    return templateTile(
+      this.name,
+      html`${url == ""
+        ? nothing
+        : html`<img
+            src="${url}"
+            alt=""
+            decoding="async"
+            class="asset-thumb-img"
+          />`}<span class="material-symbols-outlined asset-thumb-badge"
+        >play_arrow</span
+      >`,
+    );
   }
 
   // -------------------------------------------------------------- thumbnail
@@ -620,15 +636,7 @@ export class AssetFolder extends LitElement {
   constructor() {
     super();
 
-    this.classList.add(
-      "col-4",
-      "d-flex",
-      "flex-column",
-      "bd-highlight",
-      "overflow-hidden",
-      "mt-1",
-      "asset",
-    );
+    this.classList.add(...TILE_CLASSES, "asset-tile");
 
     this.addEventListener("click", this.handleClick.bind(this));
   }
@@ -651,12 +659,14 @@ export class AssetFolder extends LitElement {
   }
 
   render() {
-    return html`<span
-        class="material-symbols-outlined icon-lg align-self-center"
-      >
-        folder
-      </span>
-      <b class=${nameClass(this.showType)}>${this.name}</b>`;
+    // The one tile with no picture of its own, so its well is marked and the
+    // glyph inside it carries: `_asset.scss` draws `asset-thumb-folder` a step
+    // brighter and a step larger than a file's fallback icon.
+    return templateTile(
+      this.name,
+      templateIcon("folder"),
+      "asset-thumb-folder",
+    );
   }
 
   handleClick() {
