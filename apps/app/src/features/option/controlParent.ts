@@ -32,6 +32,7 @@ import {
   type ParentChoice,
   type ParentRefusal,
 } from "../timeline/parentOptions";
+import { section } from "./optionKit";
 
 /** Why a row is greyed out, in words, as its `title`. */
 const REFUSAL_TITLE: Record<ParentRefusal, string> = {
@@ -111,27 +112,32 @@ export class ParentSelectControl extends LitElement {
       return html``;
     }
 
-    return html`
-      <label class="form-label text-light">Parent</label>
-      <select
-        class="form-select text-light mb-2"
-        aria-label="parent"
-        aria-event="parent"
-        .value=${this.held}
-        @change=${this.handleChange}
-      >
-        <option value=${NONE}>None</option>
-        ${choices.map(
-          (choice) => html`<option
-            value=${choice.id}
-            ?disabled=${choice.disabled}
-            title=${choice.reason != null ? REFUSAL_TITLE[choice.reason] : ""}
-          >
-            ${INDENT.repeat(choice.depth)}${choice.name}
-          </option>`,
-        )}
-      </select>
-    `;
+    // A section whose whole content is one control, so the dropdown sits in the
+    // head and takes its spare width rather than opening a body for one row.
+    return section({
+      title: "Parent",
+      grow: true,
+      actions: html`
+        <select
+          class="opt-select"
+          aria-label="parent"
+          aria-event="parent"
+          .value=${this.held}
+          @change=${this.handleChange}
+        >
+          <option value=${NONE}>None</option>
+          ${choices.map(
+            (choice) => html`<option
+              value=${choice.id}
+              ?disabled=${choice.disabled}
+              title=${choice.reason != null ? REFUSAL_TITLE[choice.reason] : ""}
+            >
+              ${INDENT.repeat(choice.depth)}${choice.name}
+            </option>`,
+          )}
+        </select>
+      `,
+    });
   }
 
   /**

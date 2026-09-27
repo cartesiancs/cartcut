@@ -12,6 +12,7 @@ import { fromDisplay, toDisplay } from "../animation/propertyUnits";
 import { projectBakeHz } from "../editor/frameRate";
 import { setIn } from "../../utils/immutable";
 import { GestureCommit } from "./gestureCommit";
+import { section } from "./optionKit";
 import { withFittedTextHeights } from "../element/textFit";
 import { scaleTenthsOf, setClipScale } from "../timeline/scaleOps";
 import type { TimelineDocument } from "../timeline/tracks";
@@ -116,156 +117,145 @@ export class OptionImage extends LitElement {
     }
   }
 
-  render() {
+  /**
+   * One named value: its name, its boxes, and its stopwatch.
+   *
+   * The boxes stay `<number-input>`, which is the one widget in the inspector
+   * that says "this value scrubs" by being a blue draggable number, and whose
+   * `aria-event` is how `updateValue` and every handler below find it. Only the
+   * frame around them is the panel's own.
+   */
+  private row(
+    label: string,
+    inputs: unknown,
+    property: AnimatableProperty,
+  ) {
     return html`
-      <!--
-        Above Position deliberately: the parent decides which space every
-        number below it is written in, so reading the panel top to bottom reads
-        the transform in the order it is composed. The control renders nothing
-        at all when there is no group to pick, so a project that has never made
-        one sees the panel exactly as it was before.
+      <div class="opt-field">
+        <div class="opt-row">
+          <label class="opt-label" title=${label}>${label}</label>
+          <div class="opt-row-controls">
+            ${inputs}
+            <control-keyframe-nav
+              .elementId=${this.targetId}
+              .property=${property}
+              .label=${property}
+            ></control-keyframe-nav>
+          </div>
+        </div>
+      </div>
+    `;
+  }
 
-        No backticks in here: this comment sits inside a lit template literal,
-        and one would end it.
-      -->
+  render() {
+    // Position, Size, Scale, Opacity and Rotation are one section, in the order
+    // the transform composes rather than in five stacked cards: they are the
+    // same act on the same box, and five heads saying one word each would be
+    // more frame than content.
+    //
+    // `parent-select` stays above it and draws a section of its own, because
+    // the parent decides which space every number below is written in. It
+    // renders nothing at all when there is no group to pick, so a project that
+    // has never made one sees one card here.
+    return html`
       <parent-select
         .elementId=${this.targetId}
         .isShow=${this.isShow}
       ></parent-select>
-      <label class="form-label text-light"
-        >${this.lc.t("setting.position")}</label
-      >
-      <div class="d-flex flex-row justify-content-between bd-highlight mb-2">
-        <div class="d-flex flex-row gap-2 justify-content-start">
-          <number-input
-            aria-event="location-x"
-            @onChange=${this.handleLocation}
-            value="0"
-            step="1"
-            sensitivity="1"
-          ></number-input>
-          <number-input
-            aria-event="location-y"
-            @onChange=${this.handleLocation}
-            value="0"
-            step="1"
-            sensitivity="1"
-          ></number-input>
-        </div>
-        <div class="d-flex flex-row gap-2 justify-content-end">
-          <control-keyframe-nav
-            .elementId=${this.targetId}
-            .property=${"position"}
-            .label=${"position"}
-          ></control-keyframe-nav>
-        </div>
-      </div>
 
-      <label class="form-label text-light">Size</label>
-      <div class="d-flex flex-row justify-content-between bd-highlight mb-2">
-        <div class="d-flex flex-row gap-2 justify-content-start">
-          <number-input
-            aria-event="width"
-            @onChange=${this.handleSize}
-            value="10"
-            step="1"
-            sensitivity="1"
-          ></number-input>
-          <number-input
-            aria-event="height"
-            @onChange=${this.handleSize}
-            value="10"
-            step="1"
-            sensitivity="1"
-          ></number-input>
-        </div>
-        <div class="d-flex flex-row gap-2 justify-content-end">
-          <control-keyframe-nav
-            .elementId=${this.targetId}
-            .property=${"size"}
-            .label=${"size"}
-          ></control-keyframe-nav>
-        </div>
-      </div>
-
-      <!--
-        Next to Size, because the two are the pair most easily mistaken for one
-        another and reading them together is what makes the difference legible:
-        Size is the clip's own pixels, Scale magnifies whatever those are about
-        the centre. The context menu's Animate submenu already treats them as
-        that pair, which is why it gives them deliberately different icons.
-
-        Shown in percent, stored in tenths. The number input knows nothing of
-        either; getScale and handleScale are the whole conversion, and both go
-        through animation/propertyUnits.ts so this row and the curve editor's
-        ruler cannot drift apart.
-
-        No max, the way Rotation has none. The floor is zero because a negative
-        factor mirrors rather than shrinks, which timeline/mirrorOps.ts owns.
-
-        No backticks in here, for the reason the comment above Position gives.
-      -->
-      <label class="form-label text-light">Scale</label>
-      <div class="d-flex flex-row justify-content-between bd-highlight mb-2">
-        <div class="d-flex flex-row gap-2 justify-content-start">
-          <number-input
-            aria-event="scale"
-            @onChange=${this.handleScale}
-            value="100"
-            min="0"
-            step="1"
-            sensitivity="0.5"
-          ></number-input>
-        </div>
-        <div class="d-flex flex-row gap-2 justify-content-end">
-          <control-keyframe-nav
-            .elementId=${this.targetId}
-            .property=${"scale"}
-            .label=${"scale"}
-          ></control-keyframe-nav>
-        </div>
-      </div>
-
-      <label class="form-label text-light"
-        >${this.lc.t("setting.opacity")}</label
-      >
-      <div class="d-flex flex-row justify-content-between bd-highlight mb-2">
-        <div class="d-flex flex-row gap-2 justify-content-start">
-          <number-input
-            aria-event="opacity"
-            @onChange=${this.handleOpacity}
-            value="100"
-            min="0"
-            max="100"
-          ></number-input>
-        </div>
-        <div class="d-flex flex-row gap-2 justify-content-end">
-          <control-keyframe-nav
-            .elementId=${this.targetId}
-            .property=${"opacity"}
-            .label=${"opacity"}
-          ></control-keyframe-nav>
-        </div>
-      </div>
-
-      <label class="form-label text-light">Rotation</label>
-      <div class="d-flex flex-row justify-content-between bd-highlight mb-2">
-        <div class="d-flex flex-row gap-2 justify-content-start">
-          <number-input
-            aria-event="rotation"
-            @onChange=${this.handleRotation}
-            value="0"
-            sensitivity="0.5"
-          ></number-input>
-        </div>
-        <div class="d-flex flex-row gap-2 justify-content-end">
-          <control-keyframe-nav
-            .elementId=${this.targetId}
-            .property=${"rotation"}
-            .label=${"rotation"}
-          ></control-keyframe-nav>
-        </div>
-      </div>
+      ${section({
+        title: "Transform",
+        body: html`
+          ${this.row(
+            this.lc.t("setting.position"),
+            html`
+              <number-input
+                aria-event="location-x"
+                @onChange=${this.handleLocation}
+                value="0"
+                step="1"
+                sensitivity="1"
+              ></number-input>
+              <number-input
+                aria-event="location-y"
+                @onChange=${this.handleLocation}
+                value="0"
+                step="1"
+                sensitivity="1"
+              ></number-input>
+            `,
+            "position",
+          )}
+          ${this.row(
+            "Size",
+            html`
+              <number-input
+                aria-event="width"
+                @onChange=${this.handleSize}
+                value="10"
+                step="1"
+                sensitivity="1"
+              ></number-input>
+              <number-input
+                aria-event="height"
+                @onChange=${this.handleSize}
+                value="10"
+                step="1"
+                sensitivity="1"
+              ></number-input>
+            `,
+            "size",
+          )}
+          ${
+            // Next to Size, because the two are the pair most easily mistaken
+            // for one another and reading them together is what makes the
+            // difference legible: Size is the clip's own pixels, Scale
+            // magnifies whatever those are about the centre.
+            //
+            // Shown in percent, stored in tenths. The number input knows
+            // nothing of either; getScale and handleScale are the whole
+            // conversion, and both go through animation/propertyUnits.ts so
+            // this row and the curve editor's ruler cannot drift apart.
+            //
+            // No max, the way Rotation has none. The floor is zero because a
+            // negative factor mirrors rather than shrinks, which
+            // timeline/mirrorOps.ts owns.
+            this.row(
+              "Scale",
+              html`<number-input
+                aria-event="scale"
+                @onChange=${this.handleScale}
+                value="100"
+                min="0"
+                step="1"
+                sensitivity="0.5"
+              ></number-input>`,
+              "scale",
+            )
+          }
+          ${this.row(
+            this.lc.t("setting.opacity"),
+            html`<number-input
+              aria-event="opacity"
+              @onChange=${this.handleOpacity}
+              value="100"
+              min="0"
+              max="100"
+            ></number-input>`,
+            "opacity",
+          )}
+          ${this.row(
+            "Rotation",
+            html`<number-input
+              aria-event="rotation"
+              @onChange=${this.handleRotation}
+              value="0"
+              sensitivity="0.5"
+            ></number-input>`,
+            "rotation",
+          )}
+        `,
+      })}
     `;
   }
 

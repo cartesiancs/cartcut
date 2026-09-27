@@ -47,24 +47,6 @@ import { iconButton, section } from "./optionKit";
 import "./controlKeyframeNav";
 import "../../components/input/input";
 
-/**
- * The scrub fields, at the size the rest of the inspector uses.
- *
- * `number-input` carries its own shadow styles and is shared with
- * `default-transform`, so this reaches it the one way a light-DOM rule can: its
- * `input` and its display span both inherit `font-size`, and the host is
- * outside the shadow root. Scoped to this section so that panel is untouched.
- *
- * Not cosmetic. Position and Size each carry two boxes and a stopwatch, and at
- * the inherited size the three left the column about fifty pixels of label,
- * which clipped both names to "P..." and "S...".
- */
-const STYLES = `
-  option-mask-section number-input {
-    font-size: 11px;
-  }
-`;
-
 /** The icon for each shape. Material Symbols names. */
 const SHAPE_ICON: Record<MaskShape, string> = {
   rectangle: "crop_square",
@@ -280,7 +262,7 @@ export class OptionMaskSection extends LitElement {
       <div class="opt-field">
         <div class="opt-row">
           <label class="opt-label" title=${label}>${label}</label>
-          <div class="d-flex flex-row align-items-center gap-2">
+          <div class="opt-row-controls">
             ${inputs} ${property == null ? "" : this.keyButton(property)}
           </div>
         </div>
@@ -321,20 +303,14 @@ export class OptionMaskSection extends LitElement {
     `;
 
     if (mask == null) {
-      return html`<style>
-          ${STYLES}
-        </style>
-        ${section({ title: "Mask", body: shapes })}`;
+      return section({ title: "Mask", body: shapes });
     }
 
     // Invert and the pen sit in the head rather than under the numbers: they act
     // on the whole mask, and the five rows between them and the title read as
     // theirs when they sit below it.
-    return html`<style>
-        ${STYLES}
-      </style>
-      ${section({
-        title: "Mask",
+    return section({
+      title: "Mask",
         actions: html`
         ${iconButton({
           icon: "invert_colors",
@@ -466,6 +442,6 @@ export class OptionMaskSection extends LitElement {
           "maskRoundness",
         )}
       `,
-      })}`;
+    });
   }
 }

@@ -123,15 +123,52 @@ $opt-bright: #f1f3f5;
 }
 
 /*
- * The stopwatch beside a row's value, at the size every other glyph in a
- * section is.
+ * A scrub field, at the size every other value in a section is.
  *
- * Scoped to `.opt-row`, so `default-transform` keeps `.icon-xsm`'s 16px. The 2px
- * is not decoration: a mask row carries two scrub fields and this navigator, and
- * at 16px the three left "Position" about forty-seven pixels and clipped it.
+ * `number-input` carries its own shadow styles, so this reaches it the one way
+ * a light-DOM rule can: its display span and its edit box both inherit
+ * `font-size`, and the host is outside the shadow root.
+ *
+ * Not cosmetic. A Position or Size row carries two of these and a stopwatch,
+ * and at the inherited size the three left the column about forty-seven pixels
+ * of label, which clipped both names to "P..." and "S...".
+ */
+.opt-row number-input {
+  font-size: 11px;
+}
+
+/* The controls at a row's end: the value boxes, and the stopwatch after them. */
+.opt-row-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/*
+ * The stopwatch beside a row's value, at the size every other glyph in a
+ * section is, and in a square rather than in `.btn-xxs`'s padding.
+ *
+ * Measured, not chosen. A Position row is 189px: two scrub fields take 75, and
+ * at `.icon-xsm`'s 16px in `.btn-xxs`'s box this navigator took 58 more, which
+ * left the label 32px for a word that needs 42 and clipped it to "Positio...".
+ * At 14px in a 16px square it takes 48, and the label has 46.
+ *
+ * `!important` because `.btn-xxs` declares its padding that way; `style.scss`'s
+ * own `.keyframe-nav .btn` rule already has to do the same. Scoped to `.opt-row`
+ * so the keyframe editor's own navigator is untouched.
  */
 .opt-row .keyframe-nav .material-symbols-outlined {
   font-size: 14px;
+}
+
+.opt-row .keyframe-nav .btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
 }
 
 /* A value that is read rather than typed: a preset's name, a hex, a count. */
