@@ -255,9 +255,12 @@ export function placePreview(
  * the compositor. `.asset-hover-preview` pins the element at the origin so the
  * translation is the whole position.
  *
- * The size is written here too, because `placePreview` decides which side of
- * the cursor to use by asking whether the box fits — so the box being measured
- * has to be the one about to be painted.
+ * **`preview` is the whole card, caption included, and this function no longer
+ * writes it.** It used to size `el` here, which was sound while the card was
+ * exactly the picture; the caption's height depends on how a filename wraps, so
+ * the size is now written on the picture's own frame and the total measured
+ * back. `placePreview` decides which side of the cursor to use by asking
+ * whether the box fits, so what is passed has to be what is on screen.
  */
 export function applyPreviewPlacement(
   el: HTMLElement,
@@ -272,8 +275,6 @@ export function applyPreviewPlacement(
     opts,
   );
 
-  el.style.width = `${preview.w}px`;
-  el.style.height = `${preview.h}px`;
   el.style.transform = `translate3d(${placement.left}px, ${placement.top}px, 0)`;
 
   return placement;

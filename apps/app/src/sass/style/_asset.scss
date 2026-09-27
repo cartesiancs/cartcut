@@ -1,11 +1,3 @@
-.asset:hover > .text-ellipsis-scroll  {
-    width: 750%;
-    display: inline-block;
-    white-space: nowrap;
-    animation: scrollText 5s infinite linear;
-    padding-left: 220%; 
-}
-
 .asset {
     padding: .5rem;
 
@@ -85,7 +77,7 @@
 }
 
 /*
- * The name asks for 95% of the row on its own (`.text-ellipsis-scroll`), so
+ * The name asks for the full width of the row on its own (`.text-ellipsis`), so
  * flex resolves the overflow by shrinking every item that will shrink. The
  * preview is not one of them.
  */
@@ -194,10 +186,9 @@
  * Every tile keeps Bootstrap's `overflow-hidden`, so the part of the overshoot
  * that passes the tile's own edge is clipped, which at these widths is about
  * half a pixel per side. Taking the class off was measured instead: the file
- * browser widens a long filename to 750% on hover (`.text-ellipsis-scroll`
- * above) and two of the utility labels are wider than their cell, so the clip
- * is holding real content in and the bounce lives in the curve rather than in
- * those pixels.
+ * two of the utility labels are wider than their cell, so the clip is holding
+ * real content in and the bounce lives in the curve rather than in those
+ * pixels.
  *
  * Every number arrives from `features/motion/hoverSpring.ts`, installed on the
  * document root at boot. The fallbacks below are what that file resolves to
@@ -320,20 +311,59 @@
 }
 
 /*
+ * The card is the picture with its name under it, in that order.
+ *
+ * `min-width` is for the caption alone: a small source is shown at its own size
+ * (`previewBoxSize` never upscales), and a 64px-wide picture would otherwise
+ * give a filename a 64px column to wrap in. The frame centres itself in
+ * whatever the caption makes the card, and keeps its exact size either way.
+ */
+.asset-hover-preview {
+    display: flex;
+    flex-direction: column;
+    min-width: 180px;
+}
+
+.asset-hover-preview-frame {
+    position: relative;
+    flex: none;
+    align-self: center;
+}
+
+/*
+ * The whole filename, however long, because this is the only place it is not
+ * clipped: the tiles ellipsis theirs and nothing scrolls any more.
+ *
+ * `overflow-wrap: anywhere` is what makes that true. A filename usually has no
+ * space in it, so a long one is a single unbreakable word and would otherwise
+ * push the card wider than the window.
+ */
+.asset-hover-preview-name {
+    flex: none;
+    padding: .4rem .6rem;
+    border-top: 1px solid #2a2f34;
+    color: #f8f9fa;
+    font-size: 12px;
+    line-height: 1.35;
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+
+/*
  * `contain` rather than `cover`: the box is already the media's own aspect
  * ratio, so these agree — until the frame between opening and `loadedmetadata`,
  * where the box is still the 16:9 guess. `cover` crops that frame and the
  * preview visibly jumps; `contain` letterboxes it and the box grows into place.
  */
-.asset-hover-preview > video,
-.asset-hover-preview > img {
+.asset-hover-preview-frame > video,
+.asset-hover-preview-frame > img {
     display: block;
     width: 100%;
     height: 100%;
     object-fit: contain;
 }
 
-.asset-hover-preview > [hidden] {
+.asset-hover-preview [hidden] {
     display: none;
 }
 

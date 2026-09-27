@@ -91,12 +91,17 @@ function applyShowType(element: HTMLElement, showType: AssetShowType) {
  * The alignment is decided here rather than in `_asset.scss` because
  * `text-center` is Bootstrap's and carries `!important`, which no rule keyed on
  * `.asset-row` could outrank. The row case has to not ask for it.
+ *
+ * Every tile clips. A name too long for its tile used to be *marquee'd* on
+ * hover — `.text-ellipsis-scroll` widened it to 750% and animated a translate
+ * across it — which spent most of its five-second cycle showing the gap between
+ * two passes, so resting on a tile read as the name disappearing. The whole
+ * name is on the hover preview's own caption now, where there is room for it.
  */
-function nameClass(showType: AssetShowType, clip: "scroll" | "ellipsis") {
-  const overflow = clip == "scroll" ? "text-ellipsis-scroll" : "text-ellipsis";
+function nameClass(showType: AssetShowType) {
   const align = showType == "grid" ? "text-center" : "text-start";
 
-  return `align-self-center ${overflow} text-light ${align}`;
+  return `align-self-center text-ellipsis text-light ${align}`;
 }
 
 @customElement("asset-file")
@@ -242,7 +247,7 @@ export class AssetFile extends LitElement {
       >
         ${fileIcon[filetype] ?? fileIcon.unknown}
       </span>
-      <b class=${nameClass(this.showType, "scroll")}>${this.name}</b>`;
+      <b class=${nameClass(this.showType)}>${this.name}</b>`;
   }
 
   templateImage(url) {
@@ -253,7 +258,7 @@ export class AssetFile extends LitElement {
         decoding="async"
         class="align-self-center asset-preview"
       />
-      <b class=${nameClass(this.showType, "scroll")}>${this.name}</b>`;
+      <b class=${nameClass(this.showType)}>${this.name}</b>`;
   }
 
   /**
@@ -281,7 +286,7 @@ export class AssetFile extends LitElement {
         </span>
       </div>
 
-      <b class=${nameClass(this.showType, "scroll")}>${this.name}</b>`;
+      <b class=${nameClass(this.showType)}>${this.name}</b>`;
   }
 
   // -------------------------------------------------------------- thumbnail
@@ -570,7 +575,7 @@ export class AssetFile extends LitElement {
       return;
     }
 
-    hoverPreview.open(this, { kind, url: this.fileUrl }, x, y);
+    hoverPreview.open(this, { kind, url: this.fileUrl, name: this.name }, x, y);
   }
 
   /**
@@ -651,7 +656,7 @@ export class AssetFolder extends LitElement {
       >
         folder
       </span>
-      <b class=${nameClass(this.showType, "ellipsis")}>${this.name}</b>`;
+      <b class=${nameClass(this.showType)}>${this.name}</b>`;
   }
 
   handleClick() {

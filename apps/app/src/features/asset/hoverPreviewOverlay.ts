@@ -38,6 +38,8 @@ export type HoverPreviewSource = {
   kind: HoverPreviewKind;
   /** The tile's own encoded file URL — the key both caches below are under. */
   url: string;
+  /** The filename, shown in full under the picture. */
+  name: string;
 };
 
 /**
@@ -62,14 +64,28 @@ export function previewSrcFor(localpath: string): string {
 
 type Overlay = {
   root: HTMLDivElement;
+  /** The picture's own box. The root is this plus the caption under it. */
+  frame: HTMLDivElement;
   video: HTMLVideoElement;
   image: HTMLImageElement;
+  caption: HTMLDivElement;
 };
 
 let overlay: Overlay | null = null;
 let owner: object | null = null;
 let cursor = { x: 0, y: 0 };
+/** The picture's box, from the media's own dimensions. */
 let box: Size = { w: 0, h: 0 };
+/**
+ * The whole card, caption included: what has to fit on screen.
+ *
+ * Measured rather than derived, because a filename wraps to however many lines
+ * it wraps to and no arithmetic here knows the font's metrics. Held between
+ * paints so that a `pointermove` stays a transform write: re-measuring per move
+ * would force a layout per move, which is the cost `applyPreviewPlacement`'s
+ * transform-only write exists to avoid.
+ */
+let card: Size = { w: 0, h: 0 };
 /** The side last placed on, fed back so the preview does not strobe. */
 let side: PreviewSide | undefined;
 let frame = 0;
@@ -87,6 +103,9 @@ function ensureOverlay(): Overlay {
   root.className = "asset-hover-preview";
   root.hidden = true;
 
+  const frameEl = document.createElement("div");
+  frameEl.className = "asset-hover-preview-frame";
+
   const video = document.createElement("video");
   video.muted = true;
   video.loop = true;
@@ -102,11 +121,37 @@ function ensureOverlay(): Overlay {
   image.alt = "";
   image.hidden = true;
 
-  root.append(video, image);
+  const caption = document.createElement("div");
+  caption.className = "asset-hover-preview-name";
+
+  frameEl.append(video, image);
+  root.append(frameEl, caption);
   document.body.append(root);
 
-  overlay = { root, video, image };
+  overlay = { root, frame: frameEl, video, image, caption };
   return overlay;
+}
+
+/** Give the picture its box, and measure what the card then comes to. */
+function fit(size: Size): Size {
+  const { root, frame: frameEl } = ensureOverlay();
+
+  frameEl.style.width = `${size.w}px`;
+  frameEl.style.height = `${size.h}px`;
+
+  // The card is as wide as its picture, so the caption wraps *under* it rather
+  // than setting the width itself. Without this a long filename lays out on one
+  // line and drags the card out to its own length — measured at 726px against a
+  // 355px picture. `.asset-hover-preview`'s `min-width` still raises it for a
+  // picture too narrow to read a name in; that is why the width is measured
+  // back rather than assumed to be what was just written.
+  root.style.width = `${size.w}px`;
+
+  // A hidden element measures 0x0, and every caller unhides the root before
+  // this runs. Kept as one forced layout per open and per `loadedmetadata`,
+  // never per pointer move.
+  const rect = root.getBoundingClientRect();
+  return { w: rect.width, h: rect.height };
 }
 
 function paint() {
@@ -114,7 +159,7 @@ function paint() {
   if (overlay == null) {
     return;
   }
-  side = applyPreviewPlacement(overlay.root, cursor, box, { prefer: side });
+  side = applyPreviewPlacement(overlay.root, cursor, card, { prefer: side });
 }
 
 /**
@@ -140,6 +185,7 @@ function cancelPaint() {
 /** Re-fit to the media's real dimensions, once it has reported them. */
 function resizeTo(natural: Size) {
   box = previewBoxSize(natural, viewport());
+  card = fit(box);
   // Straight to the DOM rather than through the scheduler: this runs once, off
   // a media event, and the box is wrong on screen until it does.
   paint();
@@ -147,7 +193,7 @@ function resizeTo(natural: Size) {
 
 export const hoverPreview = {
   open(by: object, source: HoverPreviewSource, x: number, y: number): void {
-    const { root, video, image } = ensureOverlay();
+    const { root, video, image, caption } = ensureOverlay();
 
     owner = by;
     cursor = { x, y };
@@ -200,7 +246,13 @@ export const hoverPreview = {
       };
     }
 
+    // `textContent`, never `innerHTML`: a filename is not markup, and on this
+    // platform it may legally contain any of it.
+    caption.textContent = source.name;
+
+    // Unhidden before the measure, because a hidden element has no box.
     root.hidden = false;
+    card = fit(box);
     paint();
   },
 

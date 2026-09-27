@@ -615,16 +615,6 @@ body.is-scrubbing * {
   white-space: nowrap;
 }
 
-.text-ellipsis-scroll {
-  width: 95%;
-  margin-top: 0.5rem;
-  padding: 0.1rem 0.5rem 0.1rem 0.5rem;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-  animation-play-state: paused;
-}
-
 .form-range {
   margin: 0;
 }
@@ -648,12 +638,6 @@ body.is-scrubbing * {
 
 .offcanvas-header {
   padding: 0.2rem 0.2rem;
-}
-
-@keyframes scrollText {
-  to {
-    transform: translateX(-100%);
-  }
 }
 
 .card-title {
