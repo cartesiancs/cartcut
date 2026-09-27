@@ -50,6 +50,81 @@
 }
 
 /*
+ * List mode: one row per entry, sized for reading names rather than for looking
+ * at frames.
+ *
+ * `applyShowType` in `features/asset/assetList.ts` adds this alongside
+ * `flex-row`. The preview, the icon, the caption's gap and the tile's own
+ * padding all come down together, because the row is as tall as whichever of
+ * them is tallest; leaving one at its grid size keeps the whole row there.
+ *
+ * The name's alignment is not here: `text-center` is Bootstrap's and carries
+ * `!important`, so `nameClass` decides it instead.
+ */
+.asset-row {
+    padding: .15rem .5rem;
+}
+
+.asset-row > b {
+    margin-top: 0;
+}
+
+/*
+ * One slot of the same size for every leading mark, whatever it is: a folder
+ * icon, a draft icon, a still, a video thumbnail. Each of them sizes itself
+ * otherwise — an icon by its font size, a picture by its aspect ratio — and a
+ * column of names that each start at a different x is the thing a list is for
+ * reading.
+ */
+.asset-row > .icon-lg {
+    font-size: 1.6rem;
+    width: 30px;
+    height: 30px;
+    line-height: 30px;
+    text-align: center;
+}
+
+/*
+ * The name asks for 95% of the row on its own (`.text-ellipsis-scroll`), so
+ * flex resolves the overflow by shrinking every item that will shrink. The
+ * preview is not one of them.
+ */
+.asset-row > :not(b) {
+    flex-shrink: 0;
+}
+
+.asset-row .asset-preview,
+.asset-row .asset-preview-pending {
+    width: 30px;
+    height: 30px;
+    max-width: 30px;
+    max-height: 30px;
+}
+
+/* A letterbox rather than a crop, so the slot can be square and the frame not. */
+.asset-row .asset-preview {
+    object-fit: contain;
+}
+
+/* The video thumbnail's own wrapper, which `position-absolute` badge sits in. */
+.asset-row > .position-relative {
+    width: 30px;
+    height: 30px;
+}
+
+/*
+ * The play badge is sized and placed against the thumbnail it marks. At the
+ * package's 24px default it is nearly as wide as a 30px row thumbnail, and the
+ * grid's off-centre offsets then put most of it outside the frame.
+ */
+.asset-row .icon-center {
+    font-size: 16px;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+}
+
+/*
  * The "Aa" on a text-preset tile.
  *
  * Fixed height so sixty tiles of wildly different faces still line up in a

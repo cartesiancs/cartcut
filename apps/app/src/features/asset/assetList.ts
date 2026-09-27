@@ -76,12 +76,27 @@ export class AssetList extends LitElement {
  */
 function applyShowType(element: HTMLElement, showType: AssetShowType) {
   if (showType == "grid") {
-    element.classList.remove("col-12", "flex-row");
+    element.classList.remove("col-12", "flex-row", "asset-row");
     element.classList.add("col-4", "flex-column");
   } else {
     element.classList.remove("col-4", "flex-column");
-    element.classList.add("col-12", "flex-row");
+    element.classList.add("col-12", "flex-row", "asset-row");
   }
+}
+
+/**
+ * The filename's classes. A grid caption sits under the preview and is centred;
+ * a row's name reads from the left, beside it.
+ *
+ * The alignment is decided here rather than in `_asset.scss` because
+ * `text-center` is Bootstrap's and carries `!important`, which no rule keyed on
+ * `.asset-row` could outrank. The row case has to not ask for it.
+ */
+function nameClass(showType: AssetShowType, clip: "scroll" | "ellipsis") {
+  const overflow = clip == "scroll" ? "text-ellipsis-scroll" : "text-ellipsis";
+  const align = showType == "grid" ? "text-center" : "text-start";
+
+  return `align-self-center ${overflow} text-light ${align}`;
 }
 
 @customElement("asset-file")
@@ -227,9 +242,7 @@ export class AssetFile extends LitElement {
       >
         ${fileIcon[filetype] ?? fileIcon.unknown}
       </span>
-      <b class="align-self-center text-ellipsis-scroll text-light text-center"
-        >${this.name}</b
-      >`;
+      <b class=${nameClass(this.showType, "scroll")}>${this.name}</b>`;
   }
 
   templateImage(url) {
@@ -240,9 +253,7 @@ export class AssetFile extends LitElement {
         decoding="async"
         class="align-self-center asset-preview"
       />
-      <b class="align-self-center text-ellipsis-scroll text-light text-center"
-        >${this.name}</b
-      >`;
+      <b class=${nameClass(this.showType, "scroll")}>${this.name}</b>`;
   }
 
   /**
@@ -270,9 +281,7 @@ export class AssetFile extends LitElement {
         </span>
       </div>
 
-      <b class="align-self-center text-ellipsis-scroll text-light text-center"
-        >${this.name}</b
-      >`;
+      <b class=${nameClass(this.showType, "scroll")}>${this.name}</b>`;
   }
 
   // -------------------------------------------------------------- thumbnail
@@ -642,9 +651,7 @@ export class AssetFolder extends LitElement {
       >
         folder
       </span>
-      <b class="align-self-center text-ellipsis text-light text-center"
-        >${this.name}</b
-      >`;
+      <b class=${nameClass(this.showType, "ellipsis")}>${this.name}</b>`;
   }
 
   handleClick() {
