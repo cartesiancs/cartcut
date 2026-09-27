@@ -47,13 +47,18 @@ export const BUBBLE_SIZES = ["small", "medium", "large"] as const;
 export type BubbleSize = (typeof BUBBLE_SIZES)[number];
 
 /**
- * How hard the auto-zoom pushes.
+ * Whether the auto-zoom runs.
  *
- * `"off"` is a value rather than a `null` because the tray shows it as one of
- * three radio items, and a tri-state that is sometimes absent is a menu that
- * sometimes has nothing checked.
+ * `"off"` is a value rather than a `null` because the tray shows it as one of two
+ * radio items, and a state that is sometimes absent is a menu that sometimes has
+ * nothing checked.
+ *
+ * Two values and not three. The depth of a zoom is decided per move, by how
+ * localized the activity that earned it was (`zoomPlan.ts#depthFor`), so a global
+ * "how hard" setting was a second control over the same number that could only
+ * disagree with the first.
  */
-export const ZOOM_STRENGTHS = ["off", "subtle", "strong"] as const;
+export const ZOOM_STRENGTHS = ["off", "on"] as const;
 export type ZoomStrength = (typeof ZOOM_STRENGTHS)[number];
 
 /**
@@ -120,7 +125,7 @@ export const DEFAULT_RECORD_SETTINGS: RecordSettings = {
   bubbleCorner: "bottom-left",
   bubbleShape: "circle",
   bubbleSize: "medium",
-  autoZoom: "subtle",
+  autoZoom: "on",
   drawing: false,
   clickHighlight: false,
 };

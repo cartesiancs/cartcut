@@ -16,6 +16,7 @@ import { collectDroppedPaths } from "./droppedFiles";
 import { planImport, placeImported, type ImportItem } from "./importMedia";
 import { runImportSubtitlePaths } from "../subtitle/subtitleCommands";
 import type { DropTarget } from "./dropTarget";
+import type { TimelineDocument } from "../timeline/tracks";
 import { v4 as uuidv4 } from "uuid";
 import { addTemplateToTimeline } from "../template/addTemplate";
 import { installTemplateFromPath } from "../template/templateInstall";
@@ -115,9 +116,24 @@ async function importTemplatesAt(
  * both — so a caller that knows something extra about a file, as the recorders
  * know a capture's wall-clock length, can say so without a second seam.
  */
+/**
+ * A last pure transform, applied inside the same checkpoint.
+ *
+ * For a caller that has to change the clips it just imported: a screen recording
+ * has to be fitted to the frame and carry its auto-zoom keyframes, and doing that
+ * in a second `withCheckpoint` would cost the user two presses of Cmd+Z to undo one
+ * arrival. Pure, so it obeys the same decline-by-identity rule as everything else
+ * here: returning the document it was given records nothing extra.
+ */
+export type ImportAfter = (
+  doc: TimelineDocument,
+  createdIds: readonly string[],
+) => TimelineDocument;
+
 export async function importPathsAt(
   paths: readonly (string | ImportItem)[],
   target: DropTarget,
+  after?: ImportAfter,
 ): Promise<string[]> {
   if (paths.length === 0) {
     return [];
@@ -181,7 +197,7 @@ export async function importPathsAt(
       newId: uuidv4,
     });
     createdIds = result.createdIds;
-    return result.doc;
+    return after == null ? result.doc : after(result.doc, result.createdIds);
   });
 
   return createdIds;

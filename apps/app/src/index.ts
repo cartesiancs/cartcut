@@ -45,6 +45,7 @@ import "./features/menu/menuDropdown";
 import "./features/onboarding/onboardingOverlay";
 import "./features/update/updatePrompt";
 import "./features/subtitle/importDialog";
+import "./features/record/processDialog";
 
 
 import "./features/option/optionGroup";

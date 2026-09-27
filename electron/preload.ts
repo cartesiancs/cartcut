@@ -433,6 +433,8 @@ const response = {
    */
   overlayRecord: {
     complete: (callback) => ipcRenderer.on("overlayRecord:complete", callback),
+    // Sent when the mux begins, so the editor can say so while it runs.
+    processing: (callback) => ipcRenderer.on("overlayRecord:processing", callback),
     tray: (callback) => ipcRenderer.on("overlayRecord:tray", callback),
     overlay: (callback) => ipcRenderer.on("overlayRecord:overlay", callback),
     // Overlay -> engine, relayed by main: annotations to composite, and the

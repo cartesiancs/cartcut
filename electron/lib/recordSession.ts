@@ -12,9 +12,12 @@
  *     appended as they arrive, and `appendChunk` resolves only once the pipe
  *     has room, which is the backpressure signal the encoder awaits — the same
  *     arrangement `render/framePipe.ts` uses for export frames.
- *  2. **The cursor track.** `screen.getCursorScreenPoint()` exists only in the
- *     main process. It needs no permission on any platform, which is what lets
- *     auto-zoom ship without the accessibility prompt a click hook would need.
+ *  2. **The input track.** `screen.getCursorScreenPoint()` exists only in the
+ *     main process and needs no permission on any platform. Clicks need a native
+ *     monitor, which no Electron API provides (`lib/inputMonitor.ts`) and which
+ *     is absent on a build that has never run `npm run dev`, so the track
+ *     degrades to cursor-only rather than failing. Both land in one sidecar file
+ *     beside the MP4, so a take can be re-zoomed later: `lib/recordInputFile.ts`.
  *  3. **FFmpeg.** One `-c:v copy` mux at the end. See `recordMux.ts`.
  *  4. **Delivering the result.** The finished path goes to the *editor* window,
  *     which imports it through the ordinary drop path. The editor is not
@@ -46,6 +49,12 @@ import * as fsp from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { ffmpegConfig } from "./ffmpeg.js";
+import {
+  startInputMonitor,
+  type InputKind,
+  type InputMonitor,
+} from "./inputMonitor.js";
+import { writeInputLog } from "./recordInputFile.js";
 import { muxRecording, type PcmInput } from "./recordMux.js";
 
 /**
@@ -70,6 +79,22 @@ const CURSOR_INTERVAL_MS = 33;
 
 export type CursorSample = { t: number; x: number; y: number };
 
+/**
+ * One thing the pointer did, positioned here rather than by the sidecar.
+ *
+ * The sidecar reports *what* and this module reports *where*: a click's position
+ * is the pointer's position at that instant, and the mapping below is already
+ * exact and already tested. See `native/cartcut-input/README.md` for why
+ * reproducing it from Cocoa's bottom-left coordinate space would be a bug on a
+ * second monitor that no node suite could see.
+ */
+export type PointerMark = {
+  t: number;
+  x: number;
+  y: number;
+  kind: InputKind;
+};
+
 export type StartRequest = {
   /**
    * `Display.id` of the screen being captured, as a string — that is the form
@@ -88,8 +113,9 @@ type Session = {
   streams: Map<FileKey, fs.WriteStream>;
   cursor: CursorSample[];
   strokes: unknown[];
-  clicks: unknown[];
+  pointer: PointerMark[];
   timer: NodeJS.Timeout | null;
+  monitor: InputMonitor | null;
   startedAt: number;
   pausedTotalMs: number;
   pausedAt: number | null;
@@ -121,13 +147,15 @@ function elapsedMs(active: Session): number {
  * whichever edge it left by — zooming the recording onto a corner where nothing
  * is happening.
  */
-function sampleCursor(active: Session): void {
+export function capturePointNow(
+  active: Session,
+): { x: number; y: number } | null {
   const display = screen
     .getAllDisplays()
     .find((candidate) => String(candidate.id) === active.request.displayId);
 
   if (display == null) {
-    return;
+    return null;
   }
 
   const point = screen.getCursorScreenPoint();
@@ -141,14 +169,47 @@ function sampleCursor(active: Session): void {
     point.x >= x + width ||
     point.y >= y + height
   ) {
-    return;
+    return null;
   }
 
-  active.cursor.push({
-    t: elapsedMs(active),
+  return {
     x: ((point.x - x) / width) * active.request.captureWidth,
     y: ((point.y - y) / height) * active.request.captureHeight,
-  });
+  };
+}
+
+function sampleCursor(active: Session): void {
+  const point = capturePointNow(active);
+  if (point == null) {
+    return;
+  }
+  active.cursor.push({ t: elapsedMs(active), ...point });
+}
+
+/**
+ * One event from the native monitor, stamped and positioned on arrival.
+ *
+ * Stamped here rather than by the sidecar, which is the arrangement
+ * `engine/session.ts` already uses for annotations relayed through main: two
+ * processes' clocks share no epoch, and a line on a local pipe arrives in well
+ * under the 100ms the zoom planner works in.
+ *
+ * An event whose pointer is on another display is dropped, for `capturePointNow`'s
+ * reason: a phantom mark parked against an edge would zoom the recording onto a
+ * corner where nothing happened.
+ *
+ * Nothing is recorded while paused. The media clock does not advance there, so a
+ * mark would land on top of whatever is at that instant in the finished file.
+ */
+function recordPointer(active: Session, kind: InputKind): void {
+  if (active.pausedAt != null) {
+    return;
+  }
+  const point = capturePointNow(active);
+  if (point == null) {
+    return;
+  }
+  active.pointer.push({ t: elapsedMs(active), ...point, kind });
 }
 
 export async function startSession(
@@ -167,14 +228,20 @@ export async function startSession(
     streams: new Map(),
     cursor: [],
     strokes: [],
-    clicks: [],
+    pointer: [],
     timer: null,
+    monitor: null,
     startedAt: Date.now(),
     pausedTotalMs: 0,
     pausedAt: null,
   };
 
   active.timer = setInterval(() => sampleCursor(active), CURSOR_INTERVAL_MS);
+
+  // `null` when there is no sidecar to run, which is not a failure: the planner
+  // falls back to cursor dwell, which is all it had before clicks existed.
+  active.monitor = startInputMonitor((kind) => recordPointer(active, kind));
+
   session = active;
 
   return { id, dir };
@@ -272,14 +339,57 @@ export function addStroke(sessionId: string, stroke: unknown): void {
   requireSession(sessionId).strokes.push(stroke);
 }
 
-export function addClick(sessionId: string, click: unknown): void {
-  requireSession(sessionId).clicks.push(click);
+const POINTER_KINDS = new Set<string>(["down", "up", "drag", "scroll"]);
+
+/**
+ * Validate a mark on its way in, per the house `coerceX` rule.
+ *
+ * It matters more here than it looks. `addClick`'s channel has never had a
+ * caller, so until now an unusable value could only sit in an array nothing read
+ * and the zoom planner now reads that array. One `{t: "soon"}` from a stale
+ * renderer would put a `NaN` into a dwell centroid and silently move every zoom
+ * in the take.
+ */
+export function coercePointerMark(value: unknown): PointerMark | null {
+  if (value == null || typeof value !== "object") {
+    return null;
+  }
+  const raw = value as Record<string, unknown>;
+  const { t, x, y, kind } = raw;
+
+  if (typeof t !== "number" || !Number.isFinite(t) || t < 0) return null;
+  if (typeof x !== "number" || !Number.isFinite(x)) return null;
+  if (typeof y !== "number" || !Number.isFinite(y)) return null;
+  if (typeof kind !== "string" || !POINTER_KINDS.has(kind)) return null;
+
+  return { t, x, y, kind: kind as InputKind };
+}
+
+/**
+ * A pointer mark from the *renderer*, for something the native monitor cannot
+ * see.
+ *
+ * Kept as the seam it always was, now that something finally reads the track it
+ * pushes into. The overlay window is click-through while not drawing, so this has
+ * never had a caller; the native monitor is what fills `pointer` today.
+ *
+ * An unusable mark is dropped rather than thrown on: this is a fire-and-forget
+ * IPC call in the middle of a take, and a rejected promise nobody awaits is not
+ * how the user should find out.
+ */
+export function addClick(sessionId: string, mark: unknown): void {
+  const coerced = coercePointerMark(mark);
+  if (coerced == null) {
+    log.warn("[record] ignoring an unusable pointer mark", mark);
+    return;
+  }
+  requireSession(sessionId).pointer.push(coerced);
 }
 
 export type SessionTracks = {
   cursor: CursorSample[];
   strokes: unknown[];
-  clicks: unknown[];
+  pointer: PointerMark[];
   durationMs: number;
 };
 
@@ -297,13 +407,18 @@ export function stopSession(sessionId: string): SessionTracks {
     active.timer = null;
   }
 
+  // With the timer, not with the session: the sidecar is a process watching every
+  // click on the machine, and the moment it has nothing to report it should stop.
+  active.monitor?.stop();
+  active.monitor = null;
+
   const durationMs = elapsedMs(active);
   resumeSession(sessionId);
 
   return {
     cursor: active.cursor,
     strokes: active.strokes,
-    clicks: active.clicks,
+    pointer: active.pointer,
     durationMs,
   };
 }
@@ -358,6 +473,19 @@ export type DeliverRequest = {
   audio: { key: FileKey; sampleRate: number; channels: number }[];
 };
 
+export type Delivered = {
+  /** The finished MP4. */
+  path: string;
+  /**
+   * The input log beside it, or `null`.
+   *
+   * `null` for a take with nothing worth planning from, and for a write that
+   * failed. The editor reads it as "import this clip plain", which is exactly
+   * what should happen either way.
+   */
+  inputPath: string | null;
+};
+
 /**
  * Mux, move to the recordings folder, and clean up.
  *
@@ -369,7 +497,7 @@ export type DeliverRequest = {
 export async function deliverSession(
   sessionId: string,
   request: DeliverRequest,
-): Promise<string> {
+): Promise<Delivered> {
   const active = requireSession(sessionId);
 
   for (const key of active.streams.keys()) {
@@ -394,12 +522,33 @@ export async function deliverSession(
     outputPath,
   });
 
+  // After the mux and before the session is dropped, which is the only window in
+  // which both the finished path and the collected tracks exist.
+  //
+  // **Either track is enough.** Gating on the cursor track alone was a real bug:
+  // `sampleCursor` drops a point that is on another display, so a take made while
+  // the pointer sat on a second monitor collects no cursor samples at all, and
+  // every click of it was thrown away with the sidecar that was never written.
+  const inputPath =
+    active.cursor.length === 0 && active.pointer.length === 0
+      ? null
+      : await writeInputLog(outputPath, {
+          capture: {
+            width: active.request.captureWidth,
+            height: active.request.captureHeight,
+            fps: request.fps,
+          },
+          durationMs: elapsedMs(active),
+          cursor: active.cursor,
+          pointer: active.pointer,
+        });
+
   session = null;
   await fsp.rm(active.dir, { recursive: true, force: true }).catch((error) => {
     log.warn("[record] could not clean up", active.dir, error);
   });
 
-  return outputPath;
+  return { path: outputPath, inputPath };
 }
 
 /** Throw the session away. Safe to call when there is none. */
@@ -414,6 +563,7 @@ export async function cancelSession(): Promise<void> {
   if (active.timer != null) {
     clearInterval(active.timer);
   }
+  active.monitor?.stop();
 
   for (const stream of active.streams.values()) {
     stream.destroy();

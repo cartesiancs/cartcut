@@ -86,8 +86,7 @@ const QUALITY_LABELS: Record<(typeof QUALITY_PRESETS)[number], string> = {
 
 const ZOOM_LABELS: Record<(typeof ZOOM_STRENGTHS)[number], string> = {
   off: "Off",
-  subtle: "Subtle",
-  strong: "Strong",
+  on: "On",
 };
 
 const SIZE_LABELS: Record<(typeof BUBBLE_SIZES)[number], string> = {

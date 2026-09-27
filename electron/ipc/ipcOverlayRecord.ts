@@ -18,6 +18,7 @@ import { armDisplayMedia, disarmDisplayMedia } from "../lib/displayMedia.js";
 import {
   closeRecorder,
   deliverToEditor,
+  notifyEditorProcessing,
   forwardStroke,
   openRecorder,
   sendToEngine,
@@ -337,9 +338,12 @@ export const ipcOverlayRecord = {
    */
   deliver: async (_event, sessionId: string, request: DeliverRequest) => {
     try {
-      const filePath = await deliverSession(sessionId, request);
-      deliverToEditor(filePath);
-      return { status: 1 as const, path: filePath };
+      // Before the mux, not after: this is what opens the editor's dialog, and the
+      // mux is the part worth showing a dialog for.
+      notifyEditorProcessing();
+      const delivered = await deliverSession(sessionId, request);
+      deliverToEditor(delivered.path, delivered.inputPath);
+      return { status: 1 as const, ...delivered };
     } catch (error) {
       return fail("could not write the finished recording", error);
     }

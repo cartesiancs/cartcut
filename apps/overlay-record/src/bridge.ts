@@ -104,12 +104,17 @@ export const bridge = {
   pause: (sessionId: string) => api().req.overlayRecord.pause(sessionId),
   resume: (sessionId: string) => api().req.overlayRecord.resume(sessionId),
 
+  // The tracks come back and the engine ignores them, on purpose: main collected
+  // them and main writes them to the sidecar beside the MP4, so handing them
+  // across two process boundaries only to hand them back would be a megabyte of
+  // IPC for nothing. The shape is kept accurate because it is the only statement
+  // of what `overlayRecord:stop` answers.
   stop: async (
     sessionId: string,
   ): Promise<{
     cursor: { t: number; x: number; y: number }[];
     strokes: unknown[];
-    clicks: unknown[];
+    pointer: { t: number; x: number; y: number; kind: string }[];
     durationMs: number;
   }> =>
     expect(

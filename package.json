@@ -7,8 +7,8 @@
   "scripts": {
     "start": "electron .",
     "start:hot": "node scripts/devElectron.mjs",
-    "dev": "npm run build:speech && concurrently \"npm run compile\" \"npm run bundle:src\"",
-    "dev:hot": "npm run build:speech && concurrently -k -n main,renderer,app \"npm run compile\" \"npm run bundle:src\" \"npm run start:hot\"",
+    "dev": "npm run build:speech && npm run build:input && concurrently \"npm run compile\" \"npm run bundle:src\"",
+    "dev:hot": "npm run build:speech && npm run build:input && concurrently -k -n main,renderer,app \"npm run compile\" \"npm run bundle:src\" \"npm run start:hot\"",
     "compile": "tsc -w -p ./.tsconfig",
     "bundle": "npm run bundle:src",
     "vendor:sync": "node scripts/syncVendor.mjs",
@@ -27,7 +27,8 @@
     "build:main": "tsc -p ./.tsconfig",
     "build:overlay": "npm --prefix apps/overlay-record ci && npm --prefix apps/overlay-record run build",
     "build:speech": "node scripts/buildSpeech.mjs",
-    "build:osx": "npm run build:main && npm run bundle:prod:src && npm run build:overlay && node scripts/buildSpeech.mjs --all && electron-builder build --mac --arm64 --x64 -p always",
+    "build:input": "node scripts/buildInput.mjs",
+    "build:osx": "npm run build:main && npm run bundle:prod:src && npm run build:overlay && node scripts/buildSpeech.mjs --all && node scripts/buildInput.mjs --all && electron-builder build --mac --arm64 --x64 -p always",
     "build:win": "npm run build:main && npm run bundle:prod:src && npm run build:overlay && electron-builder build --win --x64 -p always",
     "build:linux": "npm run build:main && npm run bundle:prod:src && npm run build:overlay && electron-builder build --linux --x64",
     "build": "npm run build:osx && npm run build:win"

@@ -239,12 +239,39 @@ export function sendToEngine(channel: string, payload: unknown): void {
   }
 }
 
-/** Tell the editor a recording is ready for it. */
-export function deliverToEditor(filePath: string): void {
+/**
+ * Tell the editor a take has stopped and is being written.
+ *
+ * Sent at the start of the mux, which is the slow half and happens entirely in main.
+ * Without it the editor's processing dialog could only appear once the file already
+ * existed, which is the moment it stops being useful.
+ */
+export function notifyEditorProcessing(): void {
+  if (mainWindow == null || mainWindow.isDestroyed()) {
+    return;
+  }
+  mainWindow.webContents.send("overlayRecord:processing", {});
+}
+
+/**
+ * Tell the editor a recording is ready for it.
+ *
+ * `inputPath` is the sidecar holding the cursor and click tracks, or `null` when
+ * there is none. The editor reads `null` as "import this clip plain", which is
+ * also what an older payload with no such field produces, so nothing has to
+ * special-case a build mismatch.
+ */
+export function deliverToEditor(
+  filePath: string,
+  inputPath: string | null,
+): void {
   if (mainWindow == null || mainWindow.isDestroyed()) {
     log.warn("[record] no editor window to hand", filePath, "to");
     return;
   }
 
-  mainWindow.webContents.send("overlayRecord:complete", { path: filePath });
+  mainWindow.webContents.send("overlayRecord:complete", {
+    path: filePath,
+    inputPath,
+  });
 }

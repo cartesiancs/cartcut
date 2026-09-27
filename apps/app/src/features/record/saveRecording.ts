@@ -15,6 +15,9 @@
  */
 
 import { importPathsAt, atPlayhead } from "../asset/importDrop";
+import { recordProcessStore } from "../../states/recordProcessStore";
+import { planAutoZoom, readInputLog } from "./applyAutoZoom";
+import { loadRecordSettings } from "./recordSettingsBridge";
 
 function toast(message: string) {
   const box: any = document.querySelector("toast-box");
@@ -82,17 +85,51 @@ export async function saveAndImportRecording(
  */
 export async function receiveOverlayRecording(
   filePath: string,
+  inputPath: string | null = null,
 ): Promise<string[]> {
+  const process = recordProcessStore.getState();
+
   try {
-    const created = await importPathsAt([{ path: filePath }], atPlayhead());
+    process.enter("reading");
+
+    // Read and plan *before* touching the document. The planning is the slow half
+    // and it needs no document, so it happens while the dialog still says so; the
+    // transform that lands inside `withCheckpoint` is then pure arithmetic.
+    const log = await readInputLog(inputPath);
+    const strength = (await loadRecordSettings())?.autoZoom ?? "on";
+
+    process.enter("planning");
+    const plan = planAutoZoom(log, strength);
+
+    // The one place Cancel is read. Between here and the commit there is nothing to
+    // abandon that would not leave half an edit, which is why `processView` stops
+    // offering it at `placing`.
+    const skipped = recordProcessStore.getState().cancelled;
+
+    process.enter("placing");
+
+    // The fit is not optional and the zoom is: `buildVideo` hands over a clip at its
+    // native pixel size at (0,0), so a 3024-wide capture arrives a quarter visible
+    // against the top left corner whether or not anything zooms. `planAutoZoom` with
+    // no log still fits it, which is also what a skip wants.
+    const transform = skipped ? planAutoZoom(null, "off").transform : plan.transform;
+
+    const created = await importPathsAt([{ path: filePath }], atPlayhead(), transform);
+
+    recordProcessStore.getState().clear();
 
     if (created.length > 0) {
-      toast("Recording added to the timeline.");
+      toast(
+        skipped || plan.moves === 0
+          ? "Recording added to the timeline."
+          : `Recording added, with ${plan.moves} zoom${plan.moves === 1 ? "" : "s"}.`,
+      );
     }
 
     return created;
   } catch (error) {
     console.error("[record] could not import the recording", error);
+    recordProcessStore.getState().enter("failed", "The recording could not be added.");
     toast("That recording could not be added.");
     return [];
   }
@@ -112,9 +149,22 @@ export function watchOverlayRecordings(): void {
     return;
   }
 
-  on((_event: unknown, payload: { path?: string }) => {
+  on((_event: unknown, payload: { path?: string; inputPath?: string | null }) => {
     if (typeof payload?.path === "string" && payload.path.length > 0) {
-      void receiveOverlayRecording(payload.path);
+      void receiveOverlayRecording(
+        payload.path,
+        typeof payload.inputPath === "string" ? payload.inputPath : null,
+      );
     }
   });
+
+  // The mux is the slow half and it happens in main, before the editor knows a take
+  // has even stopped. Without this notice the dialog would appear only once the file
+  // was already written, which is the moment it is no longer needed.
+  const onProcessing = (window as any).electronAPI?.res?.overlayRecord?.processing;
+  if (typeof onProcessing === "function") {
+    onProcessing(() => {
+      recordProcessStore.getState().enter("finishing");
+    });
+  }
 }

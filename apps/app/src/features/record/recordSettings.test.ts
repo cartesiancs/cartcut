@@ -46,8 +46,8 @@ describe("normalizeRecordSettings", () => {
   it("never restores drawing mode, however it was left", () => {
     expect(normalizeRecordSettings({ drawing: true }).drawing).toBe(false);
     expect(
-      normalizeRecordSettings({ drawing: true, autoZoom: "strong" }),
-    ).toMatchObject({ drawing: false, autoZoom: "strong" });
+      normalizeRecordSettings({ drawing: true, autoZoom: "on" }),
+    ).toMatchObject({ drawing: false, autoZoom: "on" });
   });
 
   it("keeps the fields it can read and defaults only the rest", () => {
@@ -55,14 +55,14 @@ describe("normalizeRecordSettings", () => {
       cameraDeviceId: "cam-1",
       quality: "720p",
       fps: 60,
-      autoZoom: "strong",
+      autoZoom: "on",
       bubbleShape: "nonsense",
     });
 
     expect(settings.cameraDeviceId).toBe("cam-1");
     expect(settings.quality).toBe("720p");
     expect(settings.fps).toBe(60);
-    expect(settings.autoZoom).toBe("strong");
+    expect(settings.autoZoom).toBe("on");
     expect(settings.bubbleShape).toBe(DEFAULT_RECORD_SETTINGS.bubbleShape);
   });
 });

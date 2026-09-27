@@ -70,6 +70,7 @@ npx tsc --noEmit -p ./.tsconfig    # typecheck the main process
 npx webpack --mode=development     # build the renderer once
 npm run build:overlay              # the screen recorder's own Vite app
 npm run build:speech               # the native STT sidecar (Swift, macOS only)
+npm run build:input                # the native mouse monitor (Swift, macOS only)
 ```
 
 **Hot reload is development-only and opt-in.** `start:hot`
@@ -81,8 +82,9 @@ when `isDev` is also true. A reload drops the document and the undo history, so
 
 `npm run dev` does **not** build `apps/overlay-record`; build it yourself after
 touching it or the recorder windows load a stale bundle. It does build
-`native/cartcut-stt` (a staleness check plus two `swiftc` calls) and skips
-itself loudly on Windows or without the macOS 26 SDK.
+`native/cartcut-stt` and `native/cartcut-input` (a staleness check plus two
+`swiftc` calls each) and skips them loudly on Windows, or for the speech one
+without the macOS 26 SDK.
 
 ## How editing works
 
@@ -305,7 +307,8 @@ features/shape/        parametric outlines, over mask/geometry.ts unchanged
 features/lut/          .cube reading, tetrahedral sampling, atlas, 80 built-ins
 features/adjust/       15 sliders: tone bakes into a LUT, effects run a finish pass
 features/template/     a whole edit standing in for one clip (.cttpl)
-features/record/       the screen recorder's pure logic; the windows are apps/overlay-record
+features/record/       the recorder's pure logic and its auto-zoom: zoomPlan (when),
+                       zoomCamera (how), recordFit (where); windows in apps/overlay-record
 features/reverse/      reversed media files, made by electron/lib/reversePipeline.ts
 features/speed/        the ramp's graph editor; the curve is timeline/speedCurve.ts
 features/update/       the update card; main's half is electron/lib/updateSession.ts
@@ -408,6 +411,40 @@ The handful of facts inside those that are worth stating up front:
   A rect outside the host is invisible rather than small, and invisible in a way
   no `getBoundingClientRect` check can see, because the column carries
   `overflow: hidden`.
+- **A recording's zoom is keyframes, never pixels.** The composite pass draws the
+  capture 1:1; `features/record/` plans a camera from the cursor and click tracks
+  and writes it to the clip's `size` and `position`, so it stays editable and
+  costs no second encode. Five things carry it. **A click always earns a zoom**,
+  which is what `zoomPlan.ts#packSegments` exists for: a dwell is an inference and
+  may be dropped when there is too much to zoom at, a press is the user saying
+  "this". Two clusters that cannot both have a move shorten, then merge, and never
+  drop; the budget only ever spends dwells; and a move whose activity runs to the
+  last frame is clamped into the take rather than refused. Auto Zoom is therefore
+  `off`/`on` and not a strength: depth is already decided per move by how
+  localized the thing that earned it was. The **fit is not optional**:
+  `buildVideo` hands over a clip at its native pixel size at (0,0), so a
+  3024-wide capture arrives a quarter visible against the top left corner whether
+  or not anything zooms, and `recordFit.ts` is what places it. Zoom is measured in
+  **cover units**, where 1 means the picture exactly fills the frame, which makes
+  the whole mapping two lines with no special case for the resting pose. **At
+  `z = 1` the only legal aim is the centre**, so every ease carries an instant at
+  that crossing with the aim still centred, and past it covering is free by
+  convexity because `size` and `position` interpolate linearly together. And the
+  clamp belongs to the *project frame's* aspect, not the capture's: getting that
+  wrong is exact in every node suite whose fixtures share one aspect and shows as
+  background at the edge of a zoom in the app. Finally, the plan is laid out
+  against the **clip's** span and never the recording's: main's media clock and
+  the muxed container disagree by a few hundred milliseconds, and planning against
+  the longer put the release past the end, where it was filtered out and the take
+  finished still fully zoomed.
+- **`native/cartcut-input` reports what the mouse did, never where.** A click's
+  position is the pointer's position, and `recordSession.ts#capturePointNow`
+  already maps a screen point into capture pixels exactly; reproducing that from
+  Cocoa's bottom-left coordinate space would be right on one monitor and wrong on
+  three. It logs no keycodes and never will. Apple gates global monitors on
+  accessibility trust **for key events**, which is why clicks ship and typing does
+  not; the sidecar reports its `trusted` flag and main logs it, because that claim
+  is only really tested when the app spawns it.
 - **The screen recorder encodes on a fixed-rate clock**, not as frames arrive,
   so frame `n` *is* at `n / fps` and the bytes need no container: a bare Annex-B
   stream that ffmpeg copies with `-r` and `-c:v copy`. The overlay window is
