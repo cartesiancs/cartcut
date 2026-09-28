@@ -37,6 +37,10 @@ let tray: Tray | null = null;
  * packaged — `assets` is an `extraResources` directory, so it sits beside the
  * asar rather than inside it. Computed per call because `app` is not reliably
  * populated while this module is still being imported.
+ *
+ * `tray@2x.png` beside it is referenced by nothing here and is not dead:
+ * `createFromPath` picks it up by name, and without it a Retina menu bar
+ * upscales the 16px image and the record glyph's broken ring blurs shut.
  */
 function trayIconPath(): string {
   const root = isDev === true ? app.getAppPath() : process.resourcesPath;
