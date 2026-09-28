@@ -189,31 +189,28 @@ export class AssetBrowser extends LitElement {
   }
 
   render() {
-    return html`<div class="d-flex flex-row p-0 mt-2">
+    return html`<div class="browse-bar">
         <button
-          ref="arrowup"
-          class="btn btn-transparent btn-sm"
+          type="button"
+          class="browse-btn"
+          title=${this.lc.t("setting.parent_folder")}
+          aria-label=${this.lc.t("setting.parent_folder")}
+          ?disabled=${parentDirectory(this.nowDirectory) == null}
           @click=${this.handleClickPrevDirectory}
         >
-          <span class="material-symbols-outlined icon-sm"> arrow_upward </span>
+          <span class="material-symbols-outlined">arrow_upward</span>
         </button>
-        <input
-          ref="text"
-          type="text"
-          class="form-control"
-          aria-describedby="basic-addon1"
-          .value=${this.nowDirectory}
-          disabled
-        />
+
+        ${this.templatePath()}
 
         <button
-          class="btn btn-transparent btn-sm ${getLocationEnv() == "demo"
-            ? "d-none"
-            : ""}"
+          type="button"
+          class="browse-btn ${getLocationEnv() == "demo" ? "d-none" : ""}"
           title=${this.lc.t("setting.change_project_folder")}
+          aria-label=${this.lc.t("setting.change_project_folder")}
           @click=${this.handleClickSelectFolder}
         >
-          <span class="material-symbols-outlined icon-sm"> folder_open </span>
+          <span class="material-symbols-outlined">folder_open</span>
         </button>
 
         <switch-showtype></switch-showtype>
@@ -224,15 +221,54 @@ export class AssetBrowser extends LitElement {
       </div>`;
   }
 
+  /**
+   * Where the panel is, as a path whose folder name is the part that shows.
+   *
+   * A read-only field in the search box's shell rather than a disabled
+   * `<input>`: an input clips the end of its value, which is the folder's own
+   * name, and `_browse.scss#browse-path` clips the start instead. The whole
+   * path is the tooltip.
+   */
+  private templatePath() {
+    // No folder yet: the shell alone, since the empty state under it already
+    // says what to do and saying it twice reads as two different problems.
+    const path = this.nowDirectory;
+    if (path == "") {
+      return html`<div class="browse-field browse-field-path">
+        <span class="material-symbols-outlined browse-field-icon">folder</span>
+      </div>`;
+    }
+
+    // Split after the last separator that has something after it, so a root
+    // ("/", "C:\") still shows as itself rather than as an empty leaf.
+    const trimmed = path.replace(/[\\/]+$/, "");
+    const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+    const leaf = cut < 0 ? path : trimmed.slice(cut + 1) || path;
+    const parent = cut < 0 ? "" : trimmed.slice(0, cut + 1);
+
+    return html`<div class="browse-field browse-field-path" title=${path}>
+      <span class="material-symbols-outlined browse-field-icon">folder</span>
+      <span class="browse-path"
+        ><bdi dir="ltr"
+          >${parent}<span class="browse-path-leaf">${leaf}</span></bdi
+        ></span
+      >
+    </div>`;
+  }
+
   private templateBody() {
     if (this.status == "idle") {
       return this.templateEmpty();
     }
 
     if (this.status == "error") {
-      return html`<p class="text-light mt-2 text-center">
-        ${this.errorMessage || "Could not read this folder."}
-      </p>`;
+      return html`<div class="browse-empty">
+        <div class="browse-empty-icon">
+          <span class="material-symbols-outlined">folder_off</span>
+        </div>
+        <div class="browse-empty-title">Could not read this folder</div>
+        <div class="browse-empty-text">${this.errorMessage}</div>
+      </div>`;
     }
 
     return html`<asset-list
@@ -245,14 +281,20 @@ export class AssetBrowser extends LitElement {
   private templateEmpty() {
     const isDemo = getLocationEnv() == "demo";
 
-    return html`<div class="row px-2">
-      <p class="text-light mt-2 text-center">
+    // A `<button>` with the label as its text: `tests/e2e/harness/ui.ts` finds
+    // it as `asset-browser button` by "Select Folder".
+    return html`<div class="browse-empty">
+      <div class="browse-empty-icon">
+        <span class="material-symbols-outlined">folder_open</span>
+      </div>
+      <div class="browse-empty-title">
         ${isDemo
           ? "The folder cannot be viewed in the demo version."
           : this.lc.t("setting.need_select_project_folder")}
-      </p>
+      </div>
       <button
-        class="btn btn-sm btn-default text-light ${isDemo ? "d-none" : ""}"
+        type="button"
+        class="browse-text-btn is-primary ${isDemo ? "d-none" : ""}"
         @click=${this.handleClickSelectFolder}
       >
         ${this.lc.t("setting.select_project_folder")}

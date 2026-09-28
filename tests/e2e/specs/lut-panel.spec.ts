@@ -94,21 +94,21 @@ test("the LUT panel paints every tile when its tab is opened", async ({
 
   await test.step("every category has a heading of its own", async () => {
     const headings = await page.evaluate(() =>
-      [...document.querySelectorAll("lut-browser .text-secondary")]
-        .map((n) => (n as HTMLElement).innerText.trim())
-        .filter((t) => t === t.toUpperCase() && t.length > 0 && t.length < 24),
+      [...document.querySelectorAll("lut-browser .browse-section-title")].map(
+        (n) => (n as HTMLElement).innerText.trim(),
+      ),
     );
     for (const label of [
-      "FILM",
-      "CINEMATIC",
-      "VINTAGE",
-      "BLACK & WHITE",
-      "WARM",
-      "COOL",
-      "VIVID",
-      "MATTE",
-      "LOG CONVERSION",
-      "UTILITY",
+      "Film",
+      "Cinematic",
+      "Vintage",
+      "Black & White",
+      "Warm",
+      "Cool",
+      "Vivid",
+      "Matte",
+      "Log Conversion",
+      "Utility",
     ]) {
       expect(headings, `${label} has no heading`).toContain(label);
     }

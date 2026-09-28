@@ -6,6 +6,9 @@
   "setting": {
     "select_project_folder": "프로젝트 폴더 지정",
     "change_project_folder": "프로젝트 폴더 변경",
+    "parent_folder": "상위 폴더",
+    "view_grid": "격자 보기",
+    "view_list": "목록 보기",
     "video_duration": "영상 길이",
     "seconds": "초단위",
     "seconds_unit": "초",

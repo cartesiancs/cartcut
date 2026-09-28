@@ -23,9 +23,11 @@
 /*
  * ------------------------------------------------------- the file browser
  *
- * `<asset-list>`'s tiles only. The sidebar's other tile grids (LUTs, text
- * presets, templates, utilities) are Bootstrap columns inside a `.row` and
- * share nothing below; `.asset` above is the whole of what they have in common.
+ * `<asset-list>`'s tiles, and the Fx tab's and the template library's, which
+ * reuse the grid, the well and the name so every browsable collection in the
+ * sidebar reads as one grid (`_browse.scss` adds only their headings and
+ * states). The text presets and utilities are still Bootstrap columns inside a
+ * `.row`; `.asset` above is the whole of what those have in common.
  */
 
 asset-list {

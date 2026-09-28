@@ -242,14 +242,20 @@ export class ControlText extends LitElement {
     );
 
     return html`
-      <div class="px-0 py-1">
-        <input
-          type="search"
-          class="form-control form-control-sm bg-default text-light"
-          placeholder="Search fonts"
-          .value=${this.query}
-          @input=${this._handleInputQuery}
-        />
+      <div class="browse-bar">
+        <label class="browse-field">
+          <span class="material-symbols-outlined browse-field-icon"
+            >search</span
+          >
+          <input
+            type="search"
+            class="browse-input"
+            spellcheck="false"
+            placeholder="Search fonts"
+            .value=${this.query}
+            @input=${this._handleInputQuery}
+          />
+        </label>
       </div>
 
       <div class="row px-2">

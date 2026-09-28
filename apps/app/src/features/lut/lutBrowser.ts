@@ -1,10 +1,10 @@
 /**
  * The LUT panel's tile grid.
  *
- * Deliberately shaped like `fx/fxPresetBrowser.ts` — same tile markup, same
- * `.asset` hover, same search box, same uppercase category headings in enum
- * order — because it sits one toggle away from it, inside the same "Fx" tab,
- * and two grids that browse alike should look alike. What differs is what a
+ * Deliberately shaped like `fx/fxPresetBrowser.ts` (the same tile markup, the
+ * same `.asset` hover, the same `_browse.scss` search bar and category headings
+ * in enum order) because it sits one toggle away from it, inside the same "Fx"
+ * tab, and two grids that browse alike should look alike. What differs is what a
  * click *does*, and that is the whole design of the feature:
  *
  * | gesture | result |
@@ -319,32 +319,35 @@ export class LutBrowser extends LitElement {
       .includes(this.query);
   }
 
+  /**
+   * One tile, in the file browser's shape. `is-on` marks the LUT the whole
+   * selection already carries, as a ring and a check on the well
+   * (`_browse.scss`).
+   */
   private tile(preset: FxPreset, current: string | null) {
     const active = current === preset.id;
     return html`
       <div
-        class="col-6 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
+        class="asset asset-tile ${active ? "is-on" : ""}"
         draggable="true"
         title=${preset.name}
         @click=${() => this.apply(preset)}
         @dragstart=${(e: DragEvent) => this.handleDragStart(e, preset)}
       >
-        <canvas
-          data-lut=${preset.id}
-          width=${LUT_PREVIEW_W}
-          height=${LUT_PREVIEW_H}
-          style="width: 100%; aspect-ratio: 16/9; border-radius: 4px;
-                 background: #2b2c33; display: block; pointer-events: none;
-                 outline: ${active ? "2px solid #4b8dff" : "none"};
-                 outline-offset: -2px;"
-        ></canvas>
-        <span
-          class=${active ? "text-primary" : "text-light"}
-          style="font-size: 11px; margin-top: 2px; white-space: nowrap;
-                 overflow: hidden; text-overflow: ellipsis;"
-        >
-          ${preset.name}
-        </span>
+        <div class="asset-thumb">
+          <canvas
+            class="asset-thumb-img"
+            data-lut=${preset.id}
+            width=${LUT_PREVIEW_W}
+            height=${LUT_PREVIEW_H}
+          ></canvas>
+          ${active
+            ? html`<span class="material-symbols-outlined asset-thumb-check"
+                >check</span
+              >`
+            : null}
+        </div>
+        <span class="asset-name">${preset.name}</span>
       </div>
     `;
   }
@@ -383,57 +386,79 @@ export class LutBrowser extends LitElement {
         @dragover=${(e: DragEvent) => e.preventDefault()}
         @drop=${(e: DragEvent) => void this.handleDrop(e)}
       >
-        <div class="px-0 pt-1 d-flex gap-1">
-          <input
-            type="search"
-            class="form-control form-control-sm bg-dark text-light border-secondary"
-            style="font-size: 11px;"
-            placeholder="Search LUTs"
-            @input=${(e: Event) => {
-              this.query = (e.target as HTMLInputElement).value
-                .trim()
-                .toLowerCase();
-              this.requestUpdate();
-            }}
-          />
+        <div class="browse-bar">
+          <label class="browse-field">
+            <span class="material-symbols-outlined browse-field-icon"
+              >search</span
+            >
+            <input
+              type="search"
+              class="browse-input"
+              spellcheck="false"
+              placeholder="Search LUTs"
+              @input=${(e: Event) => {
+                this.query = (e.target as HTMLInputElement).value
+                  .trim()
+                  .toLowerCase();
+                this.requestUpdate();
+              }}
+            />
+          </label>
           <button
-            class="btn btn-sm btn-outline-secondary text-nowrap flex-shrink-0"
-            style="font-size: 11px;"
+            type="button"
+            class="browse-btn"
             title="Import a .cube, .3dl or LUT image"
+            aria-label="Import a .cube, .3dl or LUT image"
             @click=${() => void this.handleImport()}
           >
-            Import
+            <span class="material-symbols-outlined">upload</span>
           </button>
         </div>
 
         ${broken.length > 0
-          ? html`<div class="text-warning px-2 pt-2" style="font-size: 10px;">
-              ${broken.length} LUT${broken.length === 1 ? "" : "s"} could not be
-              read: ${broken.map((f) => f.message).join("; ")}
+          ? html`<div class="browse-alert">
+              <span class="material-symbols-outlined">warning</span>
+              <span>
+                ${broken.length} LUT${broken.length === 1 ? "" : "s"} could not
+                be read: ${broken.map((f) => f.message).join("; ")}
+              </span>
             </div>`
           : null}
         ${all.length === 0
-          ? html`<div class="text-secondary p-2" style="font-size: 11px;">
-              No LUTs installed.
+          ? html`<div class="browse-empty">
+              <div class="browse-empty-icon">
+                <span class="material-symbols-outlined">palette</span>
+              </div>
+              <div class="browse-empty-title">No LUTs installed</div>
+              <div class="browse-empty-text">
+                Import a .cube, .3dl or LUT image, or drop one here.
+              </div>
             </div>`
           : sections.length === 0
-            ? html`<div class="text-secondary p-2" style="font-size: 11px;">
-                Nothing matches that.
+            ? html`<div class="browse-empty">
+                <div class="browse-empty-icon">
+                  <span class="material-symbols-outlined">search_off</span>
+                </div>
+                <div class="browse-empty-title">No matches</div>
+                <div class="browse-empty-text">
+                  Try another name or category.
+                </div>
               </div>`
             : sections.map(
                 (section) => html`
-                  <div
-                    class="text-secondary px-2 pt-2"
-                    style="font-size: 10px; text-transform: uppercase;
-                           letter-spacing: 0.06em;"
-                  >
-                    ${section.label}
-                  </div>
-                  <div class="row px-2">
-                    ${section.presets.map((preset) =>
-                      this.tile(preset, current),
-                    )}
-                  </div>
+                  <section class="browse-section">
+                    <div class="browse-section-head">
+                      <span class="browse-section-title">${section.label}</span>
+                      <span class="browse-section-count">
+                        ${section.presets.length}
+                      </span>
+                    </div>
+                    <div class="asset-grid browse-grid">
+                      ${section.presets.map((preset) =>
+                        this.tile(preset, current),
+                      )}
+                    </div>
+                  </section>
                 `,
               )}
       </div>

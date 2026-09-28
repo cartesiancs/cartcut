@@ -127,6 +127,19 @@ export class FxPresetBrowser extends LitElement {
     if (presetsOfKind(this.kind).length === 0) {
       void loadPresets().then(() => this.requestUpdate());
     }
+
+    // Repaint when this grid is first shown. `ControlFx` hides the two it is
+    // not showing with `d-none`, which `paintTiles` declines to paint into,
+    // and switching to one changes no property of it: without this the
+    // Transitions grid opened on blank wells until an unrelated store change
+    // happened to re-render it. `lutBrowser` carries the same observer.
+    const visibility = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        this.paintTiles();
+      }
+    });
+    visibility.observe(this);
+    this.teardown.push(() => visibility.disconnect());
   }
 
   disconnectedCallback() {
@@ -261,10 +274,16 @@ export class FxPresetBrowser extends LitElement {
 
   // ----------------------------------------------------------------- render
 
+  /**
+   * One tile, in the file browser's shape: `.asset-thumb` holding the picture,
+   * `.asset-name` under it. The tile's text is the name and nothing else,
+   * because `tests/e2e/harness/ui.ts` finds a preset by matching the whole of
+   * it.
+   */
   private tile(preset: FxPreset) {
     return html`
       <div
-        class="col-6 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
+        class="asset asset-tile"
         draggable="true"
         title=${preset.author != null
           ? preset.name + " — " + preset.author
@@ -277,23 +296,17 @@ export class FxPresetBrowser extends LitElement {
         <!--
           A live frame, rendered through the same compositor the timeline uses,
           so what the tile shows is what the preset actually does rather than an
-          artist's impression of it. Pointer events are off because the parent
-          owns the click and the drag.
+          artist's impression of it. The well is the placeholder until it lands.
         -->
-        <canvas
-          data-preset=${preset.id}
-          width=${PREVIEW_W}
-          height=${PREVIEW_H}
-          style="width: 100%; aspect-ratio: 16/9; border-radius: 4px;
-                 background: #2b2c33; display: block; pointer-events: none;"
-        ></canvas>
-        <span
-          class="text-light"
-          style="font-size: 11px; margin-top: 2px;
-                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
-        >
-          ${preset.name}
-        </span>
+        <div class="asset-thumb">
+          <canvas
+            class="asset-thumb-img"
+            data-preset=${preset.id}
+            width=${PREVIEW_W}
+            height=${PREVIEW_H}
+          ></canvas>
+        </div>
+        <span class="asset-name">${preset.name}</span>
       </div>
     `;
   }
@@ -456,36 +469,56 @@ export class FxPresetBrowser extends LitElement {
     const total = presetsOfKind(this.kind).length;
 
     return html`
-      <div class="px-0 pt-1">
-        <input
-          type="search"
-          class="form-control form-control-sm bg-dark text-light border-secondary"
-          style="font-size: 11px;"
-          placeholder=${"Search " + total + " " + this.kind + "s"}
-          @input=${(e: Event) => this.handleSearch(e)}
-        />
+      <div class="browse-bar">
+        <label class="browse-field">
+          <span class="material-symbols-outlined browse-field-icon"
+            >search</span
+          >
+          <input
+            type="search"
+            class="browse-input"
+            spellcheck="false"
+            placeholder=${"Search " + this.kind + "s"}
+            @input=${(e: Event) => this.handleSearch(e)}
+          />
+        </label>
       </div>
 
       ${total === 0
-        ? html`<div class="text-secondary p-2" style="font-size: 11px;">
-            No ${this.kind} presets installed.
+        ? html`<div class="browse-empty">
+            <div class="browse-empty-icon">
+              <span class="material-symbols-outlined">auto_awesome</span>
+            </div>
+            <div class="browse-empty-title">No ${this.kind} presets</div>
+            <div class="browse-empty-text">
+              None are installed yet. Presets added later appear here.
+            </div>
           </div>`
         : sections.length === 0
-          ? html`<div class="text-secondary p-2" style="font-size: 11px;">
-              Nothing matches that.
+          ? html`<div class="browse-empty">
+              <div class="browse-empty-icon">
+                <span class="material-symbols-outlined">search_off</span>
+              </div>
+              <div class="browse-empty-title">No matches</div>
+              <div class="browse-empty-text">
+                Try another name, category or author.
+              </div>
             </div>`
           : sections.map(
               (section) => html`
-                <div
-                  class="text-secondary px-2 pt-2"
-                  style="font-size: 10px; text-transform: uppercase;
-                         letter-spacing: 0.06em;"
-                >
-                  ${CATEGORY_LABELS[section.category] ?? section.category}
-                </div>
-                <div class="row px-2">
-                  ${section.presets.map((preset) => this.tile(preset))}
-                </div>
+                <section class="browse-section">
+                  <div class="browse-section-head">
+                    <span class="browse-section-title">
+                      ${CATEGORY_LABELS[section.category] ?? section.category}
+                    </span>
+                    <span class="browse-section-count">
+                      ${section.presets.length}
+                    </span>
+                  </div>
+                  <div class="asset-grid browse-grid">
+                    ${section.presets.map((preset) => this.tile(preset))}
+                  </div>
+                </section>
               `,
             )}
     `;

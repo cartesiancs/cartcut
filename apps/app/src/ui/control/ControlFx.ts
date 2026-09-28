@@ -15,6 +15,10 @@
  * two icons a user has to learn the difference between, and the column has the
  * slot back.
  *
+ * The look is shared rather than owned: the toggle is the inspector's tab
+ * track and everything under it is `_browse.scss` over the file browser's
+ * tiles, so the three grids read as the same panel the asset list is.
+ *
  * The grids are `<fx-preset-browser>`, reused with a different `kind`, and
  * `<lut-browser>`, which is its own component because what a click *does*
  * differs — a LUT grades the selected clips, it does not add an element.
@@ -59,35 +63,46 @@ export class ControlUiFx extends LitElement {
   }
 
   /**
-   * `btn-xs` and `flex-fill`, not the `btn-sm` two tabs used to wear.
+   * One cell of the inspector's own tab track (`.opt-tabs` in `_option.scss`),
+   * so the sidebar and the inspector switch panes with the same control.
    *
-   * The sidebar column is about 430px wide and `overflow-x` is hidden on the
-   * pane, so a third button at the old size does not shrink — it is simply cut
-   * off the right edge and cannot be clicked. Three equal shares at 11px fit,
-   * and 11px is the size the rest of both grids' copy already uses.
+   * Three equal shares that never clip: the column is about 430px at its stock
+   * width and `overflow-x` is hidden on the pane, so a button that does not
+   * shrink is cut off the right edge and cannot be clicked. `opt-tabs-few`
+   * keeps the names at every width.
+   *
+   * The LUT glyph is `palette` and nothing called `filter_*`:
+   * `lut-panel.spec.ts` reads this button's text, ligature included, and
+   * refuses the word.
    */
-  private tab(panel: FxPanel, label: string) {
+  private tab(panel: FxPanel, label: string, icon: string) {
+    const on = this.activePanel === panel;
     return html`
       <button
-        class="btn btn-xs ${this.activePanel === panel
-          ? "btn-primary"
-          : "btn-default"} text-light mt-1 flex-fill"
+        type="button"
+        class="opt-tab ${on ? "is-on" : ""}"
         data-panel=${panel}
+        title=${label}
+        aria-selected=${on ? "true" : "false"}
         @click=${() => this.select(panel)}
       >
-        ${label}
+        <span class="material-symbols-outlined">${icon}</span>
+        <span class="opt-tab-label">${label}</span>
       </button>
     `;
   }
 
   render() {
     return html`
-      <div class="d-flex gap-1 px-0">
-        ${this.tab("effect", "Effects")}
-        ${this.tab("transition", "Transitions")} ${this.tab("lut", "LUTs")}
+      <div class="opt-tabs opt-tabs-few browse-tabs" role="tablist">
+        <div class="opt-tabs-row">
+          ${this.tab("effect", "Effects", "auto_awesome")}
+          ${this.tab("transition", "Transitions", "transition_fade")}
+          ${this.tab("lut", "LUTs", "palette")}
+        </div>
       </div>
 
-      <div class="mt-2">
+      <div>
         <!--
           Every grid stays mounted and the others are hidden, rather than being
           torn down and rebuilt on every toggle. Each subscribes to the selection

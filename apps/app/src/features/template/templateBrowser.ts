@@ -166,23 +166,25 @@ export class TemplateBrowser extends LitElement {
   }
 
   /**
-   * One tile.
-   *
-   * The `asset` class and this column shape are the ones `fxPresetBrowser` and
-   * the asset panel already use, so a template tile sits the same way in the
-   * same grid rather than bringing a stylesheet of its own.
+   * One tile, in the file browser's shape (`.asset-thumb` over `.asset-name`),
+   * so a template sits in the same grid as a file rather than bringing a
+   * stylesheet of its own.
    *
    * The thumbnail is a `file://` image when the archive shipped one and an
-   * icon when it did not — deliberately *not* a live render of the template.
+   * icon when it did not, deliberately *not* a live render of the template.
    * That is the argument `lut/sampleImage.ts` makes about its own fixed
    * picture: a grid is a comparison, and one that moved under the user every
    * time the playhead did would have them judging two templates against two
    * different frames with nothing on screen saying so.
+   *
+   * Remove sits over the well and shows on hover. In the caption row it took
+   * width from the name on exactly the tiles whose names are longest, the ones
+   * a user typed.
    */
   private tile(listing: TemplateListing) {
     return html`
       <div
-        class="col-6 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
+        class="asset asset-tile"
         draggable="true"
         aria-event="template-tile"
         data-template=${listing.id}
@@ -190,41 +192,33 @@ export class TemplateBrowser extends LitElement {
         @click=${() => this.handleAdd(listing)}
         @dragstart=${(e: DragEvent) => this.handleDragStart(e, listing)}
       >
-        ${listing.thumbnailPath == null
-          ? html`<div
-              style="width: 100%; aspect-ratio: 16/9; border-radius: 4px;
-                     background: #2b2c33; display: flex; align-items: center;
-                     justify-content: center; pointer-events: none;"
-            >
-              <span class="material-symbols-outlined" style="color: #5a6473;"
+        <div class="asset-thumb">
+          ${listing.thumbnailPath == null
+            ? html`<span class="material-symbols-outlined asset-thumb-icon"
                 >dashboard_customize</span
-              >
-            </div>`
-          : html`<img
-              src=${`file://${listing.thumbnailPath}`}
-              alt=""
-              style="width: 100%; aspect-ratio: 16/9; border-radius: 4px;
-                     object-fit: cover; background: #2b2c33; display: block;
-                     pointer-events: none;"
-            />`}
-        <div class="d-flex align-items-center" style="margin-top: 2px;">
-          <span
-            class="text-light"
-            style="font-size: 11px; flex: 1 1 auto; white-space: nowrap;
-                   overflow: hidden; text-overflow: ellipsis;"
-            >${listing.name}</span
-          >
+              >`
+            : html`<img
+                class="asset-thumb-img"
+                src=${`file://${listing.thumbnailPath}`}
+                alt=""
+                decoding="async"
+              />`}
           ${listing.origin === "user"
-            ? html`<span
-                class="material-symbols-outlined icon-xs text-secondary"
+            ? html`<button
+                type="button"
+                class="asset-thumb-action"
                 aria-event="template-remove"
                 data-template=${listing.id}
-                style="cursor: pointer;"
+                title="Remove ${listing.name}"
+                aria-label="Remove ${listing.name}"
+                draggable="false"
                 @click=${(e: Event) => this.handleRemove(e, listing)}
-                >delete</span
-              >`
+              >
+                <span class="material-symbols-outlined">delete</span>
+              </button>`
             : ""}
         </div>
+        <span class="asset-name">${listing.name}</span>
       </div>
     `;
   }
@@ -234,9 +228,50 @@ export class TemplateBrowser extends LitElement {
       return "";
     }
     return html`
-      <div class="text-secondary px-2 mt-2 text-uppercase">${title}</div>
-      <div class="row px-2">${rows.map((row) => this.tile(row))}</div>
+      <section class="browse-section">
+        <div class="browse-section-head">
+          <span class="browse-section-title">${title}</span>
+          <span class="browse-section-count">${rows.length}</span>
+        </div>
+        <div class="asset-grid browse-grid">
+          ${rows.map((row) => this.tile(row))}
+        </div>
+      </section>
     `;
+  }
+
+  /** Nothing installed, or nothing matching: the two ways the grid is empty. */
+  private empty(visible: number) {
+    if (this.templates.length === 0) {
+      return html`<div class="browse-empty">
+        <div class="browse-empty-icon">
+          <span class="material-symbols-outlined">dashboard_customize</span>
+        </div>
+        <div class="browse-empty-title">No templates yet</div>
+        <div class="browse-empty-text">
+          Import a .cttpl file to reuse a whole edit as one clip.
+        </div>
+        <button
+          type="button"
+          class="browse-text-btn is-primary"
+          ?disabled=${this.busy}
+          @click=${() => this.handleImport()}
+        >
+          <span class="material-symbols-outlined">upload</span>
+          Import template
+        </button>
+      </div>`;
+    }
+    if (visible === 0) {
+      return html`<div class="browse-empty">
+        <div class="browse-empty-icon">
+          <span class="material-symbols-outlined">search_off</span>
+        </div>
+        <div class="browse-empty-title">No matches</div>
+        <div class="browse-empty-text">Try another name.</div>
+      </div>`;
+    }
+    return "";
   }
 
   render() {
@@ -246,40 +281,46 @@ export class TemplateBrowser extends LitElement {
     const mine = visible.filter((row) => row.origin === "user");
 
     return html`
-      <div class="d-flex gap-1 px-2">
-        <input
-          type="text"
-          class="form-control form-control-sm bg-default text-light"
-          aria-event="template-search"
-          .value=${this.query}
-          @input=${(e: Event) =>
-            (this.query = (e.target as HTMLInputElement).value)}
-        />
+      <div class="browse-bar">
+        <label class="browse-field">
+          <span class="material-symbols-outlined browse-field-icon"
+            >search</span
+          >
+          <input
+            type="search"
+            class="browse-input"
+            spellcheck="false"
+            placeholder="Search templates"
+            aria-event="template-search"
+            .value=${this.query}
+            @input=${(e: Event) =>
+              (this.query = (e.target as HTMLInputElement).value)}
+          />
+        </label>
         <button
-          class="btn btn-sm btn-default text-light"
+          type="button"
+          class="browse-btn"
           aria-event="template-import"
+          title="Import a .cttpl template"
+          aria-label="Import a .cttpl template"
+          ?disabled=${this.busy}
           @click=${() => this.handleImport()}
         >
-          <span class="material-symbols-outlined icon-sm">upload</span>
+          <span class="material-symbols-outlined">upload</span>
         </button>
         <button
-          class="btn btn-sm btn-default text-light"
+          type="button"
+          class="browse-btn"
           aria-event="template-folder"
+          title="Show the templates folder"
+          aria-label="Show the templates folder"
           @click=${() => this.handleOpenFolder()}
         >
-          <span class="material-symbols-outlined icon-sm">folder</span>
+          <span class="material-symbols-outlined">folder</span>
         </button>
       </div>
 
-      ${this.templates.length === 0
-        ? html`<div
-            class="d-flex align-items-center gap-2 px-2 mt-3 text-secondary"
-          >
-            <span class="material-symbols-outlined icon-sm">upload</span>
-            <span>.cttpl</span>
-          </div>`
-        : ""}
-      ${this.section("Templates", builtin)}
+      ${this.empty(visible.length)} ${this.section("Templates", builtin)}
       <!--
         A section of its own, so a user who wonders where a template came from
         can see it, and so the delete glyph stays off rows this panel does not

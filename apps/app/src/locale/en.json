@@ -6,6 +6,9 @@
   "setting": {
     "select_project_folder": "Select Folder",
     "change_project_folder": "Change Folder",
+    "parent_folder": "Parent Folder",
+    "view_grid": "Grid",
+    "view_list": "List",
     "video_duration": "Duration",
     "seconds": "Seconds",
     "seconds_unit": "s",

@@ -1,0 +1,554 @@
+/*
+ * ----------------------------------------------- the sidebar's browse panels
+ *
+ * The strip across the top of every sidebar panel that browses a collection,
+ * and what sits under it: the file browser's path, the search over text
+ * presets, effects, transitions, LUTs and templates, the buttons beside them,
+ * the section headings between groups of tiles and the empty state.
+ *
+ * Classes only, and no shared component. What sits in each bar differs (a path
+ * and a view switch in one, an import in two, a search alone in the rest), so a
+ * component would take nearly all of its content as properties and buy nothing
+ * over the markup. Each panel writes its own bar against these rules, which is
+ * what keeps the five looking like one app without coupling them.
+ *
+ * The palette is `_option.scss`'s variables rather than a copy of them, so the
+ * sidebar and the inspector either side of the preview keep meaning the same
+ * thing by the same grey. The tiles are `_asset.scss`'s: `.asset-grid`,
+ * `.asset-thumb` and `.asset-name` are the file browser's own, reused.
+ *
+ * Nothing here is `.btn` or `.form-control`, for the reason `_option.scss`
+ * gives: the design system pins both classes' padding, border and radius with
+ * `!important`, so a control built on either cannot state its own box.
+ */
+
+$browse-h: 30px;
+$browse-radius: 8px;
+$browse-hover: #1f2327;
+$browse-placeholder: #666d75;
+
+/*
+ * A custom element with no styles is `display: inline`. These hosts hold block
+ * content, and four of them are observed by an `IntersectionObserver` to learn
+ * when their pane is first shown: an inline box split around block children
+ * reports a rect that has nothing to do with where its tiles are.
+ */
+asset-browser,
+control-ui-fx,
+fx-preset-browser,
+lut-browser,
+control-ui-template,
+template-browser {
+  display: block;
+}
+
+/* --------------------------------------------------------------------- bar */
+
+.browse-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+/*
+ * The field. A `<label>` around the search box, so a click on the magnifier
+ * focuses the input the way it would on any search field.
+ *
+ * The ring is on the shell and not the input: the input is borderless inside
+ * it, and `:focus-within` is what lets the glyph and the frame light together.
+ */
+.browse-field {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: $browse-h;
+  padding: 0 5px 0 8px;
+  margin: 0;
+  border: 1px solid $opt-line;
+  border-radius: $browse-radius;
+  background-color: $opt-field;
+  color: $opt-text;
+  cursor: text;
+  transition:
+    border-color 140ms ease-out,
+    box-shadow 140ms ease-out;
+}
+
+.browse-field:hover {
+  border-color: $opt-line-strong;
+}
+
+.browse-field:focus-within {
+  border-color: #4a5158;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
+}
+
+/*
+ * Two classes, for the reason `_asset.scss` gives: `material-symbols/outlined`
+ * is imported after this file and its single-class rule would win at 24px.
+ */
+.browse-field > .browse-field-icon {
+  flex: none;
+  font-size: 16px;
+  line-height: 1;
+  color: $opt-label;
+  transition: color 140ms ease-out;
+}
+
+.browse-field:focus-within > .browse-field-icon {
+  color: $opt-text;
+}
+
+input.browse-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  box-shadow: none;
+  color: $opt-bright;
+  font-size: 12px;
+}
+
+input.browse-input::placeholder {
+  color: $browse-placeholder;
+}
+
+/*
+ * Chromium's own clear button, redrawn rather than replaced. It already fires
+ * `input` with an empty value, which is the event every panel listens to, so a
+ * button of our own would need each panel to bind its value and clear it by
+ * hand for the same result.
+ */
+input.browse-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 0 0 0 4px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06)
+    url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23c3c9cf' stroke-linecap='round' stroke-width='1.6' d='M5 5l6 6m0-6l-6 6'/%3e%3c/svg%3e")
+    center / 12px 12px no-repeat;
+  cursor: pointer;
+}
+
+input.browse-input::-webkit-search-cancel-button:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+/*
+ * The file browser's location: the same shell, read rather than typed.
+ *
+ * Ellipsed at the **start**. A folder's own name is at the end of its path, and
+ * the old disabled input clipped the other end, so every folder under the home
+ * directory read `/Users/<name>/Docu` whichever one was open. `direction: rtl`
+ * moves the overflow to the left edge; the `<bdi dir="ltr">` inside keeps the
+ * slashes where a path has them, which RTL reordering would otherwise move.
+ */
+.browse-field.browse-field-path {
+  cursor: default;
+}
+
+.browse-field-path:hover {
+  border-color: $opt-line;
+}
+
+.browse-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  color: $opt-label;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.browse-path-leaf {
+  color: $opt-bright;
+}
+
+/* ------------------------------------------------------------------ buttons */
+
+/*
+ * The square outline button: up, change folder, import, open folder. The same
+ * height as the field, so a bar is one line whatever it holds.
+ */
+.browse-btn {
+  appearance: none;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: $browse-h;
+  height: $browse-h;
+  padding: 0;
+  margin: 0;
+  border: 1px solid $opt-line;
+  border-radius: $browse-radius;
+  background-color: transparent;
+  color: $opt-label;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    border-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.browse-btn > .material-symbols-outlined {
+  font-size: 17px;
+  line-height: 1;
+}
+
+.browse-btn:hover:not(:disabled) {
+  border-color: $opt-line-strong;
+  background-color: $browse-hover;
+  color: $opt-bright;
+}
+
+.browse-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.browse-btn:focus-visible,
+.browse-seg-item:focus-visible,
+.browse-text-btn:focus-visible {
+  outline: 1px solid #5a6067;
+  outline-offset: 1px;
+}
+
+/*
+ * A closed choice at bar height: the file browser's grid and list. Both
+ * options are always drawn, one of them raised, where the old control was one
+ * button showing the current mode's glyph and meaning "the other one".
+ */
+switch-showtype {
+  display: block;
+  flex: none;
+}
+
+.browse-seg {
+  display: flex;
+  gap: 2px;
+  height: $browse-h;
+  padding: 2px;
+  border: 1px solid $opt-line;
+  border-radius: $browse-radius;
+  background-color: #121416;
+}
+
+.browse-seg-item {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 6px;
+  background-color: transparent;
+  color: $opt-label;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.browse-seg-item > .material-symbols-outlined {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.browse-seg-item:hover:not(.is-on) {
+  color: $opt-text;
+}
+
+.browse-seg-item.is-on {
+  background-color: $opt-raised;
+  color: $opt-bright;
+}
+
+/*
+ * A word, for the one action an empty panel offers. `is-primary` is the light
+ * fill, and the only light control in the sidebar, so the empty state has one
+ * obvious thing to press.
+ */
+.browse-text-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  margin: 0;
+  border: 1px solid $opt-line-strong;
+  border-radius: $browse-radius;
+  background-color: $opt-raised;
+  color: $opt-bright;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 140ms ease-out;
+}
+
+.browse-text-btn > .material-symbols-outlined {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.browse-text-btn:hover:not(:disabled) {
+  background-color: #343b42;
+}
+
+.browse-text-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.browse-text-btn.is-primary {
+  border-color: transparent;
+  background-color: $opt-bright;
+  color: #15171a;
+}
+
+.browse-text-btn.is-primary:hover:not(:disabled) {
+  background-color: #d9dde1;
+}
+
+/* ------------------------------------------------------------------- tabs */
+
+/*
+ * The Fx tab's Effects / Transitions / LUTs switch is the inspector's own
+ * `.opt-tabs`. Only the gap under it differs: in the inspector a section card
+ * follows, here a bar with its own margin.
+ */
+.browse-tabs.opt-tabs {
+  margin-bottom: 6px;
+}
+
+/*
+ * The other way round from the inspector's crowded bar: below the width where
+ * a glyph and "Transitions" both fit (about 264px, measured), the glyphs go and
+ * the names stay. Three names fit a column far narrower than three glyphs and
+ * names, and a word is what tells Effects from LUTs; the inspector's icon-only
+ * fallback would leave three pictures to decode.
+ */
+@container (max-width: 280px) {
+  .browse-tabs .opt-tab > .material-symbols-outlined {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------- sections */
+
+.browse-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  /* 5px in from the bar, which is where the tiles' wells start. */
+  padding: 10px 5px 0;
+}
+
+.browse-section-title {
+  min-width: 0;
+  color: $opt-text;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.browse-section-count {
+  flex: none;
+  color: #5c646d;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The file browser's grid, with less room under it: `.asset-grid` closes a
+ * whole folder, and here a heading follows every few tiles.
+ */
+.asset-grid.browse-grid {
+  padding-bottom: 2px;
+}
+
+/*
+ * A preview is a picture of the tile, not a target inside it. The tile owns
+ * the click and the drag; an `<img>` left hit-testable starts a drag of its
+ * own image instead of the tile's payload.
+ */
+.browse-grid .asset-thumb > canvas,
+.browse-grid .asset-thumb > img {
+  pointer-events: none;
+}
+
+/*
+ * The tile that is already applied: the LUT every selected clip carries.
+ * A ring on the well and a check in its corner, since the ring alone reads as
+ * hover on a panel where every tile has one.
+ */
+.asset.is-on > .asset-thumb {
+  border-color: rgba(241, 243, 245, 0.85);
+  box-shadow: 0 0 0 1px rgba(241, 243, 245, 0.85);
+}
+
+.asset.is-on > .asset-name {
+  color: $opt-bright;
+}
+
+.asset-thumb > .asset-thumb-check {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background-color: $opt-bright;
+  color: #15171a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/*
+ * A tile's own action, over its well: removing a template the user imported.
+ * Out of sight until the tile is hovered or the button is focused, so a grid of
+ * twenty does not carry twenty bins.
+ */
+.asset-thumb > .asset-thumb-action {
+  appearance: none;
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 6px;
+  background-color: rgba(8, 9, 11, 0.62);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  color: $opt-text;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 140ms ease-out,
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.asset-thumb > .asset-thumb-action > .material-symbols-outlined {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.asset:hover .asset-thumb-action,
+.asset-thumb > .asset-thumb-action:focus-visible {
+  opacity: 1;
+}
+
+.asset-thumb > .asset-thumb-action:hover {
+  background-color: rgba(220, 53, 69, 0.9);
+  color: #ffffff;
+}
+
+/* ------------------------------------------------------------------- empty */
+
+/*
+ * Nothing to show: no folder picked, nothing installed, nothing matching. One
+ * shape for all of them, so an empty panel reads as a state rather than as a
+ * panel that failed to draw.
+ */
+.browse-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 26px 16px;
+  margin-top: 4px;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  text-align: center;
+}
+
+.browse-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 6px;
+  border: 1px solid $opt-line;
+  border-radius: 9px;
+  background-color: $opt-card;
+  color: $opt-text;
+}
+
+.browse-empty-icon > .material-symbols-outlined {
+  font-size: 19px;
+  line-height: 1;
+}
+
+.browse-empty-title {
+  color: $opt-bright;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.browse-empty-text {
+  max-width: 230px;
+  color: $opt-label;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.browse-empty > .browse-text-btn {
+  margin-top: 10px;
+}
+
+/* ------------------------------------------------------------------- alert */
+
+.browse-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 7px 9px;
+  margin-bottom: 6px;
+  border: 1px solid rgba(240, 180, 70, 0.25);
+  border-radius: $browse-radius;
+  background-color: rgba(240, 180, 70, 0.06);
+  color: #e0b060;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.browse-alert > .material-symbols-outlined {
+  flex: none;
+  font-size: 14px;
+  line-height: 1.1;
+}
