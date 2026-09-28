@@ -182,27 +182,18 @@ export class Timeline extends LitElement {
   }
 
   togglePlayButton() {
-    if (this.isPlay) {
-      return html`<button
-        id="playToggle"
-        class="btn btn-xs2 btn-transparent"
-        @click=${this._handleClickStop}
+    const label = this.isPlay ? "Stop" : "Play";
+    return html`<button
+      id="playToggle"
+      class="transport-btn transport-btn-play"
+      title="${label} (Space)"
+      aria-label=${label}
+      @click=${this.isPlay ? this._handleClickStop : this._handleClickPlay}
+    >
+      <span class="material-symbols-outlined"
+        >${this.isPlay ? "stop" : "play_arrow"}</span
       >
-        <span class="material-symbols-outlined icon-white icon-md">
-          stop_circle
-        </span>
-      </button>`;
-    } else {
-      return html`<button
-        id="playToggle"
-        class="btn btn-xs2 btn-transparent"
-        @click=${this._handleClickPlay}
-      >
-        <span class="material-symbols-outlined icon-white icon-md">
-          play_circle
-        </span>
-      </button>`;
-    }
+    </button>`;
   }
 
   keyframeOption() {
@@ -226,6 +217,80 @@ export class Timeline extends LitElement {
 
   render() {
     return html`
+      <style>
+        /* Play, reset and the timecode, as shadcn/ui icon buttons. Bare
+           elements rather than .btn: the design system and style.scss set a
+           .btn's padding !important, so a square could not centre its glyph.
+           28px, because the ruler under this row sits at a hard-coded top of
+           40px and the row must not grow. Greys are _option.scss's. */
+        .transport {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+
+        .transport-btn {
+          appearance: none;
+          flex: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 28px;
+          height: 28px;
+          padding: 0;
+          margin: 0;
+          border: 1px solid transparent;
+          border-radius: 6px;
+          background-color: transparent;
+          color: #7f878f;
+          cursor: pointer;
+          transition:
+            background-color 150ms ease,
+            color 150ms ease;
+        }
+
+        .transport-btn > .material-symbols-outlined {
+          font-size: 20px;
+          line-height: 1;
+        }
+
+        .transport-btn:hover {
+          background-color: #1f2327;
+          color: #c3c9cf;
+        }
+
+        .transport-btn:focus-visible {
+          outline: none;
+          box-shadow: 0 0 0 2px rgba(195, 201, 207, 0.35);
+        }
+
+        /* Play is the one a hand looks for, so it is the one with a fill. */
+        .transport-btn-play {
+          border-color: rgba(255, 255, 255, 0.07);
+          background-color: #1c1f23;
+          color: #c3c9cf;
+        }
+
+        .transport-btn-play:hover {
+          background-color: #2a3036;
+          color: #f1f3f5;
+        }
+
+        /* A readout: monospaced with tabular figures, so the digits do not
+           shift sideways as they count during playback. */
+        .transport-timecode {
+          margin-left: 4px;
+          padding: 3px 8px;
+          border-radius: 6px;
+          color: #c3c9cf;
+          font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+          font-size: 12px;
+          font-variant-numeric: tabular-nums;
+          line-height: 20px;
+          white-space: nowrap;
+        }
+      </style>
+
       <div
         class="split-bottom-bar cursor-row-resize "
         @mousedown=${this._handleClickResizeBar}
@@ -233,18 +298,18 @@ export class Timeline extends LitElement {
 
       <div class="row mb-2">
         <div class="col-4">
-          <div class="d-flex justify-content-start">
+          <div class="transport">
             ${this.togglePlayButton()}
             <button
-              class="btn btn-xs2 btn-transparent ms-2"
+              class="transport-btn"
+              title="Go to start"
+              aria-label="Go to start"
               @click=${this._handleClickReset}
             >
-              <span class="material-symbols-outlined icon-white icon-md">
-                replay_circle_filled
-              </span>
+              <span class="material-symbols-outlined">replay</span>
             </button>
-            <b class="text-light ms-2"
-              >${formatTimecode(this.timelineCursor, this.fps)}</b
+            <span class="transport-timecode"
+              >${formatTimecode(this.timelineCursor, this.fps)}</span
             >
           </div>
         </div>
