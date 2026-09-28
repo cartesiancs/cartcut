@@ -592,12 +592,22 @@ body.is-scrubbing * {
   box-shadow: 0 0 5px #d5d5d5 !important;
 }
 
+// The rail's idle tabs take the asset and option panels' greys, from
+// `style/_option.scss` (imported above): muted at rest, lighter under the
+// pointer. The active tab keeps the accent.
 .btn-nav {
   background-color: transparent;
   outline: none;
   border: none;
   padding: 0.4rem 0.4rem;
-  color: #eeeef1;
+  color: $opt-label;
+  transition: color 140ms ease-out;
+}
+
+// `:not(.active)` because this and `.btn-nav.active` are both (0,2,0), and
+// the later one would turn the active tab grey under the pointer.
+.btn-nav:hover:not(.active) {
+  color: $opt-text;
 }
 
 .btn-nav.active {
