@@ -100,9 +100,9 @@ $browse-fade-h: 36px;
   height: $browse-fade-h;
   background: linear-gradient(
     to bottom,
-    $background-color 0%,
-    rgba($background-color, 0.82) 35%,
-    rgba($background-color, 0.4) 70%,
+    rgba($background-color, 0.6) 0%,
+    rgba($background-color, 0.35) 40%,
+    rgba($background-color, 0.12) 75%,
     rgba($background-color, 0) 100%
   );
   pointer-events: none;
