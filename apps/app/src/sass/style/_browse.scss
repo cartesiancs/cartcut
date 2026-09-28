@@ -85,6 +85,11 @@ $browse-fade-h: 36px;
  * scrolled, so its opacity follows the pane's own scroll over the first
  * `$browse-fade-h` and is fully in by the time a row has gone that far under.
  * The longhands come after the shorthand, which resets both of them.
+ *
+ * The resting `opacity: 0` is load-bearing. A pane with nothing to scroll (no
+ * folder picked, a read error, a short folder) has an inactive scroll timeline,
+ * and an animation on an inactive timeline applies no value at all, so the
+ * fade fell back to opacity 1 and ate the top edge of the empty state's box.
  */
 .browse-bar.is-floating::after {
   content: "";
@@ -101,6 +106,7 @@ $browse-fade-h: 36px;
     rgba($background-color, 0) 100%
   );
   pointer-events: none;
+  opacity: 0;
   animation: browse-fade-in linear both;
   animation-timeline: scroll(nearest block);
   animation-range: 0 $browse-fade-h;
