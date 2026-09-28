@@ -62,8 +62,17 @@ export type ScreenSource = { id: string; name: string };
  * pass takes real time on a long take, and a menu that says "Start Recording"
  * while the last one is still being written invites a second session that would
  * fight it for the encoder.
+ *
+ * `"countdown"` is the three seconds after Start, while the devices are opened
+ * and nothing is written yet. It locks the settings like a take does, because
+ * the capture is being configured from them as the numbers count.
  */
-export type RecorderState = "idle" | "recording" | "paused" | "processing";
+export type RecorderState =
+  | "idle"
+  | "countdown"
+  | "recording"
+  | "paused"
+  | "processing";
 
 export type TrayInput = {
   settings: RecordSettings;
@@ -179,10 +188,11 @@ export function buildTrayModel(input: TrayInput): TrayModel {
   const { settings, state } = input;
   const busy = state === "recording" || state === "paused";
   const processing = state === "processing";
+  const counting = state === "countdown";
 
   // Nothing about *what* is captured may change once capture has begun: the
   // encoders are configured from these values and are already running.
-  const settable = !busy && !processing;
+  const settable = !busy && !processing && !counting;
 
   const items: TrayItem[] = [];
 
@@ -197,6 +207,14 @@ export function buildTrayModel(input: TrayInput): TrayModel {
           ? undefined
           : "No screen is available to capture. Check Screen Recording permission for CartCut.",
     });
+  } else if (counting) {
+    items.push({
+      type: "normal",
+      id: "noop",
+      label: "Starting…",
+      enabled: false,
+    });
+    items.push({ type: "normal", id: "cancel", label: "Cancel" });
   } else if (processing) {
     items.push({
       type: "normal",
@@ -394,7 +412,9 @@ export function buildTrayModel(input: TrayInput): TrayModel {
         ? "CartCut — recording"
         : state === "paused"
           ? "CartCut — paused"
-          : "CartCut Recorder",
+          : counting
+            ? "CartCut: starting"
+            : "CartCut Recorder",
     items,
   };
 }

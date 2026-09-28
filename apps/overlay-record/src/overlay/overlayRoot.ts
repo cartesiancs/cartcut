@@ -32,12 +32,14 @@
 
 import { LitElement, css, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
+import { keyed } from "lit/directives/keyed.js";
 import { bubbleRect } from "@app/features/record/bubbleLayout";
 import {
   simplifyStroke,
   type StrokePoint,
 } from "@app/features/record/strokeRender";
 import { paintStroke } from "../paintStroke";
+import { COUNTDOWN_STEP_MS } from "@app/features/record/countdown";
 import {
   DEFAULT_RECORD_SETTINGS,
   type BubbleCorner,
@@ -48,6 +50,8 @@ import {
 type OverlayState = {
   drawing: boolean;
   recording: boolean;
+  /** The number to show before a take begins, or `null` for none. */
+  countdown: number | null;
   cameraDeviceId: string;
   bubbleSize: BubbleSize;
   bubbleCorner: BubbleCorner;
@@ -57,6 +61,7 @@ type OverlayState = {
 const INITIAL: OverlayState = {
   drawing: false,
   recording: false,
+  countdown: null,
   cameraDeviceId: "",
   bubbleSize: DEFAULT_RECORD_SETTINGS.bubbleSize,
   bubbleCorner: DEFAULT_RECORD_SETTINGS.bubbleCorner,
@@ -204,6 +209,92 @@ export class RecordOverlay extends LitElement {
         left 120ms ease,
         width 120ms ease,
         height 120ms ease;
+    }
+
+    /* The count before a take. This window is content-protected, so none of
+       it reaches the file; the dim only tells the person being recorded that
+       the recording has not begun yet. */
+    .countdown {
+      --count-size: clamp(180px, 26vmin, 320px);
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(0, 0, 0, 0.28);
+      pointer-events: none;
+      animation: countdown-dim 200ms ease-out both;
+    }
+
+    .count {
+      position: relative;
+      width: var(--count-size);
+      height: var(--count-size);
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: rgba(22, 23, 26, 0.82);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+      color: #ffffff;
+      font: 700 calc(var(--count-size) * 0.56) / 1 system-ui, -apple-system,
+        sans-serif;
+      font-variant-numeric: tabular-nums;
+      animation: countdown-pop 420ms cubic-bezier(0.2, 0.9, 0.25, 1) both;
+    }
+
+    /* Drains over the second the number is up, so the next one is expected
+       rather than sudden. */
+    .count svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      transform: rotate(-90deg);
+    }
+
+    .count circle {
+      fill: none;
+      stroke-width: 3;
+    }
+
+    .count .track {
+      stroke: rgba(255, 255, 255, 0.14);
+    }
+
+    .count .progress {
+      stroke: #ff2d55;
+      stroke-linecap: round;
+      stroke-dasharray: 289;
+      animation: countdown-drain var(--count-step) linear both;
+    }
+
+    @keyframes countdown-dim {
+      from {
+        opacity: 0;
+      }
+    }
+
+    @keyframes countdown-pop {
+      from {
+        opacity: 0;
+        transform: scale(1.35);
+      }
+    }
+
+    @keyframes countdown-drain {
+      from {
+        stroke-dashoffset: 0;
+      }
+      to {
+        stroke-dashoffset: 289;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .countdown,
+      .count,
+      .count .progress {
+        animation: none;
+      }
     }
 
     video {
@@ -557,6 +648,32 @@ export class RecordOverlay extends LitElement {
     `;
   }
 
+  private renderCountdown() {
+    const count = this.overlay.countdown;
+    if (count == null) {
+      return null;
+    }
+
+    // Keyed by the number, so each step is a new element and its animations
+    // start over rather than finishing once on the 3 and never again.
+    return html`
+      <div class="countdown" style="--count-step: ${COUNTDOWN_STEP_MS}ms">
+        ${keyed(
+          count,
+          html`
+            <div class="count" role="status" aria-live="assertive">
+              <svg viewBox="0 0 100 100" aria-hidden="true">
+                <circle class="track" cx="50" cy="50" r="46"></circle>
+                <circle class="progress" cx="50" cy="50" r="46"></circle>
+              </svg>
+              ${count}
+            </div>
+          `,
+        )}
+      </div>
+    `;
+  }
+
   render() {
     return html`
       <canvas
@@ -565,7 +682,7 @@ export class RecordOverlay extends LitElement {
         @pointerup=${this.onPointerUp}
         @pointercancel=${this.onPointerUp}
       ></canvas>
-      ${this.renderToolbar()} ${this.renderBubble()}
+      ${this.renderToolbar()} ${this.renderBubble()} ${this.renderCountdown()}
     `;
   }
 }

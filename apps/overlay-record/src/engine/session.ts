@@ -36,6 +36,12 @@ import {
   type Size,
 } from "@app/features/record/captureSettings";
 import {
+  COUNTDOWN_FROM,
+  COUNTDOWN_STEP_MS,
+  startCountdown,
+  type Countdown,
+} from "@app/features/record/countdown";
+import {
   applyRecordSettings,
   DEFAULT_RECORD_SETTINGS,
   effectiveSystemAudio,
@@ -69,8 +75,10 @@ import {
 } from "./strokeStore";
 import { startAudioWriter, type AudioWriter } from "./audioWriter";
 import {
+  holdNewestFrame,
   negotiateEncode,
   startVideoWriter,
+  type FrameHolder,
   type VideoWriter,
 } from "./videoWriter";
 
@@ -92,6 +100,10 @@ type State = {
   devices: Devices;
   status: RecorderState;
   take: Take | null;
+  /** The count in progress, so the tray's Cancel can stop it. */
+  countdown: Countdown | null;
+  /** The number the overlay shows, or `null` for none. */
+  countdownValue: number | null;
 };
 
 const state: State = {
@@ -101,6 +113,8 @@ const state: State = {
   devices: noDevices,
   status: "idle",
   take: null,
+  countdown: null,
+  countdownValue: null,
 };
 
 function report(message: string): void {
@@ -155,6 +169,7 @@ async function refreshOverlay(): Promise<void> {
   await bridge.setOverlay({
     drawing: state.settings.drawing,
     recording: state.status === "recording",
+    countdown: state.countdownValue,
     displayId: source?.displayId ?? "",
     cameraDeviceId: selection.cameraDeviceId,
     bubbleSize: state.settings.bubbleSize,
@@ -314,12 +329,34 @@ async function cameraElement(stream: MediaStream): Promise<HTMLVideoElement> {
   return video;
 }
 
-export async function start(): Promise<void> {
-  if (state.status !== "idle") {
-    return;
-  }
+/** Everything a take needs that can be opened before it begins. */
+type Prepared = {
+  displayId: string;
+  encode: Awaited<ReturnType<typeof negotiateEncode>>;
+  screenTrack: MediaStreamTrack;
+  frames: FrameHolder;
+  cameraVideo: HTMLVideoElement | null;
+  micStream: MediaStream | null;
+  systemStream: MediaStream | null;
+  streams: MediaStream[];
+};
 
+/**
+ * Open every device the take will record, and write nothing.
+ *
+ * Run while the countdown is on screen, so the first frame lands when the count
+ * reaches zero rather than a device-open later. A camera also spends its first
+ * second finding its exposure, and this way that second is spent before the
+ * take instead of at the start of it.
+ *
+ * Nothing is written here. The screen's newest frame is held from the moment
+ * the capture opens, so that `begin` has a picture for frame 0 at once (see
+ * `holdNewestFrame`); the audio writers attach in `begin`, so no sample from
+ * the countdown reaches the file. Releases what it opened if any step fails.
+ */
+async function prepare(): Promise<Prepared> {
   const streams: MediaStream[] = [];
+  let frames: FrameHolder | null = null;
 
   try {
     // Re-read the sources: ids are minted per enumeration and the display list
@@ -335,8 +372,8 @@ export async function start(): Promise<void> {
     });
 
     // Negotiate *before* opening the capture. A hardware encoder's real limits
-    // are not the codec's — a scaled Retina panel can be taller than
-    // VideoToolbox will take — and the capture is constrained to a fixed size,
+    // are not the codec's (a scaled Retina panel can be taller than
+    // VideoToolbox will take) and the capture is constrained to a fixed size,
     // so the encoder has to have agreed to it first. `negotiateEncode` walks
     // down `captureSizeLadder` until something says yes.
     const encode = await negotiateEncode(
@@ -351,6 +388,7 @@ export async function start(): Promise<void> {
       state.settings.fps,
     );
     streams.push(screen.stream);
+    frames = holdNewestFrame(screen.track);
 
     let cameraVideo: HTMLVideoElement | null = null;
     if (selection.cameraDeviceId !== "") {
@@ -381,8 +419,105 @@ export async function start(): Promise<void> {
       }
     }
 
-    const session = await bridge.start({
+    return {
       displayId: target.displayId,
+      encode,
+      screenTrack: screen.track,
+      frames,
+      cameraVideo,
+      micStream,
+      systemStream,
+      streams,
+    };
+  } catch (error) {
+    void frames?.stop();
+    streams.forEach(releaseStream);
+    throw error;
+  }
+}
+
+function releasePrepared(prepared: Prepared): void {
+  void prepared.frames.stop();
+  prepared.streams.forEach(releaseStream);
+  if (prepared.cameraVideo != null) {
+    prepared.cameraVideo.srcObject = null;
+  }
+}
+
+/**
+ * Count down on the overlay, then record.
+ *
+ * The devices open during the count, not after it. The numeral stays up until
+ * the writers are running and is cleared by `begin`, so the moment it leaves
+ * the screen is the moment the recording starts. If opening takes longer than
+ * the count (a first-run permission prompt, say), the last number simply stays
+ * up until it is done.
+ */
+export async function start(): Promise<void> {
+  if (state.status !== "idle") {
+    return;
+  }
+
+  state.status = "countdown";
+  const countdown = startCountdown({
+    from: COUNTDOWN_FROM,
+    stepMs: COUNTDOWN_STEP_MS,
+    onStep: (remaining) => {
+      state.countdownValue = remaining;
+      void refreshOverlay();
+    },
+  });
+  state.countdown = countdown;
+  await refreshTray();
+
+  type Opened = { ok: true; prepared: Prepared } | { ok: false; error: Error };
+  const opening: Promise<Opened> = prepare().then(
+    (prepared) => ({ ok: true as const, prepared }),
+    (error) => {
+      // No point counting down to a recording that cannot happen.
+      countdown.cancel();
+      return { ok: false as const, error: error as Error };
+    },
+  );
+
+  const [counted, opened] = await Promise.all([countdown.done, opening]);
+  state.countdown = null;
+
+  if (!opened.ok || !counted) {
+    if (opened.ok) {
+      releasePrepared(opened.prepared);
+    }
+    state.countdownValue = null;
+    state.status = "idle";
+    report(
+      opened.ok
+        ? "Cancelled before the recording began."
+        : `Could not start: ${opened.error.message}`,
+    );
+    await refreshTray();
+    await refreshOverlay();
+    return;
+  }
+
+  await begin(opened.prepared);
+}
+
+/** Start the clock and the writers on devices `prepare` already opened. */
+async function begin(prepared: Prepared): Promise<void> {
+  const { encode, screenTrack, micStream, systemStream } = prepared;
+  // Held outside the `try` so a failure after it started can still stop it,
+  // rather than leaving its encode loop ticking with nothing to encode.
+  let video: VideoWriter | null = null;
+
+  try {
+    // The user can end a share from the OS chrome while the numbers count, and
+    // a writer attached to an ended track produces a file with no frames in it.
+    if (screenTrack.readyState === "ended") {
+      throw new Error("The screen capture ended before the recording began.");
+    }
+
+    const session = await bridge.start({
+      displayId: prepared.displayId,
       captureWidth: encode.size.width,
       captureHeight: encode.size.height,
     });
@@ -394,8 +529,8 @@ export async function start(): Promise<void> {
       video: null as unknown as VideoWriter,
       mic: null,
       system: null,
-      streams,
-      cameraVideo,
+      streams: prepared.streams,
+      cameraVideo: prepared.cameraVideo,
     };
 
     const onError = (error: Error) => {
@@ -404,8 +539,8 @@ export async function start(): Promise<void> {
       void abort();
     };
 
-    take.video = await startVideoWriter({
-      track: screen.track,
+    video = await startVideoWriter({
+      frames: prepared.frames,
       codec: encode.codec,
       plan: encode.plan,
       compose: composeFrame(take),
@@ -415,6 +550,7 @@ export async function start(): Promise<void> {
       onChunk: (bytes) => bridge.append(session.id, "video", bytes),
       onError,
     });
+    take.video = video;
 
     if (micStream != null) {
       take.mic = await startAudioWriter({
@@ -434,9 +570,9 @@ export async function start(): Promise<void> {
 
     // Ending the share from the OS chrome ends the track and tells us nothing.
     // Without this the recorder believes it is still recording for the rest of
-    // the session — the same failure `features/record/screenRecord.ts`
+    // the session, the same failure `features/record/screenRecord.ts`
     // documents having had.
-    screen.track.addEventListener("ended", () => {
+    screenTrack.addEventListener("ended", () => {
       if (state.status === "recording" || state.status === "paused") {
         void stop();
       }
@@ -449,13 +585,15 @@ export async function start(): Promise<void> {
         ` (${encode.codec}, ${Math.round(encode.plan.bitrate / 1e6)} Mbps)`,
     );
   } catch (error) {
-    streams.forEach(releaseStream);
+    await video?.stop().catch(() => {});
+    releasePrepared(prepared);
     await bridge.cancel();
     state.take = null;
     state.status = "idle";
     report(`Could not start: ${(error as Error).message}`);
   }
 
+  state.countdownValue = null;
   await refreshTray();
   await refreshOverlay();
 }
@@ -536,6 +674,13 @@ export async function stop(): Promise<void> {
 
 /** Throw the take away — a failure mid-recording, or the user's Discard. */
 export async function abort(): Promise<void> {
+  // Before the first frame there is no take to throw away, only a count to
+  // stop. `start` is awaiting it, and releases the devices it opened.
+  if (state.status === "countdown") {
+    state.countdown?.cancel();
+    return;
+  }
+
   const take = state.take;
   state.take = null;
   state.status = "idle";

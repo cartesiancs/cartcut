@@ -69,6 +69,41 @@ describe("buildTrayModel", () => {
     expect(byId(processing, "stop")).toBeUndefined();
   });
 
+  // The count is the one moment a second Start would open a second capture,
+  // and the moment someone who clicked by mistake wants out.
+  it("offers only Cancel while counting down", () => {
+    const counting = buildTrayModel({ ...INPUT, state: "countdown" });
+
+    expect(byId(counting, "start")).toBeUndefined();
+    expect(byId(counting, "stop")).toBeUndefined();
+    expect(byId(counting, "pause")).toBeUndefined();
+    expect(byId(counting, "cancel")).toMatchObject({ label: "Cancel" });
+    expect(parseTrayId("cancel")).toEqual({
+      kind: "command",
+      command: "cancel",
+    });
+  });
+
+  // The devices are being opened from these values while the numbers count.
+  it("locks what is captured during the countdown", () => {
+    const counting = buildTrayModel({ ...INPUT, state: "countdown" });
+
+    for (const label of ["Screen", "Camera", "Microphone", "Quality"]) {
+      const item = counting.items.find(
+        (candidate) =>
+          candidate.type === "submenu" && candidate.label === label,
+      ) as any;
+      expect(item.enabled).toBe(false);
+    }
+    // On Windows, where the row is otherwise live; on macOS it never is.
+    const onWindows = { ...INPUT, platform: "win32" };
+    expect(byId(buildTrayModel(onWindows), "systemAudio").enabled).toBe(true);
+    expect(
+      byId(buildTrayModel({ ...onWindows, state: "countdown" }), "systemAudio")
+        .enabled,
+    ).toBe(false);
+  });
+
   it("cannot be started with no screen to capture, and says why", () => {
     const model = buildTrayModel({ ...INPUT, screens: [] });
     const start = byId(model, "start");

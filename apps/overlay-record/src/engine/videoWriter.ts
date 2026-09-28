@@ -51,8 +51,77 @@ export type ComposeFn = (
   frame: VideoFrame,
 ) => void;
 
+/**
+ * The capture's newest frame, kept from before the writer exists.
+ *
+ * Started when the capture opens rather than when the take begins, so that at
+ * the start of a take there is already a picture to encode as frame 0. A
+ * reader attached only then would wait for the capturer's next frame, and a
+ * capturer on a still screen sends one when something changes: the encoder
+ * would sit with nothing to encode, catch up four frames at most, and the
+ * video would begin that much later than the audio beside it.
+ */
+export type FrameHolder = {
+  /** The newest frame, still owned by the holder: wrap it, never close it. */
+  readonly latest: VideoFrame | null;
+  /** Why reading stopped, once it has. */
+  readonly error: Error | null;
+  /** Stop reading and let go of the frame. Safe to call more than once. */
+  stop(): Promise<void>;
+};
+
+export function holdNewestFrame(track: MediaStreamTrack): FrameHolder {
+  // Exactly one captured frame is held: the newest. Holding more would stall
+  // the capturer, whose buffer pool is small and which drops frames rather than
+  // waiting when it runs out.
+  let latest: VideoFrame | null = null;
+  let error: Error | null = null;
+  let reading = true;
+
+  const processor = new (window as any).MediaStreamTrackProcessor({ track });
+  const reader: ReadableStreamDefaultReader<VideoFrame> =
+    processor.readable.getReader();
+
+  void (async () => {
+    while (reading) {
+      const { value, done } = await reader.read();
+      if (done || value == null) {
+        break;
+      }
+      // `stop` ran while this read was pending, and has already let go.
+      if (!reading) {
+        value.close();
+        break;
+      }
+      latest?.close();
+      latest = value;
+    }
+  })().catch((caught) => {
+    error = caught as Error;
+  });
+
+  return {
+    get latest() {
+      return latest;
+    },
+    get error() {
+      return error;
+    },
+    async stop() {
+      reading = false;
+      await reader.cancel().catch(() => {
+        // The track may already have ended: the user stopped the share from
+        // the OS chrome, say. Nothing left to cancel.
+      });
+      latest?.close();
+      latest = null;
+    },
+  };
+}
+
 export type VideoWriterOptions = {
-  track: MediaStreamTrack;
+  /** From `holdNewestFrame`, and owned by the writer from here on. */
+  frames: FrameHolder;
   /** From `negotiateEncode`, so the capture and the encoder agree on a size. */
   codec: string;
   plan: EncoderPlan;
@@ -214,29 +283,7 @@ export async function startVideoWriter(
       ? null
       : canvas.getContext("2d", { alpha: false, desynchronized: true });
 
-  // Exactly one captured frame is held: the newest. Holding more would stall
-  // the capturer, whose buffer pool is small and which drops frames rather than
-  // waiting when it runs out.
-  let latest: VideoFrame | null = null;
-
-  const processor = new (window as any).MediaStreamTrackProcessor({
-    track: options.track,
-  });
-  const reader: ReadableStreamDefaultReader<VideoFrame> =
-    processor.readable.getReader();
-
-  let reading = true;
-
-  void (async () => {
-    while (reading) {
-      const { value, done } = await reader.read();
-      if (done || value == null) {
-        break;
-      }
-      latest?.close();
-      latest = value;
-    }
-  })().catch((error) => fail(error as Error));
+  const { frames } = options;
 
   const intervalMs = 1000 / plan.framerate;
   const startedAt = performance.now();
@@ -247,7 +294,7 @@ export async function startVideoWriter(
   let timer: number | null = null;
 
   const encodeAt = (index: number) => {
-    const source = latest;
+    const source = frames.latest;
     if (source == null) {
       return;
     }
@@ -279,6 +326,9 @@ export async function startVideoWriter(
   };
 
   const tick = () => {
+    if (frames.error != null) {
+      fail(frames.error);
+    }
     if (failed || pausedAt != null) {
       return;
     }
@@ -324,14 +374,7 @@ export async function startVideoWriter(
         timer = null;
       }
 
-      reading = false;
-      await reader.cancel().catch(() => {
-        // The track may already have ended — the user stopped the share from
-        // the OS chrome, say. Nothing left to cancel.
-      });
-
-      latest?.close();
-      latest = null;
+      await frames.stop();
 
       await encoder.flush().catch((error) => fail(error as Error));
       encoder.close();
