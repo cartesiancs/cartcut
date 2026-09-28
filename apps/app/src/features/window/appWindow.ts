@@ -8,8 +8,8 @@
  *
  * ## The tabs are `<preview-top-bar>`'s tabs
  *
- * Same chip, same classes, and the close glyph sits inside the tab straight
- * after its label (`previewTopBar.ts#_renderTab`). The frame stands beside the
+ * Same chip, same classes (`.tb-tab` in `_toolbar.scss`), and the close glyph
+ * sits inside the tab straight after its label (`previewTopBar.ts#_renderTab`). The frame stands beside the
  * preview column's own top bar at the same 2rem, so the two read as one strip
  * across the column; a title chip with its close pushed to the far edge read as
  * a different kind of thing.
@@ -101,20 +101,20 @@ export class AppWindow extends LitElement {
     return html`<button
       type="button"
       data-window=${tab.id}
-      class="btn btn-xxs ${active ? "btn-active" : "btn-default"} text-light app-window-tab m-0"
+      class="tb-tab app-window-tab ${active ? "is-on" : ""}"
+      aria-selected=${active ? "true" : "false"}
       @click=${() => this._emit("windowSelect", tab.id)}
     >
       ${tab.label}
       ${tab.closable
         ? html`<span
-            class="material-symbols-outlined icon-xs app-window-close"
+            class="material-symbols-outlined tb-tab-close app-window-close"
             role="button"
             title="Close ${tab.label}"
             aria-label="Close ${tab.label}"
             @click=${(event: Event) => this._close(event, tab.id)}
-          >
-            close
-          </span>`
+            >close</span
+          >`
         : nothing}
     </button>`;
   }

@@ -1,0 +1,356 @@
+/*
+ * ------------------------------------------------ the preview column's bars
+ *
+ * The controls inside `<preview-top-bar>` and the tabs on a docked window's
+ * title bar beside it. The bar itself (2rem, `$background-color`, a 0.05rem
+ * rule) stays where it is, in the component's inline style and in
+ * `_window.scss`: the title bar, the bottom bar and an e2e pixel check all
+ * measure against those numbers.
+ *
+ * The same family as `_browse.scss` and `_option.scss`, at the bar's size: a
+ * control is 24px tall where the sidebar's are 30, with the same palette, the
+ * same raised-when-on and the same 140ms. Nothing here is `.btn`, for the
+ * reason those two files give.
+ */
+
+$tb-h: 24px;
+$tb-radius: 7px;
+$tb-hover: #1f2327;
+
+/* -------------------------------------------------------------------- tabs */
+
+/*
+ * One tab: the preview, a panel that took the preview area, or a docked
+ * window. Quiet until it is the one on show, which is raised the way the
+ * inspector's `.opt-tab.is-on` is.
+ */
+.tb-tab {
+  appearance: none;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: $tb-h;
+  padding: 0 8px;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: $tb-radius;
+  background-color: transparent;
+  color: $opt-label;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    border-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.tb-tab:hover:not(.is-on) {
+  background-color: $tb-hover;
+  color: $opt-text;
+}
+
+.tb-tab.is-on {
+  border-color: $opt-line;
+  background-color: $opt-raised;
+  color: $opt-bright;
+}
+
+.tb-tab:focus-visible {
+  outline: 1px solid #5a6067;
+  outline-offset: 1px;
+}
+
+/*
+ * The close glyph, inside the tab straight after its label. A square of its
+ * own so it has a hover of its own: the tab and its close are two targets, and
+ * one highlight across both said a click anywhere would close it.
+ *
+ * Two classes, for the reason `_asset.scss` gives: `material-symbols/outlined`
+ * is imported after this file and its single-class rule would win at 24px.
+ */
+.tb-tab > .tb-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: -4px;
+  border-radius: 4px;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.6;
+  transition:
+    background-color 140ms ease-out,
+    opacity 140ms ease-out;
+}
+
+.tb-tab > .tb-tab-close:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  opacity: 1;
+}
+
+/* ----------------------------------------------------------------- buttons */
+
+.tb-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* A hairline between groups that mean different things. */
+.tb-sep {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  margin: 0 3px;
+  background-color: $opt-line-strong;
+}
+
+/* A square glyph button: add, fit, lock. `is-on` is a mode that is engaged. */
+.tb-btn {
+  appearance: none;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: $tb-h;
+  height: $tb-h;
+  padding: 0 3px;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: $tb-radius;
+  background-color: transparent;
+  color: $opt-label;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    border-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.tb-btn > .material-symbols-outlined {
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* The chevron on a button that opens a menu, a step smaller than its glyph. */
+.tb-btn > .material-symbols-outlined.tb-caret,
+.tb-zoom-value > .material-symbols-outlined.tb-caret {
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+.tb-btn:hover:not(.is-on),
+.tb-btn[aria-expanded="true"]:not(.is-on) {
+  background-color: $tb-hover;
+  color: $opt-bright;
+}
+
+.tb-btn.is-on {
+  border-color: $opt-line-strong;
+  background-color: $opt-raised;
+  color: $opt-bright;
+}
+
+.tb-btn:focus-visible,
+.tb-seg-item:focus-visible,
+.tb-zoom > button:focus-visible {
+  outline: 1px solid #5a6067;
+  outline-offset: 1px;
+}
+
+/*
+ * The cursor modes that are a closed choice, pointer and text, as the
+ * sidebar's `.browse-seg` at bar height: both drawn, one raised.
+ */
+.tb-seg {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  height: $tb-h;
+  padding: 2px;
+  border: 1px solid $opt-line;
+  border-radius: $tb-radius;
+  background-color: #121416;
+}
+
+.tb-seg-item {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 5px;
+  background-color: transparent;
+  color: $opt-label;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.tb-seg-item > .material-symbols-outlined {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.tb-seg-item:hover:not(.is-on) {
+  color: $opt-text;
+}
+
+.tb-seg-item.is-on {
+  background-color: $opt-raised;
+  color: $opt-bright;
+}
+
+/*
+ * Zoom as one control: out, the value that opens the presets, in. One border
+ * around all three and hairlines between them, so the value reads as belonging
+ * to the two steps rather than as a fourth button.
+ *
+ * The dividers are on the value and not on `button + button`: the presets menu
+ * is a sibling between the value and zoom-in (Bootstrap finds a menu as the
+ * toggle's next sibling), so an adjacency selector would skip the second one.
+ */
+.tb-zoom {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: $tb-h;
+  border: 1px solid $opt-line;
+  border-radius: $tb-radius;
+}
+
+.tb-zoom > button {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background-color: transparent;
+  color: $opt-label;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.tb-zoom > button:hover,
+.tb-zoom > button[aria-expanded="true"] {
+  background-color: $tb-hover;
+  color: $opt-bright;
+}
+
+.tb-zoom > .tb-zoom-step {
+  width: 24px;
+}
+
+.tb-zoom > .tb-zoom-step:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.tb-zoom > .tb-zoom-step:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.tb-zoom > .tb-zoom-step > .material-symbols-outlined {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.tb-zoom > .tb-zoom-value {
+  gap: 1px;
+  min-width: 56px;
+  padding: 0 4px 0 8px;
+  border-left: 1px solid $opt-line;
+  border-right: 1px solid $opt-line;
+  color: $opt-text;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * A narrow preview column, which is what a docked window leaves it.
+ *
+ * The tools are about 295px and the Preview tab about 70, and the tools do not
+ * shrink, so below that the bar used to push its right end out of the column
+ * where nothing could reach it. What goes first is what has another way in:
+ * the zoom steps (the value still opens the presets) and the separators, then
+ * Fit (the presets' "100% (Fit)"), then zoom itself. The cursor modes, the add
+ * menu and the lock have no other door and stay. The tab strip gives up width
+ * before any of it, since it scrolls.
+ */
+@container previewbar (max-width: 420px) {
+  .preview-tool-bar .tb-zoom-step,
+  .preview-tool-bar .tb-sep {
+    display: none;
+  }
+
+  .preview-tool-bar .tb-zoom > .tb-zoom-value {
+    border-left: none;
+    border-right: none;
+    border-radius: 6px;
+  }
+}
+
+@container previewbar (max-width: 340px) {
+  .preview-tool-bar .tb-fit {
+    display: none;
+  }
+}
+
+/*
+ * About what a 320px docked window leaves a 500px column. Zoom goes last of
+ * all, because pinch and ctrl+wheel on the preview still do it
+ * (`previewCanvas.ts`).
+ */
+@container previewbar (max-width: 240px) {
+  .preview-tool-bar .tb-zoom {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------------- menus */
+
+/*
+ * The add and zoom menus. The menu itself is `_dropdown.scss`'s; this is only
+ * the rows, which lay an icon beside a label with `.dropdown-item-icon` and
+ * mark the engaged tool with a check at the far end.
+ */
+.tb-menu {
+  min-width: 10rem;
+  padding: 4px !important;
+}
+
+.tb-menu .dropdown-item {
+  margin: 1px 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tb-menu .dropdown-item > .tb-menu-check {
+  margin-left: auto;
+  padding-left: 1rem;
+}
+
+/*
+ * Bootstrap draws the divider in 15% black, which on this menu is nothing: the
+ * gap it opened read as a missing row.
+ */
+.tb-menu .dropdown-divider {
+  margin: 4px 2px;
+  border-top-color: rgba(255, 255, 255, 0.08);
+  opacity: 1;
+}

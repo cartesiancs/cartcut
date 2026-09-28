@@ -32,9 +32,9 @@
   font-size: 12px;
 }
 
-// Applied by `features/menu/menuDropdown.ts` alone, not folded into
-// `.dropdown-item-sm`: the same class dresses the shape picker and the font
-// list, which lay their icons out their own way and should not shift.
+// Applied row by row, not folded into `.dropdown-item-sm`: `menuDropdown.ts`
+// and the preview top bar's add and zoom menus opt in, and the font list, which
+// lays its icons out its own way, does not.
 .dropdown-item-icon {
   display: flex;
   align-items: center;

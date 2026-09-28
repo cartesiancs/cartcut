@@ -72,7 +72,7 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 0.5rem;
+  gap: 2px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -82,17 +82,8 @@
   display: none;
 }
 
-// `.preview-top-button`. The close glyph is a child of the tab, straight after
-// the label, and takes its size and colour from `icon-xs`.
-.app-window-tab {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 12px;
-  font-weight: bolder;
-  white-space: nowrap;
-}
+// The tab itself is `.tb-tab` in `_toolbar.scss`, the preview top bar's own, so
+// the two strips cannot drift apart; the gap above is that bar's too.
 
 .app-window-body {
   flex: 1 1 auto;

@@ -27,6 +27,19 @@ import { createNullElement } from "../element/nullElement";
 /** 100% is the fit scale, so it doubles as the "fit" preset. */
 const ZOOM_PRESETS = [25, 50, 100, 200, 400, 800];
 
+/**
+ * What each tab says. The panel ids are code identifiers ("autoTrack") and
+ * used to be printed as they were, beside a docked window's title-cased
+ * "Text to Speech" on the same line.
+ */
+const PANEL_LABELS: Record<ActiveStringType, string> = {
+  "": "Preview",
+  record: "Record",
+  audioRecord: "Audio Record",
+  proxy: "Proxy",
+  autoTrack: "Auto Track",
+};
+
 @customElement("preview-top-bar")
 export class PreviewTopBar extends LitElement {
   constructor() {
@@ -214,24 +227,53 @@ export class PreviewTopBar extends LitElement {
    * that does. It is the one tab with no close, because `""` is where closing
    * any other tab falls back to.
    */
-  private _renderTab(panel: ActiveStringType, label: string) {
+  private _renderTab(panel: ActiveStringType) {
+    const label = PANEL_LABELS[panel] ?? panel;
+    const on = this.nowActivePanel == panel;
     return html`<button
+      type="button"
       data-panel=${panel}
       @click=${() => this._handleClickPanelButton(panel)}
-      class="btn btn-xxs ${this.nowActivePanel == panel
-        ? "btn-active"
-        : "btn-default"} text-light preview-top-button m-0"
+      class="tb-tab ${on ? "is-on" : ""}"
+      aria-selected=${on ? "true" : "false"}
     >
       ${label}
       ${panel == ""
         ? ""
         : html`<span
-            class="material-symbols-outlined icon-xs"
+            class="material-symbols-outlined tb-tab-close"
+            role="button"
+            title="Close ${label}"
+            aria-label="Close ${label}"
             @click=${(e: Event) => this._handleClickRemovePanelButton(e, panel)}
-          >
-            close
-          </span>`}
+            >close</span
+          >`}
     </button>`;
+  }
+
+  /** A cursor mode in the pointer / text segmented control. */
+  private _renderMode(type: string, icon: string, label: string) {
+    const on = this.control.cursorType == type;
+    return html`<button
+      type="button"
+      class="tb-seg-item ${on ? "is-on" : ""}"
+      title=${label}
+      aria-label=${label}
+      aria-pressed=${on ? "true" : "false"}
+      @click=${() => this._handleClickButton(type)}
+    >
+      <span class="material-symbols-outlined">${icon}</span>
+    </button>`;
+  }
+
+  /** One row of the add menu. */
+  private _renderAddItem(icon: string, label: string, onClick: () => void) {
+    return html`<a
+      class="dropdown-item dropdown-item-sm dropdown-item-icon"
+      @click=${onClick}
+    >
+      <span class="material-symbols-outlined">${icon}</span>${label}</a
+    >`;
   }
 
   /** Whether the tab strip is scrolled away from its left / right edge. */
@@ -371,19 +413,9 @@ export class PreviewTopBar extends LitElement {
           border-bottom: 0.05rem #3a3f44 solid;
           align-items: center;
           justify-content: space-between;
-        }
-
-        .timeline-cursor-button {
-          border: none;
-        }
-
-        .preview-top-button {
-          font-size: 12px;
-          font-weight: bolder;
-          display: flex;
-          align-items: center;
-          gap: 0.25rem;
-          white-space: nowrap;
+          /* Named for _toolbar.scss, which drops the lesser tools when a
+             docked window leaves the column too narrow to hold them all. */
+          container: previewbar / inline-size;
         }
 
         /* min-width: 0 is what lets the strip shrink past its content width;
@@ -400,11 +432,13 @@ export class PreviewTopBar extends LitElement {
           flex: 0 0 auto;
         }
 
+        /* 2px, not the 0.5rem the filled chips needed: a quiet tab has no box
+           of its own to separate, and wider gaps read as three loose words. */
         .preview-tab-scroll {
           display: flex;
           flex-direction: row;
           align-items: center;
-          gap: 0.5rem;
+          gap: 2px;
           min-width: 0;
           overflow-x: auto;
           overflow-y: hidden;
@@ -457,61 +491,6 @@ export class PreviewTopBar extends LitElement {
             transparent 100%
           );
         }
-
-        /*
-         * Segmented control: [zoom out][ 100% v ][zoom in].
-         *
-         * Bootstrap's .btn-group corner reset skips .dropdown-toggle, so the
-         * middle segment would keep its right radius and cut a notch into the
-         * zoom-in button. Round the outer edges only, and let the segments
-         * stretch to a shared height instead of each sizing itself (.btn-xxs
-         * pins height: fit-content, which blocks align-items: stretch).
-         */
-        .preview-zoom-group {
-          display: inline-flex;
-          align-items: stretch;
-        }
-
-        .preview-zoom-group > .btn {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          height: auto !important;
-          margin: 0 !important;
-          border-radius: 0 !important;
-        }
-
-        /* of-type, not of-child: the .dropdown-menu <ul> is a sibling here, so
-           child position depends on where the menu sits in the markup. */
-        .preview-zoom-group > .btn:first-of-type {
-          border-top-left-radius: 10px !important;
-          border-bottom-left-radius: 10px !important;
-        }
-
-        .preview-zoom-group > .btn:last-of-type {
-          border-top-right-radius: 10px !important;
-          border-bottom-right-radius: 10px !important;
-        }
-
-        /* Hairline dividers so the three segments read as one control. */
-        .preview-zoom-group > .btn + .btn,
-        .preview-zoom-group > .dropdown-menu + .btn {
-          box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.08);
-        }
-
-        .preview-zoom-value {
-          font-size: 11px;
-          font-variant-numeric: tabular-nums;
-          min-width: 3.75rem;
-        }
-
-        /* Bootstrap's caret is inline-block and drags the baseline around;
-           size it down and let flex do the centring. */
-        .preview-zoom-value::after {
-          margin-left: 0.3rem;
-          opacity: 0.6;
-          vertical-align: middle;
-        }
       </style>
 
       <div class="timeline-cursor-buttons bg-darker">
@@ -525,84 +504,49 @@ export class PreviewTopBar extends LitElement {
           @scroll=${this._handleTabScroll}
           @wheel=${this._handleTabWheel}
         >
-          ${this._renderTab("", "preview")}
-          ${this.activePanel.map((item) => this._renderTab(item, item))}
+          ${this._renderTab("")}
+          ${this.activePanel.map((item) => this._renderTab(item))}
         </div>
-        <div class="d-flex gap-2 justify-content-end p-1 preview-tool-bar">
-          <button
-            @click=${() => this._handleClickButton("pointer")}
-            class="btn btn-xxs ${this.control.cursorType == "pointer"
-              ? "btn-primary"
-              : "btn-default"} text-light m-0"
-          >
-            <span class="material-symbols-outlined icon-xs"> near_me </span>
-          </button>
-          <button
-            @click=${() => this._handleClickButton("text")}
-            class="btn btn-xxs ${this.control.cursorType == "text"
-              ? "btn-primary"
-              : "btn-default"} text-light m-0"
-          >
-            <span class="material-symbols-outlined icon-xs"> text_fields </span>
-          </button>
+        <div class="tb-group p-1 preview-tool-bar">
+          <!--
+            Pointer and text are a closed choice, so they are one control. The
+            polygon tool is a third cursor mode, reached from the add menu, and
+            raises the add button while it is engaged. Lock is a fourth and sits
+            apart at the end, because it is about the keyboard.
+          -->
+          <div class="tb-seg" role="group" aria-label="Cursor">
+            ${this._renderMode("pointer", "near_me", "Select")}
+            ${this._renderMode("text", "text_fields", "Text")}
+          </div>
 
-          <div class="btn-group">
+          <div class="dropdown">
             <button
-              class="btn btn-xxs btn-default dropdown-toggle text-light m-0"
+              type="button"
+              class="tb-btn ${this.control.cursorType == "shape" ? "is-on" : ""}"
               data-bs-toggle="dropdown"
               aria-expanded="false"
+              title="Add a shape"
+              aria-label="Add a shape"
             >
-              <span class="material-symbols-outlined icon-xs"> add </span>
+              <span class="material-symbols-outlined">add</span>
+              <span class="material-symbols-outlined tb-caret">expand_more</span>
             </button>
 
-            <ul class="dropdown-menu">
+            <ul class="dropdown-menu tb-menu">
               <li>
+                ${this._renderAddItem("square", "Square", this.createSquare)}
+                ${this._renderAddItem(
+                  "change_history",
+                  "Triangle",
+                  this.createTriangle,
+                )}
+                ${this._renderAddItem("circle", "Circle", this.createCircle)}
+                ${this._renderAddItem("star", "Star", this.createStar)}
                 <a
-                  class="dropdown-item dropdown-item-sm"
-                  @click=${this.createSquare}
-                >
-                  <span class="material-symbols-outlined icon-xs">
-                    square
-                  </span>
-                  Square</a
-                >
-                <a
-                  class="dropdown-item dropdown-item-sm"
-                  @click=${this.createTriangle}
-                >
-                  <span class="material-symbols-outlined icon-xs">
-                    change_history
-                  </span>
-                  Triangle</a
-                >
-                <a
-                  class="dropdown-item dropdown-item-sm"
-                  @click=${this.createCircle}
-                >
-                  <span class="material-symbols-outlined icon-xs">
-                    circle
-                  </span>
-                  Circle</a
-                >
-                <a
-                  class="dropdown-item dropdown-item-sm"
-                  @click=${this.createStar}
-                >
-                  <span class="material-symbols-outlined icon-xs">
-                    star
-                  </span>
-                  Star</a
-                >
-                <a
-                  class="dropdown-item dropdown-item-sm ${this.control
-                    .cursorType == "shape"
-                    ? "bg-primary"
-                    : ""}"
+                  class="dropdown-item dropdown-item-sm dropdown-item-icon"
                   @click=${() => this._handleClickButton("shape")}
                 >
-                  <span class="material-symbols-outlined icon-xs">
-                    polyline
-                  </span>
+                  <span class="material-symbols-outlined">polyline</span>
                   <!--
                     Called "Pen Tool" until masks existed, which was the name of
                     a different tool: this one click-appends straight segments
@@ -612,86 +556,116 @@ export class PreviewTopBar extends LitElement {
                     selected and creates nothing. Two tools called a pen is the
                     "two things called a filter" problem, one tab over.
                   -->
-                  Polygon</a
+                  Polygon${this.control.cursorType == "shape"
+                    ? html`<span
+                        class="material-symbols-outlined tb-menu-check"
+                        >check</span
+                      >`
+                    : ""}</a
                 >
                 <hr class="dropdown-divider" />
-                <a
-                  class="dropdown-item dropdown-item-sm"
-                  @click=${this.createNull}
-                >
-                  <span class="material-symbols-outlined icon-xs">
-                    filter_center_focus
-                  </span>
-                  <!--
-                    Below the divider because it is not a shape: it draws
-                    nothing at all. A null is a transform to hang other clips
-                    off, attached through the Parent dropdown in the side
-                    panel. Same element type as "Group selected" produces —
-                    the difference is that this one starts empty.
-                  -->
-                  Null Object</a
-                >
+                <!--
+                  Below the divider because it is not a shape: it draws nothing
+                  at all. A null is a transform to hang other clips off,
+                  attached through the Parent dropdown in the side panel. The
+                  same element type "Group selected" produces; this one starts
+                  empty.
+                -->
+                ${this._renderAddItem(
+                  "filter_center_focus",
+                  "Null Object",
+                  this.createNull,
+                )}
               </li>
             </ul>
           </div>
 
-          <div class="btn-group preview-zoom-group">
+          <div class="tb-sep"></div>
+
+          <div class="tb-zoom dropdown">
             <button
-              @click=${() => this._handleClickZoom(1 / ZOOM_STEP)}
-              class="btn btn-xxs btn-default text-light m-0"
+              type="button"
+              class="tb-zoom-step"
               title="Zoom out"
+              aria-label="Zoom out"
+              @click=${() => this._handleClickZoom(1 / ZOOM_STEP)}
             >
-              <span class="material-symbols-outlined icon-xs"> zoom_out </span>
+              <span class="material-symbols-outlined">zoom_out</span>
             </button>
 
             <button
-              class="btn btn-xxs btn-default dropdown-toggle text-light m-0 preview-zoom-value"
+              type="button"
+              class="tb-zoom-value"
               data-bs-toggle="dropdown"
               aria-expanded="false"
+              title="Zoom presets"
             >
               ${Math.round(this.viewport.zoom)}%
+              <span class="material-symbols-outlined tb-caret">expand_more</span>
             </button>
 
-            <ul class="dropdown-menu">
+            <ul class="dropdown-menu tb-menu">
               <li>
                 ${ZOOM_PRESETS.map(
                   (zoom) =>
                     html`<a
-                      class="dropdown-item dropdown-item-sm"
+                      class="dropdown-item dropdown-item-sm dropdown-item-icon"
                       @click=${() => this._handleClickZoomPreset(zoom)}
                     >
-                      ${zoom}%${zoom == 100 ? " (Fit)" : ""}
+                      ${zoom}%${zoom == 100 ? " (Fit)" : ""}${Math.round(
+                        this.viewport.zoom,
+                      ) == zoom
+                        ? html`<span
+                            class="material-symbols-outlined tb-menu-check"
+                            >check</span
+                          >`
+                        : ""}
                     </a>`,
                 )}
               </li>
             </ul>
 
             <button
-              @click=${() => this._handleClickZoom(ZOOM_STEP)}
-              class="btn btn-xxs btn-default text-light m-0"
+              type="button"
+              class="tb-zoom-step"
               title="Zoom in"
+              aria-label="Zoom in"
+              @click=${() => this._handleClickZoom(ZOOM_STEP)}
             >
-              <span class="material-symbols-outlined icon-xs"> zoom_in </span>
+              <span class="material-symbols-outlined">zoom_in</span>
             </button>
           </div>
 
           <button
-            @click=${this._handleClickFit}
-            class="btn btn-xxs btn-default text-light m-0"
+            type="button"
+            class="tb-btn tb-fit"
             title="Fit to frame"
+            aria-label="Fit to frame"
+            @click=${this._handleClickFit}
           >
-            <span class="material-symbols-outlined icon-xs"> fit_screen </span>
+            <span class="material-symbols-outlined">fit_screen</span>
           </button>
 
+          <div class="tb-sep"></div>
+
           <button
+            type="button"
+            class="tb-btn ${this.control.cursorType == "lockKeyboard"
+              ? "is-on"
+              : ""}"
+            title="Lock keyboard shortcuts"
+            aria-label="Lock keyboard shortcuts"
+            aria-pressed=${this.control.cursorType == "lockKeyboard"
+              ? "true"
+              : "false"}
             @click=${() => this._handleClickButton("lockKeyboard")}
-            class="btn btn-xxs ${this.control.cursorType == "lockKeyboard"
-              ? "btn-primary"
-              : "btn-default"} text-light m-0"
           >
-            <span class="material-symbols-outlined icon-xs"> lock </span>
+            <span class="material-symbols-outlined"
+              >${this.control.cursorType == "lockKeyboard"
+                ? "lock"
+                : "lock_open"}</span
+            >
           </button>
-          <span></span>
         </div>
       </div>
     `;
