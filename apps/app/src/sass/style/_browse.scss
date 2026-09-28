@@ -22,6 +22,8 @@
  * `!important`, so a control built on either cannot state its own box.
  */
 
+@import "../var";
+
 $browse-h: 30px;
 $browse-radius: 8px;
 $browse-hover: #1f2327;
@@ -49,6 +51,68 @@ template-browser {
   align-items: center;
   gap: 6px;
   margin-bottom: 6px;
+}
+
+/*
+ * A bar that stays put while the tiles scroll under it, with a fade hanging
+ * below it so a row passing out of view dims into the panel rather than being
+ * cut by a hard edge.
+ *
+ * The scroller is `Control.ts`'s `.tab-content`, whose `p-2` a sticky box is
+ * held inside of. Left at `top: 0` the bar stops 8px down and the tiles stay
+ * visible in the strip above it, so it reaches out over that padding (top and
+ * sides) and paints it with the panel's own ground.
+ *
+ * `z-index` is load-bearing: every `.asset` is `position: relative`, and a
+ * positioned box with no z-index paints in tree order, which puts every tile
+ * after the bar and on top of it.
+ */
+$browse-pane-pad: 0.5rem;
+$browse-fade-h: 36px;
+
+.browse-bar.is-floating {
+  position: sticky;
+  top: -$browse-pane-pad;
+  z-index: 1;
+  margin: (-$browse-pane-pad) (-$browse-pane-pad) 6px;
+  padding: $browse-pane-pad $browse-pane-pad 0;
+  background-color: $background-color;
+}
+
+/*
+ * Invisible until there is something under it. At rest it would sit over the
+ * first row and dim the top of every thumbnail in a folder nobody has
+ * scrolled, so its opacity follows the pane's own scroll over the first
+ * `$browse-fade-h` and is fully in by the time a row has gone that far under.
+ * The longhands come after the shorthand, which resets both of them.
+ */
+.browse-bar.is-floating::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: $browse-fade-h;
+  background: linear-gradient(
+    to bottom,
+    $background-color 0%,
+    rgba($background-color, 0.82) 35%,
+    rgba($background-color, 0.4) 70%,
+    rgba($background-color, 0) 100%
+  );
+  pointer-events: none;
+  animation: browse-fade-in linear both;
+  animation-timeline: scroll(nearest block);
+  animation-range: 0 $browse-fade-h;
+}
+
+@keyframes browse-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /*

@@ -189,7 +189,7 @@ export class AssetBrowser extends LitElement {
   }
 
   render() {
-    return html`<div class="browse-bar">
+    return html`<div class="browse-bar is-floating">
         <button
           type="button"
           class="browse-btn"
