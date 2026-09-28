@@ -881,9 +881,16 @@ body.playback-preview preview-bottom-bar {
   height: fit-content;
 }
 
+// No scrollbar on the icon rail. `overflow-y: scroll` reserves the 5px gutter
+// from `::-webkit-scrollbar` even while the thumb is faded out, which leaves
+// the buttons 34px of a 40px column. A 24px icon plus 0.4rem of padding either
+// side overflows that, so `text-align: center` gives up and every icon starts
+// at the left, 1.1px left of the column's middle. It still scrolls by wheel and
+// trackpad when the tabs outgrow the window.
 .sidebar-nav {
   flex-wrap: nowrap !important;
   overflow-y: scroll;
+  scrollbar-width: none;
 }
 
 .modal-dark {
