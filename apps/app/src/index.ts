@@ -13,6 +13,11 @@ import { installProxyBridge } from "./features/proxy/proxyBridge";
 import { installAutosave } from "./features/project/autosaveBridge";
 import { initProjectBaseline } from "./features/project/projectDirty";
 import { installHoverMotion } from "./features/motion/hoverSpring";
+import {
+  SCROLLBAR_ALPHA,
+  installScrollActivity,
+} from "./features/ui/scrollActivity";
+import { installScrollerWatch } from "./features/ui/scrollerWatch";
 
 enableIpcWrapper();
 
@@ -102,6 +107,19 @@ installFrameStats();
 // spread across nine components and `_asset.scss` reads the same five names
 // for all of them.
 installHoverMotion(document.documentElement.style);
+
+// Vertical scrollbars fade in while their list is moving, or has just grown,
+// and out once it settles. Both watch the whole document, so a list added later
+// needs nothing. Every target handed to the reader is a real `Element`.
+installScrollerWatch(
+  installScrollActivity(document, (target) =>
+    parseFloat(
+      getComputedStyle(target as unknown as Element).getPropertyValue(
+        SCROLLBAR_ALPHA,
+      ),
+    ),
+  ),
+);
 
 // Reads the proxy index off disk and keeps it current. Nothing is generated
 // here — this only learns what already exists, so a session with no proxies

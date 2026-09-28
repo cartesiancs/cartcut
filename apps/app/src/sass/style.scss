@@ -63,8 +63,36 @@ $material-symbols-font-path: "material-symbols/";
   border-radius: 10px;
 }
 
+// A vertical thumb is drawn only while its list is moving, a class
+// `features/ui/scrollActivity.ts` puts on and takes off, or under the pointer,
+// so a hidden bar can still be found and dragged. The space stays reserved, so
+// nothing reflows when it appears. Horizontal thumbs are always drawn.
+//
+// The fade lives on the scrolled element, not on the thumb: Chromium never
+// transitions a scrollbar pseudo-element, but it restyles the thumb whenever
+// its element's style changes, including on every frame of an animation.
+// `scrollActivity.ts` animates `--scrollbar-alpha` with the Web Animations API
+// and `.is-scrolling` holds the value once a fade ends. Not inherited, so a fade
+// restyles one element and none of its contents; the thumb asks for it by name.
+@property --scrollbar-alpha {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+.is-scrolling {
+  --scrollbar-alpha: 1;
+}
+
+::-webkit-scrollbar-thumb:vertical {
+  --scrollbar-alpha: inherit;
+  background: rgba(136, 136, 136, calc(0.296 * var(--scrollbar-alpha)));
+}
+
 /* Handle on hover */
-::-webkit-scrollbar-thumb:hover {
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:vertical:hover,
+::-webkit-scrollbar-thumb:vertical:active {
   background: rgba(85, 85, 85, 0.456);
 }
 
