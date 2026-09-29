@@ -87,18 +87,33 @@ export class MenuDropdownBody extends LitElement {
    * can be measured, and measuring is what decides whether it opens up or
    * down. Without it the menu paints once at the wrong place and jumps.
    *
-   * All of it runs here and not from a Lit lifecycle hook: this class never
-   * calls `super.connectedCallback()`, so Lit's reactive update cycle does not
-   * run and `updated()` would never fire. The items are already in the DOM at
-   * this point, so `offsetHeight` is the real height.
+   * Not from a Lit lifecycle hook: this class never calls
+   * `super.connectedCallback()`, so Lit's reactive update cycle does not run
+   * and `updated()` would never fire.
+   *
+   * **The measurement waits one microtask.** The caller's `innerHTML` upgrades
+   * custom elements in tree order, so this callback runs before any of its
+   * rows has been upgraded or rendered. Measured here, every menu is about 0px
+   * tall and always "fits" below the cursor, so it never flipped: a right-click
+   * low in the timeline opened downward with `max-height` set to the few
+   * pixels left, and the rows scrolled. The rows' reactions all run before the
+   * `innerHTML` setter returns, and a microtask runs after that and before the
+   * first paint, so the menu is measured whole and never drawn in the wrong
+   * place.
    */
   connectedCallback() {
     this.classList.add("dropdown-menu", "show");
     this.style.cssText =
       "position: fixed; top: 0px; left: 0px; z-index: 6000; visibility: hidden;";
 
-    applyMenuPlacement(this, { x: this.leftPx, y: this.topPx });
-    this.style.visibility = "visible";
+    queueMicrotask(() => {
+      // Replaced by another right-click in the same task: nothing to place.
+      if (!this.isConnected) {
+        return;
+      }
+      applyMenuPlacement(this, { x: this.leftPx, y: this.topPx });
+      this.style.visibility = "visible";
+    });
 
     document.addEventListener("click", this.onDocumentClick);
     this.addEventListener("mouseover", this.onPointerOver);
