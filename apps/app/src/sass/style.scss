@@ -678,6 +678,14 @@ body.is-scrubbing * {
   backdrop-filter: saturate(100%) blur(36px);
 }
 
+// Between pane content and everything that floats over it. The strip overhangs
+// the next pane by 0.2rem, so it has to paint above that pane's content, which
+// tops out at 300 (the timeline header, `.split-bottom-bar`), or a scrolled
+// list covers it and the column stops resizing. And it has to paint below the
+// timeline's status bar (999), Bootstrap dropdowns (1000) and offcanvas
+// (1050), the cards at 1080, the context menus at 6000, the hover preview at
+// 7000 and the modals at 8000, or it lays an invisible col-resize strip across
+// every menu that crosses it and takes the click meant for the row.
 .split-col-bar {
   position: absolute;
   top: 50%;
@@ -687,7 +695,7 @@ body.is-scrubbing * {
   height: 80%;
   background-color: #868f9900;
   cursor: col-resize;
-  z-index: 8000;
+  z-index: 400;
 }
 
 .split-bottom-bar {
