@@ -1,4 +1,4 @@
-import { LitElement, html } from "lit";
+import { LitElement, PropertyValues, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { atPlayhead, importPathsAt } from "./importDrop";
 import { getLocationEnv } from "../../functions/getLocationEnv";
@@ -11,8 +11,10 @@ import {
   parentDirectory,
   readDirectory,
 } from "./directoryEntries";
+import { AssetSort, sortAssetEntries } from "./assetSort";
 import "./switchShowType";
 import "./assetList";
+import "./assetSortMenu";
 
 type LoadStatus = "idle" | "loading" | "loaded" | "error";
 
@@ -85,6 +87,15 @@ export class AssetBrowser extends LitElement {
   @state()
   showType = assetStore.getState().showType;
 
+  @state()
+  sort: AssetSort = assetStore.getState().sort;
+
+  /**
+   * `entries` in `sort`'s order, recomputed in `willUpdate` when either
+   * changes. A new sort re-orders what was read and never reads the disk.
+   */
+  private sorted: AssetEntry[] = [];
+
   private lc = new LocaleController(this);
   private unsubscribe?: () => void;
   private observer?: IntersectionObserver;
@@ -107,6 +118,9 @@ export class AssetBrowser extends LitElement {
   createRenderRoot() {
     this.unsubscribe = assetStore.subscribe((state: IAssetStore) => {
       this.showType = state.showType;
+      // Replaced only on a real change, so Lit's identity check is the whole
+      // test for whether to re-sort.
+      this.sort = state.sort;
 
       if (state.directoryRevision != this.loadedRevision) {
         this.loadedRevision = state.directoryRevision;
@@ -188,6 +202,23 @@ export class AssetBrowser extends LitElement {
     return assetStore.getState().directoryRevision != revision;
   }
 
+  protected willUpdate(changed: PropertyValues): void {
+    if (changed.has("entries") || changed.has("sort")) {
+      this.sorted = sortAssetEntries(this.entries, this.sort);
+    }
+  }
+
+  /**
+   * A new order starts at the top: "Largest First" is a request to see the
+   * largest file, and the row it is on is the first one. The first render is
+   * not a change of order, so it leaves the pane where it was.
+   */
+  protected updated(changed: PropertyValues): void {
+    if (changed.has("sort") && changed.get("sort") !== undefined) {
+      this.closest(".tab-content")?.scrollTo({ top: 0 });
+    }
+  }
+
   render() {
     return html`<div class="browse-bar is-floating">
         <button
@@ -212,6 +243,8 @@ export class AssetBrowser extends LitElement {
         >
           <span class="material-symbols-outlined">folder_open</span>
         </button>
+
+        <asset-sort-menu></asset-sort-menu>
 
         <switch-showtype></switch-showtype>
       </div>
@@ -272,9 +305,10 @@ export class AssetBrowser extends LitElement {
     }
 
     return html`<asset-list
-      .entries=${this.entries}
+      .entries=${this.sorted}
       .directory=${this.nowDirectory}
       .showType=${this.showType}
+      .sort=${this.sort}
     ></asset-list>`;
   }
 

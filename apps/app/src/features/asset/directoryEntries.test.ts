@@ -94,6 +94,54 @@ describe("normalizeDirectoryEntries", () => {
     expect(normalizeDirectoryEntries(42)).toEqual([]);
     expect(normalizeDirectoryEntries({ a: null, b: "str" })).toEqual([]);
   });
+
+  it("carries a file's size and dates", () => {
+    const result = normalizeDirectoryEntries({
+      "clip.mp4": {
+        isDirectory: false,
+        title: "clip.mp4",
+        size: 1234,
+        mtimeMs: 2000,
+        birthtimeMs: 1000,
+      },
+    });
+    expect(result).toStrictEqual([
+      {
+        name: "clip.mp4",
+        isDirectory: false,
+        size: 1234,
+        modifiedMs: 2000,
+        createdMs: 1000,
+      },
+    ]);
+  });
+
+  it("leaves out a value it cannot use, key and all", () => {
+    for (const bad of [NaN, Infinity, -1, "12", null]) {
+      const result = normalizeDirectoryEntries({
+        "clip.mp4": { size: bad, mtimeMs: bad, birthtimeMs: bad },
+      });
+      expect(result).toStrictEqual([{ name: "clip.mp4", isDirectory: false }]);
+    }
+  });
+
+  it("treats a creation time of 0 as unknown, which is what Linux without statx reports", () => {
+    const result = normalizeDirectoryEntries({
+      "clip.mp4": { size: 0, mtimeMs: 5, birthtimeMs: 0 },
+    });
+    expect(result).toStrictEqual([
+      { name: "clip.mp4", isDirectory: false, size: 0, modifiedMs: 5 },
+    ]);
+  });
+
+  it("gives a folder no size even when one is reported", () => {
+    const result = normalizeDirectoryEntries({
+      renders: { isDirectory: true, size: 96, mtimeMs: 5 },
+    });
+    expect(result).toStrictEqual([
+      { name: "renders", isDirectory: true, modifiedMs: 5 },
+    ]);
+  });
 });
 
 describe("parentDirectory", () => {

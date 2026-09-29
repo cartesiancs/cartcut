@@ -231,6 +231,30 @@ asset-list {
     line-height: 17px;
 }
 
+/*
+ * The list view's one column: the row's value for the key the panel is sorted
+ * by, `features/asset/assetMeta.ts`'s "2.1 GB" or "Today 14:03". A step dimmer
+ * than the name so the name still reads first, and tabular figures so sizes
+ * and clocks line up down the column. `flex: none` with a cap: the name gives
+ * way first, and a long kind label clips before it takes the whole row.
+ */
+.asset-row > .asset-meta {
+    flex: none;
+    max-width: 50%;
+    color: #5c646d;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    line-height: 17px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: color 140ms ease-out;
+}
+
+.asset:hover > .asset-meta {
+    color: #7f878f;
+}
+
 .asset-row .asset-thumb > .asset-thumb-icon {
     font-size: 19px;
 }

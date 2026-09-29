@@ -1,4 +1,10 @@
 import { createStore } from "zustand/vanilla";
+import { AssetSort, coerceAssetSort } from "../features/asset/assetSort";
+import {
+  browserSortStorage,
+  loadAssetSort,
+  saveAssetSort,
+} from "../features/asset/assetSortPref";
 
 export type AssetShowType = "grid" | "list";
 
@@ -26,6 +32,14 @@ export interface IAssetStore {
   directoryRevision: number;
 
   setDirectory: (dir: string) => void;
+
+  /**
+   * The panel's Sort By, one choice for every folder, remembered across
+   * launches by `assetSortPref.ts`. Replaced only on a real change, so a
+   * subscriber can compare it by identity.
+   */
+  sort: AssetSort;
+  setSort: (sort: AssetSort) => void;
 }
 
 export const assetStore = createStore<IAssetStore>((set) => ({
@@ -44,4 +58,21 @@ export const assetStore = createStore<IAssetStore>((set) => ({
       nowDirectory: dir,
       directoryRevision: state.directoryRevision + 1,
     })),
+
+  sort: loadAssetSort(browserSortStorage),
+
+  setSort: (next) =>
+    set((state) => {
+      const sort = coerceAssetSort(next);
+      // Returning the state itself is what makes zustand skip the notify; an
+      // empty object still wakes every subscriber.
+      if (
+        sort.key == state.sort.key &&
+        sort.direction == state.sort.direction
+      ) {
+        return state;
+      }
+      saveAssetSort(browserSortStorage, sort);
+      return { sort };
+    }),
 }));

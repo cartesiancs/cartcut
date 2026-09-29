@@ -290,6 +290,18 @@ input.browse-input::-webkit-search-cancel-button:hover {
   cursor: default;
 }
 
+/* A button whose menu is open stays lit, so the menu says where it came from. */
+.browse-btn[aria-expanded="true"] {
+  border-color: $opt-line-strong;
+  background-color: $browse-hover;
+  color: $opt-bright;
+}
+
+asset-sort-menu {
+  display: block;
+  flex: none;
+}
+
 .browse-btn:focus-visible,
 .browse-seg-item:focus-visible,
 .browse-text-btn:focus-visible {
@@ -397,6 +409,63 @@ switch-showtype {
 
 .browse-text-btn.is-primary:hover:not(:disabled) {
   background-color: #d9dde1;
+}
+
+/* ------------------------------------------------------------------- menus */
+
+/*
+ * A choice menu opened from a bar button: the file browser's Sort By
+ * (`features/asset/assetSortMenu.ts`). The panel is `_dropdown.scss`'s; the
+ * rows follow `_toolbar.scss`'s `.tb-menu`, with the check in a column of its
+ * own at the start, as Finder draws one, since these rows have no icon to sit
+ * beside it. Every row carries the check and only the chosen one shows it, so
+ * the labels start at one x.
+ *
+ * The rows are `<button>`s for the keyboard, so they shed a button's own box.
+ */
+.browse-menu {
+  min-width: 11rem;
+  padding: 4px !important;
+}
+
+.browse-menu .dropdown-header {
+  padding: 4px 8px 2px;
+  color: $opt-label;
+  font-size: 11px;
+}
+
+.browse-menu .dropdown-item {
+  width: 100%;
+  margin: 1px 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.browse-menu .dropdown-item:hover,
+.browse-menu .dropdown-item:focus-visible {
+  background-color: #43444aba;
+  outline: none;
+}
+
+/* Two classes, to outrank `material-symbols/outlined`, which loads later. */
+.browse-menu .browse-menu-check {
+  flex: none;
+  width: 14px;
+  visibility: hidden;
+}
+
+.browse-menu [aria-checked="true"] > .browse-menu-check {
+  visibility: visible;
+}
+
+/* Bootstrap's 15% black is invisible on this panel. */
+.browse-menu .dropdown-divider {
+  margin: 4px 2px;
+  border-top-color: rgba(255, 255, 255, 0.08);
+  opacity: 1;
 }
 
 /* ------------------------------------------------------------------- tabs */

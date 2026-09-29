@@ -7,15 +7,32 @@
  * real IPC call but accepts a replacement.
  */
 
+import { DEFAULT_ASSET_SORT, sortAssetEntries } from "./assetSort";
+
 export interface AssetEntry {
   /** Basename only, e.g. "clip.mp4" — never a full path. */
   name: string;
   isDirectory: boolean;
+  /**
+   * Bytes, for a file. Absent for a folder, whose `stat` size is its inode's
+   * rather than its contents', and for a listing that did not report one (the
+   * web demo's sample list).
+   */
+  size?: number;
+  /** `mtimeMs`, absent when unreported. */
+  modifiedMs?: number;
+  /**
+   * `birthtimeMs`, absent when unreported or 0. A Linux filesystem without
+   * statx answers 0, and a clip born in 1970 would sort as the oldest thing on
+   * the disk rather than as one whose age is unknown.
+   */
+  createdMs?: number;
 }
 
 /**
  * `filesystem:getDirectory` answers with an object keyed by filename:
- * `{ "clip.mp4": { isDirectory: false, title: "clip.mp4" } }`.
+ * `{ "clip.mp4": { isDirectory: false, title: "clip.mp4", size, mtimeMs, birthtimeMs } }`
+ * (`electron/lib/listDirectory.ts`).
  *
  * Iterating that object directly — which every call site used to do — leaks JS
  * object key semantics into the UI: integer-like filenames ("1.mp4", "2.mp4")
@@ -42,26 +59,41 @@ export function normalizeDirectoryEntries(raw: unknown): AssetEntry[] {
       continue;
     }
 
-    entries.push({ name: name, isDirectory: Boolean(value.isDirectory) });
+    const isDirectory = Boolean(value.isDirectory);
+    const entry: AssetEntry = { name: name, isDirectory: isDirectory };
+
+    // Each key is set only when it holds a usable number, so an entry with
+    // nothing reported has no key at all rather than one holding `undefined`.
+    if (!isDirectory && isFiniteAtLeast(value.size, 0)) {
+      entry.size = value.size;
+    }
+    if (isFiniteAbove(value.mtimeMs, 0)) {
+      entry.modifiedMs = value.mtimeMs;
+    }
+    if (isFiniteAbove(value.birthtimeMs, 0)) {
+      entry.createdMs = value.birthtimeMs;
+    }
+
+    entries.push(entry);
   }
 
   return sortEntries(entries);
 }
 
-/** Folders first, then files, each group alphabetical. */
-export function sortEntries(entries: AssetEntry[]): AssetEntry[] {
-  return [...entries].sort((a, b) => {
-    if (a.isDirectory != b.isDirectory) {
-      return a.isDirectory ? -1 : 1;
-    }
+function isFiniteAtLeast(value: unknown, min: number): value is number {
+  return typeof value == "number" && Number.isFinite(value) && value >= min;
+}
 
-    // `numeric` so clip2.mp4 precedes clip10.mp4; `base` so casing does not
-    // split an otherwise alphabetical run.
-    return a.name.localeCompare(b.name, undefined, {
-      numeric: true,
-      sensitivity: "base",
-    });
-  });
+function isFiniteAbove(value: unknown, min: number): value is number {
+  return typeof value == "number" && Number.isFinite(value) && value > min;
+}
+
+/**
+ * Folders first, then files, each group alphabetical: the panel's default
+ * order. `assetSort.ts` owns every order, this one included.
+ */
+export function sortEntries(entries: AssetEntry[]): AssetEntry[] {
+  return sortAssetEntries(entries, DEFAULT_ASSET_SORT);
 }
 
 /**

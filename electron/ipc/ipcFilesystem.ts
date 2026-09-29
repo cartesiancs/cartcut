@@ -4,42 +4,10 @@ import fse from "fs-extra";
 import path from "path";
 import { randomUUID } from "crypto";
 import { app } from "electron";
+import { listDirectory } from "../lib/listDirectory";
 
 export const ipcFilesystem = {
-  getDirectory: async (event, dir) => {
-    const result = new Promise((resolve, reject) => {
-      fs.readdir(dir, async (err, files) => {
-        // Without this, `files` is undefined and `files.map` throws inside the
-        // callback, escaping the promise — it then never settles and the
-        // renderer's `.then` and `.catch` both go uncalled.
-        if (err) {
-          reject(err);
-          return;
-        }
-
-        try {
-          let lists = {};
-
-          const promises = files.map(async (file) => {
-            const stat = await fsp.lstat(`${dir}/${file}`);
-            const isDirectory = stat.isDirectory();
-
-            lists[String(file)] = {
-              isDirectory: isDirectory,
-              title: file,
-            };
-          });
-
-          await Promise.all(promises);
-          resolve(lists);
-        } catch (error) {
-          reject(error);
-        }
-      });
-    });
-
-    return result;
-  },
+  getDirectory: async (event, dir) => listDirectory(dir),
   makeDirectory: async (event, path, options) => {
     let mkdir = await fsp.mkdir(path, options);
 

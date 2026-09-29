@@ -3,38 +3,15 @@ import * as fsp from "fs/promises";
 import fse from "fs-extra";
 import { Router, Response, Request } from "express";
 import path from "path";
+import { listDirectory } from "../../lib/listDirectory";
 
 export const httpFilesystem = {
   getDirectory: async function (req: Request, res: Response) {
-    const dir = req.query.dir;
-
-    fs.readdir(dir, async (err, files) => {
-      // Without this, `files` is undefined and `files.map` throws inside the
-      // callback, so the request hangs until the client times out.
-      if (err) {
-        res.status(404).send({ message: String(err.message) });
-        return;
-      }
-
-      try {
-        let lists = {};
-
-        const promises = files.map(async (file) => {
-          const stat = await fsp.lstat(`${dir}/${file}`);
-          const isDirectory = stat.isDirectory();
-
-          lists[String(file)] = {
-            isDirectory: isDirectory,
-            title: file,
-          };
-        });
-
-        await Promise.all(promises);
-        res.status(200).send(lists);
-      } catch (error: any) {
-        res.status(500).send({ message: String(error?.message ?? error) });
-      }
-    });
+    try {
+      res.status(200).send(await listDirectory(String(req.query.dir)));
+    } catch (error: any) {
+      res.status(404).send({ message: String(error?.message ?? error) });
+    }
   },
   getFile: async function (req: Request, res: Response) {
     try {

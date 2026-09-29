@@ -29,8 +29,8 @@
  *   opening a single zip. `contactSheet.ts` makes the same choice
  *   ("the filename carries the range so a directory of them is readable") and
  *   `reversePipeline.ts` relies on the same sortability for its segments.
- *   `filesystem:getDirectory` reports no mtime anyway, so the name is the only
- *   place the time can live.
+ *   A copy or a backup restore rewrites mtime and leaves the name alone, so
+ *   the name is the one place the time survives.
  * - **`.part` then rename**, the `reverse.ts` idiom. A truncated autosave that
  *   the menu offers is worse than no autosave at all: it looks like a recovery
  *   point and restores nothing.

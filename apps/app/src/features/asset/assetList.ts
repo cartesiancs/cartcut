@@ -31,10 +31,17 @@ import { observeVisibility, unobserveVisibility } from "./tileVisibility";
 import { showAssetMenu } from "../mediaInfo/assetMenu";
 import { canShowMediaInfo } from "../mediaInfo/mediaInfoSession";
 import { targetForAsset } from "../mediaInfo/mediaInfoView";
+import { LocaleController } from "../../controllers/locale";
+import { AssetSort, DEFAULT_ASSET_SORT } from "./assetSort";
+import { AssetMetaWords, assetMetaFor } from "./assetMeta";
 
 /**
  * The grid. Presentation only — `<asset-browser>` owns the directory and hands
- * the entries down, so nothing here fetches, sorts, or reaches into the DOM.
+ * the entries down, already in order, so nothing here fetches, sorts, or
+ * reaches into the DOM.
+ *
+ * `sort` is here for the list view's one column: each row shows its value for
+ * the key the panel is sorted by, as `assetMeta.ts` writes it.
  */
 @customElement("asset-list")
 export class AssetList extends LitElement {
@@ -47,11 +54,38 @@ export class AssetList extends LitElement {
   @property()
   showType: AssetShowType = "grid";
 
+  @property({ attribute: false })
+  sort: AssetSort = DEFAULT_ASSET_SORT;
+
+  private lc = new LocaleController(this);
+
   createRenderRoot() {
     return this;
   }
 
+  private metaWords(): AssetMetaWords {
+    const t = (key: string) => this.lc.t(key);
+    return {
+      today: t("setting.date_today"),
+      yesterday: t("setting.date_yesterday"),
+      folder: t("setting.kind_folder"),
+      video: t("setting.kind_video"),
+      image: t("setting.kind_image"),
+      audio: t("setting.kind_audio"),
+      file: t("setting.kind_file"),
+    };
+  }
+
   render() {
+    // The grid shows no column, and Name has none to show: the name is the
+    // value. One clock for the whole pass, so two rows written a moment apart
+    // never disagree about which day "today" is.
+    const withMeta = this.showType == "list" && this.sort.key != "name";
+    const words = withMeta ? this.metaWords() : null;
+    const now = Date.now();
+    const metaOf = (entry: AssetEntry) =>
+      words == null ? "" : assetMetaFor(entry, this.sort.key, now, words);
+
     // Bootstrap's `.row` is gone from here on purpose. It is a flex line with
     // negative side margins, so a fixed `col-*` was the only way to say how
     // many tiles fit; `_asset.scss`'s grid decides that from the panel's real
@@ -68,11 +102,13 @@ export class AssetList extends LitElement {
                 .name=${entry.name}
                 .directory=${this.directory}
                 .showType=${this.showType}
+                .meta=${metaOf(entry)}
               ></asset-folder>`
             : html`<asset-file
                 .name=${entry.name}
                 .directory=${this.directory}
                 .showType=${this.showType}
+                .meta=${metaOf(entry)}
               ></asset-file>`,
       )}
     </div> `;
@@ -113,14 +149,20 @@ function applyShowType(element: HTMLElement, showType: AssetShowType) {
  * gap between two passes, so resting on a tile read as the name disappearing.
  * The whole name is on the hover preview's own caption now, where there is room
  * for it.
+ *
+ * `meta` is the list view's column, the row's value for the sort key. It is ""
+ * in the grid and for Name, and then there is no element at all.
  */
 function templateTile(
   name: string,
   well: TemplateResult,
   wellClass = "",
+  meta = "",
 ): TemplateResult {
   return html`<div class="asset-thumb ${wellClass}">${well}</div>
-    <span class="asset-name">${name}</span>`;
+    <span class="asset-name">${name}</span>${meta == ""
+      ? nothing
+      : html`<span class="asset-meta">${meta}</span>`}`;
 }
 
 /** The glyph a file with no picture of its own gets. */
@@ -188,6 +230,10 @@ export class AssetFile extends LitElement {
     this.clearDwell();
     this.unwatchWindow();
 
+    // A detached tile is not on screen. A re-sort detaches every tile it moves
+    // (`repeat` moves with `insertBefore`) and the observer reports each one
+    // afresh once it is back, so this is only ever briefly false.
+    this.visible = false;
     unobserveVisibility(this);
     this.dropThumbnailRequest();
   }
@@ -200,6 +246,10 @@ export class AssetFile extends LitElement {
 
   @property()
   showType: AssetShowType = "grid";
+
+  /** The list view's column; "" for none. */
+  @property()
+  meta = "";
 
   createRenderRoot() {
     return this;
@@ -268,6 +318,8 @@ export class AssetFile extends LitElement {
     return templateTile(
       this.name,
       templateIcon(fileIcon[filetype] ?? fileIcon.unknown),
+      "",
+      this.meta,
     );
   }
 
@@ -281,6 +333,8 @@ export class AssetFile extends LitElement {
         decoding="async"
         class="asset-thumb-img"
       />`,
+      "",
+      this.meta,
     );
   }
 
@@ -306,6 +360,8 @@ export class AssetFile extends LitElement {
           />`}<span class="material-symbols-outlined asset-thumb-badge"
         >play_arrow</span
       >`,
+      "",
+      this.meta,
     );
   }
 
@@ -355,7 +411,12 @@ export class AssetFile extends LitElement {
     this.visible = visible;
 
     if (visible) {
-      this.ensureThumbnail();
+      // A render, not a direct `ensureThumbnail`. The capture this tile gave up
+      // when it last went away (scrolled off, or moved by a re-sort) may have
+      // finished since and landed in the cache with nobody listening, and
+      // `ensureThumbnail` answers a cache hit by doing nothing. `render` reads
+      // the cache and `updated` asks for whatever is still missing.
+      this.requestUpdate();
       return;
     }
 
@@ -672,6 +733,10 @@ export class AssetFolder extends LitElement {
   @property()
   showType: AssetShowType = "grid";
 
+  /** The list view's column; "" for none. */
+  @property()
+  meta = "";
+
   createRenderRoot() {
     return this;
   }
@@ -688,6 +753,7 @@ export class AssetFolder extends LitElement {
       this.name,
       templateIcon("folder"),
       "asset-thumb-folder",
+      this.meta,
     );
   }
 
