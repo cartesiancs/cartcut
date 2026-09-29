@@ -312,6 +312,8 @@ features/record/       the recorder's pure logic and its auto-zoom: zoomPlan (wh
 features/reverse/      reversed media files, made by electron/lib/reversePipeline.ts
 features/speed/        the ramp's graph editor; the curve is timeline/speedCurve.ts
 features/update/       the update card; main's half is electron/lib/updateSession.ts
+features/mediaInfo/    Show Info: labels and layout here; the ffprobe call and its
+                       parse are main's, electron/lib/mediaInfo*.ts
 features/motion/       a damped spring as a CSS linear(): the tour, the tile hover
 features/editor/       actions, menuCommands, shortcuts, frameRate
 features/extension/    the extension host's editor half: bridge, dispatch, batches

@@ -265,6 +265,8 @@ const request = {
   media: {
     backgroundRemove: (path) =>
       ipcRenderer.invoke("media:backgroundRemove", path),
+    // Show Info. An OS path in, a `MediaInfoResult` out; never rejects.
+    info: (fsPath) => ipcRenderer.invoke("media:info", fsPath),
   },
   /**
    * Proxy media — small stand-ins the preview decodes instead of the originals.

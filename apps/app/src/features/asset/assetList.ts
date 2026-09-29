@@ -28,6 +28,9 @@ import {
 } from "./hoverPreviewOverlay";
 import { cancelThumbnail, requestThumbnail } from "./thumbnails";
 import { observeVisibility, unobserveVisibility } from "./tileVisibility";
+import { showAssetMenu } from "../mediaInfo/assetMenu";
+import { canShowMediaInfo } from "../mediaInfo/mediaInfoSession";
+import { targetForAsset } from "../mediaInfo/mediaInfoView";
 
 /**
  * The grid. Presentation only — `<asset-browser>` owns the directory and hands
@@ -166,6 +169,7 @@ export class AssetFile extends LitElement {
     // Neither bubbles, so they go on the tile itself rather than on the grid.
     this.addEventListener("pointerenter", this.handlePointerEnter);
     this.addEventListener("pointerleave", this.handlePointerLeave);
+    this.addEventListener("contextmenu", this.handleContextMenu);
   }
 
   connectedCallback(): void {
@@ -389,6 +393,24 @@ export class AssetFile extends LitElement {
       this.holdTimer = 0;
     }
   }
+
+  /**
+   * Show Info, for a file it can describe. Anything else (a subtitle, a
+   * project file) gets no menu at all rather than one with nothing in it.
+   */
+  private handleContextMenu = (e: MouseEvent) => {
+    const target = targetForAsset(
+      this.fullPath,
+      this.fileUrl,
+      this.name,
+      mime.lookup(this.name).type,
+    );
+    if (target == null || !canShowMediaInfo()) {
+      return;
+    }
+    e.preventDefault();
+    showAssetMenu(e.clientX, e.clientY, target);
+  };
 
   private handlePointerDown = (e: PointerEvent) => {
     // Above the button guard on purpose. A right-click opens the context menu,

@@ -169,6 +169,7 @@ ipcMain.handle("stream:saveBufferToAudio", ipcStream.saveBufferToAudio);
 ipcMain.handle("stream:saveBufferToTempFile", ipcStream.saveBufferToTempFile);
 
 ipcMain.handle("media:backgroundRemove", ipcMedia.backgroundRemove);
+ipcMain.handle("media:info", ipcMedia.info);
 
 // Proxy media. `generate` is long-running and reports on `proxy:progress`.
 ipcMain.handle("proxy:list", ipcProxy.list);

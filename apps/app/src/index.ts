@@ -50,6 +50,7 @@ import "./features/menu/menuDropdown";
 import "./features/onboarding/onboardingOverlay";
 import "./features/update/updatePrompt";
 import "./features/subtitle/importDialog";
+import "./features/mediaInfo/mediaInfoDialog";
 import "./features/record/processDialog";
 
 

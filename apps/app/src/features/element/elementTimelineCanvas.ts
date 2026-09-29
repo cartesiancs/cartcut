@@ -166,6 +166,8 @@ import {
 } from "../editor/actions";
 import { penCapturesKey } from "../mask/penSession";
 import { count as perfCount } from "../debug/frameStats";
+import { canShowMediaInfo, openMediaInfo } from "../mediaInfo/mediaInfoSession";
+import { targetForElement } from "../mediaInfo/mediaInfoView";
 
 /** What a click on a bare cut reaches for first. */
 const DEFAULT_TRANSITION_PRESET = "com.cartcut.cross-dissolve";
@@ -974,6 +976,33 @@ export class elementTimelineCanvas extends LitElement {
     }
 
     return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').rasterizeSelectedText()" item-name="Rasterize text" item-icon="image"> </menu-dropdown-item>`;
+  }
+
+  // ------------------------------------------------------------------ info
+
+  /** Open Show Info on the one right-clicked clip's source file. */
+  public showInfoForSelected() {
+    const [id] = this.targetIdDuringRightClick;
+    const target = targetForElement(this.currentDoc().elements[id]);
+    if (target != null) {
+      openMediaInfo(target);
+    }
+  }
+
+  /**
+   * "Show Info", for exactly one video, photo, GIF or sound clip. A selection
+   * of several has no single file to describe, and the rest of this menu's
+   * rule applies: an entry that could only decline is not offered.
+   */
+  private infoMenuTemplate(): string {
+    const ids = this.targetIdDuringRightClick;
+    if (ids.length !== 1 || !canShowMediaInfo()) {
+      return "";
+    }
+    if (targetForElement(this.currentDoc().elements[ids[0]]) == null) {
+      return "";
+    }
+    return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').showInfoForSelected()" item-name="Show Info" item-icon="info"> </menu-dropdown-item>`;
   }
 
   // ----------------------------------------------------------------- media
@@ -2388,6 +2417,7 @@ export class elementTimelineCanvas extends LitElement {
   showMenuDropdown({ x, y }) {
     document.querySelector("#menuRightClick").innerHTML = `
         <menu-dropdown-body top="${y}" left="${x}">
+          ${this.infoMenuTemplate()}
           ${this.animationMenuTemplate()}
           ${this.mediaMenuTemplate()}
           ${this.audioMenuTemplate()}

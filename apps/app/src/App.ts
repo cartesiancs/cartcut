@@ -119,6 +119,7 @@ export class App extends LitElement {
 
         <toast-box></toast-box>
         <subtitle-import-dialog></subtitle-import-dialog>
+        <media-info-dialog></media-info-dialog>
         <!-- Over the other dialogs and under the toasts: a toast about the take has
              to stay readable while this is up. -->
         <recording-process-dialog></recording-process-dialog>
