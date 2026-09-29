@@ -202,7 +202,7 @@ export class ClipSpeedCurveControl extends LitElement {
       <canvas
         class="w-100"
         style="height: ${PLOT_HEIGHT}px; border-radius: 7px; cursor: crosshair;
-               display: block; margin-bottom: 8px;"
+               display: block; margin-bottom: 12px;"
         aria-label="speed ramp"
         aria-event="speed_curve"
         @pointerdown=${this.handlePointerDown}

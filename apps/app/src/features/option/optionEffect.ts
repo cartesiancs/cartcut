@@ -283,14 +283,14 @@ export class OptionEffect extends LitElement {
         title: "Settings",
         body: html`
           ${preset == null
-            ? html`<div class="opt-hint" style="margin-bottom: 8px;">
+            ? html`<div class="opt-hint" style="margin-bottom: 12px;">
                 <span class="material-symbols-outlined opt-hint-icon"
                   >warning</span
                 >
                 Not installed. This effect does nothing for now, and its
                 settings are kept.
               </div>`
-            : html`<div class="opt-hint" style="margin-bottom: 8px;">
+            : html`<div class="opt-hint" style="margin-bottom: 12px;">
                 <span class="material-symbols-outlined opt-hint-icon"
                   >layers</span
                 >

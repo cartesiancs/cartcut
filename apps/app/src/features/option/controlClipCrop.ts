@@ -262,7 +262,7 @@ export class ClipCropControl extends LitElement {
         })}
       </div>
       ${cropChanged(session)
-        ? html`<div class="opt-hint" style="margin-top: 8px;">
+        ? html`<div class="opt-hint" style="margin-top: 12px;">
             <span class="material-symbols-outlined opt-hint-icon">keyboard</span>
             Enter to apply, Escape to cancel.
           </div>`

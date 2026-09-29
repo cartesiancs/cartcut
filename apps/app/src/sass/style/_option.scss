@@ -25,6 +25,15 @@ $opt-label: #7f878f;
 $opt-text: #c3c9cf;
 $opt-bright: #f1f3f5;
 
+/*
+ * The two spacings that separate one thing from the next: card from card, and
+ * field from field inside a card. Label-to-control spacing inside one field
+ * (the 6px above a slider or a segmented row) is a different relation and
+ * stays tighter, so a value still reads as belonging to its own name.
+ */
+$opt-section-gap: 10px;
+$opt-field-gap: 12px;
+
 /* ------------------------------------------------------------------ section */
 
 /*
@@ -36,7 +45,7 @@ $opt-bright: #f1f3f5;
   border: 1px solid $opt-line;
   border-radius: 10px;
   background-color: $opt-card;
-  margin-bottom: 6px;
+  margin-bottom: $opt-section-gap;
   overflow: hidden;
 }
 
@@ -94,7 +103,7 @@ $opt-bright: #f1f3f5;
 /* -------------------------------------------------------------------- rows */
 
 .opt-field + .opt-field {
-  margin-top: 8px;
+  margin-top: $opt-field-gap;
 }
 
 .opt-row {
@@ -422,7 +431,7 @@ textarea.opt-textarea {
   display: block;
   width: 100%;
   min-height: 64px;
-  margin-bottom: 8px;
+  margin-bottom: $opt-field-gap;
   padding: 6px 8px;
   border: 1px solid $opt-line;
   border-radius: 7px;
@@ -643,7 +652,7 @@ input[type="range"].opt-slider:active::-webkit-slider-thumb {
 .opt-tabs {
   container-type: inline-size;
   padding: 3px;
-  margin-bottom: 8px;
+  margin-bottom: $opt-section-gap;
   border: 1px solid $opt-line;
   border-radius: 10px;
   background-color: #121416;

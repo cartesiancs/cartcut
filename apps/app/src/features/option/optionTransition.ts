@@ -254,7 +254,7 @@ export class OptionTransition extends LitElement {
         title: "Settings",
         body: html`
           ${preset == null
-            ? html`<div class="opt-hint" style="margin-bottom: 8px;">
+            ? html`<div class="opt-hint" style="margin-bottom: 12px;">
                 <span class="material-symbols-outlined opt-hint-icon"
                   >warning</span
                 >
