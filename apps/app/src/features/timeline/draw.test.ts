@@ -34,7 +34,11 @@ function doc(elements: Record<string, any>): TimelineDocument {
   });
 }
 
-function paint(d: TimelineDocument, over: Partial<Parameters<typeof drawTimeline>[1]> = {}) {
+function paint(
+  d: TimelineDocument,
+  over: Partial<Parameters<typeof drawTimeline>[1]> = {},
+  topOffset = 0,
+) {
   const { canvas, ctx } = scene(W, H);
   const layout = layoutTimeline({
     doc: d,
@@ -45,7 +49,9 @@ function paint(d: TimelineDocument, over: Partial<Parameters<typeof drawTimeline
     viewportH: H,
     // Pixel assertions below are written against the top of the canvas; the
     // ruler strip the real timeline reserves would just offset every one.
-    topOffset: 0,
+    // The selection ring's tests move the row down, so there is canvas above
+    // the clip to show the ring stopping at its edge.
+    topOffset,
   });
 
   drawTimeline(ctx, {
@@ -63,6 +69,12 @@ function paint(d: TimelineDocument, over: Partial<Parameters<typeof drawTimeline
   });
 
   return { canvas, ctx, layout };
+}
+
+/** `#rrggbb` as the channels `pixel` reports. */
+function rgbOf(hex: string) {
+  const n = parseInt(hex.slice(1), 16);
+  return { r: (n >> 16) & 0xff, g: (n >> 8) & 0xff, b: n & 0xff };
 }
 
 /** A provider that always returns the same solid tile. */
@@ -269,41 +281,197 @@ describe("drawTimeline", () => {
     });
   });
 
-  it("outlines a selected clip on all four sides", () => {
-    const d = doc({
-      a: imageElement({
-        trackId: "v1",
-        startTime: 0,
-        duration: 4000,
-        timelineOptions: { color: "#ff0000" },
-      }),
-    });
-    // Park the playhead off the clip: it is drawn last and 2px wide, so at its
-    // default of 0ms it sits exactly on the left-hand border being asserted.
-    const { canvas } = paint(d, { selection: ["a"], playheadMs: 90_000 });
+  describe("the selection ring", () => {
+    // 1000..5000ms at 45px/s is x 45..225, and the row starts at y 8, so there
+    // is canvas on every side of the clip to show what the ring leaves alone.
+    const ringed = () =>
+      doc({
+        a: imageElement({
+          trackId: "v1",
+          startTime: 1000,
+          duration: 4000,
+          timelineOptions: { color: "#ff0000" },
+        }),
+      });
+    const TOP = 8;
+    const RING = rgbOf(defaultColors.selection);
+    const GAP = rgbOf(defaultColors.background);
+    const RED = { r: 255, g: 0, b: 0 };
+    // Park the playhead off the clip: it is drawn last and 2px wide.
+    const paintRinged = (selection: string[]) =>
+      paint(ringed(), { selection, playheadMs: 90_000 }, TOP);
 
-    expect(pixel(canvas, 90, 0)).toMatchObject({ r: 255, g: 255, b: 255 });
-    expect(pixel(canvas, 90, TRACK_HEIGHT - 1)).toMatchObject({
-      r: 255,
-      g: 255,
-      b: 255,
+    it("rings a selected clip on all four sides, on its own edge", () => {
+      const { canvas, layout } = paintRinged(["a"]);
+      const r = layout.clips[0];
+      const midX = r.x + r.w / 2;
+      const midY = r.y + r.h / 2;
+
+      // The first and last pixel of the clip in each direction.
+      expect(pixel(canvas, midX, r.y)).toMatchObject(RING);
+      expect(pixel(canvas, midX, r.y + r.h - 1)).toMatchObject(RING);
+      expect(pixel(canvas, r.x, midY)).toMatchObject(RING);
+      expect(pixel(canvas, r.x + r.w - 1, midY)).toMatchObject(RING);
     });
-    expect(pixel(canvas, 0, 20)).toMatchObject({ r: 255, g: 255, b: 255 });
-    expect(pixel(canvas, 179, 20)).toMatchObject({ r: 255, g: 255, b: 255 });
+
+    it("starts and ends exactly where the clip does", () => {
+      // The reason it is inside: a ring outside the clip marks a span three
+      // pixels wider than the clip on each side.
+      const { canvas, layout } = paintRinged(["a"]);
+      const r = layout.clips[0];
+      const midX = r.x + r.w / 2;
+      const midY = r.y + r.h / 2;
+
+      expect(pixel(canvas, r.x - 1, midY)).not.toMatchObject(RING);
+      expect(pixel(canvas, r.x + r.w, midY)).not.toMatchObject(RING);
+      expect(pixel(canvas, midX, r.y - 1)).not.toMatchObject(RING);
+      expect(pixel(canvas, midX, r.y + r.h)).not.toMatchObject(RING);
+    });
+
+    it("keeps a dark pixel between the ring and the frames", () => {
+      const { canvas, layout } = paintRinged(["a"]);
+      const r = layout.clips[0];
+      const midX = r.x + r.w / 2;
+      const midY = r.y + r.h / 2;
+
+      expect(pixel(canvas, midX, r.y + 2)).toMatchObject(GAP);
+      expect(pixel(canvas, midX, r.y + r.h - 3)).toMatchObject(GAP);
+      expect(pixel(canvas, r.x + 2, midY)).toMatchObject(GAP);
+      expect(pixel(canvas, r.x + r.w - 3, midY)).toMatchObject(GAP);
+      // And past it, the clip.
+      expect(pixel(canvas, r.x + 3, midY)).toMatchObject(RED);
+    });
+
+    it("is absent on an unselected clip", () => {
+      const { canvas, layout } = paintRinged([]);
+      const r = layout.clips[0];
+      expect(pixel(canvas, r.x + r.w / 2, r.y)).not.toMatchObject(RING);
+      expect(pixel(canvas, r.x, r.y + r.h / 2)).not.toMatchObject(RING);
+      expect(pixel(canvas, r.x + 2, r.y + r.h / 2)).toMatchObject(RED);
+    });
+
+    it("leaves an abutting neighbour alone", () => {
+      const { canvas, layout } = paint(
+        doc({
+          a: imageElement({
+            trackId: "v1",
+            startTime: 0,
+            duration: 2000,
+            timelineOptions: { color: "#ff0000" },
+          }),
+          b: imageElement({
+            trackId: "v1",
+            startTime: 2000,
+            duration: 2000,
+            timelineOptions: { color: "#00ff00" },
+          }),
+        }),
+        { selection: ["a"], playheadMs: 90_000 },
+      );
+      const a = layout.clips.find((c) => c.elementId === "a")!;
+      const seam = a.x + a.w;
+      expect(pixel(canvas, seam - 1, 20)).toMatchObject(RING);
+      // The neighbour's first column is its hairline over green, not the ring.
+      expect(pixel(canvas, seam, 20)).not.toMatchObject(RING);
+      expect(pixel(canvas, seam + 1, 20)).toMatchObject({ r: 0, g: 255, b: 0 });
+    });
+
+    it("still marks a sliver narrower than the ring and its gap", () => {
+      // 100ms is 4.5px: no room for the gap, so the ring covers it.
+      const { canvas } = paint(
+        doc({
+          a: imageElement({
+            trackId: "v1",
+            startTime: 1000,
+            duration: 100,
+            timelineOptions: { color: "#ff0000" },
+          }),
+        }),
+        { selection: ["a"], playheadMs: 90_000 },
+      );
+      expect(pixel(canvas, 47, 20)).toMatchObject(RING);
+    });
   });
 
-  it("leaves an unselected clip unoutlined", () => {
-    const { canvas } = paint(
+  describe("the clip body", () => {
+    const red = (over: Record<string, any> = {}) =>
       doc({
         a: imageElement({
           trackId: "v1",
           startTime: 0,
           duration: 4000,
           timelineOptions: { color: "#ff0000" },
+          ...over,
         }),
-      }),
-    );
-    expect(pixel(canvas, 90, 0)).not.toMatchObject({ r: 255, g: 255, b: 255 });
+      });
+    const ROW = { r: 0x17, g: 0x18, b: 0x1c };
+
+    it("rounds its corners", () => {
+      const { canvas } = paint(red(), { playheadMs: 90_000 });
+      // The corner pixel is outside the curve and shows the row.
+      expect(pixel(canvas, 0, 0)).toMatchObject(ROW);
+      expect(pixel(canvas, 0, TRACK_HEIGHT - 1)).toMatchObject(ROW);
+      // Away from the corners the fill reaches the edge.
+      expect(pixel(canvas, 0, 20).r).toBe(255);
+      expect(pixel(canvas, 90, 0).r).toBe(255);
+    });
+
+    it("still paints a sliver narrower than two radii", () => {
+      // 100ms is 4.5px: the radius clamps to a pill instead of vanishing.
+      const { canvas } = paint(red({ duration: 100 }), { playheadMs: 90_000 });
+      expect(pixel(canvas, 2, 20)).toMatchObject({ r: 255, g: 0, b: 0 });
+    });
+
+    it("draws a hairline inside its edge", () => {
+      const { canvas } = paint(red(), { playheadMs: 90_000 });
+      // `clipBorder` over red lifts green and blue; one pixel further in is
+      // the bare fill.
+      expect(pixel(canvas, 90, TRACK_HEIGHT - 1).g).toBeGreaterThan(0);
+      expect(pixel(canvas, 90, TRACK_HEIGHT - 2)).toMatchObject({ r: 255, g: 0, b: 0 });
+    });
+
+    /** Label-band pixels darker than the fill: the halo, if there is one. */
+    function haloPixels(canvas: any) {
+      let dark = 0;
+      for (let x = 8; x < 70; x++) {
+        for (let y = 3; y < 18; y++) {
+          if (pixel(canvas, x, y).r < 200) dark++;
+        }
+      }
+      return dark;
+    }
+
+    it("letters a flat bar without a halo", () => {
+      const { canvas } = paint(
+        doc({
+          t: textElement({
+            trackId: "v1",
+            startTime: 0,
+            duration: 4000,
+            text: "Title",
+            timelineOptions: { color: "#ff0000" },
+          }),
+        }),
+        { playheadMs: 90_000 },
+      );
+      expect(haloPixels(canvas)).toBe(0);
+      // And the label is really there: white glyphs lift green over red.
+      let lit = 0;
+      for (let x = 8; x < 70; x++) {
+        for (let y = 3; y < 18; y++) {
+          if (pixel(canvas, x, y).g > 100) lit++;
+        }
+      }
+      expect(lit).toBeGreaterThan(0);
+    });
+
+    it("keeps the halo where frames sit behind the label", () => {
+      // Same fill, same label length, but a type that shows a filmstrip.
+      const { canvas } = paint(red({ localpath: "file:///Title" }), {
+        playheadMs: 90_000,
+      });
+      expect(haloPixels(canvas)).toBeGreaterThan(0);
+    });
   });
 
   it("draws the playhead over the clips", () => {
@@ -884,7 +1052,9 @@ describe("keyframe diamonds", () => {
   it("marks each keyframe at its own time", () => {
     // 45px per second at range 0.9, so 0ms / 1000ms / 2000ms land at 0 / 45 / 90.
     const { canvas } = paintKf(doc({ a: keyed([0, 1000, 2000]) }));
-    expect(isDiamond(canvas, 0, laneCenterY)).toBe(true);
+    // The one at 0ms sits on the rounded corner, which cuts its outer half;
+    // its inner half is still there.
+    expect(isDiamond(canvas, 1, laneCenterY)).toBe(true);
     expect(isDiamond(canvas, 45, laneCenterY)).toBe(true);
     expect(isDiamond(canvas, 90, laneCenterY)).toBe(true);
     // And nothing between them.
@@ -984,13 +1154,16 @@ describe("keyframe diamonds", () => {
     }
   });
 
-  it("leaves the selection border unbroken over a marker", () => {
-    // Selection is the stronger signal; its 2px frame wins.
+  it("leaves the selection ring unbroken over a marker", () => {
+    // Selection is the stronger signal; its ring wins, and the diamond's
+    // centre is still clear of it.
     const { canvas } = paintKf(doc({ a: keyed([0, 1000, 2000]) }), {
       selection: ["a"],
     });
-    const p = pixel(canvas, 45, TRACK_HEIGHT - 1);
-    expect(p).toMatchObject({ r: 255, g: 255, b: 255 });
+    expect(pixel(canvas, 45, TRACK_HEIGHT - 1)).toMatchObject(
+      rgbOf(defaultColors.selection),
+    );
+    expect(isDiamond(canvas, 45, laneCenterY)).toBe(true);
   });
 
   it("merges keyframes too close together into one marker", () => {
@@ -1113,6 +1286,15 @@ const GRID_CELL_PX = 10;
 /** Dark, so the translucent white lattice actually changes a pixel. */
 const DARK = "#000000";
 
+/**
+ * The theme without the clip's edge hairline.
+ *
+ * The hairline is a light 1px line on the clip's edge over a black fill, which
+ * is exactly what `isGridInk` looks for; the edge tests here are about the
+ * lattice not doubling the boundary, and the hairline has its own test above.
+ */
+const GRID_COLORS = { ...defaultColors, clipBorder: "rgba(0, 0, 0, 0)" };
+
 function gridPaint(
   d: TimelineDocument,
   over: Partial<Parameters<typeof drawTimeline>[1]> = {},
@@ -1139,7 +1321,7 @@ function gridPaint(
     selection: [],
     playheadMs: -1000,
     projectEndMs: 100_000,
-    colors: defaultColors,
+    colors: GRID_COLORS,
     fps: GRID_FPS,
     frameGrid: true,
     ...over,
@@ -1291,10 +1473,11 @@ describe("drawTimeline — frame grid", () => {
     expect(online.g).toBeGreaterThan(0);
   });
 
-  it("sits under the selection border", () => {
-    // Selection is the stronger signal and its frame must stay unbroken.
+  it("sits under the selection ring", () => {
+    // Selection is the stronger signal and its ring must stay unbroken.
     const { canvas } = gridPaint(doc({ a: picture() }), { selection: ["a"] });
-    expect(pixel(canvas, 20, 0)).toMatchObject({ r: 255, g: 255, b: 255 });
+    expect(pixel(canvas, 20, 0)).toMatchObject(rgbOf(defaultColors.selection));
+    expect(isGridInk(canvas, 20)).toBe(true);
   });
 
   it("costs only what is on screen", () => {

@@ -17,6 +17,7 @@ import type {
   VideoElementType,
 } from "../../@types/timeline";
 import { isAudibleElement } from "./audio";
+import { clipColorOf } from "./clipColor";
 import { isDynamicElement, spanStart, speedOf } from "./geometry";
 import { speedCurveOf } from "./speedCurve";
 import { hasSpeedRamp, speedPolyline } from "./speedBand";
@@ -51,7 +52,16 @@ export type ThemeColors = {
   background: string;
   row: string;
   label: string;
+  /**
+   * The ring around a selected clip, drawn just inside its edge.
+   *
+   * A light grey rather than white, the way the option panel marks what is
+   * active: the ring is a frame around the clip and has no business being the
+   * brightest thing on a row of saturated bars.
+   */
   selection: string;
+  /** Hairline inside every clip's edge, so a dark filmstrip still has one. */
+  clipBorder: string;
   playhead: string;
   projectEnd: string;
   snapGuide: string;
@@ -67,11 +77,11 @@ export type ThemeColors = {
   /**
    * The border on a *selected* badge.
    *
-   * Dark, where every other selection border is white — because the badge
-   * itself is white, and `selection` drawn on it would be invisible. The
-   * intent is the same as everywhere else (a high-contrast ring); only the
-   * polarity flips, because the thing being ringed is the lightest object on
-   * the timeline rather than one of the darkest.
+   * Dark, where every other selection ring is light grey, because the badge
+   * itself is white and `selection` drawn on it would be invisible. The intent
+   * is the same as everywhere else (a high-contrast ring); only the polarity
+   * flips, because the thing being ringed is the lightest object on the
+   * timeline rather than one of the darkest.
    */
   transitionSelected: string;
   /** Hairline that keeps a white badge off a bright filmstrip. */
@@ -102,7 +112,10 @@ export const defaultColors: ThemeColors = {
   background: "#0f1012",
   row: "#17181c",
   label: "#ffffff",
-  selection: "#ffffff",
+  // `$opt-text` in `_option.scss`.
+  selection: "#c3c9cf",
+  // `$opt-line-strong`.
+  clipBorder: "rgba(255, 255, 255, 0.12)",
   playhead: "#dbdaf0",
   projectEnd: "#ff173e",
   snapGuide: "#ffd400",
@@ -175,18 +188,56 @@ export type DrawOptions = {
   labelOf?: (element: TimelineElement) => string;
 };
 
-/** The timeline's label face. The ruler draws its tick numbers with it too,
- * so the two canvases that sit on top of each other read as one surface. */
-export const LABEL_FONT = '12px "Noto Sans", sans-serif';
-const LABEL_PADDING = 6;
+/**
+ * The timeline's label face. The ruler draws its tick numbers with it too,
+ * so the two canvases that sit on top of each other read as one surface.
+ *
+ * The option panel's face and size. It used to name "Noto Sans", which the app
+ * never loads (only "Noto Sans KR" is declared), so every label fell through
+ * to the generic sans-serif.
+ */
+export const LABEL_FONT = '500 11px system-ui, -apple-system, "Segoe UI", sans-serif';
+/** Clear of the corner radius, so a label never starts on the curve. */
+const LABEL_PADDING = 8;
+const LABEL_TOP = 5;
 /** Dark outline that keeps the label readable without hiding the frame. */
 const LABEL_HALO = "rgba(0, 0, 0, 0.85)";
 const LABEL_HALO_WIDTH = 3;
 /** How much of a video clip the waveform is allowed to take. */
 const WAVEFORM_BAND_PX = 10;
+/** Corner radius of a clip bar; clamped to half its width on a sliver. */
+export const CLIP_RADIUS = 6;
 const SELECTION_WIDTH = 2;
+/** The dark gap between a selected clip's ring and what the clip shows. */
+const SELECTION_OFFSET = 1;
+const TRANSITION_RADIUS = 3;
+const MARQUEE_RADIUS = 4;
 /** Below this height a label would collide with the filmstrip; skip it. */
 const MIN_LABEL_HEIGHT = 20;
+
+/**
+ * Append a rounded rectangle to the current path.
+ *
+ * The radius is clamped to half the shorter side, so a 4px sliver of a clip
+ * becomes a pill instead of a `roundRect` throw, and at 0 it is a plain `rect`.
+ * One call serves a clip region, a fill and a stroke, which is why it only
+ * adds to the path and leaves `beginPath` to the caller.
+ */
+export function roundedRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  radius: number,
+): void {
+  const r = Math.min(radius, w / 2, h / 2);
+  if (r > 0) {
+    ctx.roundRect(x, y, w, h, r);
+  } else {
+    ctx.rect(x, y, w, h);
+  }
+}
 
 /**
  * Fit `text` to `maxWidth`, ellipsising if needed.
@@ -353,15 +404,16 @@ export function drawClip(
     labelOf?: (element: TimelineElement) => string;
   },
 ) {
-  const color = element.timelineOptions?.color ?? "#4a4b57";
+  const color = clipColorOf(element);
+  const radius = Math.min(CLIP_RADIUS, rect.w / 2, rect.h / 2);
 
   ctx.save();
 
   // Everything inside the clip is clipped to it, so a filmstrip tile that
   // would overhang the trimmed edge is cut rather than spilling onto the
-  // neighbour.
+  // neighbour, and the corners round the frames as well as the fill.
   ctx.beginPath();
-  ctx.rect(rect.x, rect.y, rect.w, rect.h);
+  roundedRectPath(ctx, rect.x, rect.y, rect.w, rect.h, radius);
   ctx.clip();
 
   ctx.fillStyle = color;
@@ -434,28 +486,122 @@ export function drawClip(
 
     // Outlined rather than sat on an opaque strip. The strip was 16px of a
     // 40px row, and with the waveform below it left about 8px of actual
-    // frames — which is why the filmstrip looked absent on any clip with
+    // frames, which is why the filmstrip looked absent on any clip with
     // sound. An outline costs nothing and hides nothing.
-    ctx.lineJoin = "round";
-    ctx.miterLimit = 2;
-    ctx.lineWidth = LABEL_HALO_WIDTH;
-    ctx.strokeStyle = LABEL_HALO;
-    ctx.strokeText(label, rect.x + LABEL_PADDING, rect.y + 2);
+    //
+    // Only where there is a picture or a trace behind the words, though. On a
+    // flat bar the palette is chosen to carry white text on its own, and the
+    // outline there only thickens the glyphs.
+    if (canShowFilmstrip(element) || canShowWaveform(element)) {
+      ctx.lineJoin = "round";
+      ctx.miterLimit = 2;
+      ctx.lineWidth = LABEL_HALO_WIDTH;
+      ctx.strokeStyle = LABEL_HALO;
+      ctx.strokeText(label, rect.x + LABEL_PADDING, rect.y + LABEL_TOP);
+    }
 
     ctx.fillStyle = opts.colors.label;
-    ctx.fillText(label, rect.x + LABEL_PADDING, rect.y + 2);
+    ctx.fillText(label, rect.x + LABEL_PADDING, rect.y + LABEL_TOP);
   }
 
   ctx.restore();
 
-  if (opts.selected) {
-    ctx.fillStyle = opts.colors.selection;
-    const b = SELECTION_WIDTH;
-    ctx.fillRect(rect.x, rect.y, rect.w, b);
-    ctx.fillRect(rect.x, rect.y + rect.h - b, rect.w, b);
-    ctx.fillRect(rect.x, rect.y, b, rect.h);
-    ctx.fillRect(rect.x + rect.w - b, rect.y, b, rect.h);
+  // Last, over the frames, so a clip whose filmstrip is dark at the edge still
+  // has one. Half a pixel in, so the 1px line lands on one row of pixels.
+  if (rect.w > 1 && rect.h > 1) {
+    ctx.save();
+    ctx.strokeStyle = opts.colors.clipBorder;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    roundedRectPath(
+      ctx,
+      rect.x + 0.5,
+      rect.y + 0.5,
+      rect.w - 1,
+      rect.h - 1,
+      Math.max(radius - 0.5, 0),
+    );
+    ctx.stroke();
+    ctx.restore();
   }
+
+  // After the hairline, which it covers, and outside the clip region, which
+  // it does not need: it is drawn wholly inside the rect.
+  if (opts.selected) {
+    drawSelectionRing(ctx, rect, opts.colors);
+  }
+}
+
+/**
+ * The ring around a selected clip, inside its edge.
+ *
+ * Inside, so the ring's outer edge *is* the clip's first and last pixel: a
+ * ring drawn outside ends three pixels before the clip starts and after it
+ * ends, which makes the one thing a selection is looked at for (where does
+ * this clip begin and end) harder to read. It also leaves an abutting
+ * neighbour and the track gap untouched.
+ *
+ * Two strokes, as a focus ring with an offset turned inwards: the 2px ring on
+ * the edge, then a 1px band of the background between it and the frames, so
+ * a light ring over a light filmstrip still reads as a ring. Both share the
+ * clip's corner centres, so they follow its rounding exactly.
+ */
+export function drawSelectionRing(
+  ctx: CanvasRenderingContext2D,
+  rect: ClipRect,
+  colors: ThemeColors,
+): void {
+  const radius = Math.min(CLIP_RADIUS, rect.w / 2, rect.h / 2);
+  const ring = SELECTION_WIDTH;
+  const offset = SELECTION_OFFSET;
+
+  ctx.save();
+
+  // Too narrow for a ring with an inside: two sides of a stroke would leave a
+  // half-pixel of fill between them. The whole sliver is the mark instead.
+  if (rect.w <= 2 * ring + 1 || rect.h <= 2 * ring + 1) {
+    ctx.fillStyle = colors.selection;
+    ctx.beginPath();
+    roundedRectPath(ctx, rect.x, rect.y, rect.w, rect.h, radius);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  // Each stroke is centred half its width in from the edge it should start
+  // at, so it covers whole pixel columns rather than straddling two.
+  const g = ring / 2;
+  ctx.strokeStyle = colors.selection;
+  ctx.lineWidth = ring;
+  ctx.beginPath();
+  roundedRectPath(
+    ctx,
+    rect.x + g,
+    rect.y + g,
+    Math.max(rect.w - 2 * g, 0),
+    Math.max(rect.h - 2 * g, 0),
+    Math.max(radius - g, 0),
+  );
+  ctx.stroke();
+
+  // A sliver has no inside left for the band; the ring alone covers it.
+  const b = ring + offset / 2;
+  if (rect.w > 2 * b + 1 && rect.h > 2 * b + 1) {
+    ctx.strokeStyle = colors.background;
+    ctx.lineWidth = offset;
+    ctx.beginPath();
+    roundedRectPath(
+      ctx,
+      rect.x + b,
+      rect.y + b,
+      rect.w - 2 * b,
+      rect.h - 2 * b,
+      Math.max(radius - b, 0),
+    );
+    ctx.stroke();
+  }
+
+  ctx.restore();
 }
 
 /**
@@ -666,11 +812,11 @@ function diamondPath(
  * Mark where the clip's keyframes are.
  *
  * Drawn inside `drawClip`'s clip path, so a diamond on the clip's last frame is
- * cut at the edge instead of poking into its neighbour — the same treatment the
- * final filmstrip tile gets. That also means the selection border, which is
- * painted after `ctx.restore()`, sits on top of a diamond at either end. That
- * is the right way round: selection is the stronger signal and its 2px frame
- * stays unbroken.
+ * cut at the edge instead of poking into its neighbour, the same treatment the
+ * final filmstrip tile gets. The rounded corners cut a diamond at either end
+ * the same way. The selection ring, painted after `ctx.restore()`, sits on top
+ * of the diamonds along the clip's bottom edge. That is the right way round:
+ * selection is the stronger signal and its ring stays unbroken.
  *
  * Two fills total, however many diamonds there are.
  */
@@ -803,8 +949,16 @@ function drawTransitionBadge(
   const top = rect.y + inset;
   const bottom = rect.y + rect.h - inset;
   const mid = rect.x + rect.w / 2;
+  const plateH = bottom - top;
+  const radius = Math.min(TRANSITION_RADIUS, rect.w / 2, plateH / 2);
 
   ctx.save();
+
+  // The triangles run into the plate's corners, so they are clipped to its
+  // rounding or their points would stand proud of the outline.
+  ctx.beginPath();
+  roundedRectPath(ctx, rect.x, top, rect.w, plateH, radius);
+  ctx.clip();
 
   ctx.fillStyle = colors.transition;
   ctx.beginPath();
@@ -827,14 +981,23 @@ function drawTransitionBadge(
   // white at 0.35 over a bright filmstrip washes the whole rect out and the
   // bow-tie stops being readable as a shape.
   ctx.globalAlpha = 0.18;
-  ctx.fillRect(rect.x, top, rect.w, bottom - top);
+  ctx.fillRect(rect.x, top, rect.w, plateH);
   ctx.globalAlpha = 1;
 
   // Always outlined. A white badge over a pale frame of a filmstrip would
   // otherwise have no edge at all.
   ctx.strokeStyle = colors.transitionOutline;
   ctx.lineWidth = 1;
-  ctx.strokeRect(rect.x + 0.5, top + 0.5, rect.w - 1, bottom - top - 1);
+  ctx.beginPath();
+  roundedRectPath(
+    ctx,
+    rect.x + 0.5,
+    top + 0.5,
+    rect.w - 1,
+    plateH - 1,
+    Math.max(radius - 0.5, 0),
+  );
+  ctx.stroke();
 
   // One warning stroke for both conditions: the transition is not showing the
   // footage the user might assume. Which of the two it is belongs in the panel,
@@ -842,15 +1005,19 @@ function drawTransitionBadge(
   if (rect.clamped || rect.frozen) {
     ctx.strokeStyle = colors.transitionClamped;
     ctx.lineWidth = 2;
-    ctx.strokeRect(rect.x + 1, top, rect.w - 2, bottom - top);
+    ctx.beginPath();
+    roundedRectPath(ctx, rect.x + 1, top, rect.w - 2, plateH, Math.max(radius - 1, 0));
+    ctx.stroke();
   }
 
   if (selected) {
-    // Dark, not `colors.selection` — see `ThemeColors.transitionSelected`.
-    // The usual white ring would be invisible on a white badge.
+    // Dark, not `colors.selection`: see `ThemeColors.transitionSelected`.
+    // The usual light ring would be invisible on a white badge.
     ctx.strokeStyle = colors.transitionSelected;
     ctx.lineWidth = SELECTION_WIDTH;
-    ctx.strokeRect(rect.x + 1, top, rect.w - 2, bottom - top);
+    ctx.beginPath();
+    roundedRectPath(ctx, rect.x + 1, top, rect.w - 2, plateH, Math.max(radius - 1, 0));
+    ctx.stroke();
   }
 
   ctx.restore();
@@ -892,21 +1059,45 @@ function drawCutAffordance(
   ctx.restore();
 }
 
-/** Marks a row as the target of a drag. */
+/**
+ * Marks a row as the target of a drag.
+ *
+ * A rounded, outlined highlight inset from the row, in the option panel's
+ * light grey, the way a hovered card is marked there. Translucent, because it
+ * is drawn over the clips already on the row.
+ */
 export function drawDropTarget(
   ctx: CanvasRenderingContext2D,
   layout: TimelineLayout,
   trackId: string,
   viewportW: number,
-  color = "rgba(255, 255, 255, 0.18)",
+  color = "rgba(195, 201, 207, 0.12)",
 ) {
   const row = layout.rows.find((candidate) => candidate.trackId === trackId);
   if (row == null) {
     return;
   }
+  ctx.save();
   ctx.fillStyle = color;
-  ctx.fillRect(0, row.top, viewportW, row.height);
+  ctx.beginPath();
+  roundedRectPath(ctx, 1, row.top + 1, viewportW - 2, row.height - 2, CLIP_RADIUS);
+  ctx.fill();
+  ctx.strokeStyle = DROP_TARGET_EDGE;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  roundedRectPath(
+    ctx,
+    1.5,
+    row.top + 1.5,
+    viewportW - 3,
+    row.height - 3,
+    CLIP_RADIUS - 0.5,
+  );
+  ctx.stroke();
+  ctx.restore();
 }
+
+const DROP_TARGET_EDGE = "rgba(195, 201, 207, 0.35)";
 
 /**
  * The rubber-band, while one is being dragged over empty space.
@@ -928,12 +1119,23 @@ export function drawMarquee(
 
   ctx.save();
   ctx.fillStyle = colors.marqueeFill;
-  ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+  ctx.beginPath();
+  roundedRectPath(ctx, rect.x, rect.y, rect.w, rect.h, MARQUEE_RADIUS);
+  ctx.fill();
   ctx.strokeStyle = colors.marqueeStroke;
   ctx.lineWidth = 1;
   // Half-pixel inset, so a 1px stroke lands on one pixel instead of straddling
   // two and drawing at half strength.
-  ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+  ctx.beginPath();
+  roundedRectPath(
+    ctx,
+    rect.x + 0.5,
+    rect.y + 0.5,
+    rect.w - 1,
+    rect.h - 1,
+    MARQUEE_RADIUS - 0.5,
+  );
+  ctx.stroke();
   ctx.restore();
 }
 
