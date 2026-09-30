@@ -11,7 +11,7 @@ import {
 import { msToPxSigned, pxToMsSigned } from "../timeline/geometry";
 import { normalizeFps, snapMsToFrame } from "../timeline/frames";
 import { planRulerTicks } from "../timeline/rulerTicks";
-import { LABEL_FONT } from "../timeline/draw";
+import { RULER_HEIGHT_PX, drawRuler } from "../timeline/rulerDraw";
 import { applySurface, surfaceSpec } from "../timeline/canvasSurface";
 import { count as perfCount } from "../debug/frameStats";
 
@@ -89,7 +89,7 @@ export class ElementTimelineRuler extends LitElement {
     // The ruler is rendered ahead of <element-timeline> in the parent template,
     // so on the very first pass there may be nothing to measure yet.
     this.width = document.querySelector("element-timeline")?.clientWidth ?? 0;
-    this.height = 30;
+    this.height = RULER_HEIGHT_PX;
 
     return html`<canvas
       id="elementTimelineRulerCanvasRef"
@@ -151,25 +151,6 @@ export class ElementTimelineRuler extends LitElement {
 
 
 
-  drawCursorHead() {
-    const ctx: any = this.canvas.getContext("2d");
-
-    const now =
-      this.millisecondsToPx(this.timelineCursor) - this.timelineScroll + 1;
-
-    const size = 6;
-    const top = 16;
-
-    ctx.fillStyle = "#dbdaf0";
-
-    ctx.beginPath();
-    ctx.moveTo(now - size, top);
-    ctx.lineTo(now, this.canvas.height);
-    ctx.lineTo(now + size, top);
-    ctx.lineWidth = 2;
-    ctx.fill();
-  }
-
   /** A pending coalesced repaint, or 0. */
   private drawRequest = 0;
 
@@ -216,10 +197,6 @@ export class ElementTimelineRuler extends LitElement {
       surfaceSpec(this.width, this.height as number, window.devicePixelRatio),
     );
 
-    // No longer implied by the resize, so it is explicit. In CSS pixels, since
-    // the transform is already applied.
-    ctx.clearRect(0, 0, this.width, this.height as number);
-
     const plan = planRulerTicks({
       range: this.timelineRange,
       hScroll: this.timelineScroll,
@@ -227,27 +204,16 @@ export class ElementTimelineRuler extends LitElement {
       fps: this.projectFps(),
     });
 
-    ctx.strokeStyle = "#e3e3e3";
-    ctx.lineWidth = 1;
-    ctx.font = LABEL_FONT;
-
-    for (const tick of plan.ticks) {
-      ctx.beginPath();
-      // Labelled ticks are taller, as they always were.
-      ctx.moveTo(tick.x, tick.major ? 10 : 15);
-      ctx.lineTo(tick.x, 20);
-      ctx.stroke();
-
-      if (tick.label != null) {
-        // Just right of its own tick. The old ruler drew the text half a tick
-        // to the *left*, which only lined up because every tick was the same
-        // width; with a ladder that runs from one frame to a day it would drift
-        // away from the mark it names.
-        ctx.strokeText(tick.label, tick.x + 3, 10);
-      }
-    }
-
-    this.drawCursorHead();
+    // The band is opaque and covers the whole surface, so it stands in for the
+    // clear the resize no longer implies. `+ 1` is the centre of the 2px line
+    // `draw.ts` paints down the timeline at the same x.
+    drawRuler(ctx, {
+      plan,
+      width: this.width,
+      height: this.height as number,
+      playheadX:
+        this.millisecondsToPx(this.timelineCursor) - this.timelineScroll + 1,
+    });
   }
 
   addTickNumber(licount) {

@@ -8,10 +8,10 @@ import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
  * Playhead position holder.
  *
  * This element is deliberately never shown. The playhead the user sees is
- * painted on canvas — the vertical line by `element-timeline-canvas.drawCursor`
- * and the triangular head by `element-timeline-ruler.drawCursorHead` — and this
- * element survives only because `element-control` still reads its `style.left`
- * as the current playhead position. Un-hiding it would draw a second playhead.
+ * painted on canvas (the vertical line by `draw.ts#drawTimeline`, the head by
+ * `rulerDraw.ts#drawRuler`), and this element survives only because
+ * `element-control` still reads its `style.left` as the current playhead
+ * position. Un-hiding it would draw a second playhead.
  */
 @customElement("element-timeline-cursor")
 export class ElementTimelineCursor extends LitElement {
