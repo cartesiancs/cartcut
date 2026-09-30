@@ -7,6 +7,7 @@ import { timelineIsLocked } from "../editor/timelineLock";
 import { consume } from "@lit/context";
 import { timelineContext } from "../../context/timelineContext";
 import { RULER_OFFSET, TRACK_GAP, TRACK_HEIGHT } from "../timeline/layout";
+import { defaultColors } from "../timeline/draw";
 import { clipsOnTrack } from "../timeline/tracks";
 import { TRACK_KIND_ICON, TRACK_KIND_TITLE } from "../timeline/trackKinds";
 import { addEffectTrack as addEffectTrackOp } from "../timeline/effectOps";
@@ -359,7 +360,8 @@ export class ElementTimelineLeftOption extends LitElement {
       (track) => html`
         <div
           class="track-header"
-          style="height: ${TRACK_HEIGHT}px; margin-bottom: ${TRACK_GAP}px;"
+          style="height: ${TRACK_HEIGHT}px; margin-bottom: ${TRACK_GAP}px;
+                 background-color: ${defaultColors.row};"
         >
           <span
             class="material-symbols-outlined track-icon"
@@ -373,13 +375,17 @@ export class ElementTimelineLeftOption extends LitElement {
                 >lock</span
               >`
             : html`<button
-                class="btn btn-xxs btn-default text-light track-menu"
+                type="button"
+                class="opt-icon-btn track-menu ${this.openMenu?.trackId ===
+                track.id
+                  ? "is-on"
+                  : ""}"
                 title="Track options"
                 aria-haspopup="menu"
                 aria-expanded=${this.openMenu?.trackId === track.id}
                 @click=${(e: MouseEvent) => this.toggleMenu(track.id, e)}
               >
-                <span class="material-symbols-outlined icon-xs">more_vert</span>
+                <span class="material-symbols-outlined">more_vert</span>
               </button>`}
         </div>
       `,
@@ -389,14 +395,50 @@ export class ElementTimelineLeftOption extends LitElement {
 
     return html`
       <style>
+        /*
+         * Filled, on the element, with the grey the canvas paints the row
+         * beside it, so a header and its row read as one lane. Only the outer
+         * corners are rounded; the inner edge runs on into the canvas.
+         */
         .track-header {
-          color: #ffffff;
-          background-color: #1c1f23;
           display: flex;
           align-items: center;
-          justify-content: space-between;
-          padding: 0 0.5rem;
+          gap: 10px;
+          margin-left: 6px;
+          padding: 0 6px 0 8px;
+          border-radius: 8px 0 0 8px;
+          color: #c3c9cf;
           box-sizing: border-box;
+        }
+
+        /*
+         * The kind, in a small well: the option panel's hairline and text grey,
+         * and the glyph's outline rather than the app-wide solid fill, which at
+         * this size is a blot. Every axis is restated because
+         * font-variation-settings replaces the whole list.
+         */
+        .track-icon {
+          flex: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+          border: 1px solid rgba(255, 255, 255, 0.07);
+          border-radius: 6px;
+          background-color: rgba(255, 255, 255, 0.04);
+          font-size: 15px;
+          line-height: 1;
+          font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+        }
+
+        /* .opt-icon-btn draws the button; this only pushes it to the end. */
+        button.track-menu {
+          margin-left: auto;
+        }
+
+        .track-header:hover > button.track-menu:not(.is-on) {
+          color: #c3c9cf;
         }
 
         /*
@@ -404,22 +446,22 @@ export class ElementTimelineLeftOption extends LitElement {
          * decline while the timeline is locked, so the menu is replaced rather
          * than disabled: an affordance that could only decline is not offered,
          * and a row with nothing in its place would read as a row that had lost
-         * its controls for no reason.
+         * its controls for no reason. Boxed like the button it stands in for,
+         * so nothing in the row moves when it swaps.
          */
         .track-lock {
-          font-size: 1rem;
-          opacity: 0.55;
+          flex: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 22px;
+          height: 22px;
+          margin-left: auto;
+          color: #7f878f;
+          font-size: 15px;
+          line-height: 1;
+          font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
           cursor: default;
-        }
-
-        .track-icon {
-          color: #ececee;
-          font-size: 16px;
-          flex: 0 0 auto;
-        }
-
-        .track-menu {
-          flex: 0 0 auto;
         }
 
         /* Layout and icon colour come from .dropdown-item-icon in
