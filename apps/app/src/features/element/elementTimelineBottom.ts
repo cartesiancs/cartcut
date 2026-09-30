@@ -26,8 +26,11 @@ export class ElementTimelineBottomScroll extends LitElement {
 
   /** The `claude mcp add …` line, token included, for the user to paste. */
   mcpCommand = "";
+  /** The `npx skills add …` line. No secret in it, but main owns it too. */
+  skillCommand = "";
   mcpError = "";
-  copied = false;
+  /** Which of the two Copy buttons last copied, so only that one says so. */
+  copied: "mcp" | "skill" | null = null;
 
   constructor() {
     super();
@@ -55,6 +58,7 @@ export class ElementTimelineBottomScroll extends LitElement {
       if (result?.status == 1) {
         this.isRunMcp = result.running;
         this.mcpCommand = result.command;
+        this.skillCommand = result.skillCommand ?? "";
         this.requestUpdate();
       }
     });
@@ -64,18 +68,22 @@ export class ElementTimelineBottomScroll extends LitElement {
     window.electronAPI.req.ai.runMcpServer().then((result) => {
       this.isRunMcp = result.status == 1;
       this.mcpCommand = result.command ?? "";
+      this.skillCommand = result.skillCommand ?? this.skillCommand;
       this.mcpError = result.error ?? "";
       this.requestUpdate();
     });
   }
 
-  _handleCopyMcpCommand() {
-    navigator.clipboard.writeText(this.mcpCommand).then(() => {
-      this.copied = true;
+  _copy(which: "mcp" | "skill", text: string) {
+    navigator.clipboard.writeText(text).then(() => {
+      this.copied = which;
       this.requestUpdate();
       setTimeout(() => {
-        this.copied = false;
-        this.requestUpdate();
+        // A later copy of the other line owns the label now.
+        if (this.copied === which) {
+          this.copied = null;
+          this.requestUpdate();
+        }
       }, 1500);
     });
   }
@@ -160,6 +168,64 @@ export class ElementTimelineBottomScroll extends LitElement {
           to {
             transform: translateX(250%);
           }
+        }
+
+        .connect-steps {
+          display: flex;
+          flex-direction: column;
+          gap: 1.25rem;
+          margin-top: 1.25rem;
+        }
+
+        /* Badge in the first column, everything else lined up in the second. */
+        .connect-step {
+          position: relative;
+          display: grid;
+          grid-template-columns: 26px minmax(0, 1fr);
+          column-gap: 0.75rem;
+          row-gap: 0.5rem;
+        }
+
+        /* The rail from one badge down to the next. */
+        .connect-step:not(:last-child)::before {
+          content: "";
+          position: absolute;
+          left: 12.5px;
+          top: 32px;
+          bottom: -14px;
+          width: 1px;
+          background-color: #3a3f44;
+        }
+
+        .connect-step-num {
+          width: 26px;
+          height: 26px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 13px;
+          font-weight: 600;
+          color: #0f1012;
+          background-color: #ffffff;
+        }
+
+        .connect-step-title {
+          align-self: center;
+          font-size: 15px;
+          font-weight: 600;
+          color: #f1f3f5;
+        }
+
+        .connect-step-body {
+          grid-column: 2;
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+        }
+
+        .connect-step-body > .btn {
+          align-self: flex-start;
         }
       </style>
 
@@ -304,43 +370,73 @@ export class ElementTimelineBottomScroll extends LitElement {
 
               <span class="text-secondary" style="font-size: 13px;">
                 ${this.isRunMcp
-                  ? html`CartCut is listening. Run this once in your terminal,
-                    from any folder, then just ask Claude Code to edit.`
+                  ? html`CartCut is listening. Run these once in your terminal,
+                    from any folder, then ask Claude Code to edit.`
                   : html`The editor bridge is not running.`}
               </span>
 
-              <div
-                class="input-group mb-2 mt-2 ${this.isRunMcp ? "" : "d-none"}"
-              >
-                <input
-                  type="text"
-                  class="form-control bg-default text-light"
-                  style="font-family: monospace; font-size: 11px;"
-                  readonly
-                  .value=${this.mcpCommand}
-                />
-                <button
-                  class="btn btn-primary btn-sm"
-                  @click=${this._handleCopyMcpCommand}
-                >
-                  ${this.copied ? "Copied" : "Copy"}
-                </button>
+              <div class="connect-steps">
+                <div class="connect-step">
+                  <span class="connect-step-num">1</span>
+                  <span class="connect-step-title">Connect the bridge</span>
+                  <div class="connect-step-body">
+                    <div class="input-group ${this.isRunMcp ? "" : "d-none"}">
+                      <input
+                        type="text"
+                        class="form-control bg-default text-light"
+                        style="font-family: monospace; font-size: 11px;"
+                        readonly
+                        .value=${this.mcpCommand}
+                      />
+                      <button
+                        class="btn btn-primary btn-sm"
+                        @click=${() => this._copy("mcp", this.mcpCommand)}
+                      >
+                        ${this.copied === "mcp" ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+
+                    <span
+                      class="text-danger ${this.mcpError ? "" : "d-none"}"
+                      style="font-size: 12px;"
+                      >${this.mcpError}</span
+                    >
+
+                    <button
+                      class="btn btn-primary btn-sm ${this.isRunMcp
+                        ? "d-none"
+                        : ""}"
+                      @click=${this.runMcpServer}
+                    >
+                      Start bridge
+                    </button>
+                  </div>
+                </div>
+
+                <div class="connect-step">
+                  <span class="connect-step-num">2</span>
+                  <span class="connect-step-title"
+                    >Install the editing skill</span
+                  >
+                  <div class="connect-step-body">
+                    <div class="input-group">
+                      <input
+                        type="text"
+                        class="form-control bg-default text-light"
+                        style="font-family: monospace; font-size: 11px;"
+                        readonly
+                        .value=${this.skillCommand}
+                      />
+                      <button
+                        class="btn btn-primary btn-sm"
+                        @click=${() => this._copy("skill", this.skillCommand)}
+                      >
+                        ${this.copied === "skill" ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
-
-              <span
-                class="text-danger ${this.mcpError ? "" : "d-none"}"
-                style="font-size: 12px;"
-                >${this.mcpError}</span
-              >
-
-              <button
-                class="btn btn-primary btn-sm mt-2 ${this.isRunMcp
-                  ? "d-none"
-                  : ""}"
-                @click=${this.runMcpServer}
-              >
-                Start bridge
-              </button>
 
               <hr class="text-secondary" />
 

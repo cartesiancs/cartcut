@@ -59,6 +59,15 @@ claude mcp add --transport http cartcut http://127.0.0.1:9826/mcp --header "Auth
 An agent other than Claude Code wants the same URL and the same header in
 whatever its own MCP configuration looks like.
 
+### The bridge on its own
+
+The ⚡ panel hands out both lines, the bridge first and this skill second. With
+only the bridge connected, Claude still has a way to the skill: the bridge
+serves the same `SKILL.md` as the MCP resource `skill://cartcut-editing/SKILL.md`
+and its instructions tell Claude to read it when the skill is not installed.
+Install the skill anyway. Claude loads an installed skill on its own, where the
+resource depends on Claude following that pointer.
+
 ## Use it
 
 Open a project in Cartcut, then ask in plain language: "cut the silences out of
@@ -86,6 +95,9 @@ plugin route, plain `cartcut` on the skills route.
 - **401**: the token is wrong. Recopy it from the ⚡ panel, then run
   `/plugin configure cartcut-editing`, or on the skills route
   `claude mcp remove cartcut` followed by the ⚡ line again.
+- **The tools work but Claude ignores the editing rules**: the skill is not
+  installed and Claude skipped the bridge's pointer to it. Run the ⚡ panel's
+  second line, or ask Claude to read `skill://cartcut-editing/SKILL.md`.
 - **No `cartcut` tools at all, but the skill loads**: you took the skills route
   and stopped there. `npx skills add` does not install an MCP server; run the ⚡
   line.

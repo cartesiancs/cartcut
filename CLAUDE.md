@@ -54,6 +54,12 @@ skill alone: it does not read `.mcp.json`, so its users connect the bridge with
 the ⚡ panel's `claude mcp add` line. `npx skills add cartesiancs/cartcut --list`
 is the check, and must report one skill.
 
+A third route needs no install: the bridge serves the same file as the MCP
+resource `skill://cartcut-editing/SKILL.md`, read from `app.asar` on every
+request, and its instructions tell the model to read it when the skill is not
+in its own list (`electron/mcp/skillResource.ts`). The skill's path is
+load-bearing here too, and `skillResource.test.ts` pins it.
+
 FFmpeg and ffprobe live in `./bin/<platform>-<arch>/` (`darwin-arm64`,
 `darwin-x64`, `win32-x64`); `electron/lib/ffmpeg.ts` picks by `process.arch`.
 The macOS binaries must be **native**: an x86_64 ffmpeg runs under Rosetta at

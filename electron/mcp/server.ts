@@ -18,8 +18,13 @@ import { randomUUID } from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import { app } from "electron";
 import Store from "electron-store";
 import { registerTools } from "./tools";
+import {
+  SKILL_FALLBACK_INSTRUCTION,
+  registerSkillResource,
+} from "./skillResource";
 import { defineRegistrar } from "./tools/define";
 import { registerExtensionTools } from "../extension/mcpTools";
 import { onExtensionToolsChanged } from "../extension/host";
@@ -138,6 +143,9 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
  *
  * Not a substitute for the tool descriptions: not every client surfaces this
  * field, and a tool is read on its own. It is reinforcement, so it stays short.
+ *
+ * The last line is the exception: it points a client that has the tools but
+ * not the skill at the copy the bridge serves (`skillResource.ts`).
  */
 const INSTRUCTIONS = [
   "CartCut is a live video editor. Every call changes the project the user is watching, and shares their undo history.",
@@ -146,6 +154,7 @@ const INSTRUCTIONS = [
   "One call with many items is one undo step; N calls are N. Batch.",
   "On-screen titles take no terminal full stop. Captions transcribing speech keep their punctuation.",
   "Start with get_project_overview and list_clips rather than guessing ids.",
+  SKILL_FALLBACK_INSTRUCTION,
 ].join("\n");
 
 /**
@@ -168,6 +177,7 @@ function newMcpServer(): McpServer {
     { instructions: INSTRUCTIONS },
   );
   registerTools(mcp);
+  registerSkillResource(mcp, app.getAppPath());
 
   // Extension tools are registered per session because a tool list is
   // assembled once, here. An extension that activates after this point
