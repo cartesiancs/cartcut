@@ -8,8 +8,28 @@ import {
 } from "../../states/renderOptionStore";
 import { getLocationEnv } from "../../functions/getLocationEnv";
 import { IMediaLoadStore, mediaLoadStore } from "../../states/mediaLoadStore";
+import {
+  criticalDamping,
+  springDurationMs,
+  springEasing,
+  type Spring,
+} from "../motion/spring";
 
 type AiTab = "claude" | "codex" | "openai";
+
+/**
+ * How the ⚡ panel's height follows a tab switch.
+ *
+ * Critically damped: the panel clips its content while it moves, so a spring
+ * that passed the new height would open a strip of empty panel under the last
+ * step and then close it again. Settles in 317ms, 90% of the way by 159ms.
+ */
+const AI_PANEL_SPRING: Spring = {
+  stiffness: 600,
+  damping: criticalDamping({ stiffness: 600 }),
+};
+const AI_PANEL_EASING = springEasing(AI_PANEL_SPRING);
+const AI_PANEL_MS = springDurationMs(AI_PANEL_SPRING);
 
 type CopyTarget = "claude-mcp" | "claude-skill" | "codex-config" | "codex-skill";
 
@@ -46,6 +66,8 @@ export class ElementTimelineBottomScroll extends LitElement {
   aiTab: AiTab = "claude";
   /** Which Copy button last copied, so only that one says so. */
   copied: CopyTarget | null = null;
+  /** The height animation in flight, cancelled by a switch that lands mid-way. */
+  aiPanelAnimation: Animation | null = null;
 
   constructor() {
     super();
@@ -108,9 +130,45 @@ export class ElementTimelineBottomScroll extends LitElement {
     });
   }
 
-  _selectAiTab(tab: AiTab) {
+  /**
+   * Swap the tab, then animate the panel from the height it had to the height
+   * the new content needs. `height: auto` cannot be transitioned, so both ends
+   * are measured. The start is read before cancelling, which makes a switch in
+   * the middle of another carry on from wherever that one had got to.
+   */
+  async _selectAiTab(tab: AiTab) {
+    if (tab === this.aiTab) {
+      return;
+    }
+    const panel = this.querySelector<HTMLElement>(".ai-tab-panel");
+    const from = panel?.getBoundingClientRect().height;
+    this.aiPanelAnimation?.cancel();
+    this.aiPanelAnimation = null;
+
     this.aiTab = tab;
     this.requestUpdate();
+    await this.updateComplete;
+
+    if (
+      panel == null ||
+      from == null ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return;
+    }
+    const to = panel.getBoundingClientRect().height;
+    if (Math.abs(to - from) < 1) {
+      return;
+    }
+    // Clipped only while moving: at rest the panel must not cut off an
+    // input's focus ring at its edges.
+    this.aiPanelAnimation = panel.animate(
+      [
+        { height: `${from}px`, overflow: "hidden" },
+        { height: `${to}px`, overflow: "hidden" },
+      ],
+      { duration: AI_PANEL_MS, easing: AI_PANEL_EASING },
+    );
   }
 
   _handleSetOpenAIKey(e) {
@@ -480,11 +538,13 @@ export class ElementTimelineBottomScroll extends LitElement {
                 )}
               </div>
 
-              ${this.aiTab === "claude"
-                ? this.renderClaudeTab()
-                : this.aiTab === "codex"
-                  ? this.renderCodexTab()
-                  : this.renderOpenAiTab()}
+              <div class="ai-tab-panel">
+                ${this.aiTab === "claude"
+                  ? this.renderClaudeTab()
+                  : this.aiTab === "codex"
+                    ? this.renderCodexTab()
+                    : this.renderOpenAiTab()}
+              </div>
             </div>
           </div>
         </div>
