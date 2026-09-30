@@ -191,6 +191,13 @@ export function canPointerTarget(
     return false;
   }
 
+  // Not drawn, so not grabbable: a row with its eye off would otherwise leave
+  // an invisible clip catching the clicks aimed at whatever shows through it.
+  // Ahead of the group rule, which would answer `true` regardless.
+  if (element.trackHidden === true) {
+    return false;
+  }
+
   // A group is always a target, and its own bar does not gate that: its
   // transform applies to its children at every instant, so a null whose handles
   // blinked out with its bar would be arbitrary.

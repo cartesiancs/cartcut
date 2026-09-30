@@ -163,6 +163,13 @@ export function planFrame(input: PlanFrameInput): FramePlan {
   let needsScratch = false;
 
   for (const [id, element] of Object.entries(elements)) {
+    // Left out of the plan rather than only out of the paint loop, so a hidden
+    // shader effect does not buy a scratch pass for a frame it takes no part in
+    // and a hidden transition does not claim its clips.
+    if (element.trackHidden === true) {
+      continue;
+    }
+
     if (element.filetype === "transition") {
       const from = elements[element.fromId];
       const to = elements[element.toId];

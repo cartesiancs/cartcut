@@ -581,3 +581,76 @@ describe("renderTimelineAtTime — blend modes", () => {
     expect(pixel(canvas, 100, 100)).toMatchObject({ r: 0x10, g: 0, b: 0 });
   });
 });
+
+describe("a hidden row", () => {
+  const BACKGROUND = { r: 0x10, g: 0x10, b: 0x20 };
+
+  // The flag is the only difference between the two frames, so the pair
+  // proves the check is looking at something.
+  it("leaves its clips out of the frame, and only them", () => {
+    const shown: Timeline = {
+      back: imageElement({
+        priority: 1,
+        location: { x: 0, y: 0 },
+        width: 100,
+        height: SIZE,
+      }),
+      front: shapeElement({
+        priority: 2,
+        location: { x: 100, y: 0 },
+        width: 100,
+        height: SIZE,
+      }),
+    };
+    const hidden: Timeline = {
+      ...shown,
+      front: { ...shown.front, trackHidden: true },
+    };
+
+    const lit = render(shown, 0).canvas;
+    expect(pixel(lit, 150, 100)).toMatchObject({ r: 255, g: 0, b: 255 });
+
+    const dark = render(hidden, 0).canvas;
+    expect(pixel(dark, 150, 100)).toMatchObject(BACKGROUND);
+    expect(pixel(dark, 50, 100)).toMatchObject({ r: 255, g: 0, b: 0 });
+  });
+
+  it("reports nothing it did not draw", () => {
+    const drawn: string[] = [];
+    render(
+      {
+        a: imageElement({ priority: 1, trackHidden: true }),
+        b: imageElement({ priority: 2 }),
+      },
+      0,
+      paintRenderers(),
+      undefined,
+      (id) => drawn.push(id),
+    );
+    expect(drawn).toEqual(["b"]);
+  });
+
+  // The group stays in the map the matrices resolve against, so a visible
+  // child keeps its hidden parent's transform, as a null in After Effects does.
+  it("keeps a hidden group's transform on a visible child", () => {
+    const { canvas } = render(
+      {
+        g: groupElement({
+          location: { x: 100, y: 100 },
+          width: 0,
+          height: 0,
+          trackHidden: true,
+        }),
+        c: imageElement({
+          width: 40,
+          height: 40,
+          location: { x: 0, y: 0 },
+          parentId: "g",
+        }),
+      },
+      0,
+    );
+    expect(pixel(canvas, 120, 120)).toMatchObject({ r: 255, g: 0, b: 0 });
+    expect(pixel(canvas, 20, 20)).toMatchObject(BACKGROUND);
+  });
+});

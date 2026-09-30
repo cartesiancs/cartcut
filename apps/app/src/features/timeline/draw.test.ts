@@ -7,6 +7,7 @@ import {
   defaultColors,
   drawDropTarget,
   drawTimeline,
+  HIDDEN_CLIP_ALPHA,
   truncateText,
 } from "./draw";
 import { layoutTimeline, TRACK_HEIGHT, TRACK_PITCH } from "./layout";
@@ -14,6 +15,7 @@ import {
   SCHEMA_VERSION,
   createTrack,
   normalizeDocument,
+  setTrackHidden,
   type TimelineDocument,
 } from "./tracks";
 import { nullTileProvider, type TileProvider } from "./strip/provider";
@@ -1574,5 +1576,64 @@ describe("drawMarquee", () => {
       drawMarquee(ctx, { x: 100, y: 10, w: 0, h: 20 }, loud),
     ).not.toThrow();
     expect(pixel(canvas, 100, 20)).toMatchObject({ r: 23, g: 24, b: 28 });
+  });
+});
+
+describe("a clip on a hidden row", () => {
+  const RED = { r: 255, g: 0, b: 0 };
+  const ROW = rgbOf(defaultColors.row);
+  const RING = rgbOf(defaultColors.selection);
+
+  // One red clip on each row, the top row hidden.
+  const twoRows = () =>
+    normalizeDocument(
+      setTrackHidden(
+        doc({
+          top: imageElement({
+            trackId: "v1",
+            startTime: 1000,
+            duration: 4000,
+            timelineOptions: { color: "#ff0000" },
+          }),
+          under: imageElement({
+            trackId: "v2",
+            startTime: 1000,
+            duration: 4000,
+            timelineOptions: { color: "#ff0000" },
+          }),
+        }),
+        "v1",
+        true,
+      ),
+    );
+
+  const inside = (layout: ReturnType<typeof paint>["layout"], id: string) => {
+    const r = layout.clips.find((clip) => clip.elementId === id)!;
+    return { x: r.x + r.w / 2, y: r.y + r.h - 8, rect: r };
+  };
+
+  it("is drawn over its row at the dimmed alpha, and the lit row is not", () => {
+    const { canvas, layout } = paint(twoRows(), { playheadMs: 90_000 });
+
+    const lit = inside(layout, "under");
+    expect(pixel(canvas, lit.x, lit.y)).toMatchObject(RED);
+
+    const dim = inside(layout, "top");
+    const expected = (channel: number, over: number) =>
+      HIDDEN_CLIP_ALPHA * channel + (1 - HIDDEN_CLIP_ALPHA) * over;
+    const got = pixel(canvas, dim.x, dim.y);
+    expect(Math.abs(got.r - expected(255, ROW.r))).toBeLessThanOrEqual(2);
+    expect(Math.abs(got.g - expected(0, ROW.g))).toBeLessThanOrEqual(2);
+    expect(Math.abs(got.b - expected(0, ROW.b))).toBeLessThanOrEqual(2);
+  });
+
+  // It stays editable, so a selection on it has to read as clearly as any.
+  it("keeps its selection ring at full strength", () => {
+    const { canvas, layout } = paint(twoRows(), {
+      selection: ["top"],
+      playheadMs: 90_000,
+    });
+    const { rect } = inside(layout, "top");
+    expect(pixel(canvas, rect.x + rect.w / 2, rect.y)).toMatchObject(RING);
   });
 });

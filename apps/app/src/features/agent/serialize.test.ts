@@ -5,11 +5,13 @@ import {
   documentDuration,
   paginate,
   TEXT_PREVIEW_CHARS,
+  trackRow,
 } from "./serialize";
 import {
   SCHEMA_VERSION,
   createTrack,
   normalizeDocument,
+  setTrackHidden,
   type TimelineDocument,
 } from "../timeline/tracks";
 import {
@@ -260,6 +262,29 @@ describe("clipDetail", () => {
     // 120 keyframes across two lanes, plus the fixed fields — kilobytes, not
     // the megabytes the baked arrays would be.
     expect(size).toBeLessThan(4000);
+  });
+});
+
+describe("trackRow", () => {
+  // A shown row reads exactly as it did before rows could be hidden; a hidden
+  // one says so, because its clips are missing from the contact sheet.
+  it("says hidden only for a hidden row", () => {
+    const doc = normalizeDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: [createTrack("v0", "video", 0), createTrack("v1", "video", 1)],
+      elements: {},
+    });
+    const hidden = setTrackHidden(doc, "v0", true);
+
+    expect(trackRow(doc.tracks[0], 0)).toEqual({
+      id: "v0",
+      name: doc.tracks[0].name,
+      kind: "video",
+      index: 0,
+      clips: 0,
+    });
+    expect(trackRow(hidden.tracks[0], 0)).toMatchObject({ hidden: true });
+    expect("hidden" in trackRow(hidden.tracks[1], 0)).toBe(false);
   });
 });
 

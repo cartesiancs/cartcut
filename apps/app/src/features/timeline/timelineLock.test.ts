@@ -3,6 +3,7 @@ import { commit as agentCommit } from "../agent/commit";
 import {
   deleteSelection,
   redo,
+  setTrackHidden,
   splitSelection,
   undo,
 } from "../editor/actions";
@@ -100,6 +101,15 @@ describe("the editor's commands", () => {
     timelineLockStore.getState().lock("captionSession");
     splitSelection();
     expect(elementIds()).toEqual(["clip", "other"]);
+    expect(historyLength()).toBe(0);
+  });
+
+  // The caption session rebuilds the document from its baseline on every
+  // change, so a row hidden under it would be un-hidden by the next frame.
+  it("refuses to hide a row while it is locked", () => {
+    timelineLockStore.getState().lock("captionSession");
+    setTrackHidden("v1", true);
+    expect("hidden" in useTimelineStore.getState().tracks[0]).toBe(false);
     expect(historyLength()).toBe(0);
   });
 

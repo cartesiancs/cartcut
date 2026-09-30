@@ -12,6 +12,7 @@ import {
   redo,
   rotateSelection,
   selectAllClips,
+  setTrackHidden,
   splitSelection,
   undo,
   ungroupClips,
@@ -303,6 +304,35 @@ describe("addTrack", () => {
 
     expect(historyLength()).toBe(before + 1);
     expect(tracks().some((track) => track.kind === "effect")).toBe(true);
+  });
+});
+
+describe("setTrackHidden", () => {
+  beforeEach(() => seed());
+
+  it("hides a row in one undo step, and undo shows it again", () => {
+    const before = historyLength();
+
+    setTrackHidden("t0", true);
+
+    expect(store().tracks[0].hidden).toBe(true);
+    expect(elements().a.trackHidden).toBe(true);
+    expect(historyLength()).toBe(before + 1);
+
+    undo();
+    expect("hidden" in store().tracks[0]).toBe(false);
+    expect("trackHidden" in elements().a).toBe(false);
+  });
+
+  // A declined op returns its input, and `withCheckpoint` reads that as
+  // "nothing happened": a second click on a hidden row costs no undo step.
+  it("records nothing for a row already in that state", () => {
+    setTrackHidden("t0", true);
+    const before = historyLength();
+
+    setTrackHidden("t0", true);
+
+    expect(historyLength()).toBe(before);
   });
 });
 

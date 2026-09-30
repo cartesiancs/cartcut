@@ -6,6 +6,7 @@ import {
   SCHEMA_VERSION,
   createTrack,
   normalizeDocument,
+  setTrackHidden,
   type TimelineDocument,
 } from "../../timeline/tracks";
 import { videoElement } from "../testing";
@@ -311,5 +312,31 @@ describe("an effect's animated values", () => {
     const doc = addTransition(baseDoc(), "t1", "a", "b", "x", 800, "center");
     const active = plan(doc, 4000).transitions.get("a")!;
     expect(active.element.params).toBe((doc.elements.t1 as any).params);
+  });
+});
+
+describe("a hidden row", () => {
+  const hide = (doc: TimelineDocument, trackId: string) =>
+    normalizeDocument(setTrackHidden(doc, trackId, true));
+
+  // Left out of the plan, not merely skipped when painting: a hidden shader
+  // must not buy a scratch pass for a frame it takes no part in.
+  it("leaves its effect out of the plan, scratch and all", () => {
+    const doc = addEffect(baseDoc(), "fx", "p", 0, 2000, "e0");
+    expect(plan(doc, 1000).needsScratch).toBe(true);
+
+    const hidden = plan(hide(doc, doc.elements.fx.trackId), 1000);
+    expect(hidden.effects.size).toBe(0);
+    expect(hidden.needsScratch).toBe(false);
+    expect(hidden.empty).toBe(true);
+  });
+
+  it("claims nothing for a transition on it", () => {
+    const doc = addTransition(baseDoc(), "t1", "a", "b", "x", 800, "center");
+    expect(plan(doc, 4000).claimed.size).toBe(2);
+
+    const hidden = plan(hide(doc, "v0"), 4000);
+    expect(hidden.transitions.size).toBe(0);
+    expect(hidden.claimed.size).toBe(0);
   });
 });

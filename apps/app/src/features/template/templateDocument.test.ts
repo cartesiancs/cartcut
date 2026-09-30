@@ -246,6 +246,28 @@ describe("the document it produces", () => {
     expect(data.elements.a.priority).toBe(1);
   });
 
+  // What the author saw is what the template draws: a row they hid stays out
+  // of the nested composite, which skips the flag like the outer one does.
+  it("keeps a row the author hid out of the picture", async () => {
+    const data = await readTemplateDocument(
+      input({
+        entries: entries({
+          timeline: JSON.stringify({
+            a: imageElement({ key: "a", trackId: "v1" }),
+            b: imageElement({ key: "b", trackId: "v2" }),
+          }),
+          tracks: JSON.stringify([
+            { id: "v1", kind: "video", name: "V2", index: 0, hidden: true },
+            { id: "v2", kind: "video", name: "V1", index: 1 },
+          ]),
+        }),
+      }),
+      nothingExists,
+    );
+    expect(data.elements.a.trackHidden).toBe(true);
+    expect("trackHidden" in data.elements.b).toBe(false);
+  });
+
   it("derives the slot list once, at load", async () => {
     const data = await readTemplateDocument(
       input({

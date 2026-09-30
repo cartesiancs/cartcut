@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   TRACK_KINDS,
+  TRACK_KIND_CAN_HIDE,
   TRACK_KIND_ICON,
   TRACK_KIND_LABEL,
   TRACK_KIND_TITLE,
@@ -40,6 +41,18 @@ describe("TRACK_KINDS", () => {
     for (const kind of TRACK_KINDS) {
       expect(TRACK_KIND_TITLE[kind]).toBe(`${TRACK_KIND_LABEL[kind]} track`);
     }
+  });
+
+  // Pinned whole: the eye goes only on a row that has a picture to hide, and
+  // a new kind has to be placed on one side of that line on purpose.
+  it("offers the eye only on rows that draw a picture", () => {
+    expect(TRACK_KIND_CAN_HIDE).toEqual({
+      video: true,
+      audio: false,
+      text: true,
+      group: false,
+      effect: true,
+    });
   });
 
   // Every kind here is one `createTrack` accepts — the menu cannot offer a

@@ -41,6 +41,7 @@ import { normalizeFps, snapMsToFrame } from "../timeline/frames";
 import { spanEnd, spanStart } from "../timeline/geometry";
 import {
   appendTrackOfKind,
+  setTrackHidden as setTrackHiddenOp,
   type TimelineDocument,
   type TrackKind,
 } from "../timeline/tracks";
@@ -218,6 +219,15 @@ export function detachAudioFromSelection(): void {
  */
 export function addTrack(kind: TrackKind): void {
   commit((input) => appendTrackOfKind(input, kind, uuidv4()));
+}
+
+/**
+ * The track header's eye: one undo step, and none for a click that changes
+ * nothing. Through `commit` so it declines while the caption panel holds the
+ * timeline, whose next projection would put the old state straight back.
+ */
+export function setTrackHidden(trackId: string, hidden: boolean): void {
+  commit((input) => setTrackHiddenOp(input, trackId, hidden));
 }
 
 /**

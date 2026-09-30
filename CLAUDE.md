@@ -220,6 +220,12 @@ Things that bite:
   frame loop. This is only safe because every renderer is synchronous; the moment
   one gains an `await` the scope leaks into whatever runs next. No fallback to
   the shared map inside a scope.
+- **A hidden track reaches the renderer as a derived `trackHidden` on each of
+  its clips**, written by `tracks.ts#derivePriorities` exactly as `priority`
+  is, because no render path below the store sees `tracks`. The paint loop,
+  `planFrame`, the preview hit test and the export's decoder set skip it; the
+  element stays in the map so parents and links still resolve. Nothing on the
+  audio path reads it, which is the design: the eye hides picture, never sound.
 - **`export/snapshot.ts` copies the element map and each element, one level
   deep and no further.** The document is immutable by convention, so `animation`
   (36,000 baked samples per lane) is safe to share and a deep clone would not be.

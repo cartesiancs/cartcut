@@ -83,6 +83,8 @@ function coveringClips(doc: TimelineDocument, elementId: string): string[] {
       ([id, other]) =>
         id !== elementId &&
         isVisualTimelineElement(other) &&
+        // A clip on a hidden row paints nothing, so it covers nothing.
+        other.trackHidden !== true &&
         trackIndexOf(doc, other.trackId) < index &&
         overlaps(span, spanOf(other)),
     )

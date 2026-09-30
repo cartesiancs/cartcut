@@ -19,6 +19,7 @@
 
 import type { Timeline, TimelineElement } from "../../@types/timeline";
 import { repairHierarchy } from "./hierarchy";
+import { TRACK_KIND_CAN_HIDE } from "./trackKinds";
 import { repairTransitions } from "./transitionRepair";
 
 export type TrackKind = "video" | "audio" | "text" | "group" | "effect";
@@ -30,6 +31,14 @@ export type TimelineTrack = {
   name: string;
   /** 0 is the top row and the front of the composite. */
   index: number;
+  /**
+   * The header's eye, switched off: this row's clips are left out of the
+   * picture in the preview and in every render, and stay editable on the
+   * timeline. Absent means shown, and showing the row again deletes the key,
+   * so a project nobody has hidden a row in saves byte-identically. Read with
+   * `isTrackHidden`; the renderer reads the element's derived `trackHidden`.
+   */
+  hidden?: true;
 };
 
 export type TimelineDocument = {
@@ -212,15 +221,111 @@ export function paintOrder(doc: TimelineDocument): string[] {
  */
 export function derivePriorities(doc: TimelineDocument): Timeline {
   const order = paintOrder(doc);
+  const hidden = hiddenTrackIds(doc);
   const next: Timeline = {};
 
   // Insertion order matters: `renderMain` iterates with `for..in` and relies on
   // it for overlay stacking.
+  //
+  // `trackHidden` is derived in the same pass and for the same reason as
+  // `priority`: the compositor and both export paths see only this map, so the
+  // track's eye has to travel on the element or it reaches nothing below the
+  // store. It is rebuilt from the track every time rather than carried, which
+  // is what clears it when a clip is dragged off a hidden row. Whoever removes
+  // `priority` has to give this one a new home in the same change.
   order.forEach((elementId, rank) => {
-    next[elementId] = { ...doc.elements[elementId], priority: rank + 1 };
+    const element = doc.elements[elementId];
+    if (hidden.has(element.trackId)) {
+      next[elementId] = { ...element, priority: rank + 1, trackHidden: true };
+      return;
+    }
+    if (element.trackHidden !== undefined) {
+      const { trackHidden: _shown, ...rest } = element;
+      next[elementId] = { ...rest, priority: rank + 1 };
+      return;
+    }
+    next[elementId] = { ...element, priority: rank + 1 };
   });
 
   return next;
+}
+
+/**
+ * Whether this row's eye is off. Anything but a literal `true` reads as shown:
+ * `tracks.json` is loaded without a per-field check, and a hand-edited
+ * `"hidden": "yes"` must not blank a row nobody asked to hide.
+ */
+export function isTrackHidden(track: TimelineTrack | null | undefined): boolean {
+  return (track as { hidden?: unknown } | null | undefined)?.hidden === true;
+}
+
+/**
+ * The element map without the clips of hidden rows, or the input itself when
+ * there are none, so the `WeakMap` caches keyed on it stay warm.
+ *
+ * For a decoder set only, never for the compositor: the paint loop needs every
+ * element present to resolve parents and links, and skips hidden ones itself.
+ */
+export function withoutHiddenClips(elements: Timeline): Timeline {
+  let out: Timeline | null = null;
+  for (const [id, element] of Object.entries(elements)) {
+    if (element.trackHidden !== true) {
+      continue;
+    }
+    out ??= { ...elements };
+    delete out[id];
+  }
+  return out ?? elements;
+}
+
+function hiddenTrackIds(doc: TimelineDocument): Set<string> {
+  const ids = new Set<string>();
+  for (const track of doc.tracks) {
+    if (isTrackHidden(track)) {
+      ids.add(track.id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Switch a row's eye off (`hidden: true`) or back on.
+ *
+ * Declines, returning `doc` itself, for a track that is not in the document,
+ * a kind with no picture to hide (`TRACK_KIND_CAN_HIDE`), and the state the
+ * row already has, so a repeated click records no undo step. Showing deletes
+ * the key rather than storing `false`. The clips' own flag is not written
+ * here: `withCheckpoint` normalizes, and `derivePriorities` derives it.
+ */
+export function setTrackHidden(
+  doc: TimelineDocument,
+  trackId: string,
+  hidden: boolean,
+): TimelineDocument {
+  const track = trackById(doc, trackId);
+  if (track == null || !TRACK_KIND_CAN_HIDE[track.kind]) {
+    return doc;
+  }
+  if (isTrackHidden(track) === hidden) {
+    return doc;
+  }
+
+  let next: TimelineTrack;
+  if (hidden) {
+    next = { ...track, hidden: true };
+  } else {
+    // Removed, not set to `undefined`: the digest hashes `JSON.stringify` of
+    // the tracks, and hide-then-show has to read as clean again.
+    const { hidden: _shown, ...rest } = track;
+    next = rest;
+  }
+
+  return {
+    ...doc,
+    tracks: doc.tracks.map((candidate) =>
+      candidate.id === trackId ? next : candidate,
+    ),
+  };
 }
 
 /**

@@ -216,6 +216,13 @@ const MARQUEE_RADIUS = 4;
 const MIN_LABEL_HEIGHT = 20;
 
 /**
+ * How much of a clip on a hidden row shows through. Low enough to read as "not
+ * in the picture" beside a lit row, high enough that the label and the
+ * filmstrip still say which clip it is, since it stays editable.
+ */
+export const HIDDEN_CLIP_ALPHA = 0.4;
+
+/**
  * Append a rounded rectangle to the current path.
  *
  * The radius is clamped to half the shorter side, so a 4px sliver of a clip
@@ -402,12 +409,16 @@ export function drawClip(
     frameGrid: boolean;
     /** Overrides the derived label; see `DrawOptions.labelOf`. */
     labelOf?: (element: TimelineElement) => string;
+    /** Its row's eye is off: drawn at `HIDDEN_CLIP_ALPHA`, ring excepted. */
+    dimmed?: boolean;
   },
 ) {
   const color = clipColorOf(element);
   const radius = Math.min(CLIP_RADIUS, rect.w / 2, rect.h / 2);
+  const alpha = opts.dimmed === true ? HIDDEN_CLIP_ALPHA : 1;
 
   ctx.save();
+  ctx.globalAlpha = alpha;
 
   // Everything inside the clip is clipped to it, so a filmstrip tile that
   // would overhang the trimmed edge is cut rather than spilling onto the
@@ -510,6 +521,7 @@ export function drawClip(
   // has one. Half a pixel in, so the 1px line lands on one row of pixels.
   if (rect.w > 1 && rect.h > 1) {
     ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.strokeStyle = opts.colors.clipBorder;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -526,7 +538,8 @@ export function drawClip(
   }
 
   // After the hairline, which it covers, and outside the clip region, which
-  // it does not need: it is drawn wholly inside the rect.
+  // it does not need: it is drawn wholly inside the rect. At full strength on
+  // a dimmed clip too, so a selection on a hidden row is as legible as any.
   if (opts.selected) {
     drawSelectionRing(ctx, rect, opts.colors);
   }
@@ -893,6 +906,7 @@ export function drawTimeline(
       fps: normalizeFps(opts.fps),
       frameGrid: opts.frameGrid === true,
       labelOf: opts.labelOf,
+      dimmed: element.trackHidden === true,
     });
   }
 

@@ -944,7 +944,9 @@ export class PreviewCanvas extends LitElement {
 
     for (const elementId of Object.keys(this.timeline)) {
       const element: any = this.timeline[elementId];
-      if (element?.filetype !== "group") {
+      // A hidden row's null is not a pointer target either (`canPointerTarget`),
+      // so it draws no handles nobody could grab.
+      if (element?.filetype !== "group" || element.trackHidden === true) {
         continue;
       }
 
@@ -1024,7 +1026,10 @@ export class PreviewCanvas extends LitElement {
     if (element == undefined || element.filetype !== "text") {
       return;
     }
-    if (!isElementVisibleAtTime(this.timelineCursor, this.timeline, element)) {
+    if (
+      element.trackHidden === true ||
+      !isElementVisibleAtTime(this.timelineCursor, this.timeline, element)
+    ) {
       return;
     }
 
@@ -1080,7 +1085,12 @@ export class PreviewCanvas extends LitElement {
     if (!isVisualTimelineElement(element)) {
       return;
     }
-    if (!isElementVisibleAtTime(this.timelineCursor, this.timeline, element)) {
+    // Selecting a clip on a hidden row from the timeline must not put grips
+    // on empty canvas: the hit test refuses it, so the outline does too.
+    if (
+      element.trackHidden === true ||
+      !isElementVisibleAtTime(this.timelineCursor, this.timeline, element)
+    ) {
       return;
     }
 

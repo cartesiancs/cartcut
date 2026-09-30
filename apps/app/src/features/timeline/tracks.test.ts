@@ -8,19 +8,23 @@ import {
   derivePriorities,
   emptyDocument,
   insertTrackAt,
+  isTrackHidden,
   moveTrack,
   nameTracks,
   normalizeDocument,
   normalizeTrackIndices,
   paintOrder,
   removeTrack,
+  setTrackHidden,
   trackById,
   trackIndexOf,
   tracksOfKind,
+  withoutHiddenClips,
   type TimelineDocument,
   type TrackKind,
 } from "./tracks";
 import { audioElement, imageElement, textElement, videoElement } from "../renderer/testing";
+import { moveClip } from "./clipOps";
 
 /** A document with `kinds.length` tracks, top row first. */
 function docWithTracks(...kinds: TrackKind[]): TimelineDocument {
@@ -412,5 +416,136 @@ describe("moveTrack", () => {
     const doc = docWithTracks("video", "audio");
     expect(moveTrack(doc, "t0", 0)).toBe(doc);
     expect(moveTrack(doc, "nope", 1)).toBe(doc);
+  });
+});
+
+describe("setTrackHidden", () => {
+  // Two video rows and an audio row, a clip on each, so every case can check
+  // the flag lands on one row's clips and nowhere else.
+  function seeded(): TimelineDocument {
+    return withClips(docWithTracks("video", "video", "audio", "group"), {
+      top: imageElement({ trackId: "t0", startTime: 0 }),
+      under: imageElement({ trackId: "t1", startTime: 0 }),
+      sound: audioElement({ trackId: "t2", startTime: 0 }),
+    });
+  }
+
+  it("hides a row, and its clips pick the flag up on normalization", () => {
+    const doc = normalizeDocument(setTrackHidden(seeded(), "t0", true));
+
+    expect(trackById(doc, "t0")!.hidden).toBe(true);
+    expect(doc.elements.top.trackHidden).toBe(true);
+    expect("trackHidden" in doc.elements.under).toBe(false);
+    expect("trackHidden" in doc.elements.sound).toBe(false);
+  });
+
+  // The optional-field rule: showing the row again deletes both keys, so a
+  // hide and a show leave the saved project byte-identical, and the digest
+  // (which hashes these strings) reads clean again.
+  it("deletes both keys when the row is shown again", () => {
+    const before = seeded();
+    const hidden = normalizeDocument(setTrackHidden(before, "t0", true));
+    const shown = normalizeDocument(setTrackHidden(hidden, "t0", false));
+
+    expect("hidden" in trackById(shown, "t0")!).toBe(false);
+    expect("trackHidden" in shown.elements.top).toBe(false);
+    expect(JSON.stringify(shown.tracks)).toBe(JSON.stringify(before.tracks));
+    expect(JSON.stringify(shown.elements)).toBe(
+      JSON.stringify(before.elements),
+    );
+  });
+
+  it("declines a row that is not there", () => {
+    const doc = seeded();
+    expect(setTrackHidden(doc, "nope", true)).toBe(doc);
+  });
+
+  it("declines the state the row already has", () => {
+    const doc = seeded();
+    expect(setTrackHidden(doc, "t0", false)).toBe(doc);
+
+    const hidden = setTrackHidden(doc, "t0", true);
+    expect(setTrackHidden(hidden, "t0", true)).toBe(hidden);
+  });
+
+  // No picture to hide: the header offers no eye there, and the op agrees.
+  it("declines an audio row and a group row", () => {
+    const doc = seeded();
+    expect(setTrackHidden(doc, "t2", true)).toBe(doc);
+    expect(setTrackHidden(doc, "t3", true)).toBe(doc);
+  });
+
+  it("does not mutate the document it is given", () => {
+    const doc = seeded();
+    const snapshot = JSON.stringify(doc);
+    setTrackHidden(doc, "t0", true);
+    expect(JSON.stringify(doc)).toBe(snapshot);
+  });
+
+  // Derived, not carried: a clip dragged off a hidden row shows at once, and
+  // one dragged onto it goes dark, with nothing but the move doing it.
+  it("follows a clip dragged between rows", () => {
+    const doc = normalizeDocument(setTrackHidden(seeded(), "t0", true));
+
+    const down = moveClip(doc, "top", 5000, 1);
+    expect(down).not.toBe(doc);
+    expect(down.elements.top.trackId).toBe("t1");
+    expect("trackHidden" in down.elements.top).toBe(false);
+
+    const up = moveClip(doc, "under", 5000, -1);
+    expect(up).not.toBe(doc);
+    expect(up.elements.under.trackHidden).toBe(true);
+  });
+
+  // `tracks.json` is read without a per-field check.
+  it("reads anything but a literal true as shown", () => {
+    const junk = [
+      { ...createTrack("a", "video", 0), hidden: "yes" },
+      { ...createTrack("b", "video", 1), hidden: false },
+      { ...createTrack("c", "video", 2), hidden: 1 },
+    ] as any[];
+    for (const track of junk) {
+      expect(isTrackHidden(track)).toBe(false);
+    }
+
+    const doc = normalizeDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: junk,
+      elements: { clip: imageElement({ trackId: "a" }) },
+    });
+    expect("trackHidden" in doc.elements.clip).toBe(false);
+  });
+
+  // A file can carry a stale flag on a clip whose row is shown; the row wins.
+  it("clears a flag the clip's row does not back", () => {
+    const doc = withClips(docWithTracks("video"), {
+      clip: imageElement({ trackId: "t0", trackHidden: true } as any),
+    });
+    expect("trackHidden" in doc.elements.clip).toBe(false);
+  });
+});
+
+describe("withoutHiddenClips", () => {
+  it("returns its input by identity when nothing is hidden", () => {
+    const elements = withClips(docWithTracks("video"), {
+      clip: imageElement({ trackId: "t0" }),
+    }).elements;
+    expect(withoutHiddenClips(elements)).toBe(elements);
+  });
+
+  it("drops the clips of hidden rows and keeps the rest", () => {
+    const doc = normalizeDocument(
+      setTrackHidden(
+        withClips(docWithTracks("video", "video"), {
+          top: imageElement({ trackId: "t0" }),
+          under: imageElement({ trackId: "t1" }),
+        }),
+        "t0",
+        true,
+      ),
+    );
+    const out = withoutHiddenClips(doc.elements);
+    expect(Object.keys(out)).toEqual(["under"]);
+    expect(Object.keys(doc.elements).sort()).toEqual(["top", "under"]);
   });
 });

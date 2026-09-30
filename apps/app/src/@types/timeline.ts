@@ -646,6 +646,17 @@ type TimelinePlaced = {
    */
   priority: number;
   /**
+   * Set when this clip's track has its eye switched off, and absent otherwise.
+   *
+   * DERIVED, never authored, for the reason `priority` is: the compositor and
+   * every export path receive the bare element map, so a flag kept only on
+   * `TimelineTrack.hidden` would reach the preview and nothing else. Recomputed
+   * by `tracks.ts#derivePriorities` on every mutation and deleted when the
+   * track is shown again. It hides the picture only; nothing on the audio path
+   * reads it, so a hidden video clip is still heard.
+   */
+  trackHidden?: true;
+  /**
    * Whatever extensions have stored on this clip, keyed by extension id.
    *
    * The optional-field rule this codebase holds everywhere: absent when no

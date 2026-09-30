@@ -45,7 +45,11 @@ import { shapeGeometryOf } from "../shape/shapeGeometry";
 import { revealOf } from "../text/reveal";
 import { isRevealable } from "../timeline/textRevealOps";
 import { isMaskable } from "../timeline/maskOps";
-import type { TimelineDocument, TimelineTrack } from "../timeline/tracks";
+import {
+  isTrackHidden,
+  type TimelineDocument,
+  type TimelineTrack,
+} from "../timeline/tracks";
 import { runsOf } from "../text/runs";
 import { linkOf } from "../animation/link";
 import { linkedPropertiesOf } from "../timeline/linkOps";
@@ -658,6 +662,10 @@ export function trackRow(
     kind: track.kind,
     index: track.index,
     clips: clipCount,
+    // Only when set, so every row nobody hid reads exactly as it did. Said at
+    // all because a hidden row's clips are missing from the contact sheet and
+    // the render, and a model that cannot see why would try to repair it.
+    ...(isTrackHidden(track) ? { hidden: true } : {}),
   };
 }
 

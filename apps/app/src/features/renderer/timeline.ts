@@ -190,6 +190,16 @@ function paint(
   };
 
   for (const [elementId, element] of prioritySortedTimeline) {
+    // A row with its eye off. First, ahead of the fx branch: a transition draws
+    // its two clips through `drawOne`, which checks nothing, so a hidden pair
+    // skipped any later would still reach the frame. The element stays in
+    // `context.elements` all the same, so a visible child of a group on a
+    // hidden row keeps its parent's transform, and a link reading a hidden
+    // clip keeps its source.
+    if (element.trackHidden === true) {
+      continue;
+    }
+
     if (plan != null && fx != null) {
       const transition = plan.transitions.get(elementId);
       if (transition != null) {

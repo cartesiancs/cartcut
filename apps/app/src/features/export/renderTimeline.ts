@@ -7,6 +7,7 @@ import {
 } from "../renderer/timeline";
 import { preloadLutsForDocument } from "../lut/lutRegistry";
 import { assetTimeline } from "../template/assetTimeline";
+import { withoutHiddenClips } from "../timeline/tracks";
 import { preloadTemplatesForDocument } from "../template/templateRegistry";
 import { createExportFxRuntime } from "../renderer/fx/createRuntime";
 import { releaseOverlayScope } from "../renderer/fx/overlaySource";
@@ -143,8 +144,15 @@ export async function renderTimeline(
    * Only the asset half takes this. The picture is still drawn from `timeline`,
    * where a template is one element that composites its own document — handing
    * the expansion to `renderTimelineAtTime` would draw every inner clip twice.
+   *
+   * A hidden row's clips are left out on both sides of the expansion. An
+   * export decodes a video only to draw it, and a hidden clip's sound is
+   * rebuilt by FFmpeg from the file in main, so seeking one every frame buys
+   * nothing. Filtering the input first also drops a hidden template's
+   * contents, which carry no flag of their own. The preview cannot do the
+   * same: there the decoder is also where the sound comes from.
    */
-  const assets = assetTimeline(timeline);
+  const assets = withoutHiddenClips(assetTimeline(withoutHiddenClips(timeline)));
 
   // The per-clip grade runs on the GPU and `captureFrame` reads the canvas
   // back with `getImageData` on the next line, so that read has to see the

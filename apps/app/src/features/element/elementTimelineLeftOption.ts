@@ -8,8 +8,17 @@ import { consume } from "@lit/context";
 import { timelineContext } from "../../context/timelineContext";
 import { RULER_OFFSET, TRACK_GAP, TRACK_HEIGHT } from "../timeline/layout";
 import { defaultColors } from "../timeline/draw";
-import { clipsOnTrack } from "../timeline/tracks";
-import { TRACK_KIND_ICON, TRACK_KIND_TITLE } from "../timeline/trackKinds";
+import {
+  clipsOnTrack,
+  isTrackHidden,
+  type TrackKind,
+} from "../timeline/tracks";
+import {
+  TRACK_KIND_CAN_HIDE,
+  TRACK_KIND_ICON,
+  TRACK_KIND_TITLE,
+} from "../timeline/trackKinds";
+import { setTrackHidden } from "../editor/actions";
 import { addEffectTrack as addEffectTrackOp } from "../timeline/effectOps";
 import { applyMenuPlacement } from "../menu/menuPlacement";
 import { v4 as uuidv4 } from "uuid";
@@ -166,6 +175,15 @@ export class ElementTimelineLeftOption extends LitElement {
   removeTrack(trackId: string) {
     this.closeMenu();
     this.timelineState.removeTrackById(trackId, "delete-clips");
+    this.redrawTimeline();
+  }
+
+  /**
+   * Flip a row's eye. The window-level menu dismisser sees this press too,
+   * which is wanted: a menu open on another row closes, as any click does.
+   */
+  private toggleHidden(trackId: string, hidden: boolean) {
+    setTrackHidden(trackId, hidden);
     this.redrawTimeline();
   }
 
@@ -349,6 +367,52 @@ export class ElementTimelineLeftOption extends LitElement {
       .withCheckpoint((doc) => addEffectTrackOp(doc, uuidv4()));
   }
 
+  /**
+   * The row's eye, beside the menu.
+   *
+   * Boxed (`is-on`) while the row is hidden and plain while it shows, which is
+   * the reverse of `optionKit.eyeButton`: there the eye opens a section, here
+   * switching it on is what hides something, and nearly every row is shown,
+   * so only the exception stands out.
+   *
+   * While the timeline is locked the button goes the way the menu does, since
+   * it could only decline. A hidden row still says so, as a glyph, or the
+   * state would vanish from the header for as long as the caption panel is
+   * open while the preview goes on leaving the row out.
+   */
+  private renderEye(
+    trackId: string,
+    kind: TrackKind,
+    hidden: boolean,
+    locked: boolean,
+  ) {
+    if (!TRACK_KIND_CAN_HIDE[kind]) {
+      return null;
+    }
+    if (locked) {
+      return hidden
+        ? html`<span
+            class="material-symbols-outlined track-lock"
+            title="Hidden. Locked while the caption panel is open"
+            >visibility_off</span
+          >`
+        : null;
+    }
+    const title = hidden ? "Show track" : "Hide track";
+    return html`<button
+      type="button"
+      class="opt-icon-btn track-eye ${hidden ? "is-on" : ""}"
+      title=${title}
+      aria-label=${title}
+      aria-pressed=${hidden ? "true" : "false"}
+      @click=${() => this.toggleHidden(trackId, !hidden)}
+    >
+      <span class="material-symbols-outlined"
+        >${hidden ? "visibility_off" : "visibility"}</span
+      >
+    </button>`;
+  }
+
   render() {
     const ordered = [...this.tracks].sort((a, b) => a.index - b.index);
     const width = this.resize.timelineVertical.leftOption;
@@ -356,10 +420,11 @@ export class ElementTimelineLeftOption extends LitElement {
     // raises a toast on its first refusal, and a window resize is not a refusal.
     const locked = timelineIsLocked();
 
-    const rows = ordered.map(
-      (track) => html`
+    const rows = ordered.map((track) => {
+      const hidden = isTrackHidden(track);
+      return html`
         <div
-          class="track-header"
+          class="track-header ${hidden ? "is-hidden" : ""}"
           style="height: ${TRACK_HEIGHT}px; margin-bottom: ${TRACK_GAP}px;
                  background-color: ${defaultColors.row};"
         >
@@ -368,28 +433,31 @@ export class ElementTimelineLeftOption extends LitElement {
             title=${TRACK_KIND_TITLE[track.kind] ?? "Track"}
             >${TRACK_KIND_ICON[track.kind] ?? "layers"}</span
           >
-          ${locked
-            ? html`<span
-                class="material-symbols-outlined track-lock"
-                title="Locked while the caption panel is open"
-                >lock</span
-              >`
-            : html`<button
-                type="button"
-                class="opt-icon-btn track-menu ${this.openMenu?.trackId ===
-                track.id
-                  ? "is-on"
-                  : ""}"
-                title="Track options"
-                aria-haspopup="menu"
-                aria-expanded=${this.openMenu?.trackId === track.id}
-                @click=${(e: MouseEvent) => this.toggleMenu(track.id, e)}
-              >
-                <span class="material-symbols-outlined">more_vert</span>
-              </button>`}
+          <div class="track-actions">
+            ${this.renderEye(track.id, track.kind, hidden, locked)}
+            ${locked
+              ? html`<span
+                  class="material-symbols-outlined track-lock"
+                  title="Locked while the caption panel is open"
+                  >lock</span
+                >`
+              : html`<button
+                  type="button"
+                  class="opt-icon-btn track-menu ${this.openMenu?.trackId ===
+                  track.id
+                    ? "is-on"
+                    : ""}"
+                  title="Track options"
+                  aria-haspopup="menu"
+                  aria-expanded=${this.openMenu?.trackId === track.id}
+                  @click=${(e: MouseEvent) => this.toggleMenu(track.id, e)}
+                >
+                  <span class="material-symbols-outlined">more_vert</span>
+                </button>`}
+          </div>
         </div>
-      `,
-    );
+      `;
+    });
 
     const menu = this.renderMenu(ordered);
 
@@ -432,13 +500,23 @@ export class ElementTimelineLeftOption extends LitElement {
           font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
         }
 
-        /* .opt-icon-btn draws the button; this only pushes it to the end. */
-        button.track-menu {
+        /* The eye and the menu, pushed to the end together. .opt-icon-btn
+           draws each button; the menu stays last, so the eyes line up in one
+           column whether or not a row has one. */
+        .track-actions {
+          display: flex;
+          align-items: center;
+          gap: 2px;
           margin-left: auto;
         }
 
-        .track-header:hover > button.track-menu:not(.is-on) {
+        .track-header:hover .track-actions > .opt-icon-btn:not(.is-on) {
           color: #c3c9cf;
+        }
+
+        /* Matches the canvas, which draws this row's clips at 0.4. */
+        .track-header.is-hidden > .track-icon {
+          opacity: 0.45;
         }
 
         /*
@@ -456,7 +534,6 @@ export class ElementTimelineLeftOption extends LitElement {
           justify-content: center;
           width: 22px;
           height: 22px;
-          margin-left: auto;
           color: #7f878f;
           font-size: 15px;
           line-height: 1;

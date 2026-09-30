@@ -268,6 +268,20 @@ describe("canPointerTarget", () => {
     expect(canPointerTarget(el, 2999, timeline)).toBe(true);
   });
 
+  // Undrawn, so ungrabbable: an invisible clip must not catch the clicks
+  // aimed at whatever shows through it. A group too, which is otherwise
+  // always a target.
+  it("refuses a clip or a group on a hidden row", () => {
+    const shown = imageElement({ startTime: 1000, duration: 2000 });
+    expect(canPointerTarget(shown, 1500, timeline)).toBe(true);
+    expect(
+      canPointerTarget({ ...shown, trackHidden: true }, 1500, timeline),
+    ).toBe(false);
+    expect(
+      canPointerTarget(groupElement({ trackHidden: true }), 1500, timeline),
+    ).toBe(false);
+  });
+
   it("refuses a clip the playhead has left", () => {
     const el = imageElement({ startTime: 1000, duration: 2000 });
     expect(canPointerTarget(el, 999, timeline)).toBe(false);
