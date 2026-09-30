@@ -93,6 +93,14 @@ npx skills add cartesiancs/cartcut --skill cartcut-editing -a claude-code -g
 That route installs the skill alone, so run the ⚡ panel's `claude mcp add` line
 afterwards to connect the bridge. Take one route or the other, not both.
 
+Any other MCP client (Claude Desktop, Cursor, Codex) connects through
+[`@cartesiancs/cartcut-mcp`](packages/mcp-bridge), which is also listed in the official MCP
+Registry. It finds the token by itself:
+
+```
+npx -y @cartesiancs/cartcut-mcp
+```
+
 [plugins/cartcut-editing/README.md](plugins/cartcut-editing/README.md) has the
 details, including what to do when it will not connect.
 

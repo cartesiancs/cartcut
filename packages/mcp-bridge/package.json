@@ -1,0 +1,38 @@
+{
+  "name": "@cartesiancs/cartcut-mcp",
+  "version": "0.1.0",
+  "description": "Connect Claude and other MCP clients to the CartCut video editor running on this computer.",
+  "mcpName": "io.github.cartesiancs/cartcut",
+  "type": "module",
+  "bin": {
+    "cartcut-mcp": "bin/cartcut-mcp.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "!src/**/*.test.mjs"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "cartcut",
+    "video-editor",
+    "video-editing",
+    "claude"
+  ],
+  "homepage": "https://cartesiancs.com/cartcut",
+  "bugs": "https://github.com/cartesiancs/cartcut/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cartesiancs/cartcut.git",
+    "directory": "packages/mcp-bridge"
+  },
+  "author": "cartesiancs",
+  "license": "MIT"
+}

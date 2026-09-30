@@ -16,6 +16,9 @@ export default defineConfig({
       "electron/**/*.{test,spec}.ts",
       // Release tooling, plain .mjs so CI runs it with no `npm ci`.
       "scripts/**/*.{test,spec}.mjs",
+      // The npm bridge, plain .mjs for the same reason: what is tested is
+      // exactly what `npm publish` ships.
+      "packages/mcp-bridge/**/*.{test,spec}.mjs",
     ],
     exclude: ["**/node_modules/**", "**/dist/**", "**/main/**"],
   },

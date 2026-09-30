@@ -582,6 +582,18 @@ Four constraints:
 Connect with the command under the ⚡ icon at the bottom right of the app, or set
 `CARTCUT_MCP_TOKEN` and use the committed `.mcp.json`.
 
+`packages/mcp-bridge/` is the **stdio route to the same server**:
+`@cartesiancs/cartcut-mcp` on npm, listed in the official MCP Registry as
+`io.github.cartesiancs/cartcut`. A relay, not a second server, so nothing about the tools is taught to it. It
+reads the token from electron-store's `config.json` under `userData`, which is
+why a top-level `productName` or a new root `name` would break it;
+`manifest.test.mjs` pins that, the port and the token key. Plain `.mjs` with no
+dependencies, so `npx` starts it without an install and the tested files are the
+shipped ones. A release is `npm publish` then `mcp-publisher publish`, in that
+order: the registry checks the published package's `mcpName`. The version
+appears three times across `package.json` and `server.json`, and a registry
+version can never be republished.
+
 ## Testing
 
 Vitest, suites co-located with sources. `features/timeline/` and

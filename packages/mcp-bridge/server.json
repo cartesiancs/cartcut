@@ -1,0 +1,41 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.cartesiancs/cartcut",
+  "title": "CartCut",
+  "description": "Edit video in the CartCut desktop editor: cuts from a transcript, captions, motion, effects.",
+  "websiteUrl": "https://cartesiancs.com/cartcut",
+  "repository": {
+    "url": "https://github.com/cartesiancs/cartcut",
+    "source": "github",
+    "subfolder": "packages/mcp-bridge"
+  },
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/cartesiancs/cartcut/main/assets/icons/png/512x512.png",
+      "mimeType": "image/png",
+      "sizes": ["512x512"]
+    }
+  ],
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@cartesiancs/cartcut-mcp",
+      "version": "0.1.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "CARTCUT_MCP_TOKEN",
+          "description": "Optional. CartCut's MCP token; read from CartCut's own settings when unset.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
