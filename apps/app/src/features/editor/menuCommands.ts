@@ -38,7 +38,10 @@ import { rendererModal } from "../../utils/modal";
 import { runContributedCommand } from "../extension/bridge";
 import { startExport } from "../export/exportSession";
 import { recoverAutosaveEntry } from "../project/recoverAutosave";
-import { TUTORIAL_RESTART_EVENT } from "../tutorial/tutorialFlag";
+import {
+  TUTORIAL_RESTART_EVENT,
+  resetOnboardingAndTutorial,
+} from "../tutorial/tutorialFlag";
 import {
   runExportSubtitles,
   runImportSubtitles,
@@ -298,6 +301,7 @@ const COMMANDS: Record<MenuCommandId, (payload?: unknown) => void> = {
   // tutorial's tag, and the tutorial does not need to know the menu.
   "help.tutorial": () =>
     window.dispatchEvent(new CustomEvent(TUTORIAL_RESTART_EVENT)),
+  "help.resetOnboarding": () => void resetOnboardingAndTutorial(),
 };
 
 /**

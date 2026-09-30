@@ -287,6 +287,7 @@ function buildTemplate(): any[] {
       submenu: [
         item("help.shortcuts"),
         item("help.tutorial"),
+        item("help.resetOnboarding"),
         separator,
         {
           label: "Learn More",

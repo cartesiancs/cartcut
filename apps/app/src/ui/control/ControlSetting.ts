@@ -37,11 +37,7 @@ import {
   type PresetName,
 } from "../../features/export/settings";
 import { IS_MAC } from "../../utils/platform";
-import {
-  ONBOARDING_RESTART_EVENT,
-  browserOnboardingFlagPort,
-  resetOnboarding,
-} from "../../features/onboarding/onboardingFlag";
+import { resetOnboardingAndTutorial } from "../../features/tutorial/tutorialFlag";
 
 /**
  * The two halves of the settings panel.
@@ -228,16 +224,14 @@ export class ControlSetting extends LitElement {
   }
 
   /**
-   * Clears the "tour is done" flag and puts the tour back on screen.
+   * Forgets the tour and the tutorial and puts the tour back on screen.
    *
-   * Two steps rather than one call into the overlay: this panel does not know
-   * the overlay's tag, and the event still shows the tour on a build where the
-   * flag could not be cleared. No confirmation — the tour is a handful of Next
-   * clicks and a Skip, and it writes the flag again on the way out.
+   * The same function as Help ▸ Reset Onboarding, so the two cannot disagree
+   * about what a reset clears. No confirmation: the tour is a handful of Next
+   * clicks and a Skip, and it writes its flag again on the way out.
    */
   private async _handleClickResetOnboarding() {
-    await resetOnboarding(browserOnboardingFlagPort);
-    window.dispatchEvent(new CustomEvent(ONBOARDING_RESTART_EVENT));
+    await resetOnboardingAndTutorial();
   }
 
   _handleClickResolution(w, h) {

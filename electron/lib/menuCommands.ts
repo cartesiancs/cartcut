@@ -87,7 +87,8 @@ export type MenuCommandId =
   | "extension.command"
   // Help
   | "help.shortcuts"
-  | "help.tutorial";
+  | "help.tutorial"
+  | "help.resetOnboarding";
 
 export interface MenuCommand {
   id: MenuCommandId;
@@ -233,6 +234,10 @@ export const MENU_COMMANDS: readonly MenuCommand[] = [
   },
   // Runs the first-run tutorial again from its first step.
   { id: "help.tutorial", label: "Show Tutorial" },
+  // Forgets both the tour and the tutorial and shows the tour again, which the
+  // tutorial then follows. No accelerator and no confirmation: it touches
+  // nothing but two "seen it" flags.
+  { id: "help.resetOnboarding", label: "Reset Onboarding" },
 ];
 
 const BY_ID = new Map<MenuCommandId, MenuCommand>(

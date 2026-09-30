@@ -23,6 +23,7 @@ export type TutorialState =
 export type TutorialAction =
   | { type: "start" }
   | { type: "restart" }
+  | { type: "reset" }
   | { type: "next" }
   | { type: "skip" }
   | { type: "satisfied"; step: number; now: number }
@@ -50,6 +51,11 @@ export function reduceTutorial(
 
     case "restart":
       return showing(0);
+
+    // Back to before it ever began, so the next `start` is a first run. Not
+    // "finished": nothing was completed or skipped, and nothing is recorded.
+    case "reset":
+      return state.kind === "idle" ? state : IDLE;
 
     case "next":
       return state.kind === "running" ? advance(state.step, stepCount) : state;

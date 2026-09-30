@@ -92,6 +92,11 @@ export type TutorialRunner = {
   startIfNew(): Promise<boolean>;
   /** Starts from the first step whatever happened before. */
   restart(): void;
+  /**
+   * Takes the card away and forgets the run, recording nothing, so the next
+   * `startIfNew` begins from the first step. For the tour being reset.
+   */
+  reset(): void;
   next(): void;
   skip(): void;
   /** Measure the card and place it; the view calls this after it re-renders. */
@@ -151,7 +156,10 @@ export function createTutorialRunner(ports: TutorialPorts): TutorialRunner {
       return;
     }
 
-    if (next.kind !== "running") return;
+    if (next.kind === "idle") {
+      stop();
+      return;
+    }
 
     if (prev.kind !== "running") unwatch = env.watch();
 
@@ -348,6 +356,7 @@ export function createTutorialRunner(ports: TutorialPorts): TutorialRunner {
     },
 
     restart: () => dispatch({ type: "restart" }),
+    reset: () => dispatch({ type: "reset" }),
     next: () => dispatch({ type: "next" }),
     skip: () => dispatch({ type: "skip" }),
     layout,

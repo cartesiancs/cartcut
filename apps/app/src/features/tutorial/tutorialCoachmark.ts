@@ -2,7 +2,10 @@ import { LitElement, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { LocaleController } from "../../controllers/locale";
 import { windowScheduler } from "../caption/previewLoop";
-import { ONBOARDING_COMPLETE_EVENT } from "../onboarding/onboardingFlag";
+import {
+  ONBOARDING_COMPLETE_EVENT,
+  ONBOARDING_RESTART_EVENT,
+} from "../onboarding/onboardingFlag";
 import { browserTutorialEnv } from "./browserEnv";
 import { TUTORIAL_MOTION, tutorialMotionStyle } from "./motion";
 import {
@@ -34,9 +37,11 @@ const ENTER_FROM: Record<string, (px: number) => string> = {
  * two elements' styles rather than through the template, so a card following
  * a panel being resized never re-renders.
  *
- * It listens for two things on `window`: the tour finishing, which starts the
- * tutorial for someone who has not seen it, and Help ▸ Show Tutorial, which
- * starts it for anyone.
+ * It listens for three things on `window`: the tour finishing, which starts
+ * the tutorial for someone who has not seen it; the tour starting over
+ * (Help ▸ Reset Onboarding), which puts the tutorial back to before it began
+ * so it follows the tour again; and Help ▸ Show Tutorial, which starts it for
+ * anyone.
  *
  * Nothing here captures keys. The tour is modal and swallows every keystroke
  * while it is up; this one is the opposite, because the user has to use the
@@ -87,11 +92,13 @@ export class TutorialCoachmark extends LitElement {
     });
 
     window.addEventListener(ONBOARDING_COMPLETE_EVENT, this.handleTourDone);
+    window.addEventListener(ONBOARDING_RESTART_EVENT, this.handleTourRestart);
     window.addEventListener(TUTORIAL_RESTART_EVENT, this.handleRestart);
   }
 
   disconnectedCallback() {
     window.removeEventListener(ONBOARDING_COMPLETE_EVENT, this.handleTourDone);
+    window.removeEventListener(ONBOARDING_RESTART_EVENT, this.handleTourRestart);
     window.removeEventListener(TUTORIAL_RESTART_EVENT, this.handleRestart);
     this.runner?.dispose();
     this.runner = null;
@@ -101,6 +108,16 @@ export class TutorialCoachmark extends LitElement {
   // Arrow properties: `removeEventListener` needs the reference it was given.
   private handleTourDone = () => {
     void this.runner?.startIfNew();
+  };
+
+  /**
+   * The tour starting over puts the tutorial back to before it began: a run
+   * left half done would otherwise sit hidden behind the tour and carry on
+   * from its old step afterwards, and `startIfNew` would refuse to begin a
+   * fresh one while it was running.
+   */
+  private handleTourRestart = () => {
+    this.runner?.reset();
   };
 
   private handleRestart = () => {

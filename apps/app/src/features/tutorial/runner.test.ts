@@ -444,6 +444,38 @@ describe("tutorial runner", () => {
       expect(h.frames.size).toBe(1);
     });
 
+    // Help > Reset Onboarding: the tour comes back, and the tutorial has to be
+    // ready to follow it from the first step rather than carry on hidden.
+    it("goes back to before it began when reset, recording nothing", async () => {
+      const h = harness();
+      await h.runner.startIfNew();
+      h.goTo(stepIndex("playhead"));
+      h.tick();
+
+      h.runner.reset();
+
+      expect(h.runner.state).toEqual({ kind: "idle" });
+      expect(h.shown[h.shown.length - 1]).toBeNull();
+      expect(h.placed[h.placed.length - 1]).toBeNull();
+      expect(h.frames.size).toBe(0);
+      expect(h.editor.unwatched).toBe(1);
+      expect(h.stored.value).toBeNull();
+
+      await expect(h.runner.startIfNew()).resolves.toBe(true);
+      expect(h.step()).toBe(0);
+      expect(h.editor.watching).toBe(2);
+    });
+
+    it("does nothing when reset while it is not running", () => {
+      const h = harness();
+
+      h.runner.reset();
+
+      expect(h.shown).toEqual([]);
+      expect(h.placed).toEqual([]);
+      expect(h.editor.unwatched).toBe(0);
+    });
+
     it("stops everything when disposed, without recording anything", async () => {
       const h = harness();
       await h.runner.startIfNew();

@@ -39,6 +39,18 @@ describe("tutorial session", () => {
     }
   });
 
+  it("resets to before it began, recording no outcome", () => {
+    for (const state of [
+      showing(4),
+      done(2, 100),
+      { kind: "finished", outcome: "completed" } as TutorialState,
+    ]) {
+      expect(reduceTutorial(state, { type: "reset" })).toBe(IDLE);
+    }
+    expect(reduceTutorial(IDLE, { type: "reset" })).toBe(IDLE);
+    expect(reduceTutorial(IDLE, { type: "start" })).toEqual(showing(0));
+  });
+
   describe("Next", () => {
     it("moves one step on", () => {
       expect(reduceTutorial(showing(2), { type: "next" })).toEqual(showing(3));
