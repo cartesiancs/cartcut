@@ -275,19 +275,33 @@ async function waitForTerminalEvent(page: Page, timeoutMs: number): Promise<Rend
  * It is a Bootstrap modal, so its backdrop sits over the whole window — the
  * title bar's export button included. A second export cannot be clicked until
  * it is closed, which is true for a user as well as for a spec.
+ *
+ * `hide()` is retried until the modal drops `.show`, because Bootstrap 5.0.2's
+ * `hide()` returns early while `_isTransitioning` is set: `runExport` returns
+ * on the finish event, the same tick `event.ts` calls `show()`, so a single
+ * `hide()` lands inside the ~450ms fade in and is dropped without an error.
+ * The modal then finishes showing and intercepts the next Render click.
  */
 export async function dismissExportModals(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    for (const id of ["progressFinish", "progressError"]) {
-      const el = document.querySelector(`#${id}`);
-      if (el == null) continue;
-      (globalThis as any).bootstrap?.Modal?.getInstance?.(el)?.hide();
-    }
-  });
-  await page
-    .locator(".modal-backdrop")
-    .waitFor({ state: "detached", timeout: 10_000 })
-    .catch(() => {});
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          let open = false;
+          for (const id of ["progressFinish", "progressError"]) {
+            const el = document.querySelector(`#${id}`);
+            if (el == null || !el.classList.contains("show")) continue;
+            open = true;
+            (globalThis as any).bootstrap?.Modal?.getInstance?.(el)?.hide();
+          }
+          return open;
+        }),
+      { message: "an export modal would not hide", timeout: 10_000 },
+    )
+    .toBe(false);
+  // Dropping `.show` starts the fade out; the modal keeps covering the window
+  // until Bootstrap removes the backdrop at the end of it.
+  await page.locator(".modal-backdrop").waitFor({ state: "detached", timeout: 10_000 });
 }
 
 export async function exportModalState(page: Page): Promise<{

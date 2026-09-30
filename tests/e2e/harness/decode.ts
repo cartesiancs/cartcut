@@ -26,6 +26,7 @@
 import { spawn } from "node:child_process";
 
 import { FFMPEG, FFPROBE, type CodeRegion, type Region } from "./paths";
+import type { FrameBuffer } from "./compare";
 
 export class FfmpegError extends Error {
   constructor(readonly argv: string[], readonly stderrTail: string, code: number | null) {
@@ -320,6 +321,50 @@ export async function decodeFrames(
   const all = Buffer.concat(chunks, total);
   const frames = indices.map((_, i) => all.subarray(i * stride, (i + 1) * stride));
   return { indices, frames, width: outW, height: outH };
+}
+
+/**
+ * An RGBA frame as a yuv420p file can hold it, converted back to RGBA.
+ *
+ * For comparing a reference render against a decoded export. 4:2:0 keeps one
+ * chroma sample per 2x2 block, so colour detail narrower than two pixels does
+ * not survive any encode: the chromatic aberration effect's 1 to 2px red and
+ * green fringes on caption text cost p99 25 and p999 88 from subsampling alone,
+ * with no encoder involved, which is past `CODEC_THRESHOLDS` on a correct
+ * export. Subsampling the reference first leaves only what the export could
+ * have got right, and a 1px error in the aberration then fails at p999 100+.
+ *
+ * Both conversions are ffmpeg's defaults, the same ones the export (raw RGBA
+ * in, `-pix_fmt yuv420p` out) and `decodeFrames` (`-pix_fmt rgba`) use. A
+ * wrong matrix is the colour canary's job; this models only the subsampling.
+ */
+export async function through420(frame: FrameBuffer): Promise<FrameBuffer> {
+  const { width, height } = frame;
+  const argv = [
+    "-hide_banner", "-nostdin", "-loglevel", "error",
+    "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`, "-i", "-",
+    "-vf", "format=yuv420p,format=rgba",
+    "-f", "rawvideo", "-",
+  ];
+
+  const chunks: Buffer[] = [];
+  let total = 0;
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(FFMPEG, argv, { stdio: ["pipe", "pipe", "pipe"] });
+    let err = "";
+    child.stdout.on("data", (c: Buffer) => { chunks.push(c); total += c.length; });
+    child.stderr.on("data", (d) => { err += d; });
+    child.on("error", reject);
+    child.on("close", (code) =>
+      code === 0 ? resolve() : reject(new FfmpegError(argv, tail(err), code)),
+    );
+    child.stdin.end(Buffer.from(frame.data.buffer, frame.data.byteOffset, frame.data.byteLength));
+  });
+
+  if (total !== width * height * 4) {
+    throw new Error(`through420: expected ${width * height * 4} bytes, ffmpeg produced ${total}`);
+  }
+  return { data: Buffer.concat(chunks, total), width, height };
 }
 
 /**

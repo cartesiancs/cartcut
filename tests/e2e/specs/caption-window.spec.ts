@@ -280,7 +280,9 @@ test("the caption window docks beside the preview and is never clipped", async (
         previewCanvas: box("preview-canvas"),
         apply: box("app-window .caption-apply"),
         firstCaption: box("app-window .caption"),
-        silence: box("app-window .caption-silence"),
+        // The one footer icon button that opens no menu; the placement trigger
+        // beside it shares the class and carries `aria-haspopup`.
+        silence: box("app-window .caption-panel-footer .caption-icon-btn:not([aria-haspopup])"),
         // The *used* colour, not the custom property. `getPropertyValue` hands
         // back the token exactly as authored, which is the hex string
         // `#3a3f44`; `borderTopColor` is what the compositor actually painted,
@@ -387,18 +389,23 @@ test("the caption window docks beside the preview and is never clipped", async (
     await expect(page.locator("app-window .caption")).toHaveCount(LINES.length);
   });
 
-  await test.step("the silence button is icon only, named, and sits beside Apply", async () => {
+  await test.step("the silence button is icon only, named, and sits before placement and Apply", async () => {
     const button = await page.evaluate(() => {
-      const el = document.querySelector("app-window .caption-silence") as HTMLElement | null;
+      const el = document.querySelector(
+        "app-window .caption-panel-footer .caption-icon-btn:not([aria-haspopup])",
+      ) as HTMLElement | null;
       if (el == null) {
         return null;
       }
+      // Since a27cbf8 the caption-placement menu trigger sits between the two.
       const next = el.nextElementSibling as HTMLElement | null;
+      const afterNext = next?.nextElementSibling as HTMLElement | null;
       return {
         text: (el.textContent ?? "").trim(),
         title: el.getAttribute("title") ?? "",
         ariaLabel: el.getAttribute("aria-label") ?? "",
-        nextIsApply: next?.classList.contains("caption-apply") ?? false,
+        nextIsPlacement: next?.getAttribute("aria-haspopup") === "menu",
+        thenApply: afterNext?.classList.contains("caption-apply") ?? false,
         // Anything that is not the icon span would be a stray text node.
         childTags: [...el.children].map((child) => child.tagName.toLowerCase()),
       };
@@ -412,7 +419,8 @@ test("the caption window docks beside the preview and is never clipped", async (
     // An icon-only button has no other name, so these are not optional.
     expect(button!.title.length).toBeGreaterThan(0);
     expect(button!.ariaLabel).toBe(button!.title);
-    expect(button!.nextIsApply, "the silence button is not next to Apply").toBe(true);
+    expect(button!.nextIsPlacement, "the placement menu does not follow the silence button").toBe(true);
+    expect(button!.thenApply, "Apply does not follow the placement menu").toBe(true);
   });
 
   /** The containment checks, run at whatever size the window is now. */

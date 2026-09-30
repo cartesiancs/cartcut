@@ -83,7 +83,7 @@ test("the project frame rate survives a save and a reopen", async ({
     // was. Asserted here because it is the one part of the frame-rate surface
     // no node test can reach: `formatTimecode` is pure and covered, but whether
     // `Timeline.ts` actually calls it with the project's rate is not.
-    const readout = page.locator("timeline-ui b.text-light");
+    const readout = page.locator("timeline-ui .transport-timecode");
 
     await page.evaluate(() =>
       (globalThis as any).CARTCUT.useTimelineStore.getState().setCursor(0),

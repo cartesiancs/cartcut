@@ -29,6 +29,7 @@ import {
   decodeIndexMap,
   probeOutput,
   singleFrameCommand,
+  through420,
 } from "../harness/decode";
 import {
   CODEC_THRESHOLDS,
@@ -385,7 +386,10 @@ test("every editing element survives a full-length export, frame for frame", asy
         if (target == null) continue;
 
         const content = instruments.regions.content;
-        const stats = diffStats(reference.frame, target, content);
+        // Against what a yuv420p file can hold, not the full-chroma render:
+        // see `through420` for the frames that fail otherwise.
+        const expected = await through420(reference.frame);
+        const stats = diffStats(expected, target, content);
         const verdict = judge(stats, CODEC_THRESHOLDS, `frame ${anchor.index}`);
 
         const candidates = [];
@@ -432,7 +436,7 @@ test("every editing element survives a full-length export, frame for frame", asy
         if (!verdict.pass || burned.value !== anchor.index || alignment.bestIndex !== anchor.index) {
           const dir = path.join(artifactDir, "frames", String(anchor.index));
           const region = instruments.regions.content;
-          const a = crop(reference.frame, region);
+          const a = crop(expected, region);
           const b = crop(target, region);
           writePng(path.join(dir, "reference.png"), a);
           writePng(path.join(dir, "decoded.png"), b);
