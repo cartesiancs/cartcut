@@ -457,10 +457,12 @@ export class Control extends LitElement {
               role="tablist"
               aria-orientation="vertical"
             >
+              <!-- data-tutorial: what features/tutorial/steps.ts points at -->
               <button
                 class="btn-nav active"
                 data-bs-toggle="pill"
                 data-bs-target="#nav-home"
+                data-tutorial="sidebar-settings"
                 type="button"
                 role="tab"
                 aria-selected="true"
@@ -472,6 +474,7 @@ export class Control extends LitElement {
                 class="btn-nav"
                 data-bs-toggle="pill"
                 data-bs-target="#nav-draft"
+                data-tutorial="sidebar-file"
                 type="button"
                 role="tab"
                 aria-selected="false"
@@ -483,6 +486,7 @@ export class Control extends LitElement {
                 class="btn-nav"
                 data-bs-toggle="pill"
                 data-bs-target="#nav-text"
+                data-tutorial="sidebar-text"
                 type="button"
                 role="tab"
                 aria-selected="false"

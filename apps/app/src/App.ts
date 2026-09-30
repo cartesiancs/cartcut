@@ -133,6 +133,8 @@ export class App extends LitElement {
 
         <warning-demo></warning-demo>
         <onboarding-overlay></onboarding-overlay>
+        <!-- Starts when the tour above finishes, for first-run users only. -->
+        <tutorial-coachmark></tutorial-coachmark>
         <update-prompt></update-prompt>
       </body>
     `;

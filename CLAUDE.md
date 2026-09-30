@@ -327,6 +327,8 @@ features/update/       the update card; main's half is electron/lib/updateSessio
 features/mediaInfo/    Show Info: labels and layout here; the ffprobe call and its
                        parse are main's, electron/lib/mediaInfo*.ts
 features/motion/       a damped spring as a CSS linear(): the tour, the tile hover
+features/tutorial/     the coachmarks after the tour: seven steps judged from
+                       snapshots, a pure runner over ports; targets are data-tutorial
 features/editor/       actions, menuCommands, shortcuts, frameRate
 features/extension/    the extension host's editor half: bridge, dispatch, batches
 electron/extension/    the extension host, its protocol, the webview sandbox

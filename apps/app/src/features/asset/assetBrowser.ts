@@ -237,6 +237,7 @@ export class AssetBrowser extends LitElement {
         <button
           type="button"
           class="browse-btn ${getLocationEnv() == "demo" ? "d-none" : ""}"
+          data-tutorial="asset-change-folder"
           title=${this.lc.t("setting.change_project_folder")}
           aria-label=${this.lc.t("setting.change_project_folder")}
           @click=${this.handleClickSelectFolder}
@@ -329,6 +330,7 @@ export class AssetBrowser extends LitElement {
       <button
         type="button"
         class="browse-text-btn is-primary ${isDemo ? "d-none" : ""}"
+        data-tutorial="asset-select-folder"
         @click=${this.handleClickSelectFolder}
       >
         ${this.lc.t("setting.select_project_folder")}

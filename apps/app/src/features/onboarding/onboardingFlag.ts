@@ -27,13 +27,28 @@ export const ONBOARDING_STORE_KEY = "ONBOARDING_COMPLETED";
 export const ONBOARDING_RESTART_EVENT = "onboarding:restart";
 
 /**
+ * Fired on `window` once the tour has faded out, whichever way it was closed.
+ *
+ * The follow-on tutorial (`features/tutorial/`) starts from this and from
+ * nothing else, which is what keeps it to first-run users: someone who
+ * finished the tour before the tutorial existed never sees the tour again, so
+ * never fires this.
+ */
+export const ONBOARDING_COMPLETE_EVENT = "onboarding:complete";
+
+/**
  * The two stores, each reached through one call.
  *
  * Every method here may throw or reject, and the functions below are what
  * handles that: `localStorage` throws outright in a window with site data
  * blocked, and `store` is IPC to another process.
+ *
+ * Nothing below names a key, so the same functions keep any "has the user seen
+ * this" flag; `browserFlagPort` binds one to its key. `name` prefixes the
+ * warnings, so a refused write says which flag it was.
  */
 export type OnboardingFlagPort = {
+  name?: string;
   readMirror(): string | null;
   writeMirror(value: string): void;
   clearMirror(): void;
@@ -58,17 +73,19 @@ export async function isOnboardingComplete(
   } catch (error) {
     // Not fatal, and not a reason to skip the store: the mirror is the copy,
     // and the store is the record.
-    port.warn("onboarding: could not read the mirrored flag", error);
+    port.warn(`${nameOf(port)}: could not read the mirrored flag`, error);
   }
 
   try {
     const stored = await port.readStored();
     return stored?.value === true;
   } catch (error) {
-    port.warn("onboarding: could not read the completion flag", error);
+    port.warn(`${nameOf(port)}: could not read the completion flag`, error);
     return false;
   }
 }
+
+const nameOf = (port: OnboardingFlagPort): string => port.name ?? "onboarding";
 
 /** Records that the tour is done, in both places. */
 export async function markOnboardingComplete(
@@ -115,31 +132,37 @@ async function bothOf(
   try {
     mirror();
   } catch (error) {
-    port.warn(`onboarding: could not ${verb} the mirrored flag`, error);
+    port.warn(`${nameOf(port)}: could not ${verb} the mirrored flag`, error);
   }
 
   try {
     await stored();
   } catch (error) {
-    port.warn(`onboarding: could not ${verb} the stored flag`, error);
+    port.warn(`${nameOf(port)}: could not ${verb} the stored flag`, error);
   }
 }
 
 /**
- * The real two stores.
+ * The real two stores, for one key.
  *
  * Each method reaches `window` when it is called rather than at module load,
  * so importing this from a suite costs nothing and a build without
  * `electronAPI` fails at the call that needs it.
  */
-export const browserOnboardingFlagPort: OnboardingFlagPort = {
-  readMirror: () => window.localStorage.getItem(ONBOARDING_STORE_KEY),
-  writeMirror: (value) =>
-    window.localStorage.setItem(ONBOARDING_STORE_KEY, value),
-  clearMirror: () => window.localStorage.removeItem(ONBOARDING_STORE_KEY),
-  readStored: () => window.electronAPI.req.store.get(ONBOARDING_STORE_KEY),
-  writeStored: (value) =>
-    window.electronAPI.req.store.set(ONBOARDING_STORE_KEY, value),
-  clearStored: () => window.electronAPI.req.store.delete(ONBOARDING_STORE_KEY),
-  warn: (message, error) => console.warn(message, error),
-};
+export function browserFlagPort(key: string, name: string): OnboardingFlagPort {
+  return {
+    name,
+    readMirror: () => window.localStorage.getItem(key),
+    writeMirror: (value) => window.localStorage.setItem(key, value),
+    clearMirror: () => window.localStorage.removeItem(key),
+    readStored: () => window.electronAPI.req.store.get(key),
+    writeStored: (value) => window.electronAPI.req.store.set(key, value),
+    clearStored: () => window.electronAPI.req.store.delete(key),
+    warn: (message, error) => console.warn(message, error),
+  };
+}
+
+export const browserOnboardingFlagPort = browserFlagPort(
+  ONBOARDING_STORE_KEY,
+  "onboarding",
+);

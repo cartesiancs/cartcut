@@ -97,14 +97,18 @@ export class AssetList extends LitElement {
         this.entries,
         (entry) => entry.name,
         (entry) =>
+          // `data-tutorial` is what the tutorial's "click a file" step points
+          // at: the first tile of each kind that is on screen.
           entry.isDirectory
             ? html`<asset-folder
+                data-tutorial="asset-folder"
                 .name=${entry.name}
                 .directory=${this.directory}
                 .showType=${this.showType}
                 .meta=${metaOf(entry)}
               ></asset-folder>`
             : html`<asset-file
+                data-tutorial="asset-file"
                 .name=${entry.name}
                 .directory=${this.directory}
                 .showType=${this.showType}

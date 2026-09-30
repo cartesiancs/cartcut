@@ -286,6 +286,7 @@ function buildTemplate(): any[] {
       role: "help",
       submenu: [
         item("help.shortcuts"),
+        item("help.tutorial"),
         separator,
         {
           label: "Learn More",

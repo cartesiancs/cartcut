@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ONBOARDING_COMPLETE_EVENT,
+  ONBOARDING_RESTART_EVENT,
   ONBOARDING_STORE_KEY,
+  browserFlagPort,
+  browserOnboardingFlagPort,
   isOnboardingComplete,
   markOnboardingComplete,
   resetOnboarding,
@@ -190,6 +194,21 @@ describe("onboarding flag", () => {
       await expect(resetOnboarding(brokenPort())).resolves.toBeUndefined();
     });
 
+    it("names the flag it could not clear, when the port has a name", async () => {
+      const warnings: string[] = [];
+      await resetOnboarding(
+        brokenPort({
+          name: "tutorial",
+          warn: (message) => void warnings.push(message),
+        }),
+      );
+
+      expect(warnings).toEqual([
+        "tutorial: could not clear the mirrored flag",
+        "tutorial: could not clear the stored flag",
+      ]);
+    });
+
     it("undoes a completion exactly", async () => {
       const port = fakePort();
 
@@ -199,5 +218,69 @@ describe("onboarding flag", () => {
       await resetOnboarding(port);
       await expect(isOnboardingComplete(port)).resolves.toBe(false);
     });
+  });
+
+  describe("the browser port", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    /** Both stores as plain maps, behind the two globals the port reaches. */
+    function stubStores() {
+      const local = new Map<string, string>();
+      const stored = new Map<string, unknown>();
+
+      vi.stubGlobal("window", {
+        localStorage: {
+          getItem: (key: string) => local.get(key) ?? null,
+          setItem: (key: string, value: string) => void local.set(key, value),
+          removeItem: (key: string) => void local.delete(key),
+        },
+        electronAPI: {
+          req: {
+            store: {
+              get: async (key: string) =>
+                stored.has(key) ? { value: stored.get(key) } : { status: 0 },
+              set: async (key: string, value: unknown) =>
+                void stored.set(key, value),
+              delete: async (key: string) => void stored.delete(key),
+            },
+          },
+        },
+      });
+
+      return { local, stored };
+    }
+
+    it("reads and writes only its own key, in both stores", async () => {
+      const { local, stored } = stubStores();
+      const port = browserFlagPort("SOME_FLAG", "some");
+
+      await markOnboardingComplete(port);
+
+      expect([...local.keys()]).toEqual(["SOME_FLAG"]);
+      expect([...stored.keys()]).toEqual(["SOME_FLAG"]);
+      await expect(isOnboardingComplete(port)).resolves.toBe(true);
+      await expect(isOnboardingComplete(browserOnboardingFlagPort)).resolves.toBe(
+        false,
+      );
+
+      await resetOnboarding(port);
+      expect(local.size + stored.size).toBe(0);
+    });
+
+    it("keeps the tour on its own key", async () => {
+      const { local, stored } = stubStores();
+
+      await markOnboardingComplete(browserOnboardingFlagPort);
+
+      expect(local.get(ONBOARDING_STORE_KEY)).toBe("true");
+      expect(stored.get(ONBOARDING_STORE_KEY)).toBe(true);
+      expect(browserOnboardingFlagPort.name).toBe("onboarding");
+    });
+  });
+
+  it("has two different events for starting over and for having finished", () => {
+    expect(ONBOARDING_COMPLETE_EVENT).not.toBe(ONBOARDING_RESTART_EVENT);
   });
 });

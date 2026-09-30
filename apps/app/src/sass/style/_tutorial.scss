@@ -1,0 +1,270 @@
+@import "../var";
+
+// The tutorial's card and ring (`features/tutorial/tutorialCoachmark.ts`).
+//
+// Placed by writing `transform` straight onto the two elements, so nothing
+// here sets `left`/`top` beyond pinning both to the window's corner. Hidden
+// until the first placement lands (`data-placed`), so neither is ever seen at
+// that corner.
+
+// The fill is #ea580c, not the brighter #f97316: white text on #f97316 is
+// about 2.8:1, which is too faint for a line the user has to read. The ring
+// takes the brighter one, because it sits on the dark editor instead.
+$tutorial-fill: #ea580c;
+$tutorial-ring: #f97316;
+$tutorial-ring-glow: rgba(249, 115, 22, 0.55);
+$tutorial-next-ink: #c2410c;
+$tutorial-radius: 12px;
+
+// Above the update prompt (1080) and the timeline's own chrome (998, 999);
+// under menus (6000), the hover preview (7000), modals (8000), the dialogs
+// (8600, 8700), toasts (9000) and the tour (9500). A menu the user opens while
+// following a step must never open under the card.
+$tutorial-z: 5500;
+
+.tutorial-ring {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: $tutorial-z;
+  box-sizing: border-box;
+  border: 2px solid $tutorial-ring;
+  border-radius: 8px;
+  pointer-events: none;
+
+  &:not([data-placed]) {
+    visibility: hidden;
+  }
+
+  // The pulse is a spreading box-shadow rather than a scale: the ruler is the
+  // width of the window and 24px tall, and scaling it would bulge the ends
+  // and barely move the sides.
+  &::after {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+    animation: tutorial-pulse var(--tutorial-pulse, 1600ms) ease-out infinite;
+  }
+
+  &.is-done::after {
+    animation: none;
+    box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.25);
+  }
+}
+
+@keyframes tutorial-pulse {
+  0% {
+    box-shadow: 0 0 0 0 $tutorial-ring-glow;
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 10px rgba(249, 115, 22, 0);
+  }
+}
+
+.tutorial-card {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: $tutorial-z + 1;
+  box-sizing: border-box;
+  width: 280px;
+  max-width: calc(100vw - 16px);
+  padding: 14px 16px 12px;
+  border-radius: $tutorial-radius;
+  background: $tutorial-fill;
+  color: #fff;
+  font-family: "Noto Sans KR", sans-serif;
+  word-break: keep-all;
+  box-shadow:
+    0 12px 32px -8px rgba(0, 0, 0, 0.5),
+    0 2px 8px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  // The title bar is a window drag region; a card that ever met it would
+  // swallow no clicks. Placement keeps it below, and this is the second line.
+  -webkit-app-region: no-drag;
+
+  &:not([data-placed]) {
+    visibility: hidden;
+  }
+}
+
+// A 10px square turned 45deg, half outside the card: its tip stands 7px off
+// the edge, which is `placement.ts#ARROW_PX`.
+.tutorial-arrow {
+  display: none;
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: $tutorial-fill;
+  transform: rotate(45deg);
+
+  .tutorial-card[data-side="right"] & {
+    display: block;
+    left: -5px;
+    top: calc(var(--tutorial-arrow, 50%) - 5px);
+  }
+
+  .tutorial-card[data-side="left"] & {
+    display: block;
+    right: -5px;
+    top: calc(var(--tutorial-arrow, 50%) - 5px);
+  }
+
+  .tutorial-card[data-side="top"] & {
+    display: block;
+    bottom: -5px;
+    left: calc(var(--tutorial-arrow, 50%) - 5px);
+  }
+
+  .tutorial-card[data-side="bottom"] & {
+    display: block;
+    top: -5px;
+    left: calc(var(--tutorial-arrow, 50%) - 5px);
+  }
+}
+
+.tutorial-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 22px;
+  margin-bottom: 6px;
+}
+
+.tutorial-count {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.tutorial-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    opacity var(--tutorial-check, 240ms) ease-out,
+    transform var(--tutorial-check, 240ms) ease-out;
+
+  .material-symbols-outlined {
+    font-size: 14px;
+  }
+
+  .tutorial-card.is-done & {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.tutorial-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.tutorial-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.tutorial-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 12px;
+  line-height: 1.45;
+
+  .material-symbols-outlined {
+    font-size: 15px;
+    line-height: 1.2;
+  }
+}
+
+.tutorial-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+// Bare buttons, never `.btn`: the design system gives `.btn` an `!important`
+// padding that nothing here could undo.
+.tutorial-skip,
+.tutorial-next {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out;
+
+  &:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+  }
+}
+
+.tutorial-skip {
+  margin-left: -8px;
+  padding: 0 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: #fff;
+  }
+}
+
+.tutorial-next {
+  padding: 0 10px 0 14px;
+  background: #fff;
+  color: $tutorial-next-ink;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+
+  &:hover {
+    background: #fff7ed;
+  }
+
+  .material-symbols-outlined {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tutorial-ring::after {
+    animation: none;
+    box-shadow: 0 0 0 5px rgba(249, 115, 22, 0.25);
+  }
+
+  .tutorial-check {
+    transition: none;
+  }
+}

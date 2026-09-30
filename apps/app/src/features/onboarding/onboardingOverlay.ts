@@ -3,6 +3,7 @@ import { customElement, state } from "lit/decorators.js";
 import { LocaleController } from "../../controllers/locale";
 import { ONBOARDING_STEPS, nextStep } from "./steps";
 import {
+  ONBOARDING_COMPLETE_EVENT,
   ONBOARDING_RESTART_EVENT,
   browserOnboardingFlagPort,
   isOnboardingComplete,
@@ -163,6 +164,12 @@ export class OnboardingOverlay extends LitElement {
   /**
    * The flag is written straight away; only the unmount waits for the fade, so
    * a close that races a quit still records itself.
+   *
+   * `ONBOARDING_COMPLETE_EVENT` goes out after the fade, not with the flag:
+   * by then `visible` is false, so `_handleKeydown` has stopped swallowing
+   * keys, and the tutorial that starts from it arrives over an editor that
+   * can be used. A restart during the fade clears this timer, and then
+   * nothing is announced, which is right: the tour is back on screen.
    */
   private _complete() {
     if (this.leaving) return;
@@ -174,6 +181,7 @@ export class OnboardingOverlay extends LitElement {
       this.visible = false;
       this.leaving = false;
       this.leaveTimer = null;
+      window.dispatchEvent(new CustomEvent(ONBOARDING_COMPLETE_EVENT));
     }, FADE_MS);
   }
 

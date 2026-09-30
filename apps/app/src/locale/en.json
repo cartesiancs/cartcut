@@ -106,6 +106,52 @@
     "next": "Next",
     "finish": "Finish"
   },
+  "tutorial": {
+    "label": "Tutorial",
+    "skip": "Skip",
+    "next": "Next",
+    "finish": "Finish",
+    "done": "Done",
+    "steps": {
+      "duration": {
+        "title": "Set the video length",
+        "body": "Change the minutes or seconds here to decide how long your video runs."
+      },
+      "file_tab": {
+        "title": "Open the File tab",
+        "body": "Click the File tab to browse the media on your computer."
+      },
+      "folder": {
+        "title": "Choose a folder",
+        "body": "Select the folder that holds your videos, images or audio."
+      },
+      "add_file": {
+        "title": "Add a clip",
+        "body": "Click any file to add it to the timeline at the playhead."
+      },
+      "playhead": {
+        "title": "Move the playhead",
+        "body": "Drag along the ruler to move the playhead through your video."
+      },
+      "text_tab": {
+        "title": "Open the Text tab",
+        "body": "Click the Text tab to see the text styles."
+      },
+      "add_text": {
+        "title": "Add a text",
+        "body": "Click Text to add a default text clip to your timeline."
+      }
+    },
+    "hints": {
+      "open_settings": "Open the Settings tab first.",
+      "open_canvas": "Switch to the Canvas tab first.",
+      "open_file_tab": "Open the File tab first.",
+      "select_folder_first": "Select a folder first.",
+      "open_subfolder": "Open a folder to find your media.",
+      "no_media": "No media here. Choose a folder with videos, images or audio.",
+      "open_text_tab": "Open the Text tab first."
+    }
+  },
   "adjust": {
     "tab": "Adjust",
     "group_color": "Color",

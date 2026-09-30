@@ -93,6 +93,7 @@ export class ElementTimelineRuler extends LitElement {
 
     return html`<canvas
       id="elementTimelineRulerCanvasRef"
+      data-tutorial="timeline-ruler"
       width="${this.width}"
       height="${this.height}"
       style="width: ${this.width}px; height: ${this.height}px;"

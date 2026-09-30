@@ -86,7 +86,8 @@ export type MenuCommandId =
    */
   | "extension.command"
   // Help
-  | "help.shortcuts";
+  | "help.shortcuts"
+  | "help.tutorial";
 
 export interface MenuCommand {
   id: MenuCommandId;
@@ -230,6 +231,8 @@ export const MENU_COMMANDS: readonly MenuCommand[] = [
     label: "Keyboard Shortcuts",
     accelerator: "CmdOrCtrl+/",
   },
+  // Runs the first-run tutorial again from its first step.
+  { id: "help.tutorial", label: "Show Tutorial" },
 ];
 
 const BY_ID = new Map<MenuCommandId, MenuCommand>(

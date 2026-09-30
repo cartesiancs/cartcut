@@ -376,8 +376,13 @@ export class ControlSetting extends LitElement {
       <label class="form-label text-light"
         >${this.lc.t("setting.video_duration")}</label
       >
-      <div class="d-flex flex-row bd-highlight gap-2">
-        <div class="input-group mb-3">
+      <!-- The margin is on the row rather than on each group, so the row's box
+           ends where the inputs do: the tutorial draws its ring around it. -->
+      <div
+        class="d-flex flex-row bd-highlight gap-2 mb-3"
+        data-tutorial="project-duration"
+      >
+        <div class="input-group">
           <input
             id="projectDurationMinute"
             type="number"
@@ -393,7 +398,7 @@ export class ControlSetting extends LitElement {
           >
         </div>
 
-        <div class="input-group mb-3">
+        <div class="input-group">
           <input
             id="projectDurationSecond"
             type="number"

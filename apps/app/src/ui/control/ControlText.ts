@@ -261,6 +261,7 @@ export class ControlText extends LitElement {
       <div class="row px-2">
         <div
           class="col-6 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
+          data-tutorial="text-default"
           @click=${this._handleClickAddFont}
         >
           <div class="text-preset-preview text-preset-preview-plain">

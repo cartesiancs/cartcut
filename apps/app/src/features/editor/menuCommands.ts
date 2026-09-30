@@ -38,6 +38,7 @@ import { rendererModal } from "../../utils/modal";
 import { runContributedCommand } from "../extension/bridge";
 import { startExport } from "../export/exportSession";
 import { recoverAutosaveEntry } from "../project/recoverAutosave";
+import { TUTORIAL_RESTART_EVENT } from "../tutorial/tutorialFlag";
 import {
   runExportSubtitles,
   runImportSubtitles,
@@ -293,6 +294,10 @@ const COMMANDS: Record<MenuCommandId, (payload?: unknown) => void> = {
   },
 
   "help.shortcuts": () => rendererModal.shortKey.show(),
+  // An event rather than a call: the menu does not need to know the
+  // tutorial's tag, and the tutorial does not need to know the menu.
+  "help.tutorial": () =>
+    window.dispatchEvent(new CustomEvent(TUTORIAL_RESTART_EVENT)),
 };
 
 /**
