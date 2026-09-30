@@ -10,11 +10,11 @@ import { existsSync, readFileSync, mkdtempSync } from "fs";
 import os from "os";
 import path from "path";
 import {
-  SKILL_ADD_COMMAND,
   SKILL_FALLBACK_INSTRUCTION,
   SKILL_NAME,
   SKILL_URI,
   registerSkillResource,
+  skillAddCommand,
   skillFilePath,
   type ResourceRegistrar,
 } from "./skillResource";
@@ -46,8 +46,12 @@ describe("the skill file", () => {
 });
 
 describe("the lines handed out", () => {
-  it("installs this skill and no other", () => {
-    expect(SKILL_ADD_COMMAND).toContain(`--skill ${SKILL_NAME} `);
+  it("installs this skill and no other, for the agent asked", () => {
+    for (const agent of ["claude-code", "codex"] as const) {
+      const command = skillAddCommand(agent);
+      expect(command).toContain(`--skill ${SKILL_NAME} `);
+      expect(command).toContain(` -a ${agent} `);
+    }
   });
 
   it("points the model at the resource by its URI", () => {

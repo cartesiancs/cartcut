@@ -9,6 +9,16 @@ import {
 import { getLocationEnv } from "../../functions/getLocationEnv";
 import { IMediaLoadStore, mediaLoadStore } from "../../states/mediaLoadStore";
 
+type AiTab = "claude" | "codex" | "openai";
+
+type CopyTarget = "claude-mcp" | "claude-skill" | "codex-config" | "codex-skill";
+
+const AI_TABS: { id: AiTab; label: string }[] = [
+  { id: "claude", label: "Claude Code" },
+  { id: "codex", label: "Codex" },
+  { id: "openai", label: "OpenAI API" },
+];
+
 @customElement("element-timeline-bottom")
 export class ElementTimelineBottomScroll extends LitElement {
   @property({ attribute: false })
@@ -28,9 +38,14 @@ export class ElementTimelineBottomScroll extends LitElement {
   mcpCommand = "";
   /** The `npx skills add …` line. No secret in it, but main owns it too. */
   skillCommand = "";
+  /** The `~/.codex/config.toml` entry, token included. */
+  codexConfig = "";
+  codexSkillCommand = "";
   mcpError = "";
-  /** Which of the two Copy buttons last copied, so only that one says so. */
-  copied: "mcp" | "skill" | null = null;
+  /** Which option of the ⚡ panel is showing. */
+  aiTab: AiTab = "claude";
+  /** Which Copy button last copied, so only that one says so. */
+  copied: CopyTarget | null = null;
 
   constructor() {
     super();
@@ -59,6 +74,8 @@ export class ElementTimelineBottomScroll extends LitElement {
         this.isRunMcp = result.running;
         this.mcpCommand = result.command;
         this.skillCommand = result.skillCommand ?? "";
+        this.codexConfig = result.codexConfig ?? "";
+        this.codexSkillCommand = result.codexSkillCommand ?? "";
         this.requestUpdate();
       }
     });
@@ -69,12 +86,15 @@ export class ElementTimelineBottomScroll extends LitElement {
       this.isRunMcp = result.status == 1;
       this.mcpCommand = result.command ?? "";
       this.skillCommand = result.skillCommand ?? this.skillCommand;
+      this.codexConfig = result.codexConfig ?? this.codexConfig;
+      this.codexSkillCommand =
+        result.codexSkillCommand ?? this.codexSkillCommand;
       this.mcpError = result.error ?? "";
       this.requestUpdate();
     });
   }
 
-  _copy(which: "mcp" | "skill", text: string) {
+  _copy(which: CopyTarget, text: string) {
     navigator.clipboard.writeText(text).then(() => {
       this.copied = which;
       this.requestUpdate();
@@ -86,6 +106,11 @@ export class ElementTimelineBottomScroll extends LitElement {
         }
       }, 1500);
     });
+  }
+
+  _selectAiTab(tab: AiTab) {
+    this.aiTab = tab;
+    this.requestUpdate();
   }
 
   _handleSetOpenAIKey(e) {
@@ -227,6 +252,78 @@ export class ElementTimelineBottomScroll extends LitElement {
         .connect-step-body > .btn {
           align-self: flex-start;
         }
+
+        .ai-tabs {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 4px;
+          padding: 4px;
+          margin-bottom: 1rem;
+          border-radius: 10px;
+          background-color: #1c1f23;
+        }
+
+        .ai-tab {
+          border: 0;
+          border-radius: 7px;
+          padding: 7px 0;
+          font-size: 13px;
+          font-weight: 600;
+          color: #b7b8c0;
+          background-color: transparent;
+          transition:
+            background-color 0.15s,
+            color 0.15s;
+        }
+
+        .ai-tab:hover {
+          color: #f1f3f5;
+        }
+
+        .ai-tab.active {
+          color: #0f1012;
+          background-color: #ffffff;
+        }
+
+        /* A multi-line snippet with its Copy button, shaped like an input-group. */
+        .connect-code {
+          display: flex;
+          border-radius: 6px;
+          overflow: hidden;
+          background-color: #1c1f23;
+        }
+
+        /* Wrapped rather than scrolled: Copy takes the exact text either way. */
+        .connect-code pre {
+          flex: 1;
+          min-width: 0;
+          margin: 0;
+          padding: 8px 10px;
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+          font-size: 11px;
+          line-height: 1.6;
+          color: #f1f3f5;
+          background: transparent;
+          border: 0;
+          border-radius: 0;
+          /* vendor/devent-designsystem.css forces a scrollbar on every pre. */
+          overflow-x: hidden !important;
+        }
+
+        .connect-code .btn {
+          border-radius: 0;
+        }
+
+        .connect-note {
+          font-size: 12px;
+          color: #8b8f96;
+        }
+
+        .connect-note code {
+          font-size: 11px;
+          color: #d7dade;
+        }
       </style>
 
       <div class="timeline-bottom">
@@ -364,106 +461,163 @@ export class ElementTimelineBottomScroll extends LitElement {
         <div class="modal-dialog modal-dialog-dark modal-dialog-centered">
           <div class="modal-content modal-dark modal-darker">
             <div class="modal-body modal-body-dark">
-              <h6 class="modal-title text-light font-weight-lg mb-2">
-                Connect Claude Code
+              <h6 class="modal-title text-light font-weight-lg mb-3">
+                Connect AI
               </h6>
 
-              <span class="text-secondary" style="font-size: 13px;">
-                ${this.isRunMcp
-                  ? html`CartCut is listening. Run these once in your terminal,
-                    from any folder, then ask Claude Code to edit.`
-                  : html`The editor bridge is not running.`}
-              </span>
-
-              <div class="connect-steps">
-                <div class="connect-step">
-                  <span class="connect-step-num">1</span>
-                  <span class="connect-step-title">Connect the bridge</span>
-                  <div class="connect-step-body">
-                    <div class="input-group ${this.isRunMcp ? "" : "d-none"}">
-                      <input
-                        type="text"
-                        class="form-control bg-default text-light"
-                        style="font-family: monospace; font-size: 11px;"
-                        readonly
-                        .value=${this.mcpCommand}
-                      />
-                      <button
-                        class="btn btn-primary btn-sm"
-                        @click=${() => this._copy("mcp", this.mcpCommand)}
-                      >
-                        ${this.copied === "mcp" ? "Copied" : "Copy"}
-                      </button>
-                    </div>
-
-                    <span
-                      class="text-danger ${this.mcpError ? "" : "d-none"}"
-                      style="font-size: 12px;"
-                      >${this.mcpError}</span
+              <div class="ai-tabs" role="tablist">
+                ${AI_TABS.map(
+                  (tab) =>
+                    html`<button
+                      type="button"
+                      role="tab"
+                      class="ai-tab ${this.aiTab === tab.id ? "active" : ""}"
+                      aria-selected=${this.aiTab === tab.id}
+                      @click=${() => this._selectAiTab(tab.id)}
                     >
-
-                    <button
-                      class="btn btn-primary btn-sm ${this.isRunMcp
-                        ? "d-none"
-                        : ""}"
-                      @click=${this.runMcpServer}
-                    >
-                      Start bridge
-                    </button>
-                  </div>
-                </div>
-
-                <div class="connect-step">
-                  <span class="connect-step-num">2</span>
-                  <span class="connect-step-title"
-                    >Install the editing skill</span
-                  >
-                  <div class="connect-step-body">
-                    <div class="input-group">
-                      <input
-                        type="text"
-                        class="form-control bg-default text-light"
-                        style="font-family: monospace; font-size: 11px;"
-                        readonly
-                        .value=${this.skillCommand}
-                      />
-                      <button
-                        class="btn btn-primary btn-sm"
-                        @click=${() => this._copy("skill", this.skillCommand)}
-                      >
-                        ${this.copied === "skill" ? "Copied" : "Copy"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                      ${tab.label}
+                    </button>`,
+                )}
               </div>
 
-              <hr class="text-secondary" />
-
-              <span class="text-secondary" style="font-size: 13px;"
-                >OpenAI API key</span
-              >
-
-              <div class="input-group mb-1 mt-2">
-                <span
-                  class="input-group-text bg-default text-light"
-                  id="basic-addon2"
-                  >OpenAI Key</span
-                >
-                <input
-                  type="password"
-                  class="form-control bg-default text-light"
-                  placeholder="openai key"
-                  .value=${this.openaiKey}
-                  @change=${this._handleSetOpenAIKey}
-                  @input=${this._handleSetOpenAIKey}
-                />
-              </div>
+              ${this.aiTab === "claude"
+                ? this.renderClaudeTab()
+                : this.aiTab === "codex"
+                  ? this.renderCodexTab()
+                  : this.renderOpenAiTab()}
             </div>
           </div>
         </div>
       </div>
     `;
+  }
+
+  renderClaudeTab() {
+    return html`
+      <span class="text-secondary" style="font-size: 13px;">
+        ${this.isRunMcp
+          ? html`CartCut is listening. Run these once in your terminal, from
+            any folder, then ask Claude Code to edit.`
+          : html`The editor bridge is not running.`}
+      </span>
+
+      <div class="connect-steps">
+        ${this.renderStep(
+          1,
+          "Connect the bridge",
+          this.isRunMcp
+            ? this.renderCommand("claude-mcp", this.mcpCommand)
+            : this.renderStartBridge(),
+        )}
+        ${this.renderStep(
+          2,
+          "Install the editing skill",
+          this.renderCommand("claude-skill", this.skillCommand),
+        )}
+      </div>
+    `;
+  }
+
+  renderCodexTab() {
+    return html`
+      <span class="text-secondary" style="font-size: 13px;">
+        ${this.isRunMcp
+          ? html`CartCut is listening. Add it to Codex once, then ask Codex to
+            edit.`
+          : html`The editor bridge is not running.`}
+      </span>
+
+      <div class="connect-steps">
+        ${this.renderStep(
+          1,
+          "Add the bridge to config.toml",
+          this.isRunMcp
+            ? html`${this.renderCode("codex-config", this.codexConfig)}
+                <span class="connect-note">
+                  Paste into <code>~/.codex/config.toml</code>, replacing any
+                  earlier <code>[mcp_servers.cartcut]</code> entry. The CLI,
+                  the IDE extension and the desktop app all read this file.
+                </span>`
+            : this.renderStartBridge(),
+        )}
+        ${this.renderStep(
+          2,
+          "Install the editing skill",
+          this.renderCommand("codex-skill", this.codexSkillCommand),
+        )}
+      </div>
+    `;
+  }
+
+  renderOpenAiTab() {
+    return html`
+      <span class="text-secondary" style="font-size: 13px;">
+        Transcribes speech for captions and the transcript tool when on-device
+        recognition is not available. The key is stored on this computer.
+      </span>
+
+      <div class="input-group mb-1 mt-3">
+        <span class="input-group-text bg-default text-light">OpenAI Key</span>
+        <input
+          type="password"
+          class="form-control bg-default text-light"
+          placeholder="openai key"
+          .value=${this.openaiKey}
+          @change=${this._handleSetOpenAIKey}
+          @input=${this._handleSetOpenAIKey}
+        />
+      </div>
+    `;
+  }
+
+  renderStep(n: number, title: string, body: unknown) {
+    return html`<div class="connect-step">
+      <span class="connect-step-num">${n}</span>
+      <span class="connect-step-title">${title}</span>
+      <div class="connect-step-body">${body}</div>
+    </div>`;
+  }
+
+  renderCommand(target: CopyTarget, text: string) {
+    return html`<div class="input-group">
+      <input
+        type="text"
+        class="form-control bg-default text-light"
+        style="font-family: monospace; font-size: 11px;"
+        readonly
+        .value=${text}
+      />
+      <button
+        class="btn btn-primary btn-sm"
+        @click=${() => this._copy(target, text)}
+      >
+        ${this.copied === target ? "Copied" : "Copy"}
+      </button>
+    </div>`;
+  }
+
+  renderCode(target: CopyTarget, text: string) {
+    return html`<div class="connect-code">
+      <pre>${text}</pre>
+      <button
+        class="btn btn-primary btn-sm"
+        @click=${() => this._copy(target, text)}
+      >
+        ${this.copied === target ? "Copied" : "Copy"}
+      </button>
+    </div>`;
+  }
+
+  /** Shown in place of step 1 while the bridge is down, on either agent's tab. */
+  renderStartBridge() {
+    return html`<span
+        class="text-danger ${this.mcpError ? "" : "d-none"}"
+        style="font-size: 12px;"
+        >${this.mcpError}</span
+      >
+      <button class="btn btn-primary btn-sm" @click=${this.runMcpServer}>
+        Start bridge
+      </button>`;
   }
 
   runSelfhosted() {

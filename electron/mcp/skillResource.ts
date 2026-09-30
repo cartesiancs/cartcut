@@ -31,8 +31,13 @@ export const SKILL_URI = `skill://${SKILL_NAME}/SKILL.md`;
  */
 export const SKILL_RELATIVE_PATH = `plugins/${SKILL_NAME}/skills/${SKILL_NAME}/SKILL.md`;
 
+/** The agents the ⚡ panel has a tab for, by their skills CLI `-a` id. */
+export type SkillAgent = "claude-code" | "codex";
+
 /** The line the ⚡ panel hands out for installing the skill on its own. */
-export const SKILL_ADD_COMMAND = `npx skills add cartesiancs/cartcut --skill ${SKILL_NAME} -a claude-code -g`;
+export function skillAddCommand(agent: SkillAgent): string {
+  return `npx skills add cartesiancs/cartcut --skill ${SKILL_NAME} -a ${agent} -g`;
+}
 
 /** Appended to the server's instructions. */
 export const SKILL_FALLBACK_INSTRUCTION = `If the ${SKILL_NAME} skill is not in your skill list, read the MCP resource ${SKILL_URI} before the first edit and follow it.`;

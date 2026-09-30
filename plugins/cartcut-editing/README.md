@@ -56,13 +56,34 @@ Cartcut, click the ⚡ icon at the bottom right, and run the command it hands yo
 claude mcp add --transport http cartcut http://127.0.0.1:9826/mcp --header "Authorization: Bearer <the UUID>"
 ```
 
-An agent other than Claude Code wants the same URL and the same header in
-whatever its own MCP configuration looks like.
+### Codex
+
+The ⚡ panel's Codex tab hands out a `~/.codex/config.toml` entry with the token
+filled in:
+
+```toml
+[mcp_servers.cartcut]
+url = "http://127.0.0.1:9826/mcp"
+http_headers = { Authorization = "Bearer <the UUID>" }
+```
+
+A static header rather than `codex mcp add --bearer-token-env-var`, because the
+Codex desktop app is not started from a shell and never sees a variable set in
+a shell profile; the CLI, the IDE extension and the desktop app all read this
+file. `codex mcp list` should then show `cartcut` with `Bearer token` auth. The
+skill installs the same way as for Claude Code, with `-a codex`:
+
+```
+npx skills add cartesiancs/cartcut --skill cartcut-editing -a codex -g
+```
+
+Any other agent wants the same URL and the same header in whatever its own MCP
+configuration looks like.
 
 ### The bridge on its own
 
-The ⚡ panel hands out both lines, the bridge first and this skill second. With
-only the bridge connected, Claude still has a way to the skill: the bridge
+The ⚡ panel hands out both lines on each agent's tab, the bridge first and this
+skill second. With only the bridge connected, Claude still has a way to the skill: the bridge
 serves the same `SKILL.md` as the MCP resource `skill://cartcut-editing/SKILL.md`
 and its instructions tell Claude to read it when the skill is not installed.
 Install the skill anyway. Claude loads an installed skill on its own, where the

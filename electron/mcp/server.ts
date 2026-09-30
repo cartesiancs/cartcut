@@ -71,6 +71,22 @@ export function mcpAddCommand(): string {
   return `claude mcp add --transport http cartcut ${mcpUrl()} --header "Authorization: Bearer ${mcpToken()}"`;
 }
 
+/**
+ * The same bridge as a `~/.codex/config.toml` entry.
+ *
+ * `codex mcp add` accepts a token only by environment variable name, and the
+ * Codex desktop app, launched outside any shell, never sees a variable set in
+ * a shell profile. A static header in the file reaches the CLI, the IDE
+ * extension and the desktop app alike, because all three read it.
+ */
+export function codexConfigSnippet(): string {
+  return [
+    "[mcp_servers.cartcut]",
+    `url = "${mcpUrl()}"`,
+    `http_headers = { Authorization = "Bearer ${mcpToken()}" }`,
+  ].join("\n");
+}
+
 export function isMcpRunning(): boolean {
   return server != null && server.listening;
 }

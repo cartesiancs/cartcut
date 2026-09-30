@@ -5,13 +5,14 @@ import axios from "axios";
 import Store from "electron-store";
 import path from "path";
 import {
+  codexConfigSnippet,
   isMcpRunning,
   mcpAddCommand,
   mcpToken,
   mcpUrl,
   startMcpServer,
 } from "../mcp/server";
-import { SKILL_ADD_COMMAND } from "../mcp/skillResource";
+import { skillAddCommand } from "../mcp/skillResource";
 import { fileBlob } from "../mcp/transcribe";
 const store = new Store();
 
@@ -112,7 +113,9 @@ export const ipcAi = {
       url: result.url,
       token: result.token,
       command: mcpAddCommand(),
-      skillCommand: SKILL_ADD_COMMAND,
+      skillCommand: skillAddCommand("claude-code"),
+      codexConfig: codexConfigSnippet(),
+      codexSkillCommand: skillAddCommand("codex"),
       alreadyRunning: result.alreadyRunning,
       error: result.error,
     };
@@ -124,7 +127,9 @@ export const ipcAi = {
     url: mcpUrl(),
     token: mcpToken(),
     command: mcpAddCommand(),
-    skillCommand: SKILL_ADD_COMMAND,
+    skillCommand: skillAddCommand("claude-code"),
+    codexConfig: codexConfigSnippet(),
+    codexSkillCommand: skillAddCommand("codex"),
   }),
 
   setKey: async (evt, key) => {
