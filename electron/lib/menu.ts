@@ -293,7 +293,7 @@ function buildTemplate(): any[] {
           label: "Learn More",
           click: async () => {
             const { shell } = require("electron");
-            await shell.openExternal("https://blog.nugget.studio/");
+            await shell.openExternal("https://cartesiancs.com/cartcut/tutorial");
           },
         },
       ],

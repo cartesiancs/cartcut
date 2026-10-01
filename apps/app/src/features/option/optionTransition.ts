@@ -236,14 +236,21 @@ export class OptionTransition extends LitElement {
               // A preset that is not installed still appears, selected, so the
               // dropdown does not silently show a different one as current.
               preset == null
-                ? html`<option value=${transition.presetId}>
+                ? html`<option value=${transition.presetId} selected>
                     ${transition.presetId} (missing)
                   </option>`
                 : ""
             }
             ${installed.map(
               (entry) =>
-                html`<option value=${entry.id}>
+                // Marked on the option as well as through the select's
+                // `.value`: Lit commits `.value` before it renders these
+                // options, so on a first render there is nothing to match and
+                // the select falls back to the first preset in the list.
+                html`<option
+                  value=${entry.id}
+                  ?selected=${entry.id === transition.presetId}
+                >
                   ${entry.name}${entry.origin === "user" ? " *" : ""}
                 </option>`,
             )}
