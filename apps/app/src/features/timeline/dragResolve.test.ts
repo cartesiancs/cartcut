@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SNAP_TOLERANCE_PX,
+  clampRowTravel,
   confirmTrimGuide,
   nextDragPreview,
   resolveMove,
@@ -131,6 +132,87 @@ describe("resolveMove — behaviour that must not change", () => {
         expect(Number.isNaN(plan.appliedMs)).toBe(false);
       }
     }
+  });
+});
+
+describe("clampRowTravel", () => {
+  const rows = { first: 3, last: 6 };
+
+  it("bounds the side the clip is travelling towards", () => {
+    expect(clampRowTravel(8, -7, rows)).toBe(-5); // to row 3, not row 1
+    expect(clampRowTravel(4, 5, rows)).toBe(2); // to row 6, not row 9
+  });
+
+  it("passes travel that stays inside", () => {
+    expect(clampRowTravel(5, -1, rows)).toBe(-1);
+    expect(clampRowTravel(4, 2, rows)).toBe(2);
+  });
+
+  it("never turns a clip already outside the range around", () => {
+    // On row 1, above the range, and pulled further up: it may stay, and must
+    // not be dragged down into the range against the hand.
+    expect(clampRowTravel(1, -1, rows)).toBe(0);
+    expect(clampRowTravel(9, 2, rows)).toBe(0);
+  });
+
+  it("does not pull a clip that is not travelling", () => {
+    expect(clampRowTravel(1, 0, rows)).toBe(0);
+  });
+
+  it("is the identity with no range", () => {
+    expect(clampRowTravel(8, -7, null)).toBe(-7);
+    expect(clampRowTravel(8, -7, undefined)).toBe(-7);
+  });
+});
+
+describe("resolveMove, rows kept in view", () => {
+  /** Ten video rows, the clip on row 8. */
+  function tall(): TimelineDocument {
+    return normalizeDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: Array.from({ length: 10 }, (_, i) =>
+        createTrack(`r${i}`, "video", i),
+      ),
+      elements: { a: alignedClip(60, 120, { trackId: "r8" }) },
+    });
+  }
+
+  it("rides the top visible row when the pointer is far above it", () => {
+    const plan = move(tall(), {
+      dxPx: 0,
+      dyPx: -20 * TRACK_PITCH,
+      free: true,
+      rows: { first: 4, last: 7 },
+    });
+    expect(plan).toMatchObject({ kind: "move", trackDelta: -4 });
+  });
+
+  it("would have left the document when nothing bounded it", () => {
+    // The same gesture without `rows`: a target above row 0, which
+    // `moveClips` refuses. Proof the case above measures the clamp.
+    const plan = move(tall(), { dxPx: 0, dyPx: -20 * TRACK_PITCH, free: true });
+    expect(plan).toMatchObject({ kind: "move", trackDelta: -20 });
+  });
+
+  it("declines a row change the clamp cancels, with no time travel", () => {
+    // Row 8 is below the visible rows and the hand pulls further down.
+    const plan = move(tall(), {
+      dxPx: 0,
+      dyPx: TRACK_PITCH,
+      free: true,
+      rows: { first: 2, last: 5 },
+    });
+    expect(plan.kind).toBe("none");
+  });
+
+  it("is ignored for a slide, which never changes row", () => {
+    const plan = move(tall(), {
+      dxPx: 50,
+      dyPx: -20 * TRACK_PITCH,
+      free: false,
+      rows: { first: 4, last: 7 },
+    });
+    expect(plan).toMatchObject({ kind: "move", trackDelta: 0 });
   });
 });
 

@@ -68,6 +68,7 @@ import {
   subscribePresets,
 } from "../fx/presetRegistry";
 import {
+  RULER_OFFSET,
   TRACK_PITCH,
   clipsInRect,
   hitTest,
@@ -84,6 +85,23 @@ import {
   type DragState,
   type PointerEv,
 } from "../timeline/dragMachine";
+import {
+  UNARMED,
+  axisVelocity,
+  contentTravel,
+  createEdgeScroller,
+  maxVerticalScroll,
+  pinToBand,
+  scrollAxesOf,
+  scrollStep,
+  updateArm,
+  wholeRowsInView,
+  type Band,
+  type EdgeArm,
+  type Point,
+  type ScrollPair,
+} from "../timeline/edgeScroll";
+import { windowScheduler } from "../caption/previewLoop";
 import {
   clipLabel,
   drawDropTarget,
@@ -369,6 +387,31 @@ export class elementTimelineCanvas extends LitElement {
   private canvasVerticalScroll = 0;
 
   /**
+   * Both scrolls as they stood when the press began.
+   *
+   * A move resolves from travel through the content, not across the screen
+   * (`contentTravel`), so a scroll mid-drag carries the clip with the rows and
+   * times under the pointer instead of leaving it on a row counted from where
+   * it started.
+   */
+  private dragScrollOrigin: ScrollPair = { h: 0, v: 0 };
+  /**
+   * Where the pointer is, in canvas px, while a gesture is live.
+   *
+   * Kept apart from `dragState` because a slide zeroes its vertical travel, and
+   * the edge zones still need to know where the hand actually is.
+   */
+  private dragPointer: Point | null = null;
+  /** Which edge zones this gesture has armed. See `updateArm`. */
+  private edgeArm: { x: EdgeArm; y: EdgeArm } = { x: UNARMED, y: UNARMED };
+  private edgeScroller = createEdgeScroller({
+    scheduler: windowScheduler(),
+    now: () => performance.now(),
+    velocity: () => this.edgeVelocity(),
+    scrollBy: (dx, dy) => this.edgeScrollBy(dx, dy),
+  });
+
+  /**
    * The bare cut under the pointer, hinted while hovered.
    *
    * Display-only, like `snapGuideMs`: it takes no part in hit-testing, which
@@ -478,6 +521,7 @@ export class elementTimelineCanvas extends LitElement {
     window.removeEventListener("mouseup", this.handleWindowMouseUp);
     window.removeEventListener("blur", this.handleCancelGesture);
     window.clearTimeout(this.longPressTimer);
+    this.edgeScroller.stop();
     super.disconnectedCallback();
   }
 
@@ -1330,17 +1374,43 @@ export class elementTimelineCanvas extends LitElement {
       // The grabbed clip is resolved, and the whole selection then moves by
       // however much it actually travelled, so a multi-clip drag keeps its
       // shape.
+      //
+      // Travel through the content once the gesture is a move, so the clip
+      // stays under the pointer while the view scrolls. Not while `pressed`:
+      // a wheel then must not move a clip the reducer has not let go of yet.
+      //
+      // And kept in sight: carried past an edge, the clip waits at it (the
+      // grabbed instant at the side, the outermost whole row at the top or
+      // bottom) while the view scrolls, so it lands where it was last seen.
+      const moving = drag.phase === "moveH" || drag.phase === "moveFree";
+      const bands = moving ? this.edgeBands() : null;
+      const scroll = this.currentScroll();
+      const travel = moving
+        ? contentTravel(
+            {
+              dx: bands
+                ? pinToBand(drag.origin.x, drag.dxPx, bands.x)
+                : drag.dxPx,
+              dy: drag.dyPx,
+            },
+            this.dragScrollOrigin,
+            scroll,
+          )
+        : { dx: drag.dxPx, dy: drag.dyPx };
       const plan = resolveMove({
         base,
         primaryId: drag.hit.elementId,
         dragIds: this.dragIds,
-        dxPx: drag.dxPx,
-        dyPx: drag.dyPx,
+        dxPx: travel.dx,
+        dyPx: travel.dy,
         free: drag.free,
         range: this.timelineRange,
         fps,
         playheadMs: this.timelineCursor,
         trackPitch: TRACK_PITCH,
+        rows: bands
+          ? wholeRowsInView(scroll.v, bands.y, base.tracks.length)
+          : null,
       });
 
       // A gesture that moves nothing must produce nothing. `moveClips` builds a
@@ -1408,9 +1478,15 @@ export class elementTimelineCanvas extends LitElement {
     const wasIdle = this.dragState.phase === "idle";
     this.dragState = state;
 
+    if (ev.type === "down" || ev.type === "move") {
+      this.dragPointer = { x: ev.x, y: ev.y };
+    }
+
     if (ev.type === "down" && state.phase !== "idle") {
       this.dragBase = this.currentDoc();
       this.dragIds = [...this.targetId];
+      this.dragScrollOrigin = this.currentScroll();
+      this.edgeArm = { x: UNARMED, y: UNARMED };
       // A hold has to be able to complete without the pointer moving.
       window.clearTimeout(this.longPressTimer);
       this.longPressTimer = window.setTimeout(
@@ -1463,6 +1539,10 @@ export class elementTimelineCanvas extends LitElement {
       const wasMarquee = this.marqueeRect != null;
       window.clearTimeout(this.longPressTimer);
       this.longPressTimer = 0;
+      // The view stays where the gesture left it, Escape included: the drop
+      // is under the pointer, and a cancel takes back the edit, not the look.
+      this.edgeScroller.stop();
+      this.dragPointer = null;
       this.dragBase = null;
       this.dragIds = [];
       this.snapGuideMs = null;
@@ -1496,6 +1576,111 @@ export class elementTimelineCanvas extends LitElement {
         this.applyDrag();
       }
     }
+
+    this.updateEdgeScroll();
+  }
+
+  /** Both scrolls as they stand. */
+  private currentScroll(): ScrollPair {
+    return {
+      h: useTimelineStore.getState().scroll,
+      v: this.canvasVerticalScroll,
+    };
+  }
+
+  /**
+   * The visible stretch of each axis, in canvas px.
+   *
+   * Measured rather than assumed, because what covers the canvas is decided by
+   * other components. The ruler is laid over the top `RULER_OFFSET`. At the
+   * bottom, the canvas runs past the window's own edge (by 46px in an 800px
+   * window), and the status bar and the horizontal scrollbar are both
+   * `position: fixed` over what is left. Measured from the canvas's box, the
+   * bottom zone sat entirely off screen and the last row the scroll stopped on
+   * was one nobody could see.
+   */
+  private edgeBands(): { x: Band; y: Band } | null {
+    if (!this.canvas) {
+      return null;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    let bottom = Math.min(rect.bottom, window.innerHeight);
+    // The scrollbar is only rendered while there is somewhere to scroll to.
+    for (const selector of [".timeline-bottom-scroll", ".timeline-bottom"]) {
+      const bar = document.querySelector(selector)?.getBoundingClientRect();
+      if (bar != null && bar.height > 0 && bar.top > rect.top) {
+        bottom = Math.min(bottom, bar.top);
+      }
+    }
+    return {
+      x: { lo: 0, hi: rect.width },
+      y: { lo: RULER_OFFSET, hi: bottom - rect.top },
+    };
+  }
+
+  /**
+   * Re-arm the edge zones for where the pointer now is, and start the loop if
+   * it is in one. Called after every pointer event; a gesture that cannot
+   * scroll (a trim, a band, a press still undecided) just stops it.
+   */
+  private updateEdgeScroll() {
+    const axes = scrollAxesOf(this.dragState.phase);
+    const pointer = this.dragPointer;
+    const bands = axes.x || axes.y ? this.edgeBands() : null;
+    if (pointer == null || bands == null) {
+      this.edgeScroller.stop();
+      return;
+    }
+
+    const origin = this.dragState.origin;
+    this.edgeArm = {
+      x: updateArm(this.edgeArm.x, pointer.x, origin.x, bands.x),
+      y: updateArm(this.edgeArm.y, pointer.y, origin.y, bands.y),
+    };
+    this.edgeScroller.update();
+  }
+
+  /** The edge loop's speed for the pointer as it stands, in px per second. */
+  private edgeVelocity(): { x: number; y: number } {
+    const axes = scrollAxesOf(this.dragState.phase);
+    const pointer = this.dragPointer;
+    const bands = axes.x || axes.y ? this.edgeBands() : null;
+    if (pointer == null || bands == null) {
+      return { x: 0, y: 0 };
+    }
+    return {
+      x: axes.x ? axisVelocity(pointer.x, bands.x, this.edgeArm.x) : 0,
+      y: axes.y ? axisVelocity(pointer.y, bands.y, this.edgeArm.y) : 0,
+    };
+  }
+
+  /**
+   * One step of the edge loop, then the drag re-resolved at the new scroll.
+   *
+   * Time is open to the right, as it is for the trackpad (see `applyWheel`):
+   * holding a clip at the right edge is how it is carried past the end of the
+   * project. The rows stop where the last one comes fully into view.
+   */
+  private edgeScrollBy(dx: number, dy: number): boolean {
+    const before = this.currentScroll();
+
+    const nextH = scrollStep(before.h, dx, 0, Infinity);
+    if (nextH !== before.h) {
+      this.timelineState.setScroll(nextH);
+    }
+
+    const bands = this.edgeBands();
+    if (bands != null) {
+      const maxV = maxVerticalScroll(this.layout.totalHeight, bands.y.hi);
+      this.setVerticalScroll(scrollStep(before.v, dy, 0, maxV));
+    }
+
+    const after = this.currentScroll();
+    if (after.h === before.h && after.v === before.v) {
+      return false;
+    }
+    this.applyDrag();
+    return true;
   }
 
   // --------------------------------------------------------------- events
@@ -1557,18 +1742,36 @@ export class elementTimelineCanvas extends LitElement {
       return;
     }
 
-    const nextVertical = Math.max(0, this.canvasVerticalScroll + e.deltaY);
-    if (nextVertical !== this.canvasVerticalScroll) {
-      this.canvasVerticalScroll = nextVertical;
-      this.timelineOptions.canvasVerticalScroll = nextVertical;
-      this.drawCanvas();
-      this.syncTrackHeaders();
-    }
+    this.setVerticalScroll(Math.max(0, this.canvasVerticalScroll + e.deltaY));
 
     // The trackpad scrolls freely past the end of the project — only the bottom
     // scrollbar is bounded, because a thumb that can leave its track is telling
     // the user something untrue. A flick is not.
     this.timelineState.setScroll(Math.max(0, this.timelineScroll + e.deltaX));
+
+    // A clip being carried follows the rows and times the wheel brought under
+    // the pointer. Without this it stayed put until the next mousemove, then
+    // jumped to a row counted from where it started.
+    const phase = this.dragState.phase;
+    if (phase === "moveH" || phase === "moveFree") {
+      this.applyDrag();
+    }
+  }
+
+  /**
+   * Scroll the rows, and the track headers with them.
+   *
+   * One writer for the wheel and the edge loop alike, so the headers cannot be
+   * left behind by either.
+   */
+  private setVerticalScroll(next: number) {
+    if (next === this.canvasVerticalScroll) {
+      return;
+    }
+    this.canvasVerticalScroll = next;
+    this.timelineOptions.canvasVerticalScroll = next;
+    this.drawCanvas();
+    this.syncTrackHeaders();
   }
 
   /**

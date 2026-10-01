@@ -51,7 +51,7 @@ import {
 } from "./frames";
 import { collectSnapPoints, snapEdge, snapSpan } from "./snapping";
 import { trackDeltaFor } from "./dragMachine";
-import type { TimelineDocument } from "./tracks";
+import { trackIndexOf, type TimelineDocument } from "./tracks";
 
 /** How close, in px, an edge must come before it snaps. */
 export const SNAP_TOLERANCE_PX = 10;
@@ -83,6 +83,32 @@ function travelInWholeFrames(
   const wanted = msToFrame(toMs - fromMs, fps);
   const shortest = msToFrameCeil(-fromMs, fps);
   return frameToMs(Math.max(wanted, shortest), fps);
+}
+
+/** A run of row indices, both ends included. */
+export type RowRange = { first: number; last: number };
+
+/**
+ * Keep a row change inside `rows`, without ever turning it around.
+ *
+ * Only the side the clip is travelling towards is bounded. A clip already
+ * sitting outside the range (on a row half under the ruler, say) is not pulled
+ * into it by a gesture that went the other way, or by none at all: a clamp that
+ * moved it where the hand did not would be an edit nobody asked for.
+ */
+export function clampRowTravel(
+  fromIndex: number,
+  delta: number,
+  rows: RowRange | null | undefined,
+): number {
+  if (rows == null || delta === 0) {
+    return delta;
+  }
+  const to = fromIndex + delta;
+  if (delta < 0) {
+    return Math.max(to, Math.min(rows.first, fromIndex)) - fromIndex;
+  }
+  return Math.min(to, Math.max(rows.last, fromIndex)) - fromIndex;
 }
 
 export type MovePlan =
@@ -125,6 +151,14 @@ export type ResolveMoveInput = {
   fps: number;
   playheadMs: number;
   trackPitch: number;
+  /**
+   * The rows a freed clip may land on. Absent means any.
+   *
+   * The canvas passes the rows wholly in view, so a clip carried past the edge
+   * of the panel rides the outermost visible row while the view scrolls, rather
+   * than following the pointer out of sight and landing somewhere nobody saw.
+   */
+  rows?: RowRange | null;
   tolerancePx?: number;
   /**
    * Off only for testing the pre-quantization behaviour.
@@ -171,7 +205,15 @@ export function resolveMove(input: ResolveMoveInput): MovePlan {
   // the anchor is the one whose position the grid gets to choose.
   const anchorLocked = isFrameLocked(primary);
 
-  const trackDelta = free ? trackDeltaFor(dyPx, trackPitch) : 0;
+  // Clamped before the no-op checks below, so a row change the clamp cancels
+  // is declined like any other gesture that goes nowhere.
+  const trackDelta = free
+    ? clampRowTravel(
+        trackIndexOf(base, primary.trackId),
+        trackDeltaFor(dyPx, trackPitch),
+        input.rows,
+      )
+    : 0;
 
   // A press that has not travelled must stay a press. Without this the pointer
   // going down on a clip that predates frame alignment would quantize it on the
