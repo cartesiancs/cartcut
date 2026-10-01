@@ -13,7 +13,12 @@
  * once it is tangled into mouse handlers.
  */
 
-import type { Hit } from "./layout";
+import {
+  TRACK_PITCH,
+  rowIndexAtContentY,
+  type Hit,
+  type RowStack,
+} from "./layout";
 
 export const DRAG = {
   /** Hold this long without moving and the clip comes free of its track. */
@@ -397,4 +402,38 @@ export function trackDeltaFor(
     return 0;
   }
   return Math.round(dyPx / pitch);
+}
+
+/**
+ * How many rows a freed clip has travelled, over rows of any height.
+ *
+ * The clip's row centre is carried by `dyPx` and the row it lands on is the one
+ * whose band holds it (`rowIndexAtContentY`). A tall row therefore takes more
+ * travel to cross than a short one, which is what the user can see. Over rows
+ * that are all one height this is `trackDeltaFor` to the pixel, ties included,
+ * which is the property the sweep in the suite pins.
+ *
+ * `originIndex` is the row's position in `stack`. One that is not in it (the
+ * clip's track is gone, so `trackIndexOf` answered `MAX_SAFE_INTEGER`) falls
+ * back to the default pitch, and the move's own range check declines it as it
+ * always did.
+ */
+export function trackDeltaAt(
+  stack: RowStack,
+  originIndex: number,
+  dyPx: number,
+  cfg: DragConfig = DRAG,
+): number {
+  if (Math.abs(dyPx) < cfg.VERTICAL_ENTER_PX || stack.ids.length === 0) {
+    return 0;
+  }
+  if (
+    !Number.isInteger(originIndex) ||
+    originIndex < 0 ||
+    originIndex >= stack.ids.length
+  ) {
+    return trackDeltaFor(dyPx, TRACK_PITCH, cfg);
+  }
+  const centre = stack.tops[originIndex] + stack.heights[originIndex] / 2;
+  return rowIndexAtContentY(stack, centre + dyPx) - originIndex;
 }

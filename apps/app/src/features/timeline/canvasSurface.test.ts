@@ -6,11 +6,9 @@ import {
   type TransformableContext,
 } from "./canvasSurface";
 import {
-  RULER_OFFSET,
   TRACK_PITCH,
   hitTest,
   layoutTimeline,
-  rowTop,
 } from "./layout";
 import { SCHEMA_VERSION, createTrack, normalizeDocument } from "./tracks";
 import { imageElement } from "../renderer/testing";
@@ -283,13 +281,13 @@ describe("hit-testing under a correctly sized surface", () => {
         viewportH: cssH,
       });
 
-      const intoRow1 = rowTop(1, 0, RULER_OFFSET) + 1;
+      const intoRow1 = layout.rows[1].top + 1;
       expect(hitTest(layout, 10, intoRow1)).toMatchObject({
         kind: "clip",
         elementId: "b",
       });
 
-      const intoRow0 = rowTop(0, 0, RULER_OFFSET) + 1;
+      const intoRow0 = layout.rows[0].top + 1;
       expect(hitTest(layout, 10, intoRow0)).toMatchObject({
         kind: "clip",
         elementId: "a",
@@ -300,9 +298,9 @@ describe("hit-testing under a correctly sized surface", () => {
   it("would have selected the wrong row under the old three-number sizing", () => {
     // Documents the regression rather than the fix. With the CSS box left at
     // `height * dpr`, content laid out at logical y appeared at CSS `y * dpr`,
-    // so a user aiming at row 1 pressed at CSS `rowTop(1) * dpr` — while
+    // so a user aiming at row 1 pressed at CSS `rows[1].top * dpr`, while
     // `hitTest` compared that number against the *logical* row bands. The error
-    // is `rowTop(n) * (dpr - 1)` and grows with the row index, so it is not
+    // is `rows[n].top * (dpr - 1)` and grows with the row index, so it is not
     // absorbed by the 40px row height.
     const layout = layoutTimeline({
       doc,
@@ -314,13 +312,13 @@ describe("hit-testing under a correctly sized surface", () => {
     });
 
     // Correct sizing: the press lands where it was aimed.
-    const aimedAtRow1 = rowTop(1, 0, RULER_OFFSET) + 1;
+    const aimedAtRow1 = layout.rows[1].top + 1;
     expect(hitTest(layout, 10, aimedAtRow1)).toMatchObject({ elementId: "b" });
 
     // Broken sizing at dpr 2: the same intent arrives doubled, and misses.
     const asItArrived = aimedAtRow1 * 2;
     expect(asItArrived).toBeGreaterThanOrEqual(
-      rowTop(1, 0, RULER_OFFSET) + TRACK_PITCH,
+      layout.rows[1].top + TRACK_PITCH,
     );
     expect(hitTest(layout, 10, asItArrived)).not.toMatchObject({
       elementId: "b",

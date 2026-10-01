@@ -32,7 +32,7 @@ import {
 } from "./layout";
 import type { TimelineDocument } from "./tracks";
 import { nullTileProvider, type TileProvider } from "./strip/provider";
-import { planFilmstrip } from "./strip/tiles";
+import { fallbackTileKeys, planFilmstrip } from "./strip/tiles";
 import { planWaveform } from "./strip/peaks";
 import { nullPeakProvider, type PeakProvider } from "./strip/audioPeaks";
 import {
@@ -629,7 +629,8 @@ export function drawSelectionRing(
  *
  * Every tile is drawn if the provider already has it and requested if not —
  * `request` is cheap and deduplicating, so calling it each frame is fine. A
- * miss leaves the flat colour showing until a later repaint, which is the
+ * miss draws the same frame from another decode rung if one is held, and
+ * otherwise leaves the flat colour showing until a later repaint, which is the
  * normal state while a strip fills in.
  */
 function drawFilmstrip(
@@ -666,16 +667,32 @@ function drawFilmstrip(
   });
 
   for (const tile of plan.tiles) {
-    const bitmap = provider.get(tile.key);
+    let bitmap = provider.get(tile.key);
     if (bitmap == null) {
+      // Decoded at the rung, not at the row's own height, so every height a
+      // resize drag passes through on the way to the next rung reuses it.
       provider.request({
         key: tile.key,
         localpath: tile.localpath,
         sourceMs: tile.sourceMs,
-        tileW: plan.tileW,
-        tileH: rect.h,
+        tileW: plan.decodeW,
+        tileH: plan.decodeH,
       });
-      continue;
+      // Meanwhile the same frame at another rung, if one is held, scaled
+      // into place, rather than flat colour for as long as the decode takes.
+      for (const key of fallbackTileKeys(
+        tile.localpath,
+        tile.sourceMs,
+        plan.decodeH,
+      )) {
+        bitmap = provider.get(key);
+        if (bitmap != null) {
+          break;
+        }
+      }
+      if (bitmap == null) {
+        continue;
+      }
     }
 
     // Draw the whole tile at its natural width and let the clip's own clip path

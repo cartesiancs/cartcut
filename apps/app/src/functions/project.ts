@@ -1,6 +1,14 @@
 import { EXTENSIONS_ENTRY, parseExtensionsEntry } from "../features/extension/projectData";
 import { extensionsExtraEntries, projectDataStore } from "../features/extension/projectDataStore";
 import { useTimelineStore } from "../states/timelineStore";
+import {
+  timelineViewExtraEntries,
+  trackHeightStore,
+} from "../states/trackHeightStore";
+import {
+  TIMELINE_VIEW_ENTRY,
+  parseTimelineViewEntry,
+} from "../features/project/timelineView";
 import { rendererModal } from "../utils/modal";
 import { uiStore } from "../states/uiStore";
 import { renderOptionStore } from "../states/renderOptionStore";
@@ -22,6 +30,7 @@ import {
   openNgt,
   readNgtEntries,
   readNgtExtra,
+  type ProjectExtras,
 } from "../features/project/projectArchive";
 import {
   readProjectDocument,
@@ -116,7 +125,7 @@ const project = {
     const filepath: string = picked;
 
     let entries;
-    let extensionsEntry: string | null = null;
+    const extras: ProjectExtras = { extensions: null, timelineView: null };
     try {
       // One read of the archive, not two. The document and the project's
       // settings used to be pulled from separate `loadAsync` chains with no
@@ -129,7 +138,8 @@ const project = {
       // The sixth entry, read from the same archive so there is no second
       // open. `readNgtEntries` asks for five by name and ignores the rest,
       // which is what lets this be added without moving `SCHEMA_VERSION`.
-      extensionsEntry = await readNgtExtra(zip, EXTENSIONS_ENTRY);
+      extras.extensions = await readNgtExtra(zip, EXTENSIONS_ENTRY);
+      extras.timelineView = await readNgtExtra(zip, TIMELINE_VIEW_ENTRY);
     } catch (error) {
       project.showLoadFailure(
         `This project could not be opened — ${String(error)}.`,
@@ -151,7 +161,7 @@ const project = {
       return;
     }
 
-    project.adoptDocument(read, filepath, extensionsEntry);
+    project.adoptDocument(read, filepath, extras);
     project.changeProjectFileValue({ projectDestination: filepath });
 
     // Baseline against what was just loaded. Without this the freshly opened
@@ -174,12 +184,27 @@ const project = {
   adoptDocument: function (
     read: Extract<ReadProjectResult, { ok: true }>,
     _source: string,
-    extensionsEntry: string | null = null,
+    extras: Partial<ProjectExtras> = {},
   ): void {
     // Before the document, so an extension woken by `project.opened` finds its
     // own data already there rather than reading an empty store and caching
     // the answer.
-    projectDataStore.getState().replace(parseExtensionsEntry(extensionsEntry));
+    projectDataStore
+      .getState()
+      .replace(parseExtensionsEntry(extras.extensions ?? null));
+
+    // Before the document too, and replaced whole even when the file has none,
+    // so the first paint already has this project's rows at their heights and
+    // nothing from the previously open project is left behind. Also before
+    // `markProjectSaved`, whose baseline digest includes these heights.
+    trackHeightStore
+      .getState()
+      .replace(
+        parseTimelineViewEntry(
+          extras.timelineView ?? null,
+          read.document.tracks.map((track) => track.id),
+        ),
+      );
 
     // Read against a *fresh* project's settings, so a field the file predates
     // falls back to the app's default rather than to whatever the previously
@@ -245,10 +270,14 @@ const project = {
       previewRatio,
     });
 
-    // The sixth entry, or nothing at all. `extensionsExtraEntries` answers an
-    // empty object when no extension has stored anything, so a project nobody
-    // has run one on is byte-identical to a project saved before this existed.
-    const content = await buildNgtBlob(entries, extensionsExtraEntries());
+    // The optional entries, or nothing at all. Each answers an empty object
+    // when it has nothing to keep (no extension has stored anything, every row
+    // is at the default height), so a project that uses neither is
+    // byte-identical to a project saved before either existed.
+    const content = await buildNgtBlob(entries, {
+      ...extensionsExtraEntries(),
+      ...timelineViewExtraEntries(tracks),
+    });
     const base64 = arrayBufferToBase64(await content.arrayBuffer());
 
     // `writeFileEnsured`, never `writeFile`. The latter calls the *callback*

@@ -10,7 +10,8 @@ import {
   hitTest,
   layoutTimeline,
   rectBetween,
-  rowTop,
+  rowIndexAtContentY,
+  rowStack,
   timeAtX,
   trackAtY,
   trimHandleWidth,
@@ -26,6 +27,7 @@ import {
   type TimelineDocument,
 } from "./tracks";
 import { groupElement, imageElement, videoElement } from "../renderer/testing";
+import { MAX_TRACK_HEIGHT, MIN_TRACK_HEIGHT } from "./trackHeights";
 
 const RANGE = 0.9; // 45px per second
 
@@ -73,26 +75,99 @@ describe("xAtTime / timeAtX", () => {
   });
 });
 
-describe("rowTop", () => {
-  it("stacks rows at a constant pitch", () => {
-    expect(rowTop(0, 0, 0)).toBe(0);
-    expect(rowTop(1, 0, 0)).toBe(TRACK_PITCH);
-    expect(rowTop(2, 0, 0)).toBe(TRACK_PITCH * 2);
-  });
+describe("rowStack", () => {
+  const tracks = (ids: string[]) =>
+    ids.map((id, index) => createTrack(id, "video", index));
 
-  it("clears the ruler by default", () => {
-    // The ruler is absolutely positioned over the top of the canvas, so a row
-    // at y=0 is half-hidden behind the timecode.
-    expect(rowTop(0, 0)).toBe(RULER_OFFSET);
-    expect(RULER_OFFSET).toBeGreaterThan(0);
+  it("stacks default rows at a constant pitch", () => {
+    const stack = rowStack(tracks(["a", "b", "c"]));
+    expect(stack.ids).toEqual(["a", "b", "c"]);
+    expect(stack.tops).toEqual([0, TRACK_PITCH, TRACK_PITCH * 2]);
+    expect(stack.heights).toEqual([TRACK_HEIGHT, TRACK_HEIGHT, TRACK_HEIGHT]);
+    expect(stack.total).toBe(TRACK_PITCH * 3);
   });
 
   it("leaves a gap between rows", () => {
     expect(TRACK_PITCH).toBe(TRACK_HEIGHT + TRACK_GAP);
   });
 
-  it("subtracts the vertical scroll", () => {
-    expect(rowTop(2, 30, 0)).toBe(TRACK_PITCH * 2 - 30);
+  it("pushes every row below a resized one down by the difference", () => {
+    const stack = rowStack(tracks(["a", "b", "c"]), { b: 100 });
+    expect(stack.heights).toEqual([TRACK_HEIGHT, 100, TRACK_HEIGHT]);
+    expect(stack.tops).toEqual([0, TRACK_PITCH, TRACK_PITCH + 100 + TRACK_GAP]);
+    expect(stack.total).toBe(TRACK_PITCH * 2 + 100 + TRACK_GAP);
+  });
+
+  it("orders by track index, not by array order", () => {
+    const shuffled = [
+      createTrack("c", "video", 2),
+      createTrack("a", "video", 0),
+      createTrack("b", "video", 1),
+    ];
+    expect(rowStack(shuffled, { a: 60 }).ids).toEqual(["a", "b", "c"]);
+    expect(rowStack(shuffled, { a: 60 }).tops[1]).toBe(60 + TRACK_GAP);
+  });
+
+  it("reads a corrupt height as the default rather than throwing", () => {
+    const stack = rowStack(tracks(["a", "b"]), {
+      a: Number.NaN,
+      b: 10_000,
+    } as any);
+    expect(stack.heights).toEqual([TRACK_HEIGHT, TRACK_HEIGHT]);
+  });
+
+  it("is empty for a document with no tracks", () => {
+    expect(rowStack([])).toEqual({ ids: [], tops: [], heights: [], total: 0 });
+  });
+});
+
+describe("rowIndexAtContentY", () => {
+  const stackOf = (heights: number[]) =>
+    rowStack(
+      heights.map((_, i) => createTrack(`t${i}`, "video", i)),
+      Object.fromEntries(heights.map((h, i) => [`t${i}`, h])),
+    );
+
+  it("gives each row its box plus half the gap on either side", () => {
+    const stack = stackOf([40, 100, 40]);
+    const half = TRACK_GAP / 2;
+    // Row 1 runs from 44 to 144; its band from 42 to 146.
+    expect(rowIndexAtContentY(stack, 44 - half - 0.001)).toBe(0);
+    expect(rowIndexAtContentY(stack, 44 - half)).toBe(1);
+    expect(rowIndexAtContentY(stack, 144 + half - 0.001)).toBe(1);
+    expect(rowIndexAtContentY(stack, 144 + half)).toBe(2);
+  });
+
+  it("counts on past either end in steps of that edge row's pitch", () => {
+    const stack = stackOf([60, 40, 100]);
+    const half = TRACK_GAP / 2;
+    expect(rowIndexAtContentY(stack, -half - 0.001)).toBe(-1);
+    expect(rowIndexAtContentY(stack, -half - 64)).toBe(-1);
+    expect(rowIndexAtContentY(stack, -half - 64.001)).toBe(-2);
+    const lastEnd = stack.total - half;
+    expect(rowIndexAtContentY(stack, lastEnd)).toBe(3);
+    expect(rowIndexAtContentY(stack, lastEnd + 103.999)).toBe(3);
+    expect(rowIndexAtContentY(stack, lastEnd + 104)).toBe(4);
+  });
+
+  it("answers 0 for an empty stack", () => {
+    expect(rowIndexAtContentY(rowStack([]), 123)).toBe(0);
+  });
+
+  it("is the old division wherever the rows are all one height", () => {
+    // The oracle shares no code with the subject: it is the formula the
+    // layout used before rows could be resized, measured from row 0's top.
+    for (const h of [MIN_TRACK_HEIGHT, TRACK_HEIGHT, 77, MAX_TRACK_HEIGHT]) {
+      const pitch = h + TRACK_GAP;
+      const stack = stackOf([h, h, h, h, h]);
+      let checked = 0;
+      for (let y = -3 * pitch; y <= 9 * pitch; y += 0.25) {
+        const expected = Math.floor((y + TRACK_GAP / 2) / pitch);
+        expect(rowIndexAtContentY(stack, y) === expected).toBe(true);
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(100);
+    }
   });
 });
 
@@ -138,6 +213,69 @@ describe("the ruler offset", () => {
     });
     expect(result.rows[0].top).toBe(100);
     expect(result.clips[0].y).toBe(100);
+  });
+});
+
+describe("layoutTimeline with resized rows", () => {
+  const four = () =>
+    doc([
+      ["a", "video"],
+      ["b", "video"],
+      ["c", "audio"],
+      ["d", "text"],
+    ]);
+
+  it("puts default rows exactly where the fixed pitch did", () => {
+    // Independent oracle: the formula every row was placed by before rows
+    // could be resized, `topOffset + index * pitch - vScroll`.
+    for (const v of [0, 7, 44, 130.5]) {
+      for (const topOffset of [0, RULER_OFFSET]) {
+        const result = layout(four(), { vScroll: v, topOffset });
+        expect(result.rows.map((r) => r.top)).toEqual(
+          [0, 1, 2, 3].map((i) => topOffset + i * TRACK_PITCH - v),
+        );
+        expect(result.rows.every((r) => r.height === TRACK_HEIGHT)).toBe(true);
+        expect(result.totalHeight).toBe(topOffset + 4 * TRACK_PITCH);
+      }
+    }
+  });
+
+  it("disagrees with the fixed pitch below a resized row, and only there", () => {
+    // Proves the oracle above can fail: the same harness, one row resized.
+    const result = layout(four(), { heights: { b: 80 } });
+    const fixed = [0, 1, 2, 3].map((i) => i * TRACK_PITCH);
+    expect(result.rows[0].top).toBe(fixed[0]);
+    expect(result.rows[1].top).toBe(fixed[1]);
+    expect(result.rows[1].height).toBe(80);
+    expect(result.rows[2].top).toBe(fixed[2] + 40);
+    expect(result.rows[3].top).toBe(fixed[3] + 40);
+    expect(result.totalHeight).toBe(4 * TRACK_PITCH + 40);
+  });
+
+  it("draws and hits a clip across the whole of a tall row", () => {
+    const d = doc([["a", "video"], ["b", "video"]], {
+      x: imageElement({ trackId: "b", startTime: 0, duration: 4000 }),
+    });
+    const result = layout(d, { heights: { b: 120 } });
+    expect(result.clips[0]).toMatchObject({ y: TRACK_PITCH, h: 120 });
+    expect(hitTest(result, 10, TRACK_PITCH + 119)).toMatchObject({
+      kind: "clip",
+      elementId: "x",
+    });
+    expect(hitTest(result, 10, TRACK_PITCH + 120)).toEqual({ kind: "none" });
+    expect(trackAtY(result, TRACK_PITCH + 60)).toBe("b");
+  });
+
+  it("culls a row by its own height", () => {
+    const d = doc([["a", "video"], ["b", "video"]], {
+      x: imageElement({ trackId: "b", startTime: 0, duration: 4000 }),
+    });
+    // Row b starts 60px above the viewport. At the default height it would be
+    // wholly above it and culled; at 120 its lower half is in view.
+    const over = { vScroll: TRACK_PITCH + 60 };
+    expect(layout(d, over).clips).toEqual([]);
+    const result = layout(d, { ...over, heights: { b: 120 } });
+    expect(result.clips.map((c) => c.elementId)).toEqual(["x"]);
   });
 });
 

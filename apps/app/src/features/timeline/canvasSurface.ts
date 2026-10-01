@@ -12,9 +12,9 @@
  * `element-timeline-ruler > canvas`). So the used CSS height fell back to the
  * attribute, `height * dpr`. Horizontal mapping was correct because
  * `style.width` pinned it; vertical was off by exactly `devicePixelRatio`. On a
- * Retina display every row painted at double pitch, and `e.offsetY` — which
- * `hitTest` compares against `rowTop` — was twice the coordinate it was being
- * compared to.
+ * Retina display every row painted at double pitch, and `e.offsetY` (which
+ * `hitTest` compares against each row's `top`) was twice the coordinate it
+ * was being compared to.
  *
  * A 40px row absorbs some of that. An 8px keyframe lane does not, which is why
  * this is the first thing to land.

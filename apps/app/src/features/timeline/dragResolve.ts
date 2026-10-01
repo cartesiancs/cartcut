@@ -50,7 +50,8 @@ import {
   snapMsToFrame,
 } from "./frames";
 import { collectSnapPoints, snapEdge, snapSpan } from "./snapping";
-import { trackDeltaFor } from "./dragMachine";
+import { trackDeltaAt } from "./dragMachine";
+import type { RowStack } from "./layout";
 import { trackIndexOf, type TimelineDocument } from "./tracks";
 
 /** How close, in px, an edge must come before it snaps. */
@@ -150,7 +151,11 @@ export type ResolveMoveInput = {
   range: number;
   fps: number;
   playheadMs: number;
-  trackPitch: number;
+  /**
+   * Where every row sits, so a freed clip changes row where the rows actually
+   * meet. `layout.ts#rowStack` over the same heights the canvas draws with.
+   */
+  stack: RowStack;
   /**
    * The rows a freed clip may land on. Absent means any.
    *
@@ -180,7 +185,7 @@ export function resolveMove(input: ResolveMoveInput): MovePlan {
     range,
     fps,
     playheadMs,
-    trackPitch,
+    stack,
     quantize = true,
   } = input;
 
@@ -210,7 +215,7 @@ export function resolveMove(input: ResolveMoveInput): MovePlan {
   const trackDelta = free
     ? clampRowTravel(
         trackIndexOf(base, primary.trackId),
-        trackDeltaFor(dyPx, trackPitch),
+        trackDeltaAt(stack, stack.ids.indexOf(primary.trackId), dyPx),
         input.rows,
       )
     : 0;

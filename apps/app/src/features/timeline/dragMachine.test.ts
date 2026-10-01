@@ -3,12 +3,14 @@ import {
   DRAG,
   idleDrag,
   reduceDrag,
+  trackDeltaAt,
   trackDeltaFor,
   type DragEffect,
   type DragState,
   type PointerEv,
 } from "./dragMachine";
-import type { Hit } from "./layout";
+import { TRACK_GAP, TRACK_PITCH, rowStack, type Hit } from "./layout";
+import { createTrack } from "./tracks";
 
 const bodyHit: Hit = {
   kind: "clip",
@@ -289,6 +291,91 @@ describe("trackDeltaFor", () => {
 
   it("is safe with a degenerate pitch", () => {
     expect(trackDeltaFor(100, 0)).toBe(0);
+  });
+});
+
+describe("trackDeltaAt", () => {
+  /** Rows `t0..` at the given heights. */
+  const stackOf = (heights: number[]) =>
+    rowStack(
+      heights.map((_, i) => createTrack(`t${i}`, "video", i)),
+      Object.fromEntries(heights.map((h, i) => [`t${i}`, h])),
+    );
+
+  it("changes row at exactly the pixel trackDeltaFor did, over one-height rows", () => {
+    // `trackDeltaFor` is the rule clips moved by before rows could be resized,
+    // and shares no code with `trackDeltaAt`. Compared with `===` rather than
+    // `toBe`: `Math.round(-0.5)` is -0, which `Object.is` tells apart from 0.
+    let samples = 0;
+    let ties = 0;
+    for (const h of [32, 40, 77, 200]) {
+      const pitch = h + TRACK_GAP;
+      for (const n of [1, 2, 3, 10]) {
+        const stack = stackOf(Array(n).fill(h));
+        for (let origin = 0; origin < n; origin++) {
+          for (let k = -12 * 8; k <= 12 * 8; k++) {
+            const dy = (k / 8) * pitch;
+            const expected = trackDeltaFor(dy, pitch);
+            const actual = trackDeltaAt(stack, origin, dy);
+            expect(actual === expected).toBe(true);
+            samples++;
+            if (Math.abs(Math.abs(dy / pitch) % 1) === 0.5) {
+              ties++;
+            }
+          }
+        }
+      }
+    }
+    expect(samples).toBeGreaterThan(10_000);
+    expect(ties).toBeGreaterThan(100);
+  });
+
+  it("disagrees with the fixed pitch once a row is resized", () => {
+    // Proves the sweep above can fail. One 120px row in the middle; a clip on
+    // the row above it has to travel further to land below it.
+    const stack = stackOf([40, 120, 40]);
+    const pitch = 40 + TRACK_GAP;
+    let differ = 0;
+    for (let dy = 0; dy <= 3 * pitch; dy += 1) {
+      if (trackDeltaAt(stack, 0, dy) !== trackDeltaFor(dy, pitch)) {
+        differ++;
+      }
+    }
+    expect(differ).toBeGreaterThan(20);
+  });
+
+  it("crosses a tall row only once its centre band is passed", () => {
+    const stack = stackOf([40, 120, 40]);
+    // Row 0's centre is at 20. Row 1's band starts at 42, row 2's at 166.
+    expect(trackDeltaAt(stack, 0, 21.999)).toBe(0);
+    expect(trackDeltaAt(stack, 0, 22)).toBe(1);
+    expect(trackDeltaAt(stack, 0, 145.999)).toBe(1);
+    expect(trackDeltaAt(stack, 0, 146)).toBe(2);
+    // From the tall row, up: its centre is at 104, row 0's band ends at 42.
+    expect(trackDeltaAt(stack, 1, -62)).toBe(0);
+    expect(trackDeltaAt(stack, 1, -62.001)).toBe(-1);
+  });
+
+  it("stays put until the pointer clearly leaves the row", () => {
+    const stack = stackOf([32, 32, 32]);
+    expect(trackDeltaAt(stack, 1, DRAG.VERTICAL_ENTER_PX - 1)).toBe(0);
+    expect(trackDeltaAt(stack, 1, -(DRAG.VERTICAL_ENTER_PX - 1))).toBe(0);
+  });
+
+  it("counts past the last row, for the caller's clamp to refuse", () => {
+    const stack = stackOf([40, 40]);
+    expect(trackDeltaAt(stack, 1, 3 * TRACK_PITCH)).toBe(3);
+    expect(trackDeltaAt(stack, 0, -2 * TRACK_PITCH)).toBe(-2);
+  });
+
+  it("falls back to the default pitch for a row that is not in the stack", () => {
+    const stack = stackOf([120, 120]);
+    expect(trackDeltaAt(stack, -1, TRACK_PITCH)).toBe(1);
+    expect(trackDeltaAt(stack, Number.MAX_SAFE_INTEGER, -TRACK_PITCH)).toBe(-1);
+  });
+
+  it("is zero for an empty stack", () => {
+    expect(trackDeltaAt(rowStack([]), 0, 500)).toBe(0);
   });
 });
 

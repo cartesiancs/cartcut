@@ -29,7 +29,7 @@ import {
   normalizeDocument,
   type TimelineDocument,
 } from "./tracks";
-import { TRACK_PITCH } from "./layout";
+import { rowStack } from "./layout";
 import { MAX_RANGE, maxRangeForFps } from "./zoom";
 import { audioElement, imageElement, mulberry32 } from "../renderer/testing";
 import { rebakeAnimations } from "../animation/keyframeOps";
@@ -148,7 +148,7 @@ describe("a drag survives the trip through the document", () => {
         range: MAX_RANGE,
         fps,
         playheadMs: -1_000_000,
-        trackPitch: TRACK_PITCH,
+        stack: rowStack(base.tracks),
       });
       if (plan.kind !== "move") continue;
 
@@ -190,7 +190,7 @@ describe("a drag survives the trip through the document", () => {
           range: MAX_RANGE,
           fps,
           playheadMs: -1_000_000,
-          trackPitch: TRACK_PITCH,
+          stack: rowStack(base.tracks),
         });
         if (plan.kind !== "move") continue;
 
@@ -344,7 +344,7 @@ describe("changing the project frame rate", () => {
         range: MAX_RANGE,
         fps,
         playheadMs: -1_000_000,
-        trackPitch: TRACK_PITCH,
+        stack: rowStack(base.tracks),
       });
       if (plan.kind !== "move") {
         continue;

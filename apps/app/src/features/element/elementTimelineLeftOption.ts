@@ -1,9 +1,16 @@
-import { html, LitElement } from "lit";
+import { html, LitElement, type PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
+import { repeat } from "lit/directives/repeat.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { IUIStore, uiStore } from "../../states/uiStore";
 import { timelineLockStore } from "../../states/timelineLockStore";
 import { timelineIsLocked } from "../editor/timelineLock";
+import {
+  effectiveTrackHeights,
+  trackHeightStore,
+} from "../../states/trackHeightStore";
+import { coerceTrackHeight, trackHeightOf } from "../timeline/trackHeights";
+import { createTrackResizeController } from "../timeline/trackResize";
 import { consume } from "@lit/context";
 import { timelineContext } from "../../context/timelineContext";
 import { RULER_OFFSET, TRACK_GAP, TRACK_HEIGHT } from "../timeline/layout";
@@ -44,6 +51,11 @@ import { v4 as uuidv4 } from "uuid";
  *
  * Keyframe editing moved to the bottom editor: with many clips per row there is
  * no longer a row belonging to one element to expand.
+ *
+ * A row is resized from here, by the strip along the bottom edge of its header
+ * (`timeline/trackResize.ts` holds the rules, this class the DOM). The canvas
+ * draws from the same `trackHeightStore`, so header and row change height in
+ * the same frame.
  */
 @customElement("element-timeline-left-option")
 export class ElementTimelineLeftOption extends LitElement {
@@ -81,12 +93,138 @@ export class ElementTimelineLeftOption extends LitElement {
     canvasVerticalScroll: 0,
   };
 
+  /** The row whose edge is being dragged, for the edge's dragging style. */
+  private resizingTrackId: string | null = null;
+
+  /** The scroll the resize gesture last heard about. */
+  private lastScroll = 0;
+
+  private readonly rowResize = createTrackResizeController(
+    {
+      preview: (trackId, px) =>
+        trackHeightStore.getState().preview(trackId, px),
+      commit: () => trackHeightStore.getState().commit(),
+      cancel: () => trackHeightStore.getState().cancel(),
+      reset: (trackId) => trackHeightStore.getState().reset(trackId),
+      setActive: (trackId, on) => {
+        // The cursor for the whole window, not just the edge: the pointer
+        // leaves the 8px strip on the first pixel of a drag, and the canvas
+        // sets its own cursor on everything it hovers.
+        document.body.classList.toggle("is-resizing-track", on);
+        this.resizingTrackId = on ? trackId : null;
+        this.requestUpdate();
+      },
+      listen: (on) => this.listenForRowResize(on),
+    },
+    coerceTrackHeight,
+  );
+
+  private onRowResizeMove = (e: PointerEvent) => {
+    this.rowResize.dispatch({
+      type: "move",
+      pointerId: e.pointerId,
+      clientY: e.clientY,
+      buttons: e.buttons,
+    });
+  };
+
+  private onRowResizeUp = (e: PointerEvent) => {
+    this.rowResize.dispatch({ type: "up", pointerId: e.pointerId });
+  };
+
+  private onRowResizeCancel = (e: PointerEvent) => {
+    this.rowResize.dispatch({ type: "pointercancel", pointerId: e.pointerId });
+  };
+
+  private onRowResizeBlur = () => {
+    this.rowResize.dispatch({ type: "blur" });
+  };
+
+  /**
+   * Escape reverts a resize, and only then is it swallowed: in the capture
+   * phase on the window, ahead of the canvas's own Escape, which would also
+   * clear the clip selection.
+   */
+  private onRowResizeKeydown = (e: KeyboardEvent) => {
+    if (e.key !== "Escape") {
+      return;
+    }
+    if (this.rowResize.dispatch({ type: "escape" })) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  };
+
+  /**
+   * On the window rather than the edge, so the end of the gesture is heard
+   * wherever it happens. Pointer capture routes the moves to the edge and they
+   * bubble here; `lostpointercapture` is deliberately not one of the ways a
+   * gesture ends, because `repeat` moving a row in the DOM drops the capture
+   * while the drag goes on.
+   */
+  private listenForRowResize(on: boolean) {
+    if (on) {
+      window.addEventListener("pointermove", this.onRowResizeMove);
+      window.addEventListener("pointerup", this.onRowResizeUp);
+      window.addEventListener("pointercancel", this.onRowResizeCancel);
+      window.addEventListener("blur", this.onRowResizeBlur);
+      window.addEventListener("keydown", this.onRowResizeKeydown, true);
+      return;
+    }
+    window.removeEventListener("pointermove", this.onRowResizeMove);
+    window.removeEventListener("pointerup", this.onRowResizeUp);
+    window.removeEventListener("pointercancel", this.onRowResizeCancel);
+    window.removeEventListener("blur", this.onRowResizeBlur);
+    window.removeEventListener("keydown", this.onRowResizeKeydown, true);
+  }
+
+  private onGripPointerDown(trackId: string, e: PointerEvent) {
+    const accepted = this.rowResize.dispatch({
+      type: "down",
+      trackId,
+      pointerId: e.pointerId,
+      clientY: e.clientY,
+      scroll: this.verticalScroll(),
+      startPx: trackHeightOf(trackHeightStore.getState().heights, trackId),
+      button: e.button,
+      isPrimary: e.isPrimary,
+      ctrlKey: e.ctrlKey,
+    });
+    if (!accepted) {
+      return;
+    }
+    // No `preventDefault` here: on a `pointerdown` it would also suppress the
+    // `mousedown` that closes the ⋯ menu, the toolbar's popovers and the export
+    // popover. Text selection is stopped on the `mousedown` instead.
+    try {
+      (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    } catch {
+      // A pointer that is already gone cannot be captured; the window
+      // listeners still end the gesture.
+    }
+  }
+
+  private verticalScroll(): number {
+    return this.timelineOptions?.canvasVerticalScroll ?? 0;
+  }
+
   createRenderRoot() {
     useTimelineStore.subscribe((state) => {
+      if (state.tracks !== this.tracks) {
+        this.rowResize.dispatch({
+          type: "tracks",
+          ids: state.tracks.map((track) => track.id),
+        });
+      }
       this.timeline = state.timeline;
       this.tracks = state.tracks;
       this.requestUpdate();
     });
+
+    // A resize in progress and every committed height. Read in `render`
+    // through `effectiveTrackHeights`, which is memoised, so this only has to
+    // say that something changed.
+    trackHeightStore.subscribe(() => this.requestUpdate());
 
     // `resize` is the only field of this store the component renders, and it
     // keeps its reference across writes that do not touch it. The update was
@@ -116,6 +254,33 @@ export class ElementTimelineLeftOption extends LitElement {
     super.disconnectedCallback();
     window.removeEventListener("mousedown", this._handleDocumentMouseDown);
     window.removeEventListener("keydown", this._handleMenuKeydown);
+
+    // A resize cannot outlive the column that draws it: drop what it drew,
+    // take the window listeners and the body's cursor with it.
+    const gesture = this.rowResize.state();
+    if (gesture.phase !== "idle") {
+      this.rowResize.dispatch({
+        type: "pointercancel",
+        pointerId: gesture.pointerId,
+      });
+    }
+  }
+
+  /**
+   * Tell a resize in progress that the rows scrolled under it.
+   *
+   * The canvas owns the scroll and asks this column to update whenever it
+   * moves (`syncTrackHeaders`), so this is where the change is seen. In
+   * `willUpdate`, before `render`, so a preview it causes is drawn by this
+   * same update rather than scheduling another.
+   */
+  protected willUpdate(changed: PropertyValues) {
+    super.willUpdate(changed);
+    const v = this.verticalScroll();
+    if (v !== this.lastScroll) {
+      this.lastScroll = v;
+      this.rowResize.dispatch({ type: "scroll", v });
+    }
   }
 
   /** Any press that is not on the menu itself dismisses it. */
@@ -419,42 +584,72 @@ export class ElementTimelineLeftOption extends LitElement {
     // Asked without announcing, because this is a render path: `refusesEdit`
     // raises a toast on its first refusal, and a window resize is not a refusal.
     const locked = timelineIsLocked();
+    const heights = effectiveTrackHeights();
 
-    const rows = ordered.map((track) => {
+    // Keyed by track id, so a row's element (and the edge holding the pointer
+    // capture of a resize in progress) stays with its track when rows are
+    // added, removed or reordered, rather than being handed to whichever track
+    // now sits at that position.
+    const rows = repeat(ordered, (track) => track.id, (track) => {
       const hidden = isTrackHidden(track);
+      const height = trackHeightOf(heights, track.id);
       return html`
         <div
           class="track-header ${hidden ? "is-hidden" : ""}"
-          style="height: ${TRACK_HEIGHT}px; margin-bottom: ${TRACK_GAP}px;
+          style="height: ${height}px; margin-bottom: ${TRACK_GAP}px;
                  background-color: ${defaultColors.row};"
         >
-          <span
-            class="material-symbols-outlined track-icon"
-            title=${TRACK_KIND_TITLE[track.kind] ?? "Track"}
-            >${TRACK_KIND_ICON[track.kind] ?? "layers"}</span
+          <!-- The controls keep a default row's band, so a tall row has them
+               at its top beside the clip's label rather than floating in the
+               middle, and a default row lays out exactly as it always has. -->
+          <div
+            class="track-header-band"
+            style="height: ${Math.min(height, TRACK_HEIGHT)}px;"
           >
-          <div class="track-actions">
-            ${this.renderEye(track.id, track.kind, hidden, locked)}
-            ${locked
-              ? html`<span
-                  class="material-symbols-outlined track-lock"
-                  title="Locked while the caption panel is open"
-                  >lock</span
-                >`
-              : html`<button
-                  type="button"
-                  class="opt-icon-btn track-menu ${this.openMenu?.trackId ===
-                  track.id
-                    ? "is-on"
-                    : ""}"
-                  title="Track options"
-                  aria-haspopup="menu"
-                  aria-expanded=${this.openMenu?.trackId === track.id}
-                  @click=${(e: MouseEvent) => this.toggleMenu(track.id, e)}
-                >
-                  <span class="material-symbols-outlined">more_vert</span>
-                </button>`}
+            <span
+              class="material-symbols-outlined track-icon"
+              title=${TRACK_KIND_TITLE[track.kind] ?? "Track"}
+              >${TRACK_KIND_ICON[track.kind] ?? "layers"}</span
+            >
+            <div class="track-actions">
+              ${this.renderEye(track.id, track.kind, hidden, locked)}
+              ${locked
+                ? html`<span
+                    class="material-symbols-outlined track-lock"
+                    title="Locked while the caption panel is open"
+                    >lock</span
+                  >`
+                : html`<button
+                    type="button"
+                    class="opt-icon-btn track-menu ${this.openMenu?.trackId ===
+                    track.id
+                      ? "is-on"
+                      : ""}"
+                    title="Track options"
+                    aria-haspopup="menu"
+                    aria-expanded=${this.openMenu?.trackId === track.id}
+                    @click=${(e: MouseEvent) => this.toggleMenu(track.id, e)}
+                  >
+                    <span class="material-symbols-outlined">more_vert</span>
+                  </button>`}
+            </div>
           </div>
+          <!-- Offered while the timeline is locked too: a row's height is
+               view state, and the caption session never rewrites it. -->
+          <div
+            class="track-resize-grip ${this.resizingTrackId === track.id
+              ? "is-dragging"
+              : ""}"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize track"
+            data-keeps-selection
+            @pointerdown=${(e: PointerEvent) =>
+              this.onGripPointerDown(track.id, e)}
+            @mousedown=${(e: MouseEvent) => e.preventDefault()}
+            @dblclick=${() =>
+              this.rowResize.dispatch({ type: "dblclick", trackId: track.id })}
+          ></div>
         </div>
       `;
     });
@@ -469,14 +664,61 @@ export class ElementTimelineLeftOption extends LitElement {
          * corners are rounded; the inner edge runs on into the canvas.
          */
         .track-header {
-          display: flex;
-          align-items: center;
-          gap: 10px;
+          position: relative;
           margin-left: 6px;
           padding: 0 6px 0 8px;
           border-radius: 8px 0 0 8px;
           color: #c3c9cf;
           box-sizing: border-box;
+        }
+
+        .track-header-band {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        /*
+         * The bottom edge, as a window edge: 8px to grab, centred on the gap
+         * below the row and never painted itself, so the cursor is the
+         * affordance. The line in the gap appears once the pointer has rested
+         * on it a moment (a pass across the column on the way somewhere else
+         * draws nothing) and stays for as long as a drag holds it.
+         * Above the next row's header, which is later in the DOM and would
+         * otherwise take the 2px of the strip that overlap it.
+         */
+        .track-resize-grip {
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: -6px;
+          height: 8px;
+          z-index: 1;
+          cursor: row-resize;
+        }
+
+        .track-resize-grip::after {
+          content: "";
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 3px;
+          height: 2px;
+          border-radius: 1px;
+          background-color: #c3c9cf;
+          opacity: 0;
+          transition: opacity 120ms ease;
+          pointer-events: none;
+        }
+
+        .track-resize-grip:hover::after {
+          opacity: 0.45;
+          transition-delay: 150ms;
+        }
+
+        .track-resize-grip.is-dragging::after {
+          opacity: 0.9;
+          transition-delay: 0s;
         }
 
         /*

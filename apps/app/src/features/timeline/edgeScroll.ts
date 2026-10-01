@@ -2,7 +2,7 @@
  * Scrolling the timeline from under a clip that is being dragged.
  *
  * Two problems, solved in one place. A held clip used to work out its row from
- * screen travel alone (`dyPx / TRACK_PITCH`), so scrolling mid-drag moved the
+ * screen travel alone (`dyPx` over one row pitch), so scrolling mid-drag moved the
  * rows under a clip that did not follow them, and the next mousemove snapped it
  * to a row counted from where it started. And nothing scrolled on its own, so a
  * track out of view was out of reach: with the destination at the top and the
@@ -19,7 +19,7 @@
 import type { FrameScheduler } from "../caption/previewLoop";
 import { DRAG, type DragPhase } from "./dragMachine";
 import type { RowRange } from "./dragResolve";
-import { RULER_OFFSET, TRACK_HEIGHT, TRACK_PITCH } from "./layout";
+import { RULER_OFFSET, type RowStack } from "./layout";
 
 export const EDGE_SCROLL = {
   /**
@@ -77,7 +77,7 @@ export const UNARMED: EdgeArm = { low: false, high: false };
 /**
  * How far the pointer has travelled through the *content*, not the screen.
  *
- * A row's top is `RULER_OFFSET + index * TRACK_PITCH - vScroll` and a time's x
+ * A row's top is `RULER_OFFSET + stack.tops[i] - vScroll` and a time's x
  * is `msToPx(ms) - hScroll`, so the content under a screen point is that point
  * plus the scroll. Travel since the press is therefore screen travel plus the
  * scroll's own change. Kept apart from the canvas because the sign is the one
@@ -118,18 +118,28 @@ export function pinToBand(origin: number, travel: number, band: Band): number {
 export function wholeRowsInView(
   vScroll: number,
   band: Band,
-  rowCount: number,
+  stack: RowStack,
   topOffset: number = RULER_OFFSET,
 ): RowRange | null {
-  // Row `i`'s top on screen is `topOffset + i * TRACK_PITCH - vScroll`.
-  const first = Math.max(
-    0,
-    Math.ceil((band.lo - topOffset + vScroll) / TRACK_PITCH),
-  );
-  const last = Math.min(
-    rowCount - 1,
-    Math.floor((band.hi - TRACK_HEIGHT - topOffset + vScroll) / TRACK_PITCH),
-  );
+  // Row `i`'s top on screen is `topOffset + stack.tops[i] - vScroll`. Tops and
+  // bottoms both rise with `i`, so "top below the band's top" holds from some
+  // row onwards and "bottom above the band's bottom" up to some row, and the
+  // rows wholly in view are the run between the two.
+  const n = stack.ids.length;
+  let first = n;
+  for (let i = 0; i < n; i++) {
+    if (topOffset + stack.tops[i] - vScroll >= band.lo) {
+      first = i;
+      break;
+    }
+  }
+  let last = -1;
+  for (let i = n - 1; i >= 0; i--) {
+    if (topOffset + stack.tops[i] + stack.heights[i] - vScroll <= band.hi) {
+      last = i;
+      break;
+    }
+  }
   return first <= last ? { first, last } : null;
 }
 
@@ -250,10 +260,10 @@ export function scrollStep(
 /**
  * The furthest the rows may be scrolled by a drag.
  *
- * `totalHeight` is `layout.ts`'s: the ruler's strip plus a pitch per row, so
- * the last row's bottom sits one `TRACK_GAP` short of it. At this scroll that
- * bottom lands one gap above `visibleBottom`, the last pixel not covered by the
- * chrome beneath the canvas.
+ * `totalHeight` is `layout.ts`'s: the ruler's strip plus each row and the gap
+ * after it, so the last row's bottom sits one `TRACK_GAP` short of it. At this
+ * scroll that bottom lands one gap above `visibleBottom`, the last pixel not
+ * covered by the chrome beneath the canvas.
  */
 export function maxVerticalScroll(
   totalHeight: number,

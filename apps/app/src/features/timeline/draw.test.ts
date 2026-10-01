@@ -40,6 +40,7 @@ function paint(
   d: TimelineDocument,
   over: Partial<Parameters<typeof drawTimeline>[1]> = {},
   topOffset = 0,
+  heights: Record<string, number> = {},
 ) {
   const { canvas, ctx } = scene(W, H);
   const layout = layoutTimeline({
@@ -54,6 +55,7 @@ function paint(
     // The selection ring's tests move the row down, so there is canvas above
     // the clip to show the ring stopping at its edge.
     topOffset,
+    heights,
   });
 
   drawTimeline(ctx, {
@@ -624,6 +626,61 @@ describe("drawTimeline filmstrip", () => {
     const keys = (provider.request as any).mock.calls.map((c: any[]) => c[0].key);
     expect(keys.length).toBeGreaterThan(1);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("decodes a resized row's tiles at the next rung up, keyed by the rung", () => {
+    const provider: TileProvider = { get: vi.fn(() => null), request: vi.fn() };
+    paint(filmDoc(), { provider });
+    const atDefault = (provider.request as any).mock.calls[0][0];
+
+    const tall: TileProvider = { get: vi.fn(() => null), request: vi.fn() };
+    paint(filmDoc(), { provider: tall }, 0, { v1: 81 });
+    const at81 = (tall.request as any).mock.calls[0][0];
+
+    expect(at81.tileH).toBe(112);
+    expect(at81.key.endsWith("|112")).toBe(true);
+    // Wider in proportion: the aspect is kept at the rung, not at 81.
+    expect(
+      Math.abs(at81.tileW - (atDefault.tileW * 112) / TRACK_HEIGHT),
+    ).toBeLessThanOrEqual(1);
+  });
+
+  it("asks for one height at every row height that shares a rung", () => {
+    // What keeps a resize drag from queuing a decode per pixel. The frames a
+    // plan names can change with the tile width; the height part cannot.
+    for (const h of [57, 66, 80]) {
+      const provider: TileProvider = { get: vi.fn(() => null), request: vi.fn() };
+      paint(filmDoc(), { provider }, 0, { v1: h });
+      const calls = (provider.request as any).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      for (const [request] of calls) {
+        expect(request.tileH).toBe(80);
+        expect(request.key.endsWith("|80")).toBe(true);
+      }
+    }
+  });
+
+  it("draws the frame from another rung while the right one decodes", () => {
+    // Only the default rung is held. The row is 81 tall, so the exact key
+    // (rung 112) misses and the 40px decode of the same frame stands in.
+    const tile = solid(80, TRACK_HEIGHT, "#ff0000");
+    const provider: TileProvider = {
+      get: vi.fn((key: string) => (key.endsWith("|40") ? (tile as any) : null)),
+      request: vi.fn(),
+    };
+    const { canvas } = paint(filmDoc(), { provider }, 0, { v1: 81 });
+    expect(provider.request).toHaveBeenCalled();
+    // Scaled to the row: red near the bottom of the 81px row too.
+    expect(pixel(canvas, 30, 30)).toMatchObject({ r: 255, g: 0, b: 0 });
+    expect(pixel(canvas, 30, 70)).toMatchObject({ r: 255, g: 0, b: 0 });
+  });
+
+  it("shows flat colour when no rung holds the frame", () => {
+    // The control for the case above: the same row, with the frame held at
+    // no rung at all.
+    const provider: TileProvider = { get: vi.fn(() => null), request: vi.fn() };
+    const { canvas } = paint(filmDoc(), { provider }, 0, { v1: 81 });
+    expect(pixel(canvas, 30, 70)).toMatchObject({ r: 0, g: 0, b: 255 });
   });
 
   it("never asks the provider about audio or text", () => {
@@ -1692,5 +1749,33 @@ describe("a clip pressed in by the hold", () => {
     });
     const m = ctx.getTransform();
     expect([m.a, m.b, m.c, m.d, m.e, m.f]).toEqual([1, 0, 0, 1, 0, 0]);
+  });
+});
+
+describe("drawTimeline with a resized row", () => {
+  it("paints the row at its own height and the next one below it", () => {
+    const d = doc({
+      a: imageElement({
+        trackId: "v1",
+        startTime: 0,
+        duration: 4000,
+        timelineOptions: { color: "#0000ff" },
+      }),
+      b: imageElement({
+        trackId: "v2",
+        startTime: 0,
+        duration: 4000,
+        timelineOptions: { color: "#00ff00" },
+      }),
+    });
+    const { canvas } = paint(d, { provider: nullTileProvider }, 0, { v1: 80 });
+    // Row v1 runs 0..80, the gap 80..84, row v2 from 84.
+    expect(pixel(canvas, 30, 75)).toMatchObject({ r: 0, g: 0, b: 255 });
+    expect(pixel(canvas, 30, 84 + 20)).toMatchObject({ r: 0, g: 255, b: 0 });
+
+    // At the default height the same y is row v2's, which is what makes the
+    // check above a measurement of the height and not of the colour.
+    const { canvas: plain } = paint(d, { provider: nullTileProvider });
+    expect(pixel(plain, 30, 75)).toMatchObject({ r: 0, g: 255, b: 0 });
   });
 });

@@ -32,6 +32,7 @@
 import { extensionsEntryText } from "../extension/projectDataStore";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { useTimelineStore } from "../../states/timelineStore";
+import { timelineViewEntryText } from "../../states/trackHeightStore";
 import { projectStateDigest } from "./projectDigest";
 
 /**
@@ -48,6 +49,7 @@ export function currentProjectDigest(): string {
     state.tracks,
     renderOptionStore.getState().options,
     extensionsEntryText(),
+    timelineViewEntryText(state.tracks),
   );
 }
 

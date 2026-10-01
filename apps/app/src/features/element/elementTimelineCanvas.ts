@@ -69,11 +69,11 @@ import {
 } from "../fx/presetRegistry";
 import {
   RULER_OFFSET,
-  TRACK_PITCH,
   clipsInRect,
   hitTest,
   layoutTimeline,
   rectBetween,
+  rowStack,
   trackAtY,
   type ScreenRect,
   type TimelineLayout,
@@ -172,6 +172,10 @@ import { contributionStore } from "../extension/contributions";
 import { runContributedCommand } from "../extension/bridge";
 import { hasEditorModifier } from "../../utils/platform";
 import { mergeIds, selectionStore } from "../../states/selectionStore";
+import {
+  effectiveTrackHeights,
+  trackHeightStore,
+} from "../../states/trackHeightStore";
 import {
   copySelection,
   cutSelection,
@@ -617,6 +621,13 @@ export class elementTimelineCanvas extends LitElement {
       this.drawCanvas();
     });
 
+    // A row resized from its header, live while the edge is dragged. Batched
+    // into the next frame like every other repaint, so a drag costs one paint
+    // per frame however many pixels it crossed.
+    trackHeightStore.subscribe(() => {
+      this.drawCanvas();
+    });
+
     return this;
   }
 
@@ -702,6 +713,7 @@ export class elementTimelineCanvas extends LitElement {
       vScroll: this.canvasVerticalScroll,
       viewportW: width,
       viewportH: height,
+      heights: effectiveTrackHeights(),
     });
 
     const fps = this.projectFps();
@@ -1421,6 +1433,9 @@ export class elementTimelineCanvas extends LitElement {
             scroll,
           )
         : { dx: drag.dxPx, dy: drag.dyPx };
+      // Over the same heights the rows are drawn at, so a clip changes row
+      // where the rows it is carried across visibly meet.
+      const stack = rowStack(base.tracks, effectiveTrackHeights());
       const plan = resolveMove({
         base,
         primaryId: drag.hit.elementId,
@@ -1431,10 +1446,8 @@ export class elementTimelineCanvas extends LitElement {
         range: this.timelineRange,
         fps,
         playheadMs: this.timelineCursor,
-        trackPitch: TRACK_PITCH,
-        rows: bands
-          ? wholeRowsInView(scroll.v, bands.y, base.tracks.length)
-          : null,
+        stack,
+        rows: bands ? wholeRowsInView(scroll.v, bands.y, stack) : null,
       });
 
       // A gesture that moves nothing must produce nothing. `moveClips` builds a

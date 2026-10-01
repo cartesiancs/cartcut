@@ -36,6 +36,7 @@
 import type { Timeline } from "../../@types/timeline";
 import type { RenderOptions } from "../../states/renderOptionStore";
 import type { TimelineTrack } from "../timeline/tracks";
+import { TIMELINE_VIEW_ENTRY } from "./timelineView";
 
 /**
  * A 64-bit digest of `text`, as 16 lowercase hex characters.
@@ -101,8 +102,11 @@ export function projectStateDigest(
   tracks: TimelineTrack[],
   options: RenderOptions,
   extensionData: string | null = null,
+  timelineView: string | null = null,
 ): string {
-  return digest64(projectStateText(elements, tracks, options, extensionData));
+  return digest64(
+    projectStateText(elements, tracks, options, extensionData, timelineView),
+  );
 }
 
 /**
@@ -127,12 +131,22 @@ export function projectStateText(
    * digest it had for a project no extension has touched.
    */
   extensionData: string | null = null,
+  /**
+   * The `timelineView.json` entry, or `null` when every row is at the default.
+   *
+   * Saved with the project, so a resized row makes it dirty, for the reason
+   * the extension data does. Tagged with its entry name, because both optional
+   * parts are bare JSON objects and a project holding only one of them must
+   * not hash the same as one holding only the other.
+   */
+  timelineView: string | null = null,
 ): string {
   return [
     JSON.stringify(elements),
     JSON.stringify(tracks),
     JSON.stringify(digestableOptions(options)),
     ...(extensionData == null ? [] : [extensionData]),
+    ...(timelineView == null ? [] : [`${TIMELINE_VIEW_ENTRY}:${timelineView}`]),
   ].join("\n");
 }
 

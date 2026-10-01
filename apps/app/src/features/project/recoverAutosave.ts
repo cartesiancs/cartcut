@@ -36,7 +36,13 @@
 
 import { EXTENSIONS_ENTRY } from "../extension/projectData";
 import type { ExistsFn } from "./assetsFile";
-import { openNgt, readNgtEntries, readNgtExtra } from "./projectArchive";
+import {
+  openNgt,
+  readNgtEntries,
+  readNgtExtra,
+  type ProjectExtras,
+} from "./projectArchive";
+import { TIMELINE_VIEW_ENTRY } from "./timelineView";
 import {
   readProjectDocument,
   readProjectFailureMessage,
@@ -91,16 +97,17 @@ export type RecoverReaderPort = {
  */
 export type RecoverEffectsPort = {
   /**
-   * `extensionsEntry` is the archive's `extensions.json`, or null.
+   * `extras` holds the archive's `extensions.json` and `timelineView.json`,
+   * each null where the archive has none.
    *
    * Passed through rather than read by the caller, because a recovery has to
-   * restore what extensions had stored at that moment too: leaving it out
+   * restore everything the project carried at that moment: leaving one out
    * would recover the timeline and silently drop the data an extension had
-   * keyed to it.
+   * keyed to it, or put every row back at the default height.
    */
   adopt(
     read: Extract<ReadProjectResult, { ok: true }>,
-    extensionsEntry: string | null,
+    extras: ProjectExtras,
   ): void;
   setTitle(title: string): void;
   setProjectPath(path: string): void;
@@ -169,12 +176,13 @@ export async function recoverAutosave(
 
   let entries;
   let autosaveMeta: AutosaveArchiveMeta = null;
-  let extensionsEntry: string | null = null;
+  const extras: ProjectExtras = { extensions: null, timelineView: null };
   try {
     const zip = await openNgt(await reader.readFile(pick.file));
     entries = await readNgtEntries(zip);
     const raw = parse(await readNgtExtra(zip, "autosave.json"));
-    extensionsEntry = await readNgtExtra(zip, EXTENSIONS_ENTRY);
+    extras.extensions = await readNgtExtra(zip, EXTENSIONS_ENTRY);
+    extras.timelineView = await readNgtExtra(zip, TIMELINE_VIEW_ENTRY);
     autosaveMeta =
       raw != null && typeof raw === "object"
         ? (raw as AutosaveArchiveMeta)
@@ -200,7 +208,7 @@ export async function recoverAutosave(
     return { kind: "failed", message };
   }
 
-  effects.adopt(read, extensionsEntry);
+  effects.adopt(read, extras);
 
   // `setProjectPath` is *not* called. The session is detached, so ⌘S opens
   // Save As and the original `.ngt` cannot be overwritten with older state.
@@ -287,8 +295,7 @@ export async function recoverAutosaveEntry(payload: unknown): Promise<void> {
       exists: (fsPath) => filesystem.existFile(fsPath),
     },
     {
-      adopt: (read, extensionsEntry) =>
-        project.adoptDocument(read, pick.file, extensionsEntry),
+      adopt: (read, extras) => project.adoptDocument(read, pick.file, extras),
       setTitle: (title) => uiStore.getState().setTopBarTitle(title),
       // Never called. See the header.
       setProjectPath: () => {

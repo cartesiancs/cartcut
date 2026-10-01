@@ -18,6 +18,7 @@
 import { msToPxSigned, pxToMsSigned } from "../geometry";
 import { curveSourceAt, type SpeedCurve } from "../speedCurve";
 import { DEFAULT_FPS, frameToMs, msToFrame, normalizeFps } from "../frames";
+import { DEFAULT_TRACK_HEIGHT, MAX_TRACK_HEIGHT } from "../trackHeights";
 
 /**
  * Rungs the quantum can take, in **frames**.
@@ -40,7 +41,7 @@ export const TILE_QUANTA_FRAMES = [
 ] as const;
 
 export type FilmstripTile = {
-  /** Cache key: the frame this tile shows, at this height. */
+  /** Cache key: the frame this tile shows, at its decode rung. */
   key: string;
   localpath: string;
   /** Quantised position in the source file, in source ms. */
@@ -69,7 +70,67 @@ export type FilmstripPlan = {
   quantum: number;
   /** Natural width of one tile, before the last one is clipped. */
   tileW: number;
+  /**
+   * The size to decode each tile at, which is not the size it is drawn at:
+   * the height is `decodeRungFor(clipH)` and the width follows the source's
+   * aspect at that height. `drawImage` scales it into `tileW x clipH`.
+   */
+  decodeW: number;
+  decodeH: number;
 };
+
+/**
+ * The heights tiles are decoded at.
+ *
+ * A row can be any whole height from 32 to 200, and a tile's cache key holds
+ * the height it was decoded at. Keyed by the row's own height, a resize drag
+ * would ask for a fresh decode of every frame on screen at every pixel it
+ * crossed. Keyed by a rung, a drag from one end of the range to the other
+ * crosses six, and a frame decoded at a rung serves every height up to it.
+ *
+ * The first rung is the default row height, so a row nobody resized decodes
+ * and keys exactly as it did before rows could be resized. The last is the
+ * tallest a row can be, so nothing is ever drawn larger than it was decoded.
+ * In between, steps of about 1.4x, so a tile is decoded at no more than about
+ * twice the pixels it is drawn at.
+ */
+export const FILMSTRIP_DECODE_RUNGS = [
+  DEFAULT_TRACK_HEIGHT,
+  56,
+  80,
+  112,
+  160,
+  MAX_TRACK_HEIGHT,
+] as const;
+
+/** The smallest rung at least `clipH` tall, or the top rung. */
+export function decodeRungFor(clipH: number): number {
+  for (const rung of FILMSTRIP_DECODE_RUNGS) {
+    if (rung >= clipH) {
+      return rung;
+    }
+  }
+  return FILMSTRIP_DECODE_RUNGS[FILMSTRIP_DECODE_RUNGS.length - 1];
+}
+
+/**
+ * The same frame at every other rung, best first, for drawing while the right
+ * one decodes.
+ *
+ * Larger rungs first, nearest first, because shrinking a bitmap looks better
+ * than enlarging one; then smaller ones, nearest first. A resize drag crosses
+ * into a new rung with every frame on screen already decoded at the last one,
+ * so this is what keeps the strip from flashing to flat colour at each rung.
+ */
+export function fallbackTileKeys(
+  localpath: string,
+  sourceMs: number,
+  rung: number,
+): string[] {
+  const larger = FILMSTRIP_DECODE_RUNGS.filter((r) => r > rung);
+  const smaller = FILMSTRIP_DECODE_RUNGS.filter((r) => r < rung).reverse();
+  return [...larger, ...smaller].map((r) => tileKey(localpath, sourceMs, r));
+}
 
 /**
  * The largest rung that still fits inside one tile's worth of source time.
@@ -154,6 +215,8 @@ export function planFilmstrip(input: FilmstripInput): FilmstripPlan {
 
   const fps = normalizeFps(input.fps);
   const tileW = Math.max(1, Math.round(clipH * sourceAspect));
+  const decodeH = decodeRungFor(clipH);
+  const decodeW = Math.max(1, Math.round(decodeH * sourceAspect));
   const tileSpanTimelineMs = pxToMsSigned(tileW, range);
   // The mean rate is the right ladder for the clip as a whole: the quantum is
   // one decision for the whole strip, and a ramp's own extremes would size it
@@ -215,7 +278,7 @@ export function planFilmstrip(input: FilmstripInput): FilmstripPlan {
     const sourceMs = frameToMs(frame, fps);
 
     tiles.push({
-      key: tileKey(localpath, sourceMs, clipH),
+      key: tileKey(localpath, sourceMs, decodeH),
       localpath,
       sourceMs,
       tileX,
@@ -227,5 +290,5 @@ export function planFilmstrip(input: FilmstripInput): FilmstripPlan {
     });
   }
 
-  return { tiles, quantum, tileW };
+  return { tiles, quantum, tileW, decodeW, decodeH };
 }

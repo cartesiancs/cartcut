@@ -9,6 +9,7 @@ import {
   type RecoverReaderPort,
 } from "./recoverAutosave";
 import { serializeProjectEntries } from "./projectEntries";
+import type { ProjectExtras } from "./projectArchive";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import type { TimelineTrack } from "../timeline/tracks";
 import type { Timeline } from "../../@types/timeline";
@@ -95,6 +96,7 @@ function ports() {
   const warned: string[] = [];
   const toasted: string[] = [];
   const adopted: unknown[] = [];
+  const adoptedExtras: ProjectExtras[] = [];
   const titles: string[] = [];
   let recovered = 0;
   let bytes: Uint8Array | null = null;
@@ -115,7 +117,10 @@ function ports() {
   };
 
   const effects: RecoverEffectsPort = {
-    adopt: (read) => adopted.push(read),
+    adopt: (read, extras) => {
+      adopted.push(read);
+      adoptedExtras.push(extras);
+    },
     setTitle: (title) => titles.push(title),
     setProjectPath: () => {
       // LOAD-BEARING. A recovered session must stay detached.
@@ -136,6 +141,7 @@ function ports() {
     warned,
     toasted,
     adopted,
+    adoptedExtras,
     titles,
     recoveredCount: () => recovered,
     setBytes: (value: Uint8Array) => {
@@ -223,6 +229,25 @@ describe("the guard", () => {
 });
 
 describe("recovering", () => {
+  it("brings the row heights back with the document", async () => {
+    const view = JSON.stringify({ v: 1, trackHeights: { t1: 90 } });
+    p.setBytes(
+      await archive({
+        extra: {
+          "timelineView.json": view,
+          "autosave.json": JSON.stringify({ v: 1, anchor: PROJECT }),
+        },
+      }),
+    );
+    await recoverAutosave(PICK, guard(true, false), p.reader, p.effects);
+    expect(p.adoptedExtras).toEqual([{ extensions: null, timelineView: view }]);
+  });
+
+  it("hands over null for an archive with no row heights", async () => {
+    await recoverAutosave(PICK, guard(true, false), p.reader, p.effects);
+    expect(p.adoptedExtras).toEqual([{ extensions: null, timelineView: null }]);
+  });
+
   it("adopts the document", async () => {
     const outcome = await recoverAutosave(
       PICK,

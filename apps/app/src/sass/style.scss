@@ -576,6 +576,16 @@ body.is-scrubbing * {
   user-select: none !important;
 }
 
+// The same, for a timeline row being resized from its header's bottom edge
+// (`elementTimelineLeftOption.ts`). The pointer leaves the 8px edge on the
+// first pixel of the drag and crosses the canvas, which sets a cursor of its
+// own on everything it hovers.
+body.is-resizing-track,
+body.is-resizing-track * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
 .form-transparent {
   background-color: transparent;
   outline: 0;

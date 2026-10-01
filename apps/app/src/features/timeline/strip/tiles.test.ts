@@ -3,6 +3,9 @@ import {
   TILE_QUANTA_FRAMES,
   chooseQuantum,
   chooseQuantumFrames,
+  FILMSTRIP_DECODE_RUNGS,
+  decodeRungFor,
+  fallbackTileKeys,
   planFilmstrip,
   tileKey,
   type FilmstripInput,
@@ -114,6 +117,62 @@ describe("tileKey", () => {
 
   it("separates different heights, which need different bitmaps", () => {
     expect(tileKey("/a.mp4", 0, 40)).not.toBe(tileKey("/a.mp4", 0, 80));
+  });
+});
+
+describe("decode rungs", () => {
+  it("starts at the default row height and ends at the tallest row", () => {
+    expect(FILMSTRIP_DECODE_RUNGS[0]).toBe(40);
+    expect(FILMSTRIP_DECODE_RUNGS.at(-1)).toBe(200);
+    const sorted = [...FILMSTRIP_DECODE_RUNGS].sort((a, b) => a - b);
+    expect([...FILMSTRIP_DECODE_RUNGS]).toEqual(sorted);
+  });
+
+  it("picks the smallest rung at least as tall as the row", () => {
+    expect(decodeRungFor(32)).toBe(40);
+    expect(decodeRungFor(40)).toBe(40);
+    expect(decodeRungFor(41)).toBe(56);
+    expect(decodeRungFor(81)).toBe(112);
+    expect(decodeRungFor(200)).toBe(200);
+  });
+
+  it("caps at the top rung", () => {
+    expect(decodeRungFor(500)).toBe(200);
+  });
+
+  it("never decodes much more than twice the pixels drawn", () => {
+    for (let h = 32; h <= 200; h++) {
+      expect((decodeRungFor(h) / h) ** 2).toBeLessThan(2.05);
+    }
+  });
+
+  it("offers the other rungs, larger nearest first, then smaller nearest first", () => {
+    expect(fallbackTileKeys("/a.mp4", 1000, 80)).toEqual([
+      "/a.mp4|1000|112",
+      "/a.mp4|1000|160",
+      "/a.mp4|1000|200",
+      "/a.mp4|1000|56",
+      "/a.mp4|1000|40",
+    ]);
+    expect(fallbackTileKeys("/a.mp4", 0, 40)).not.toContain("/a.mp4|0|40");
+  });
+});
+
+describe("planFilmstrip at a resized height", () => {
+  it("keys and decodes a default row exactly as before rows could be resized", () => {
+    const plan = planFilmstrip(input({ clipH: 40 }));
+    expect(plan.decodeH).toBe(40);
+    expect(plan.decodeW).toBe(plan.tileW);
+    expect(plan.tiles[0].key).toBe(tileKey("/clip.mp4", plan.tiles[0].sourceMs, 40));
+  });
+
+  it("decodes at the rung but lays out at the row's height", () => {
+    const plan = planFilmstrip(input({ clipH: 81 }));
+    expect(plan.decodeH).toBe(112);
+    expect(plan.decodeW).toBe(Math.round(112 * (16 / 9)));
+    expect(plan.tileW).toBe(Math.round(81 * (16 / 9)));
+    expect(plan.tiles.every((t) => t.dh === 81)).toBe(true);
+    expect(plan.tiles.every((t) => t.key.endsWith("|112"))).toBe(true);
   });
 });
 

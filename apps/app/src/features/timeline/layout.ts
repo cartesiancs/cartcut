@@ -24,12 +24,24 @@ import { KEYFRAME_LANE_PX, keyframeLane } from "./keyframeMarkers";
 import { hitLevelLine, levelBandOf } from "./levelLine";
 import { freezeMs } from "./transitionGeometry";
 import { clipsOnTrack, type TimelineDocument, type TimelineTrack } from "./tracks";
+import {
+  DEFAULT_TRACK_HEIGHT,
+  NO_TRACK_HEIGHTS,
+  trackHeightOf,
+  type TrackHeights,
+} from "./trackHeights";
 
-/** Row height in px. Fixed globally so filmstrip tiles cache at one size. */
-export const TRACK_HEIGHT = 40;
+/**
+ * The height of a row nobody has resized.
+ *
+ * Rows can be resized (`trackHeights.ts`), so this is the default and not every
+ * row's height: anything asking where a row is goes through `rowStack` or the
+ * layout's `rows`, never `index * TRACK_PITCH`.
+ */
+export const TRACK_HEIGHT = DEFAULT_TRACK_HEIGHT;
 /** Vertical space between rows. */
 export const TRACK_GAP = 4;
-/** Distance between the tops of adjacent rows. */
+/** Distance between the tops of two adjacent default-height rows. */
 export const TRACK_PITCH = TRACK_HEIGHT + TRACK_GAP;
 /** Grab width of a trim handle, shrunk on narrow clips. */
 export const TRIM_HANDLE_PX = 8;
@@ -85,7 +97,92 @@ export type LayoutInput = {
   viewportH: number;
   /** Space reserved above the first row; defaults to the ruler's. */
   topOffset?: number;
+  /** Rows resized away from the default, by track id. Absent means none. */
+  heights?: TrackHeights;
 };
+
+/**
+ * Where every row sits, in content space: before scroll and before the space
+ * reserved above the first row.
+ *
+ * The one place a row's position is worked out. The layout, the header column,
+ * a clip carried between rows and the edge scroll's "rows in view" all read it,
+ * so they cannot disagree about where a row is once rows differ in height.
+ * Arrays indexed by position in track order, which is `track.index` once
+ * `normalizeTrackIndices` has run.
+ */
+export type RowStack = {
+  ids: string[];
+  tops: number[];
+  heights: number[];
+  /** Every row plus the gap after it: the last row's bottom plus one gap. */
+  total: number;
+};
+
+export function rowStack(
+  tracks: readonly TimelineTrack[],
+  heights: TrackHeights = NO_TRACK_HEIGHTS,
+): RowStack {
+  const ordered = [...tracks].sort((a, b) => a.index - b.index);
+  const stack: RowStack = { ids: [], tops: [], heights: [], total: 0 };
+  let top = 0;
+  for (const track of ordered) {
+    const height = trackHeightOf(heights, track.id);
+    stack.ids.push(track.id);
+    stack.tops.push(top);
+    stack.heights.push(height);
+    top += height + TRACK_GAP;
+  }
+  stack.total = top;
+  return stack;
+}
+
+/**
+ * Which row a content-space y belongs to, counting past either end.
+ *
+ * Each row owns its own box plus half the gap on either side, so the bands meet
+ * with nothing between them: row `i` owns `[top - GAP/2, top + height + GAP/2)`.
+ * Past the first or last row the count goes on in steps of that edge row's
+ * pitch, so a pointer carried above the top row reads as row -1, -2 and so on,
+ * the way the division this replaced counted, and the callers' own clamps decide
+ * what an out-of-range row means.
+ *
+ * For rows that are all one height this is `floor(y / pitch + 1/2)` measured
+ * from the first row's centre, which is exactly `Math.round`, ties included.
+ * That is what keeps a clip carried between default rows changing row at the
+ * same pixel it always did. `dragMachine.test.ts` sweeps it.
+ */
+export function rowIndexAtContentY(stack: RowStack, y: number): number {
+  const n = stack.tops.length;
+  if (n === 0) {
+    return 0;
+  }
+  const half = TRACK_GAP / 2;
+
+  const firstStart = stack.tops[0] - half;
+  if (y < firstStart) {
+    const pitch = stack.heights[0] + TRACK_GAP;
+    return -Math.ceil((firstStart - y) / pitch);
+  }
+
+  const lastEnd = stack.tops[n - 1] + stack.heights[n - 1] + half;
+  if (y >= lastEnd) {
+    const pitch = stack.heights[n - 1] + TRACK_GAP;
+    return n + Math.floor((y - lastEnd) / pitch);
+  }
+
+  // The last band whose start is at or above y. Rows are few, and a binary
+  // search would be one more thing to get wrong at a band edge.
+  let index = 0;
+  for (let i = 1; i < n; i++) {
+    if (y >= stack.tops[i] - half) {
+      index = i;
+    } else {
+      break;
+    }
+  }
+  return index;
+}
 
 export type TrackRow = {
   trackId: string;
@@ -210,26 +307,21 @@ export function timeAtX(x: number, range: number, hScroll: number): number {
   return pxToMsSigned(x + hScroll, range);
 }
 
-/** Top edge of row `index`, accounting for scroll and the reserved header. */
-export function rowTop(
-  index: number,
-  vScroll: number,
-  topOffset: number = RULER_OFFSET,
-): number {
-  return topOffset + index * TRACK_PITCH - vScroll;
-}
-
 export function layoutTimeline(input: LayoutInput): TimelineLayout {
   const { doc, range, hScroll, vScroll, viewportW, viewportH } = input;
   const topOffset = input.topOffset ?? RULER_OFFSET;
+  const stack = rowStack(doc.tracks, input.heights);
 
+  // Placed by position in the sorted order, not by `track.index` times a pitch:
+  // with rows of different heights a row's top is the sum of everything above
+  // it, and `stack` is where that sum is taken.
   const rows: TrackRow[] = [...doc.tracks]
     .sort((a, b) => a.index - b.index)
-    .map((track) => ({
+    .map((track, position) => ({
       trackId: track.id,
       index: track.index,
-      top: rowTop(track.index, vScroll, topOffset),
-      height: TRACK_HEIGHT,
+      top: topOffset + stack.tops[position] - vScroll,
+      height: stack.heights[position],
       track,
     }));
 
@@ -331,7 +423,7 @@ export function layoutTimeline(input: LayoutInput): TimelineLayout {
     clips,
     transitions,
     cuts,
-    totalHeight: topOffset + doc.tracks.length * TRACK_PITCH,
+    totalHeight: topOffset + stack.total,
   };
 }
 

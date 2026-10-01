@@ -191,6 +191,10 @@ export { windowStore } from "./features/window/windowStore";
 // shipping refusal through these rather than reimplementing a gesture, which
 // would prove only that the spec can decline.
 export { timelineLockStore } from "./states/timelineLockStore";
+// How tall each timeline row is. View state kept outside the document, so a
+// spec that resizes a row by its header's edge reads the result here rather
+// than in anything `getDocument()` returns.
+export { trackHeightStore } from "./states/trackHeightStore";
 export * as editorActions from "./features/editor/actions";
 export { proxyStore } from "./states/proxyStore";
 // How far along an export is, and whether one is running at all. `harness/

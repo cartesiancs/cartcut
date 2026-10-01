@@ -11,6 +11,13 @@
  * Pure: no DOM, no IPC, no JSZip. `buildProjectArchive` in `projectArchive.ts`
  * is the half that zips.
  *
+ * Two optional entries are not here, because they are not the document:
+ * `extensions.json` (`extension/projectData.ts`) and `timelineView.json`
+ * (`timelineView.ts`, how tall each resized row is). Each is passed to
+ * `buildNgtBlob` as an extra entry, and each is left out of the archive when
+ * it has nothing to hold, so a project that uses neither is byte-identical to
+ * one saved before they existed.
+ *
  * ## The anchor
  *
  * One parameter decides both `videoDestination` and what

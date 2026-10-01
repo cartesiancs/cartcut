@@ -332,6 +332,38 @@ describe("ids survive being rebuilt", () => {
     }
   });
 
+  it("keeps the caption track's id across rebuilds, so a row height set on it holds", () => {
+    // Row heights are keyed by track id (`trackHeightStore`) and the panel
+    // rebuilds the document on every change. A caption track renamed by each
+    // rebuild would lose its height to the next keystroke.
+    const base = doc();
+    const ls = lines();
+    const ids = idsFor(ls, cuts(base).length);
+    const trackIds = (d: TimelineDocument) => d.tracks.map((t) => t.id).sort();
+
+    const first = planFor(base, ls, true, ids);
+    const a = projectCaptions(base, first.plan, first.steps);
+    expect(a.tracks.length).toBeGreaterThan(base.tracks.length);
+
+    const second = planFor(base, ls, true, ids);
+    expect(trackIds(projectCaptions(base, second.plan, second.steps))).toEqual(
+      trackIds(a),
+    );
+
+    // Striking out a line other than the first keeps the track's name too.
+    const fewer = removeLine(ls, 2);
+    const kept = mintSessionIds(
+      ids,
+      fewer,
+      new Map([["clip", cuts(base).length]]),
+      counter("later"),
+    );
+    const third = planFor(base, fewer, true, kept);
+    expect(trackIds(projectCaptions(base, third.plan, third.steps))).toEqual(
+      trackIds(a),
+    );
+  });
+
   it("names a line a split has just created, and leaves the rest alone", () => {
     const ls = lines();
     const before = mintSessionIds(null, ls, new Map(), counter("id"));

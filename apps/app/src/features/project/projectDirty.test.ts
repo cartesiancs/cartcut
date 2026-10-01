@@ -10,6 +10,7 @@ import {
 } from "./projectDirty";
 import { useTimelineStore } from "../../states/timelineStore";
 import { renderOptionStore } from "../../states/renderOptionStore";
+import { trackHeightStore } from "../../states/trackHeightStore";
 import { SCHEMA_VERSION, type TimelineTrack } from "../timeline/tracks";
 import type { Timeline } from "../../@types/timeline";
 
@@ -61,6 +62,7 @@ beforeEach(() => {
   renderOptionStore.setState({
     options: renderOptionStore.getInitialState().options,
   });
+  trackHeightStore.setState(trackHeightStore.getInitialState(), true);
 });
 
 describe("isProjectDirty", () => {
@@ -312,5 +314,44 @@ describe("currentProjectDigest", () => {
     });
     const afterPatch = currentProjectDigest();
     expect(afterPatch).toBe(currentProjectDigest());
+  });
+});
+
+describe("row heights", () => {
+  // Saved with the project but kept out of the undo history, so these are the
+  // only way the quit guard learns about them.
+  const heights = () => trackHeightStore.getState();
+
+  it("reads dirty once a row is resized", () => {
+    setDocument({}, TRACKS);
+    markProjectSaved();
+    heights().preview("t1", 90);
+    heights().commit();
+    expect(isProjectDirty()).toBe(true);
+  });
+
+  it("reads clean again when the row goes back to where it was saved", () => {
+    setDocument({}, TRACKS);
+    markProjectSaved();
+    heights().preview("t1", 90);
+    heights().commit();
+    heights().reset("t1");
+    expect(isProjectDirty()).toBe(false);
+  });
+
+  it("is not dirtied by a resize still being dragged", () => {
+    setDocument({}, TRACKS);
+    markProjectSaved();
+    heights().preview("t1", 90);
+    expect(isProjectDirty()).toBe(false);
+    heights().cancel();
+    expect(isProjectDirty()).toBe(false);
+  });
+
+  it("ignores the height of a row that is not on the timeline", () => {
+    setDocument({}, TRACKS);
+    markProjectSaved();
+    heights().replace({ gone: 90 });
+    expect(isProjectDirty()).toBe(false);
   });
 });

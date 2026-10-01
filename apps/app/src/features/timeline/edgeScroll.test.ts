@@ -23,7 +23,15 @@ import {
   type TimelineDocument,
 } from "./tracks";
 import { imageElement } from "../renderer/testing";
-import { RULER_OFFSET, TRACK_GAP, TRACK_HEIGHT, TRACK_PITCH } from "./layout";
+import {
+  RULER_OFFSET,
+  TRACK_GAP,
+  TRACK_HEIGHT,
+  TRACK_PITCH,
+  layoutTimeline,
+  rowStack,
+  type RowStack,
+} from "./layout";
 
 const { ZONE_PX, RAMP_PX, MIN_PX_PER_S, MAX_PX_PER_S, MAX_STEP_MS, ARM_PX } =
   EDGE_SCROLL;
@@ -54,7 +62,7 @@ function moveBy(base: TimelineDocument, dxPx: number, dyPx: number) {
     range: 0.9,
     fps: 30,
     playheadMs: 0,
-    trackPitch: TRACK_PITCH,
+    stack: rowStack(base.tracks),
   });
 }
 
@@ -122,33 +130,45 @@ describe("pinToBand", () => {
   });
 });
 
+/** `n` rows, every one at the default height unless `heights` says otherwise. */
+function rowsOf(n: number, heights: Record<string, number> = {}): RowStack {
+  return rowStack(
+    Array.from({ length: n }, (_, i) => createTrack(`r${i}`, "video", i)),
+    heights,
+  );
+}
+
 describe("wholeRowsInView", () => {
   const band: Band = { lo: RULER_OFFSET, hi: RULER_OFFSET + 4 * TRACK_PITCH };
 
   it("is the rows that fit, unscrolled", () => {
-    expect(wholeRowsInView(0, band, 30)).toEqual({ first: 0, last: 3 });
+    expect(wholeRowsInView(0, band, rowsOf(30))).toEqual({ first: 0, last: 3 });
   });
 
   it("drops a row the ruler half covers, and one cut off at the bottom", () => {
     // Twenty px down: row 0 is half under the ruler and row 4 is not yet in.
-    expect(wholeRowsInView(20, band, 30)).toEqual({ first: 1, last: 3 });
+    expect(wholeRowsInView(20, band, rowsOf(30))).toEqual({ first: 1, last: 3 });
   });
 
   it("follows the scroll a whole pitch at a time", () => {
-    expect(wholeRowsInView(10 * TRACK_PITCH, band, 30)).toEqual({
+    expect(wholeRowsInView(10 * TRACK_PITCH, band, rowsOf(30))).toEqual({
       first: 10,
       last: 13,
     });
   });
 
   it("never names a row that does not exist", () => {
-    expect(wholeRowsInView(0, band, 2)).toEqual({ first: 0, last: 1 });
-    expect(wholeRowsInView(1e5, band, 30)).toBeNull();
+    expect(wholeRowsInView(0, band, rowsOf(2))).toEqual({ first: 0, last: 1 });
+    expect(wholeRowsInView(1e5, band, rowsOf(30))).toBeNull();
   });
 
   it("is null when the band is shorter than a row", () => {
     expect(
-      wholeRowsInView(0, { lo: RULER_OFFSET, hi: RULER_OFFSET + 30 }, 30),
+      wholeRowsInView(
+        0,
+        { lo: RULER_OFFSET, hi: RULER_OFFSET + 30 },
+        rowsOf(30),
+      ),
     ).toBeNull();
   });
 
@@ -158,8 +178,99 @@ describe("wholeRowsInView", () => {
     const visibleBottom = 235.9;
     const max = maxVerticalScroll(total, visibleBottom);
     expect(
-      wholeRowsInView(max, { lo: RULER_OFFSET, hi: visibleBottom }, rows)?.last,
+      wholeRowsInView(
+        max,
+        { lo: RULER_OFFSET, hi: visibleBottom },
+        rowsOf(rows),
+      )?.last,
     ).toBe(rows - 1);
+  });
+
+  it("is the old pitch division wherever the rows are all the default height", () => {
+    // The formula this replaced, copied here as an oracle that shares no code
+    // with the subject.
+    const old = (v: number, b: Band, n: number, top: number) => {
+      const first = Math.max(0, Math.ceil((b.lo - top + v) / TRACK_PITCH));
+      const last = Math.min(
+        n - 1,
+        Math.floor((b.hi - TRACK_HEIGHT - top + v) / TRACK_PITCH),
+      );
+      return first <= last ? { first, last } : null;
+    };
+    const bands: Band[] = [
+      { lo: RULER_OFFSET, hi: RULER_OFFSET + 400 },
+      { lo: RULER_OFFSET, hi: 235.9 },
+      { lo: 0, hi: 30 },
+      { lo: 12.5, hi: 190.25 },
+    ];
+    let checked = 0;
+    for (const n of [0, 1, 2, 5, 30]) {
+      const stack = rowsOf(n);
+      for (const top of [0, RULER_OFFSET]) {
+        for (const b of bands) {
+          for (let v = 0; v <= 40 * TRACK_PITCH; v += 1.75) {
+            expect(wholeRowsInView(v, b, stack, top)).toEqual(old(v, b, n, top));
+            checked++;
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(10_000);
+  });
+
+  it("disagrees with the old division below a resized row", () => {
+    // Proves the sweep can fail. Row 1 at 120: by the fixed pitch rows 0 to 3
+    // fit the band, but row 3 now ends 80px lower and does not.
+    const stack = rowsOf(30, { r1: 120 });
+    expect(wholeRowsInView(0, band, stack)).toEqual({ first: 0, last: 1 });
+    expect(wholeRowsInView(0, band, rowsOf(30))).toEqual({ first: 0, last: 3 });
+  });
+
+  it("measures each row by its own height", () => {
+    // A 200px row is only wholly in view once all of it is.
+    const tall = rowsOf(3, { r1: 200 });
+    const tight: Band = { lo: RULER_OFFSET, hi: RULER_OFFSET + 240 };
+    expect(wholeRowsInView(0, tight, tall)).toEqual({ first: 0, last: 0 });
+    expect(wholeRowsInView(TRACK_PITCH, tight, tall)).toEqual({
+      first: 1,
+      last: 1,
+    });
+  });
+});
+
+describe("maxVerticalScroll with resized rows", () => {
+  it("keeps the last row's bottom one gap above the visible bottom", () => {
+    const doc = normalizeDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: Array.from({ length: 6 }, (_, i) =>
+        createTrack(`r${i}`, "video", i),
+      ),
+      elements: {},
+    });
+    const heights = { r2: 150, r5: 32 };
+    const visibleBottom = 260;
+    const total = layoutTimeline({
+      doc,
+      range: 0.9,
+      hScroll: 0,
+      vScroll: 0,
+      viewportW: 800,
+      viewportH: 600,
+      heights,
+    }).totalHeight;
+    const max = maxVerticalScroll(total, visibleBottom);
+    const at = layoutTimeline({
+      doc,
+      range: 0.9,
+      hScroll: 0,
+      vScroll: max,
+      viewportW: 800,
+      viewportH: 600,
+      heights,
+    });
+    const last = at.rows[at.rows.length - 1];
+    expect(last.height).toBe(32);
+    expect(last.top + last.height).toBe(visibleBottom - TRACK_GAP);
   });
 });
 

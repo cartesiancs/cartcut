@@ -24,6 +24,21 @@ import {
 export type ExtraEntries = Record<string, string>;
 
 /**
+ * The optional entries a project carries beyond the five, as read from one
+ * archive and handed to whatever adopts it. `null` where the archive has none.
+ *
+ * Read by the caller rather than here because the entry names live with their
+ * owners, and `features/extension/imports.test.ts` keeps the list of files that
+ * may reach into the extension subsystem short on purpose.
+ */
+export type ProjectExtras = {
+  /** `extensions.json`. */
+  extensions: string | null;
+  /** `timelineView.json`: how tall each row is. */
+  timelineView: string | null;
+};
+
+/**
  * Pull the five entries out of an opened archive.
  *
  * Takes the `JSZip` rather than the bytes so a caller that needs a sixth entry

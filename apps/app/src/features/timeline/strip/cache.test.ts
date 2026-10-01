@@ -122,3 +122,70 @@ describe("createTileCache", () => {
     expect(() => cache.set("b", {})).not.toThrow();
   });
 });
+
+describe("createTileCache with a weight budget", () => {
+  type Sized = { area: number; close: () => void };
+  const sized = (area: number) => ({ area, close: vi.fn() });
+  const make = (maxWeight: number, maxTiles = 100) =>
+    createTileCache<Sized>({
+      maxTiles,
+      weigh: (value) => value.area,
+      maxWeight,
+    });
+
+  it("evicts the oldest until what is held fits the budget", () => {
+    const cache = make(100);
+    const a = sized(40);
+    cache.set("a", a);
+    cache.set("b", sized(40));
+    cache.set("c", sized(40));
+    expect(cache.has("a")).toBe(false);
+    expect(a.close).toHaveBeenCalled();
+    expect(cache.has("b")).toBe(true);
+    expect(cache.has("c")).toBe(true);
+  });
+
+  it("still counts tiles, whichever limit binds first", () => {
+    const cache = make(1_000_000, 2);
+    cache.set("a", sized(1));
+    cache.set("b", sized(1));
+    cache.set("c", sized(1));
+    expect(cache.size).toBe(2);
+  });
+
+  it("keeps a single value heavier than the whole budget, so it still draws", () => {
+    const cache = make(10);
+    cache.set("a", sized(5));
+    cache.set("big", sized(500));
+    expect(cache.has("a")).toBe(false);
+    expect(cache.has("big")).toBe(true);
+  });
+
+  it("gives the weight back when a value leaves, however it leaves", () => {
+    const cache = make(100);
+    cache.set("/a.mp4|0|40", sized(60));
+    cache.invalidatePath("/a.mp4");
+    cache.set("x", sized(60));
+    cache.set("y", sized(30));
+    // 90 is under budget only if the invalidated 60 was given back.
+    expect(cache.has("x")).toBe(true);
+    expect(cache.has("y")).toBe(true);
+
+    cache.set("x", sized(10)); // replaced: 60 out, 10 in
+    cache.set("z", sized(60));
+    expect(cache.size).toBe(3);
+
+    cache.clear();
+    cache.set("w", sized(100));
+    expect(cache.has("w")).toBe(true);
+    expect(cache.size).toBe(1);
+  });
+
+  it("is the count-only cache when nothing is weighed", () => {
+    // The other users of `createTileCache` pass only `maxTiles`.
+    const cache = createTileCache<Sized>({ maxTiles: 3, maxWeight: 1 });
+    cache.set("a", sized(1000));
+    cache.set("b", sized(1000));
+    expect(cache.size).toBe(2);
+  });
+});

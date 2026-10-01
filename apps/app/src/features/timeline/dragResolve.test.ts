@@ -28,7 +28,7 @@ import {
 } from "./geometry";
 import { frameToMs, framePx, isFrameAligned, msToFrame } from "./frames";
 import { moveClips, splitClip, trimClipEnd, trimClipStart } from "./clipOps";
-import { TRACK_PITCH } from "./layout";
+import { TRACK_GAP, TRACK_PITCH, rowStack } from "./layout";
 import { MAX_RANGE } from "./zoom";
 
 const FPS = 60;
@@ -70,7 +70,7 @@ function move(base: TimelineDocument, over: Record<string, any> = {}) {
     range: ZOOMED,
     fps: FPS,
     playheadMs: -1_000_000, // parked far away unless a test wants it
-    trackPitch: TRACK_PITCH,
+    stack: rowStack(base.tracks),
     ...over,
   });
 }
@@ -213,6 +213,50 @@ describe("resolveMove, rows kept in view", () => {
       rows: { first: 4, last: 7 },
     });
     expect(plan).toMatchObject({ kind: "move", trackDelta: 0 });
+  });
+});
+
+describe("resolveMove, rows of different heights", () => {
+  // v1 at 40, v2 resized to 120, a1 at 40. The clip starts on v1.
+  const heights = { v2: 120 };
+
+  it("lands on the row the carried clip is over, not on a count of pitches", () => {
+    const base = doc({ a: alignedClip(60, 120) });
+    const stack = rowStack(base.tracks, heights);
+    // Two default pitches down is still inside the tall v2: by the fixed
+    // pitch this would have been a1, two rows away.
+    const plan = move(base, { dyPx: 2 * TRACK_PITCH, free: true, stack });
+    expect(plan).toMatchObject({ kind: "move", trackDelta: 1 });
+    // Past v2's band (it ends at 44 + 120 + GAP/2) the clip reaches a1. The
+    // move itself is declined further down the line by kind, which is not
+    // this function's business: the delta is what is under test.
+    const deep = move(base, {
+      dyPx: 44 + 120 + TRACK_GAP / 2 - 20,
+      free: true,
+      stack,
+    });
+    expect(deep).toMatchObject({ kind: "move", trackDelta: 2 });
+  });
+
+  it("declines a carry that ends on the row it began on", () => {
+    const base = doc({ a: alignedClip(60, 120, { trackId: "v2" }) });
+    const stack = rowStack(base.tracks, heights);
+    // 50px down from the centre of a 120px row is still that row, where the
+    // fixed pitch would have counted one row.
+    const plan = move(base, { dxPx: 0, dyPx: 50, free: true, stack });
+    expect(plan.kind).toBe("none");
+  });
+
+  it("still keeps the rows clamp", () => {
+    const base = doc({ a: alignedClip(60, 120) });
+    const stack = rowStack(base.tracks, heights);
+    const plan = move(base, {
+      dyPx: 10 * TRACK_PITCH,
+      free: true,
+      stack,
+      rows: { first: 0, last: 1 },
+    });
+    expect(plan).toMatchObject({ kind: "move", trackDelta: 1 });
   });
 });
 
@@ -573,7 +617,7 @@ describe("resolveMove — snapping composes with quantization", () => {
       range: ZOOMED,
       fps: FPS,
       playheadMs: -1_000_000,
-      trackPitch: TRACK_PITCH,
+      stack: rowStack(displaced.tracks),
     });
     expect(plan.kind).toBe("move");
     if (plan.kind !== "move") return;

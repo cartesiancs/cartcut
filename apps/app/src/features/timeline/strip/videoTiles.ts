@@ -23,6 +23,13 @@ import type { TileProvider, TileRequest } from "./provider";
 
 /** Roughly a few screens' worth of 40px tiles. */
 const MAX_TILES = 400;
+/**
+ * The same memory as `MAX_TILES` tiles at the 80px decode rung of a 16:9
+ * source, about 18MB of bitmaps. The count still binds for default-height rows;
+ * this is what binds for tall ones, where a tile is up to 25 times the area of
+ * a default row's and 400 of them would hold over 100MB.
+ */
+const MAX_TILE_PIXELS = 400 * 80 * 142;
 /** Beyond this, the oldest pending requests are dropped unrendered. */
 const MAX_PENDING = 24;
 /**
@@ -60,6 +67,14 @@ function withDeadline<T>(work: Promise<T>, ms: number, label: string): Promise<T
 
 type CachedTile = CanvasImageSource & Disposable;
 
+/** A tile's area in pixels. Both kinds this file makes have numeric sizes. */
+function tileArea(tile: CachedTile): number {
+  const { width, height } = tile as { width?: unknown; height?: unknown };
+  return typeof width === "number" && typeof height === "number"
+    ? width * height
+    : 0;
+}
+
 /** Mirrors `loadedAssetStore.getPath` so web mode resolves the same way. */
 function resolvePath(localpath: string): string {
   return getLocationEnv() === "electron"
@@ -85,7 +100,11 @@ export type VideoTileProvider = TileProvider & {
 };
 
 export function createVideoTileProvider(): VideoTileProvider {
-  const cache = createTileCache<CachedTile>({ maxTiles: MAX_TILES });
+  const cache = createTileCache<CachedTile>({
+    maxTiles: MAX_TILES,
+    weigh: tileArea,
+    maxWeight: MAX_TILE_PIXELS,
+  });
   const videos = new Map<string, HTMLVideoElement>();
   const pending: TileRequest[] = [];
   const queued = new Set<string>();

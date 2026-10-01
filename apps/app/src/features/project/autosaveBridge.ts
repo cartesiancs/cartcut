@@ -24,6 +24,10 @@
  */
 
 import { extensionsExtraEntries } from "../extension/projectDataStore";
+import {
+  timelineViewExtraEntries,
+  trackHeightStore,
+} from "../../states/trackHeightStore";
 import { v4 as uuidv4 } from "uuid";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { useTimelineStore } from "../../states/timelineStore";
@@ -187,6 +191,12 @@ function realSource(): { snapshot: () => AutosaveSnapshot | null } {
             1,
         });
 
+        // Taken now, beside `entries` and the digest, rather than inside the
+        // lazy `bytes()`: the rows can be resized between the snapshot and the
+        // write, and an archive whose heights differ from the digest it was
+        // filed under would be recorded as holding a state it does not.
+        const timelineView = timelineViewExtraEntries(state.tracks);
+
         return {
           digest: currentProjectDigest(),
           baseline: projectBaseline(),
@@ -199,6 +209,9 @@ function realSource(): { snapshot: () => AutosaveSnapshot | null } {
               // recovered autosave brings it back too. Absent when no
               // extension has stored anything.
               ...extensionsExtraEntries(),
+              // How tall each resized row is. Absent when every row is at the
+              // default height.
+              ...timelineView,
               // The sixth entry. `project.load` reads five *named* entries and
               // ignores the rest, so this does not move `SCHEMA_VERSION`, and
               // it never appears in a user-saved `.ngt`. It exists so each
@@ -289,9 +302,24 @@ export function installAutosave(): () => void {
     live.noteChange();
   });
 
+  // Row heights are saved with the project, so a resize is a change. Gated on
+  // the kept `heights` only: `live` moves on every pixel of a drag and is not
+  // in the file until the drag ends, and a resize that ended where it began
+  // leaves `heights` by identity.
+  let lastHeights = trackHeightStore.getState().heights;
+  const offHeights = trackHeightStore.subscribe((state) => {
+    if (state.heights === lastHeights) {
+      return;
+    }
+    lastHeights = state.heights;
+    perfCount("autosave.noteChange");
+    live.noteChange();
+  });
+
   return () => {
     offTimeline();
     offOptions();
+    offHeights();
     live.stop();
     session = null;
   };

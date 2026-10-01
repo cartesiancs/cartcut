@@ -234,7 +234,13 @@ Things that bite:
 
 A `.ngt` is a zip of five JSON entries, read and written entirely in the renderer
 by `functions/project.ts`: `project.json`, `timeline.json`, `tracks.json`,
-`renderOptions.json`, `assetPaths.json`.
+`renderOptions.json`, `assetPaths.json`. Two optional entries ride beside them
+and are absent when empty, so neither moves `SCHEMA_VERSION`: `extensions.json`
+(see Extensions) and `timelineView.json`, the height of every resized timeline
+row. Row heights are view state (`timeline/trackHeights.ts`): keyed by track id
+in `trackHeightStore`, never in `TimelineDocument`, so they are saved and make
+the project dirty but are never undone, and the caption lock does not stop a
+resize. Anything asking where a row is goes through `layout.ts#rowStack`.
 
 > **The in-memory `TimelineDocument` is always absolute.** A relative path
 > exists only inside the archive.
