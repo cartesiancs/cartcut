@@ -5,15 +5,28 @@
  * drops it at the playhead — the panel's original and most-used behaviour.
  * Dragging one onto the timeline says *where* and *on which track*, which is
  * the whole point of having tracks. Native HTML5 drag begins on the first few
- * pixels of movement, so wiring `draggable="true"` unconditionally makes the
- * panel hostile to scroll and turns every imprecise click into a drag.
+ * pixels of movement, which is what decides the two for a mouse and what makes
+ * a permanently `draggable` tile hostile to scrolling by touch.
  *
- * Time separates them, the same way `timeline/dragMachine.ts` separates sliding
- * a clip from lifting it — and with the same constants, deliberately: holding
- * to pick something up should feel identical in both halves of the editor.
- * Hold still and the tile arms, at which point `draggable` goes on and the
- * browser's own drag can start. Move first and the gesture is neither: it is
- * the panel being scrolled, and it must not leave a clip behind.
+ * A mouse needs nothing more than the browser's own threshold. Chromium starts
+ * a native drag only once the pointer has travelled more than 4px, the same
+ * tolerance the hold below uses to tell a click from a move, so arming on the
+ * press itself costs a click nothing: down and up on the spot is still "add
+ * this", and a press that sets off is a drag at once. Making the hold a
+ * requirement there was what made dragging an asset to the timeline feel
+ * broken: a press that moved straight away was thrown out as a scroll.
+ *
+ * Except that the browser's 4px are *device* pixels: on a 2x display a native
+ * drag starts after 2 CSS px, which a click that slips on a trackpad easily
+ * covers. So a drag that ends with no drop, never having travelled further
+ * than the hold's own tolerance, is the click it was meant to be (`dragend`).
+ *
+ * Every other pointer keeps the hold. A finger pressed on the panel and moved
+ * is scrolling it, so time separates the two there, the same way
+ * `timeline/dragMachine.ts` separates sliding a clip from lifting it and with
+ * the same constants. Hold still and the tile arms, at which point `draggable`
+ * goes on and the browser's own drag can start. Move first and the gesture is
+ * neither: it is the panel being scrolled, and it must not leave a clip behind.
  *
  * As a reducer with an injected clock, the boundaries are testable — 219ms
  * versus 220ms, 4px versus 5px. None of that is observable once it is tangled
@@ -54,14 +67,32 @@ export const idlePress: PressState = {
 };
 
 export type PressEv =
-  | { type: "down"; x: number; y: number; t: number }
+  | {
+      type: "down";
+      x: number;
+      y: number;
+      t: number;
+      /**
+       * Arm on the press, without waiting out the hold. For a mouse, whose
+       * press-and-move means "drag" and never "scroll". Absent means the hold
+       * applies, so a `down` that predates this flag behaves as it always did.
+       */
+      immediate?: boolean;
+    }
   | { type: "move"; x: number; y: number; t: number }
   /** A clock pulse, so the hold can complete without any pointer motion. */
   | { type: "tick"; t: number }
   | { type: "up"; t: number }
   /** The browser began a native drag. Only it knows when that happened. */
   | { type: "dragstart" }
-  /** `dragend`, `pointercancel`, the element going away. */
+  /**
+   * The native drag finished.
+   *
+   * `dropped` is whether a target took it (`dropEffect` other than "none").
+   * `travelPx` is the furthest the pointer got from the press, in CSS px.
+   */
+  | { type: "dragend"; dropped: boolean; travelPx: number }
+  /** `pointercancel`. */
   | { type: "cancel" };
 
 export type PressEffect =
@@ -79,10 +110,14 @@ export function reducePress(
 ): { state: PressState; effects: PressEffect[] } {
   switch (ev.type) {
     case "down": {
-      return {
-        state: { phase: "pressed", origin: { x: ev.x, y: ev.y }, downT: ev.t },
-        effects: [],
-      };
+      const base = { origin: { x: ev.x, y: ev.y }, downT: ev.t };
+      if (ev.immediate === true) {
+        return {
+          state: { ...base, phase: "armed" },
+          effects: [{ type: "arm" }],
+        };
+      }
+      return { state: { ...base, phase: "pressed" }, effects: [] };
     }
 
     case "move": {
@@ -149,12 +184,30 @@ export function reducePress(
       return { state, effects: [] };
     }
 
-    case "cancel": {
+    case "dragend": {
       if (state.phase === "idle") {
         return { state, effects: [] };
       }
-      // `dragend` lands here. The drop target already placed the asset where
-      // the user aimed; adding a second copy at the playhead would be wrong.
+      // Dropped somewhere, or carried off and let go: the drop target already
+      // placed the asset where the user aimed, and a second copy at the
+      // playhead would be wrong. Neither, and no further than a click may
+      // shake, it was a click that the browser's threshold mistook for a drag.
+      const click = !ev.dropped && ev.travelPx <= cfg.MOVE_CANCEL_PX;
+      return {
+        state: idlePress,
+        effects: click
+          ? [{ type: "disarm" }, { type: "open" }]
+          : [{ type: "disarm" }],
+      };
+    }
+
+    case "cancel": {
+      // Chromium sends `pointercancel` the moment it starts a native drag, as
+      // the spec says to. That is the drag taking the pointer over, not the
+      // gesture ending, and `dragend` is what will end it.
+      if (state.phase === "idle" || state.phase === "dragging") {
+        return { state, effects: [] };
+      }
       return { state: idlePress, effects: [{ type: "disarm" }] };
     }
   }

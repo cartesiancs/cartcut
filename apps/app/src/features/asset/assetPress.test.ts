@@ -29,7 +29,9 @@ describe("reducePress", () => {
     expect(DRAG.MOVE_CANCEL_PX).toBe(4);
   });
 
-  it("starts undecided on pointerdown", () => {
+  // Every `down` below this point is a touch or pen press, which still waits
+  // out the hold; a mouse press has its own block at the end.
+  it("starts undecided on a press that is not a mouse's", () => {
     const { state, effects } = run([down(1000)]);
 
     expect(state.phase).toBe("pressed");
@@ -190,6 +192,7 @@ describe("reducePress", () => {
         { type: "tick", t: 220 },
         { type: "dragstart" },
         { type: "cancel" },
+        { type: "dragend", dropped: true, travelPx: 300 },
       ]);
 
       expect(state).toEqual(idlePress);
@@ -271,6 +274,17 @@ describe("reducePress", () => {
       expect(state).toBe(idlePress);
       expect(effects).toEqual([]);
     });
+
+    it("ignores a dragend with no press behind it", () => {
+      const next = reducePress(idlePress, {
+        type: "dragend",
+        dropped: false,
+        travelPx: 0,
+      });
+
+      expect(next.state).toBe(idlePress);
+      expect(next.effects).toEqual([]);
+    });
   });
 
   describe("reporting no change by identity", () => {
@@ -335,6 +349,7 @@ describe("reducePress", () => {
         { type: "tick", t: 220 },
         { type: "dragstart" },
         { type: "cancel" },
+        { type: "dragend", dropped: true, travelPx: 300 },
       ]);
 
       expect(state).toEqual(idlePress);
@@ -358,6 +373,117 @@ describe("reducePress", () => {
 
       expect(state).toEqual(idlePress);
       expect(effects).toEqual(["open"]);
+    });
+  });
+
+  describe("a mouse press", () => {
+    const mouseDown = (t = 0, x = 100, y = 100): PressEv => ({
+      type: "down",
+      x,
+      y,
+      t,
+      immediate: true,
+    });
+
+    it("is armed on the press, with no hold to wait out", () => {
+      const { state, effects } = run([mouseDown(1000)]);
+
+      expect(state.phase).toBe("armed");
+      expect(state.origin).toEqual({ x: 100, y: 100 });
+      expect(state.downT).toBe(1000);
+      expect(effects).toEqual(["arm"]);
+    });
+
+    it("drags when the browser starts one straight away", () => {
+      // The gesture this exists for: press and go, well inside the hold.
+      const { state } = run([
+        mouseDown(0),
+        { type: "move", x: 140, y: 100, t: 30 },
+        { type: "dragstart" },
+      ]);
+
+      expect(state.phase).toBe("dragging");
+    });
+
+    it("is not thrown out as a scroll by moving early", () => {
+      // The same move that ends a touch press. Here the browser decides, by
+      // starting a drag or not, so the reducer must not get there first.
+      const { state, effects } = run([
+        mouseDown(0),
+        { type: "move", x: 100, y: 300, t: 50 },
+      ]);
+
+      expect(state.phase).toBe("armed");
+      expect(effects).toEqual(["arm"]);
+    });
+
+    it("is still a click when released on the spot, however fast", () => {
+      const { state, effects } = run([mouseDown(0), { type: "up", t: 40 }]);
+
+      expect(state).toEqual(idlePress);
+      expect(effects).toEqual(["arm", "disarm", "open"]);
+    });
+
+    it("adds nothing at the playhead after a drag, wherever it ended", () => {
+      const dropped = run([
+        mouseDown(0),
+        { type: "dragstart" },
+        { type: "cancel" },
+        { type: "dragend", dropped: true, travelPx: 2 },
+      ]);
+      expect(dropped.effects).not.toContain("open");
+      expect(dropped.state).toEqual(idlePress);
+
+      // Carried away and let go over nothing: a change of mind, not a click.
+      const abandoned = run([
+        mouseDown(0),
+        { type: "dragstart" },
+        { type: "dragend", dropped: false, travelPx: 67 },
+      ]);
+      expect(abandoned.effects).not.toContain("open");
+      expect(abandoned.state).toEqual(idlePress);
+    });
+
+    // On a 2x display Chromium starts a native drag after 2 CSS px, so a click
+    // that slips on the trackpad arrives as a drag that went nowhere.
+    it("is a click when the browser's drag never went further than a click may shake", () => {
+      const { state, effects } = run([
+        mouseDown(0),
+        { type: "dragstart" },
+        { type: "cancel" },
+        { type: "dragend", dropped: false, travelPx: 3.2 },
+      ]);
+
+      expect(state).toEqual(idlePress);
+      expect(effects).toEqual(["arm", "disarm", "open"]);
+    });
+
+    it("draws that line where the hold's own tolerance is, 4px versus 5px", () => {
+      const at = (travelPx: number) =>
+        run([
+          mouseDown(0),
+          { type: "dragstart" },
+          { type: "dragend", dropped: false, travelPx },
+        ]).effects;
+
+      expect(at(DRAG.MOVE_CANCEL_PX)).toContain("open");
+      expect(at(DRAG.MOVE_CANCEL_PX + 1)).not.toContain("open");
+    });
+
+    it("keeps the drag when the browser cancels the pointer to start it", () => {
+      const dragging = run([mouseDown(0), { type: "dragstart" }]).state;
+      const next = reducePress(dragging, { type: "cancel" });
+
+      expect(next.state).toBe(dragging);
+      expect(next.effects).toEqual([]);
+    });
+
+    it("ignores the hold's clock, which has nothing left to arm", () => {
+      const armed = reducePress(idlePress, mouseDown(0)).state;
+      const next = reducePress(armed, { type: "tick", t: 500 });
+
+      expect(next.state).toBe(armed);
+      expect(next.effects).toEqual([]);
     });
   });
 });

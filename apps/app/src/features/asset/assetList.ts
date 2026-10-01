@@ -186,12 +186,15 @@ export class AssetFile extends LitElement {
   /**
    * Click or drag, decided by `assetPress.ts`.
    *
-   * `draggable` stays off until the hold completes. Left on permanently — which
-   * is how this started — the panel cannot be scrolled by dragging it, and
-   * every slightly imprecise click becomes a drag.
+   * `draggable` goes on at a mouse press, and only after the hold for touch.
+   * Left on permanently, which is how this started, a finger could not scroll
+   * the panel by dragging it. Off between presses either way, so nothing but a
+   * press on this tile can start a drag from it.
    */
   private press: PressState = idlePress;
   private holdTimer = 0;
+  /** The furthest a native drag from this tile has got from the press, in CSS px. */
+  private dragTravel = 0;
 
   /** Resting on the tile, decided by `assetHover.ts`. */
   private hover: HoverState = idleHover;
@@ -211,7 +214,8 @@ export class AssetFile extends LitElement {
     this.addEventListener("pointerup", this.handlePointerUp);
     this.addEventListener("pointercancel", this.handleGestureEnd);
     this.addEventListener("dragstart", this.handleDragStart);
-    this.addEventListener("dragend", this.handleGestureEnd);
+    this.addEventListener("drag", this.handleDrag);
+    this.addEventListener("dragend", this.handleDragEnd);
     // Neither bubbles, so they go on the tile itself rather than on the grid.
     this.addEventListener("pointerenter", this.handlePointerEnter);
     this.addEventListener("pointerleave", this.handlePointerLeave);
@@ -494,11 +498,20 @@ export class AssetFile extends LitElement {
     // browser would begin one and visibly cancel it. Every press starts clean.
     this.removeAttribute("draggable");
 
-    this.dispatch({ type: "down", x: e.clientX, y: e.clientY, t: e.timeStamp });
+    this.dispatch({
+      type: "down",
+      x: e.clientX,
+      y: e.clientY,
+      t: e.timeStamp,
+      immediate: e.pointerType === "mouse",
+    });
 
     // The hold has to be able to complete with the pointer perfectly still, so
-    // it cannot wait on a move event.
+    // it cannot wait on a move event. A mouse press is armed already.
     this.clearHold();
+    if (this.press.phase !== "pressed") {
+      return;
+    }
     this.holdTimer = window.setTimeout(() => {
       this.holdTimer = 0;
       this.dispatch({ type: "tick", t: e.timeStamp + DRAG.LONG_PRESS_MS });
@@ -530,15 +543,16 @@ export class AssetFile extends LitElement {
   private handleDragStart = (e: DragEvent) => {
     this.dispatchHover({ type: "cancel" });
 
-    // The gate. `draggable` is only set once the hold completes, but Chromium
-    // can still begin a drag on the same frame the attribute lands, so refusing
-    // here is what actually guarantees a short press never drags.
+    // The gate. For touch, `draggable` is only set once the hold completes, but
+    // Chromium can still begin a drag on the same frame the attribute lands, so
+    // refusing here is what actually guarantees a short touch never drags.
     this.dispatch({ type: "dragstart" });
 
     if (this.press.phase !== "dragging" || !e.dataTransfer) {
       e.preventDefault();
       return;
     }
+    this.dragTravel = 0;
 
     // A custom type so the timeline can tell an asset from an OS file drop,
     // which `asset-upload-drop` handles differently.
@@ -555,6 +569,38 @@ export class AssetFile extends LitElement {
         preview.height / 2,
       );
     }
+  };
+
+  /**
+   * Note how far the drag has got. `drag` fires on the source throughout,
+   * with the pointer's position; a sample at (0, 0) is the one Chromium sends
+   * as a drag ends, not a place the pointer went.
+   */
+  private noteDragTravel(e: DragEvent) {
+    if (this.press.phase !== "dragging" || (e.clientX === 0 && e.clientY === 0)) {
+      return;
+    }
+    const { x, y } = this.press.origin;
+    this.dragTravel = Math.max(
+      this.dragTravel,
+      Math.hypot(e.clientX - x, e.clientY - y),
+    );
+  }
+
+  private handleDrag = (e: DragEvent) => {
+    this.noteDragTravel(e);
+  };
+
+  private handleDragEnd = (e: DragEvent) => {
+    this.noteDragTravel(e);
+    this.dispatch({
+      type: "dragend",
+      // No `dataTransfer` to ask is read as dropped, so the doubt never adds
+      // a clip nobody asked for.
+      dropped: e.dataTransfer == null || e.dataTransfer.dropEffect !== "none",
+      travelPx: this.dragTravel,
+    });
+    this.dispatchHover({ type: "cancel" });
   };
 
   private handleOpen() {
