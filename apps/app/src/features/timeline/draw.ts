@@ -47,6 +47,7 @@ import {
   levelPoints,
   levelPolyline,
 } from "./levelLine";
+import { liftScale } from "./liftPulse";
 
 export type ThemeColors = {
   background: string;
@@ -186,6 +187,12 @@ export type DrawOptions = {
    * gets the id, which is at least true.
    */
   labelOf?: (element: TimelineElement) => string;
+  /**
+   * Clips drawn pressed in, and how far: the pulse a hold gives when it frees
+   * a clip from its track. See `liftPulse.ts`. Absent, or an inset of zero,
+   * draws every clip exactly as it was before the pulse existed.
+   */
+  lift?: { ids: ReadonlySet<string>; insetPx: number } | null;
 };
 
 /**
@@ -893,6 +900,20 @@ export function drawTimeline(
     if (element == null) {
       continue;
     }
+    // A transform over the rect, not a smaller rect: see `liftPulse.ts`. The
+    // row behind is already painted, so the gap the press opens shows it.
+    const lift = opts.lift;
+    const lifted =
+      lift != null && lift.insetPx !== 0 && lift.ids.has(rect.elementId);
+    if (lifted) {
+      const { sx, sy } = liftScale(rect.w, rect.h, lift.insetPx);
+      const cx = rect.x + rect.w / 2;
+      const cy = rect.y + rect.h / 2;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(sx, sy);
+      ctx.translate(-cx, -cy);
+    }
     drawClip(ctx, rect, element, {
       selected: selection.has(rect.elementId),
       provider,
@@ -908,6 +929,9 @@ export function drawTimeline(
       labelOf: opts.labelOf,
       dimmed: element.trackHidden === true,
     });
+    if (lifted) {
+      ctx.restore();
+    }
   }
 
   // Cuts first, so a badge drawn next to one covers the hint rather than the

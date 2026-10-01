@@ -1637,3 +1637,60 @@ describe("a clip on a hidden row", () => {
     expect(pixel(canvas, rect.x + rect.w / 2, rect.y)).toMatchObject(RING);
   });
 });
+
+describe("a clip pressed in by the hold", () => {
+  const RED = { r: 255, g: 0, b: 0 };
+  const ROW = rgbOf(defaultColors.row);
+
+  const twoClips = () =>
+    doc({
+      a: imageElement({
+        trackId: "v1",
+        startTime: 1000,
+        duration: 4000,
+        timelineOptions: { color: "#ff0000" },
+      }),
+      b: imageElement({
+        trackId: "v2",
+        startTime: 1000,
+        duration: 4000,
+        timelineOptions: { color: "#ff0000" },
+      }),
+    });
+
+  const rectOf = (layout: ReturnType<typeof paint>["layout"], id: string) =>
+    layout.clips.find((clip) => clip.elementId === id)!;
+
+  it("opens a gap at its edge that shows the row, and only on that clip", () => {
+    const { canvas, layout } = paint(twoClips(), {
+      lift: { ids: new Set(["a"]), insetPx: 3 },
+    });
+
+    const a = rectOf(layout, "a");
+    const b = rectOf(layout, "b");
+    const mid = (r: typeof a) => r.x + r.w / 2;
+
+    // One pixel in from the rect's edge: the inset is three, and the pixel
+    // beside the new edge carries a trace of its hairline's anti-aliasing.
+    expect(pixel(canvas, mid(a), a.y + 1)).toMatchObject(ROW);
+    expect(pixel(canvas, a.x + 1, a.y + a.h / 2)).toMatchObject(ROW);
+    expect(pixel(canvas, mid(a), a.y + a.h / 2)).toMatchObject(RED);
+
+    expect(pixel(canvas, mid(b), b.y + 1)).toMatchObject(RED);
+  });
+
+  it("draws exactly as before with no lift, which is what the gap is measured against", () => {
+    const { canvas, layout } = paint(twoClips());
+    const a = rectOf(layout, "a");
+    expect(pixel(canvas, a.x + a.w / 2, a.y + 1)).toMatchObject(RED);
+    expect(pixel(canvas, a.x + 1, a.y + a.h / 2)).toMatchObject(RED);
+  });
+
+  it("leaves the transform as it found it for everything drawn after", () => {
+    const { ctx } = paint(twoClips(), {
+      lift: { ids: new Set(["a"]), insetPx: 3 },
+    });
+    const m = ctx.getTransform();
+    expect([m.a, m.b, m.c, m.d, m.e, m.f]).toEqual([1, 0, 0, 1, 0, 0]);
+  });
+});

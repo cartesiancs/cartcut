@@ -102,6 +102,7 @@ import {
   type ScrollPair,
 } from "../timeline/edgeScroll";
 import { windowScheduler } from "../caption/previewLoop";
+import { liftInsetAt } from "../timeline/liftPulse";
 import {
   clipLabel,
   drawDropTarget,
@@ -385,6 +386,14 @@ export class elementTimelineCanvas extends LitElement {
     totalHeight: 0,
   };
   private canvasVerticalScroll = 0;
+
+  /**
+   * The pulse the hold gave the clips it freed, while it plays.
+   *
+   * Left to finish when the gesture ends, Escape included: cutting it at the
+   * release would snap a half-pressed clip back to size in one frame.
+   */
+  private lift: { ids: ReadonlySet<string>; startMs: number } | null = null;
 
   /**
    * Both scrolls as they stood when the press began.
@@ -681,6 +690,11 @@ export class elementTimelineCanvas extends LitElement {
     applySurface(this.canvas, ctx, surfaceSpec(width, height, dpr));
 
     const doc = this.currentDoc();
+    const liftInset =
+      this.lift == null ? null : liftInsetAt(performance.now() - this.lift.startMs);
+    if (liftInset == null) {
+      this.lift = null;
+    }
     this.layout = layoutTimeline({
       doc,
       range: this.timelineRange,
@@ -729,7 +743,17 @@ export class elementTimelineCanvas extends LitElement {
       labelOf: labelForClip,
       provider: this.tiles,
       peaks: this.peaks,
+      lift:
+        this.lift != null && liftInset != null
+          ? { ids: this.lift.ids, insetPx: liftInset }
+          : null,
     });
+
+    // The pulse runs on the paint loop itself: one more frame while it lasts,
+    // and nothing scheduled once it is over.
+    if (this.lift != null) {
+      this.drawCanvas();
+    }
 
     if (this.dropTrackId != null) {
       drawDropTarget(ctx, this.layout, this.dropTrackId, width);
@@ -1525,6 +1549,7 @@ export class elementTimelineCanvas extends LitElement {
         case "armed":
           // The clip is off its track now; showing that immediately is what
           // makes the gesture discoverable without a tooltip.
+          this.startLift();
           this.drawCanvas();
           break;
         default:
@@ -1578,6 +1603,25 @@ export class elementTimelineCanvas extends LitElement {
     }
 
     this.updateEdgeScroll();
+  }
+
+  /**
+   * Press in the clips the hold just freed: the grabbed one and whatever is
+   * selected with it, since all of them move together from here.
+   *
+   * Nothing at all under reduced motion. The cursor's change to `grabbing`
+   * still says the same thing without anything on screen moving.
+   */
+  private startLift() {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return;
+    }
+    const ids = new Set(this.dragIds);
+    const hit = this.dragState.hit;
+    if (hit.kind === "clip") {
+      ids.add(hit.elementId);
+    }
+    this.lift = { ids, startMs: performance.now() };
   }
 
   /** Both scrolls as they stand. */
