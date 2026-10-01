@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { silenceButtonState, type SilenceButtonInput } from "./silenceButton";
+import {
+  SILENCE_CUT_ON_START,
+  silenceButtonState,
+  silenceSummary,
+  type SilenceButtonInput,
+  type SilenceSummaryInput,
+} from "./silenceButton";
 
 const input = (over: Partial<SilenceButtonInput> = {}): SilenceButtonInput => ({
   available: true,
@@ -47,10 +53,11 @@ describe("silenceButtonState", () => {
     expect(state?.label).toContain("3 silent gaps");
   });
 
-  it("offers to take them out again once they are back", () => {
+  it("offers to take them out while they are only marked", () => {
     const state = silenceButtonState(input({ silenceOn: false, gapCount: 3 }));
     expect(state?.action).toBe("on");
     expect(state?.variant).toBe("secondary");
+    expect(state?.label).toBe("Remove the 3 silent gaps");
   });
 
   it("counts one gap in the singular", () => {
@@ -59,7 +66,7 @@ describe("silenceButtonState", () => {
     );
     expect(
       silenceButtonState(input({ gapCount: 1, silenceOn: false }))?.label,
-    ).toContain("1 silent gap again");
+    ).toBe("Remove the 1 silent gap");
   });
 
   // For an icon-only button the tooltip is the only accessible name it has.
@@ -100,5 +107,44 @@ describe("silenceButtonState over several clips", () => {
     expect(silenceButtonState(input({ gapCount: 0 }))?.label).toBe(
       "No silent gaps were found in this clip",
     );
+  });
+});
+
+describe("SILENCE_CUT_ON_START", () => {
+  // Auto-caption adds captions to the timeline as it stands. Cutting footage
+  // is a second decision, made with the button.
+  it("starts a session with the gaps marked, not cut", () => {
+    expect(SILENCE_CUT_ON_START).toBe(false);
+  });
+});
+
+describe("silenceSummary", () => {
+  const summary = (over: Partial<SilenceSummaryInput> = {}) =>
+    silenceSummary({
+      error: null,
+      removedMs: 0,
+      gapCount: 3,
+      gapMs: 2_140,
+      silenceOn: false,
+      ...over,
+    });
+
+  it("says what there is to remove while nothing is removed", () => {
+    expect(summary()).toBe("3 silent gaps, 2.1s.");
+    expect(summary({ gapCount: 1, gapMs: 400 })).toBe("1 silent gap, 0.4s.");
+  });
+
+  it("says what the edit costs once something is cut", () => {
+    expect(summary({ silenceOn: true, removedMs: 2_140 })).toBe("2.1s cut out.");
+    // A struck-out line cuts too, with the gaps still only marked.
+    expect(summary({ removedMs: 900 })).toBe("0.9s cut out.");
+  });
+
+  it("puts a failed sweep first", () => {
+    expect(summary({ error: "No audio", removedMs: 900 })).toBe("No audio");
+  });
+
+  it("says nothing when there is nothing to say", () => {
+    expect(summary({ gapCount: 0, gapMs: 0 })).toBeNull();
   });
 });

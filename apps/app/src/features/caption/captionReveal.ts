@@ -1,9 +1,10 @@
 /**
  * How fast the edit lands.
  *
- * When a transcript comes back the session cuts the silences and places every
- * caption, and doing that in one write would show the user a timeline that was
- * one thing and is now another, with nothing in between to say what happened.
+ * When a transcript comes back the session places every caption (and makes
+ * whatever cuts the panel asked for, which by default is none), and doing that
+ * in one write would show the user a timeline that was one thing and is now
+ * another, with nothing in between to say what happened.
  * So the steps are dealt out from the start of the project forwards, and this
  * module is the only thing that decides when each one is due.
  *

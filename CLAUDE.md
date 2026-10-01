@@ -393,7 +393,10 @@ The handful of facts inside those that are worth stating up front:
   is a *projection* of a held baseline and whatever the panel says
   (`captionProjection.ts`), rebuilt from that baseline on every change and
   written through `previewDocument`, so no intermediate state records an undo
-  step. The silences are swept and cut at once, the captions land one at a time
+  step. The silences are swept at once but **not cut**: they are listed between
+  the lines as empty space (`captionList.ts`) and only the footer's silence
+  button removes them (`silenceButton.ts#SILENCE_CUT_ON_START`), so by default
+  the panel adds captions to the timeline as it stands. The captions land one at a time
   from 0ms forwards (`captionReveal.ts`), and editing a caption's text reaches
   its clip on the next frame. `applyCaptionCommit` stays as the *definition* of
   the finished edit, and the sequence is tested against arriving where it does.

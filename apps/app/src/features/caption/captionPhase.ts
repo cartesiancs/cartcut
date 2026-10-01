@@ -26,9 +26,9 @@ export type CaptionPhase =
   | "transcribing"
   /** One ffmpeg decode, looking for the silent gaps. */
   | "sweeping"
-  /** The cuts and captions are landing on the timeline. */
+  /** The captions are landing on the timeline. */
   | "revealing"
-  /** The caption list, the footer, and a timeline that is already edited. */
+  /** The caption list, the footer, and a timeline that already has the captions. */
   | "live"
   | "failed";
 
@@ -67,7 +67,7 @@ export type CaptionPhaseView = {
 };
 
 const NOTE_SWEEP = "Finding the gaps where nobody is speaking.";
-const NOTE_REVEAL = "Cutting the silences and laying the captions down.";
+const NOTE_REVEAL = "Laying the captions down.";
 
 /**
  * The screen, or null when the phase has none.

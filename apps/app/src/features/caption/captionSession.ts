@@ -60,7 +60,7 @@ import {
   spanOf,
 } from "../timeline/geometry";
 import { overlaps } from "../timeline/overlap";
-import { shiftPoint, unshiftPoint } from "../timeline/rippleMap";
+import { clipsAcrossCuts, shiftPoint, unshiftPoint } from "../timeline/rippleMap";
 import { trackById, type TimelineDocument } from "../timeline/tracks";
 import {
   advanceProjection,
@@ -226,6 +226,30 @@ export class CaptionSession {
   /** The clips that were refused cuts at `start`. See the header. */
   get refusedClips(): readonly CaptionRefusal[] {
     return this.refusals;
+  }
+
+  /**
+   * Clips on other tracks that sit across a cut, and so keep their old timing
+   * while the footage under them closes up.
+   *
+   * Judged against the baseline, which only the session holds: by the time the
+   * store shows the cuts, the stranded clips are already wherever the ripple
+   * left them. Current as soon as `start` or `update` returns, since both
+   * replan synchronously, which is what lets the caller warn the moment the
+   * silence button first makes a cut rather than only at `start`.
+   */
+  get strandedClips(): readonly string[] {
+    const baseline = this.baseline;
+    if (baseline == null) {
+      return [];
+    }
+    const stranded = new Set<string>();
+    for (const [trackId, cuts] of this.cutsByTrack) {
+      for (const id of clipsAcrossCuts(baseline, trackId, cuts)) {
+        stranded.add(id);
+      }
+    }
+    return [...stranded];
   }
 
   /**

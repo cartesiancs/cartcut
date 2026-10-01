@@ -230,6 +230,32 @@ describe("the reveal", () => {
 });
 
 describe("the silence toggle", () => {
+  // What the panel does by default: the gaps are found and listed, and the
+  // session is started with none of them asked for. The captions land on the
+  // timeline as it stands.
+  it("starts with nothing asked for, and leaves the clip exactly as it was", () => {
+    const base = doc();
+    const h = harness(base);
+    const session = new CaptionSession(h.ports);
+    session.start(oneClip(base, []));
+    h.settle(3);
+
+    expect(textClips(h.shown)).toHaveLength(3);
+    expect(pieces(h.shown)).toBe(1);
+    expect(h.shown.elements.clip).toEqual(base.elements.clip);
+    expect(allCuts(session)).toHaveLength(0);
+
+    // The button: the gaps go, and come back as the baseline had them.
+    session.update(change(lines(), true));
+    h.tick(16);
+    expect(pieces(h.shown)).toBe(3);
+
+    session.update(change(lines(), false));
+    h.tick(16);
+    expect(pieces(h.shown)).toBe(1);
+    expect(h.shown.elements.clip).toEqual(base.elements.clip);
+  });
+
   it("puts the footage back, and puts it back the way it was", () => {
     const base = doc();
     const h = harness(base);
@@ -535,6 +561,32 @@ describe("several clips", () => {
 
   const X_CUT = { startMs: 4_000, endMs: 5_000 };
   const Y_CUT = { startMs: 3_000, endMs: 4_000 };
+
+  // Z on v2 runs 5-15s, across Y's cut at 13-14s. The warning used to be
+  // computed at start only, which is before the silence button has cut anything.
+  it("names the clips stranded across a cut, once a cut is asked for", () => {
+    const base = scene();
+    const ls = [...tagged("x"), ...tagged("y")];
+    const { session } = begin(
+      base,
+      [
+        { key: "x", sourceRanges: [] },
+        { key: "y", sourceRanges: [] },
+      ],
+      ls,
+    );
+    expect(session.strandedClips).toEqual([]);
+
+    session.update({
+      lines: ls,
+      placement: "lowerThird",
+      ranges: [{ key: "y", sourceRanges: [Y_CUT] }],
+    });
+    expect(session.strandedClips).toEqual(["z"]);
+
+    session.update({ lines: ls, placement: "lowerThird", ranges: [] });
+    expect(session.strandedClips).toEqual([]);
+  });
 
   it("reveals every clip's captions and cuts", () => {
     const base = scene();

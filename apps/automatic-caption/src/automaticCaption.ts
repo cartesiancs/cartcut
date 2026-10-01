@@ -22,7 +22,16 @@ import {
   type CaptionEditor,
   type CaptionKeyIntent,
 } from "../../app/src/features/caption/editor";
-import { silenceButtonState } from "../../app/src/features/caption/silenceButton";
+import {
+  SILENCE_CUT_ON_START,
+  silenceButtonState,
+  silenceSummary,
+} from "../../app/src/features/caption/silenceButton";
+import {
+  captionListItems,
+  silenceRow,
+  type CaptionListItem,
+} from "../../app/src/features/caption/captionList";
 import {
   captionPlacementButton,
   captionPlacementMenu,
@@ -55,7 +64,6 @@ import {
 import {
   clipFollows,
   clipRanges,
-  clipSections,
   joinClipLines,
   removedTotalOf,
   sweepClips,
@@ -107,8 +115,13 @@ export class AutomaticCaption extends LitElement {
    */
   private _silenceByKey: Record<string, TimeRange[]> = {};
 
-  /** Whether those gaps are currently cut out of the timeline. */
-  private _silenceOn = true;
+  /**
+   * Whether those gaps are currently cut out of the timeline.
+   *
+   * Off until the footer's button says otherwise: a session adds the captions
+   * to the timeline as it stands, and the gaps are only listed.
+   */
+  private _silenceOn = SILENCE_CUT_ON_START;
 
   /** A decode is running. One ffmpeg pass, so a spinner rather than a bar. */
   private _silenceBusy = false;
@@ -618,6 +631,16 @@ export class AutomaticCaption extends LitElement {
     );
   }
 
+  /** What those gaps add up to, in ms. The footer's line while none is cut. */
+  private _silenceGapMs(): number {
+    return removedTotalOf(
+      Object.entries(this._silenceByKey).map(([key, sourceRanges]) => ({
+        key,
+        sourceRanges,
+      })),
+    );
+  }
+
   /**
    * Hand the whole edit to the session, which takes the timeline.
    *
@@ -627,7 +650,7 @@ export class AutomaticCaption extends LitElement {
    * changed.
    */
   private _startSession(): void {
-    this._silenceOn = true;
+    this._silenceOn = SILENCE_CUT_ON_START;
     this.phase = "revealing";
     this.isLoadVideo = false;
     this.requestUpdate();
@@ -836,8 +859,9 @@ export class AutomaticCaption extends LitElement {
   /**
    * Apply.
    *
-   * The captions and the cuts are already on the timeline and have been since
-   * the transcript landed. What this does is make them the user's: the session
+   * The captions are already on the timeline and have been since the
+   * transcript landed, with whatever cuts the user made since (the silence
+   * button, a struck-out line). What this does is make them the user's: the session
    * records one undo step holding exactly what is on screen, gives the timeline
    * back, and the panel returns to its setup screen.
    *
@@ -1123,13 +1147,11 @@ export class AutomaticCaption extends LitElement {
   }
 
   /**
-   * Turn the silence cuts off, or back on.
+   * Cut the silent gaps, or put them back.
    *
-   * A true toggle now, and the reason is that there is nothing left for it to
-   * *start*: the sweep runs as part of the transcription, so by the time anyone
-   * sees this button the gaps are already gone from the timeline. It used to
-   * mean "go and look" the first time and "put them back" afterwards, which is
-   * a control that changes meaning under the user.
+   * The sweep runs as part of the transcription, so by the time anyone sees
+   * this button the gaps are found and listed between the lines, and still on
+   * the timeline. This is the one thing that takes them out.
    *
    * Neither direction undoes anything. `removeRanges` has no inverse; both
    * states are built from the session's baseline, which is why switching the
@@ -1720,6 +1742,42 @@ export class AutomaticCaption extends LitElement {
           white-space: nowrap;
         }
 
+        /* A silent gap: empty space between the lines, drawn as an outline with
+           nothing in it so it reads as room rather than as another caption. */
+        .caption-silence {
+          display: flex;
+          align-items: center;
+          gap: 0.4rem;
+          width: 100%;
+          padding: 0.2rem 0.6rem;
+          border: 1px dashed #3a3a42;
+          border-radius: 10px;
+          background: transparent;
+          color: #8b8b94;
+          font-size: 0.75rem;
+          font-variant-numeric: tabular-nums;
+          text-align: left;
+          cursor: pointer;
+        }
+
+        .caption-silence:hover {
+          border-color: #5a5a64;
+          color: #d8d8de;
+        }
+
+        .caption-silence .material-symbols-outlined {
+          font-size: 1rem;
+        }
+
+        .caption-silence-cut .caption-silence-label {
+          text-decoration: line-through;
+        }
+
+        .caption-silence-cut {
+          opacity: 0.45;
+          border-color: #4a2b2b;
+        }
+
         .caption-phase-clip {
           display: flex;
           align-items: center;
@@ -1942,86 +2000,108 @@ export class AutomaticCaption extends LitElement {
     // were two independent copies of the same three lines.
     const lit = this._activeLines();
 
-    // A header before each clip's lines, once there is more than one clip. A
-    // clip with no speech still gets its header, at the place its lines would
-    // have been, so nothing chosen goes missing without a word.
+    // Headers, lines and the silent gaps between them, in the order they are
+    // drawn. Where each one goes is `caption/captionList.ts`'s decision, where
+    // a test can see it; a clip with no speech still gets its header.
     const leaders = this._clips.filter((clip) => clip.follows == null);
-    const headers = new Map<number, typeof leaders>();
-    if (leaders.length > 1) {
-      const sections = clipSections(
-        this.lines,
-        leaders.map((clip) => clip.key),
-      );
-      sections.forEach((section, order) => {
-        const list = headers.get(section.from) ?? [];
-        list.push(leaders[order]);
-        headers.set(section.from, list);
-      });
-    }
-    const headersAt = (index: number) =>
-      (headers.get(index) ?? []).map((clip) =>
-        this.renderSection(clip, leaders.indexOf(clip) + 1, index),
-      );
+    const items = captionListItems({
+      lines: this.lines,
+      leaders: leaders.map((clip) => clip.key),
+      silenceByKey: this._silenceByKey,
+      silenceOn: this._silenceOn,
+    });
 
     return html`
       <div class="caption-editor-lines">
-        ${this.lines.map(
-          (line, index) =>
-            html`${headersAt(index)}<div
-              class="text-light caption ${line.removed === true
-                ? "caption-cut"
-                : ""}"
-            >
-              <div class="caption-ribbon">
-                ${line.words.map(
-                  (word, wordIndex) =>
-                    html`<span
-                      @click=${() =>
-                        this.clickCaptionText(this._keyOfLine(line), word.start)}
-                      class="${lit.has(index) && lit.get(index) === wordIndex
-                        ? "caption-part active"
-                        : "caption-part"}"
-                      >${word.word}</span
-                    >`,
-                )}
-              </div>
-
-              <div class="d-flex gap-1 mt-1 align-items-start">
-                <button
-                  class="btn btn-sm caption-merge caption-row-more"
-                  title="Line actions"
-                  aria-haspopup="menu"
-                  aria-expanded=${this._menu?.kind === "line" &&
-                  this._menu.index === index
-                    ? "true"
-                    : "false"}
-                  @click=${(e: MouseEvent) =>
-                    this._toggleMenu(e, "line", index)}
-                >
-                  <span class="material-symbols-outlined icon-white"
-                    >more_vert</span
-                  >
-                </button>
-                <textarea
-                  @beforeinput=${(e: InputEvent) =>
-                    this._handleCaptionBeforeInput(e)}
-                  @input=${(e: Event) => this._handleChangeInput(e, index)}
-                  @keydown=${(e: KeyboardEvent) =>
-                    this._handleCaptionKeydown(e, index)}
-                  class="form-control form-control-sm bg-dark text-light caption-text"
-                  rows="1"
-                  id="analyzedEditCaption_${index}"
-                  ?disabled=${line.removed === true}
-                  .value=${line.text}
-                ></textarea>
-              </div>
-            </div>`,
-        )}
-        ${headersAt(this.lines.length)}
+        ${items.map((item) => this.renderListItem(item, leaders, lit))}
       </div>
 
       ${this.renderMenu()}
     `;
+  }
+
+  private renderListItem(
+    item: CaptionListItem,
+    leaders: PanelClip[],
+    lit: Map<number, number | null>,
+  ) {
+    switch (item.kind) {
+      case "section": {
+        const clip = leaders.find((candidate) => candidate.key === item.key);
+        return clip == null ? nothing : this.renderSection(clip, item.number, item.at);
+      }
+      case "silence":
+        return this.renderSilence(item);
+      case "line":
+        return this.renderLine(item.index, lit);
+    }
+  }
+
+  /** One caption: its word chips, its menu and its text. */
+  renderLine(index: number, lit: Map<number, number | null>) {
+    const line = this.lines[index];
+    return html`<div
+      class="text-light caption ${line.removed === true ? "caption-cut" : ""}"
+    >
+      <div class="caption-ribbon">
+        ${line.words.map(
+          (word, wordIndex) =>
+            html`<span
+              @click=${() =>
+                this.clickCaptionText(this._keyOfLine(line), word.start)}
+              class="${lit.has(index) && lit.get(index) === wordIndex
+                ? "caption-part active"
+                : "caption-part"}"
+              >${word.word}</span
+            >`,
+        )}
+      </div>
+
+      <div class="d-flex gap-1 mt-1 align-items-start">
+        <button
+          class="btn btn-sm caption-merge caption-row-more"
+          title="Line actions"
+          aria-haspopup="menu"
+          aria-expanded=${this._menu?.kind === "line" && this._menu.index === index
+            ? "true"
+            : "false"}
+          @click=${(e: MouseEvent) => this._toggleMenu(e, "line", index)}
+        >
+          <span class="material-symbols-outlined icon-white">more_vert</span>
+        </button>
+        <textarea
+          @beforeinput=${(e: InputEvent) => this._handleCaptionBeforeInput(e)}
+          @input=${(e: Event) => this._handleChangeInput(e, index)}
+          @keydown=${(e: KeyboardEvent) => this._handleCaptionKeydown(e, index)}
+          class="form-control form-control-sm bg-dark text-light caption-text"
+          rows="1"
+          id="analyzedEditCaption_${index}"
+          ?disabled=${line.removed === true}
+          .value=${line.text}
+        ></textarea>
+      </div>
+    </div>`;
+  }
+
+  /**
+   * A silent gap, as a row of empty space where it sits in the speech.
+   *
+   * Clicking it puts the playhead at its start, the way a word chip does. It
+   * carries the footer button's glyph, because that button is what removes it;
+   * once it is removed the row stays, struck out, so the list still says what
+   * went.
+   */
+  renderSilence(item: Extract<CaptionListItem, { kind: "silence" }>) {
+    const row = silenceRow(item);
+    return html`<button
+      type="button"
+      class="caption-silence ${item.cut ? "caption-silence-cut" : ""}"
+      title=${row.title}
+      @click=${() => this.clickCaptionText(item.key, item.startMs / 1000)}
+    >
+      <span class="material-symbols-outlined" aria-hidden="true">volume_off</span>
+      <span class="caption-silence-label">${row.label}</span>
+    </button>`;
   }
 
   /**
@@ -2151,12 +2231,11 @@ export class AutomaticCaption extends LitElement {
   }
 
   /**
-   * What the edit has already cost, and the two buttons that act on it.
+   * What the edit costs, and the two buttons that act on it.
    *
-   * The tense changed with the feature. It used to say what Apply *would* do,
-   * because nothing had happened yet; the cuts are on the timeline by the time
-   * anyone reads this, so it says what is currently removed and the toggle
-   * beside it puts it back.
+   * While nothing is cut, the line says what the silence button beside it
+   * would remove; once something is, it says what is removed and the same
+   * button puts the gaps back. `caption/silenceButton.ts` words both.
    *
    * There is no Close button. The window's title bar carries the only one, so
    * there is one way out and it cannot get out of step with the other.
@@ -2171,6 +2250,13 @@ export class AutomaticCaption extends LitElement {
       this._clipRanges().filter((ranges) => !followers.has(ranges.key)),
     );
     const silenceError = this._silenceErrorText();
+    const summary = silenceSummary({
+      error: silenceError,
+      removedMs,
+      gapCount: this._silenceGapCount(),
+      gapMs: this._silenceGapMs(),
+      silenceOn: this._silenceOn,
+    });
 
     // Where the captions sit, as the one glyph the trigger can show. The bar
     // this replaced said it by lighting the selected button.
@@ -2189,15 +2275,12 @@ export class AutomaticCaption extends LitElement {
 
     return html`
       <div class="caption-panel-footer">
-        ${silenceError != null
-          ? html`<span class="caption-summary text-warning"
-              >${silenceError}</span
-            >`
-          : removedMs <= 0
-            ? nothing
-            : html`<span class="caption-summary text-light">
-                ${(removedMs / 1000).toFixed(1)}s cut out.
-              </span>`}
+        ${summary == null
+          ? nothing
+          : html`<span
+              class="caption-summary ${silenceError != null ? "text-warning" : "text-light"}"
+              >${summary}</span
+            >`}
         ${silence == null
           ? nothing
           : html`<button

@@ -38,7 +38,7 @@ import {
 } from "../../features/caption/captionSession";
 import { windowScheduler } from "../../features/caption/previewLoop";
 import type { CaptionPlayheadPort } from "../../features/caption/playheadPort";
-import { clipsAcrossCuts } from "../../features/timeline/rippleMap";
+import { captionWarnings } from "../../features/caption/captionWarnings";
 import { snapMsToFrame } from "../../features/timeline/frames";
 import { ensureUndoBaseline } from "../../features/agent/checkpoint";
 import { v4 as uuidv4 } from "uuid";
@@ -224,9 +224,9 @@ export class Control extends LitElement {
    * the second change `doc.elements[key]` names a *piece* of a clip or nothing
    * at all.
    *
-   * The warnings moved forward with the cuts. They used to fire on Apply,
-   * which was the moment the cuts happened; the cuts happen as soon as a
-   * transcript lands now, so this is that moment.
+   * The warnings follow the cuts. A session starts with none (the silence
+   * button makes them), so they are judged here and again on every change,
+   * and each is said the first time it is true. See `captionWarnings.ts`.
    */
   /**
    * An arrow property, and all four of these have to be.
@@ -262,42 +262,42 @@ export class Control extends LitElement {
       placement: e.detail.placement ?? "lowerThird",
     });
 
-    // The warnings read back what the session decided, because the planning
-    // and the clamping are its job now. They fire here and not on every later
-    // change: each describes something settled once, not a state the user is
-    // going to keep looking at.
-    const covered = this.captionSession.coveredClips.length;
-    if (covered > 0) {
-      this.toastCaption(
-        covered === 1 && clips.length === 1
-          ? "Those silences cover the whole clip, so nothing was cut. The captions were placed."
-          : `The silences cover ${covered} whole clip(s), so those were not cut. Their captions were placed.`,
-      );
-    }
-
-    const refused = this.captionSession.refusedClips.length;
-    if (refused > 0) {
-      this.toastCaption(
-        `${refused} clip(s) overlap another chosen clip or sit on no video or audio track, so they were not cut. Their captions were placed.`,
-      );
-    }
-
-    // The ripple is lane-local, so anything on another row keeps its old timing
-    // and drifts out of sync with the speech. That includes a chosen clip on
-    // another row, which drifts against the clips it was playing with. Said
-    // plainly rather than discovered at playback.
-    const stranded = new Set<string>();
-    for (const [trackId, cuts] of this.captionSession.cutsByTrack) {
-      for (const id of clipsAcrossCuts(doc, trackId, cuts)) {
-        stranded.add(id);
-      }
-    }
-    if (stranded.size > 0) {
-      this.toastCaption(
-        `${stranded.size} clip(s) on other tracks overlap the cuts and were not moved, so they may now be out of sync.`,
-      );
-    }
+    this._shownCaptionWarnings = new Set();
+    this._toastNewCaptionWarnings(clips);
   };
+
+  /** The warning keys this session has already said. Reset at every start. */
+  private _shownCaptionWarnings = new Set<string>();
+
+  /**
+   * Say whatever the session's cuts now call for that has not been said yet.
+   *
+   * Read back from the session, because the planning and the clamping are its
+   * job. Once per key, so a keystroke says nothing and switching the gaps off
+   * and on again does not repeat itself.
+   */
+  private _toastNewCaptionWarnings(
+    ranges: readonly { sourceRanges?: readonly unknown[] }[],
+  ) {
+    const session = this.captionSession;
+    if (!session.isLive) {
+      return;
+    }
+    const warnings = captionWarnings({
+      clipCount: ranges.length,
+      cutting: ranges.some((range) => (range.sourceRanges?.length ?? 0) > 0),
+      covered: session.coveredClips.length,
+      refused: session.refusedClips.length,
+      stranded: session.strandedClips.length,
+    });
+    for (const warning of warnings) {
+      if (this._shownCaptionWarnings.has(warning.key)) {
+        continue;
+      }
+      this._shownCaptionWarnings.add(warning.key);
+      this.toastCaption(warning.message);
+    }
+  }
 
   private toastCaption(message: string) {
     (document.querySelector("toast-box") as any)?.showToast({
@@ -308,11 +308,13 @@ export class Control extends LitElement {
 
   /** A text edit, a split, a merge, a strike-out, a realignment, a toggle. */
   _handleCaptionSessionChange = (e) => {
+    const ranges = e.detail.ranges ?? [];
     this.captionSession.update({
       lines: e.detail.lines ?? [],
       placement: e.detail.placement ?? "lowerThird",
-      ranges: e.detail.ranges ?? [],
+      ranges,
     });
+    this._toastNewCaptionWarnings(ranges);
   };
 
   /** Apply. One undo step, holding exactly what the user is looking at. */

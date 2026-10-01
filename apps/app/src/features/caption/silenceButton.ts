@@ -12,18 +12,27 @@
  * nothing can assert about. It is here for the same reason `lines.ts`,
  * `editor.ts` and `layout.ts` are.
  *
- * ## It no longer starts the sweep
+ * ## It does not start the sweep, and nothing else makes the cut
  *
- * It used to. The gaps were found when the button was pressed and staged until
- * Apply, so the button meant "go and look" the first time and "put them back"
- * afterwards. The session sweeps as soon as the transcript lands now and the
- * cuts are already on the timeline by the time anyone sees this, so the button
- * has exactly one job: turn them off, and turn them on again.
+ * The session sweeps as soon as the transcript lands, so by the time anyone
+ * sees this the gaps are already found and listed in the panel as empty space
+ * between the lines. They are **not** cut: a session begins with the picture
+ * exactly as the user left it and only the captions added
+ * (`SILENCE_CUT_ON_START`), and this button is the one thing that takes the
+ * gaps out, and puts them back.
  *
- * Which makes it a real toggle rather than a control that changed meaning under
- * the user, and it is the reason `action` names a destination (`"on"`, `"off"`)
- * rather than a verb.
+ * Which makes it a real toggle, and it is the reason `action` names a
+ * destination (`"on"`, `"off"`) rather than a verb.
  */
+
+/**
+ * Whether a session begins with the silent gaps cut.
+ *
+ * False: auto-caption adds captions to the timeline as it stands, and removing
+ * footage is a second decision the user makes with this button. Here rather
+ * than in the panel because the panel is outside every vitest include pattern.
+ */
+export const SILENCE_CUT_ON_START = false;
 
 /** The glyph for every state but the spinner. One icon, so it names the thing. */
 const SILENCE_ICON = "volume_off";
@@ -135,8 +144,46 @@ export function silenceButtonState(
     icon: SILENCE_ICON,
     variant: "secondary",
     disabled: false,
-    label: `Remove the ${input.gapCount} silent gap${input.gapCount === 1 ? "" : "s"} again`,
+    label: `Remove the ${input.gapCount} silent gap${input.gapCount === 1 ? "" : "s"}`,
     action: "on",
     busy: false,
   };
+}
+
+export type SilenceSummaryInput = {
+  /** Why a sweep failed, already worded for the footer. Wins over the rest. */
+  error: string | null;
+  /** What the edit currently removes: struck-out lines and, if on, the gaps. */
+  removedMs: number;
+  /** How many silent gaps were found. */
+  gapCount: number;
+  /** What those gaps add up to, in ms. */
+  gapMs: number;
+  /** Whether those gaps are currently cut out of the timeline. */
+  silenceOn: boolean;
+};
+
+/**
+ * The footer's line beside the button, or null for none.
+ *
+ * The button is an icon, and since the gaps are no longer cut on their own it
+ * is the only way to cut them. While nothing is removed this says what there is
+ * to remove, so the glyph next to it has a meaning before anyone hovers it.
+ * Once something is removed it says what that costs, as it always did.
+ */
+export function silenceSummary(input: SilenceSummaryInput): string | null {
+  if (input.error != null) {
+    return input.error;
+  }
+  if (input.removedMs > 0) {
+    return `${seconds(input.removedMs)}s cut out.`;
+  }
+  if (!input.silenceOn && input.gapCount > 0) {
+    return `${input.gapCount} silent gap${input.gapCount === 1 ? "" : "s"}, ${seconds(input.gapMs)}s.`;
+  }
+  return null;
+}
+
+function seconds(ms: number): string {
+  return (ms / 1000).toFixed(1);
 }
