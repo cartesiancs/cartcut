@@ -382,8 +382,9 @@ function validatePrecompute(
  * The pipeline a multi-pass effect declares.
  *
  * Bounded rather than open-ended: eight steps covers every optical effect we
- * ship (the longest is bloom at four), and an unbounded list is a way for a
- * downloaded preset to spend the whole frame budget in the driver.
+ * ship (the longest, bloom and halation, declare five), and an unbounded list
+ * is a way for a downloaded preset to spend the whole frame budget in the
+ * driver.
  */
 function validatePasses(
   raw: unknown,

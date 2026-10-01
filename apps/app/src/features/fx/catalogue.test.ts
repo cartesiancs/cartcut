@@ -198,6 +198,42 @@ describe("the shipped catalogue", () => {
     expect(clashes).toEqual([]);
   });
 
+  it("runs the shared blur as one shader, in all four of its stages", () => {
+    // A preset folder is self-contained, so each of these ships its own copy
+    // of `blur.frag`. A fix made to one copy leaves the others drawing the
+    // lattice of shifted copies the old nine-tap kernel drew, and a pipeline
+    // that drops a stage blurs by a fraction of its radius. Neither fails to
+    // load, and neither can be seen without the GPU.
+    const passesOf = (preset: FxPreset) =>
+      preset.render.type === "shader" ? (preset.render.passes ?? []) : [];
+    const users = entries.filter(({ preset }) =>
+      passesOf(preset).some((pass) => pass.source === "blur.frag"),
+    );
+    expect(users.map(({ mechanism }) => mechanism).sort()).toEqual([
+      "bloom",
+      "gaussian-blur",
+      "halation",
+      "tilt-shift",
+    ]);
+
+    const copies = new Set(
+      users.map(({ preset }) => preset.sources["blur.frag"]),
+    );
+    expect(copies.size).toBe(1);
+
+    for (const { preset, mechanism } of users) {
+      const stages = passesOf(preset)
+        .filter((pass) => pass.source === "blur.frag")
+        .map((pass) => pass.constants);
+      expect(stages, mechanism).toEqual([
+        { dir: [1, 0], stage: 0 },
+        { dir: [1, 0], stage: 1 },
+        { dir: [0, 1], stage: 0 },
+        { dir: [0, 1], stage: 1 },
+      ]);
+    }
+  });
+
   it("keeps every category non-empty and worth its own heading", () => {
     // A category holding one preset is a heading with a single tile under it,
     // which is worse for scanning than no heading at all.

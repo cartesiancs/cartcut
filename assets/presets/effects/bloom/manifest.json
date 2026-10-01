@@ -5,7 +5,7 @@
   "name": "Bloom",
   "category": "optical",
   "author": "Cartcut",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "render": {
     "type": "shader",
     "source": "combine.frag",
@@ -19,7 +19,18 @@
           "dir": [
             1,
             0
-          ]
+          ],
+          "stage": 0
+        }
+      },
+      {
+        "source": "blur.frag",
+        "constants": {
+          "dir": [
+            1,
+            0
+          ],
+          "stage": 1
         }
       },
       {
@@ -28,7 +39,18 @@
           "dir": [
             0,
             1
-          ]
+          ],
+          "stage": 0
+        }
+      },
+      {
+        "source": "blur.frag",
+        "constants": {
+          "dir": [
+            0,
+            1
+          ],
+          "stage": 1
         }
       }
     ]

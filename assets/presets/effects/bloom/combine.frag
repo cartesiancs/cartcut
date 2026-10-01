@@ -1,7 +1,7 @@
 uniform float amount;
 
-// Step four: the blurred highlights added back over the untouched frame.
-// `original` is what makes this possible — `source` by now is three passes deep
+// Step six: the blurred highlights added back over the untouched frame.
+// `original` is what makes this possible: `source` by now is five passes deep
 // and no longer holds the picture.
 vec4 effect(vec2 uv) {
   vec3 base = getOriginalColor(uv).rgb;
