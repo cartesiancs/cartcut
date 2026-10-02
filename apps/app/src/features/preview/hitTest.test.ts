@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   canPointerTarget,
   HANDLE_PADDING_PX,
+  ROTATION_HANDLE_HEIGHT_PX,
   hitZoneOf,
   isStretchZone,
   type HitZone,
@@ -76,7 +77,9 @@ describe("hitZoneOf on a plain box", () => {
   });
 
   it("finds the rotation knob above the top edge", () => {
-    expect(hitZoneOf({ x: W / 2, y: -50 }, W, H)).toBe("rotation");
+    expect(
+      hitZoneOf({ x: W / 2, y: -ROTATION_HANDLE_HEIGHT_PX / 2 }, W, H),
+    ).toBe("rotation");
   });
 
   it("does not report rotation from inside the element", () => {
@@ -94,30 +97,30 @@ describe("hitZoneOf on a plain box", () => {
 
 describe("handle sizes are screen pixels, not artwork pixels", () => {
   it("shrinks the bands in local space when the world scale is up", () => {
-    // At 4x, 20 screen px is 5 local px. A point 10 local px outside the edge
-    // is 40 screen px away — well past the grip.
+    // At 4x, 8 screen px is 2 local px. A point 10 local px outside the edge
+    // is 40 screen px away, well past the grip; one 1.5 local px out is 6.
     expect(hitZoneOf({ x: W + 10, y: H / 2 }, W, H, { worldScale: 4 })).toBe(
       "none",
     );
-    expect(hitZoneOf({ x: W + 3, y: H / 2 }, W, H, { worldScale: 4 })).toBe(
+    expect(hitZoneOf({ x: W + 1.5, y: H / 2 }, W, H, { worldScale: 4 })).toBe(
       "stretchE",
     );
   });
 
   it("grows the bands in local space when the world scale is down", () => {
-    // At 0.25x a grip would reach 80 local px to stay 20 on screen — but the
-    // clamp holds it to a third of the shorter side (100/3), so it reaches
-    // 33 local px instead. Still far wider than the unscaled 20.
+    // At 0.25x a grip reaches 32 local px to stay 8 on screen, just inside the
+    // clamp of a third of the shorter side (100/3). Unscaled it would be 8.
     expect(hitZoneOf({ x: W + 20, y: H / 2 }, W, H, { worldScale: 0.25 })).toBe(
       "stretchE",
     );
+    expect(hitZoneOf({ x: W + 20, y: H / 2 }, W, H)).toBe("none");
   });
 
   it("keeps an interior for a small element instead of covering it in grips", () => {
-    // A 20x20 clip with a 20px band has no interior at all unless the band is
-    // clamped, so it could not be grabbed to move — every point on it read as
-    // a resize grip.
-    expect(hitZoneOf({ x: 10, y: 10 }, 20, 20)).toBe("position");
+    // An 8x8 clip with an 8px band has no interior at all unless the band is
+    // clamped, so it could not be grabbed to move: every point on it read as a
+    // resize grip.
+    expect(hitZoneOf({ x: 4, y: 4 }, 8, 8)).toBe("position");
   });
 
   it("keeps the edge bands disjoint on a small element", () => {

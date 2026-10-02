@@ -4,8 +4,7 @@
  * Every length comes from `nullGizmoGeometry`; there is no arithmetic here.
  * That is the point — `features/preview/nullGizmo.ts` owns the shape *and* the
  * hit test, so a mark drawn by this file is always a mark the pointer accepts,
- * and the pair cannot drift the way `renderControlOutline` and `hitZoneOf`
- * have.
+ * and the pair cannot drift apart.
  *
  * The caller has already applied the parent chain and the element's own local
  * transform — the same two steps `renderElement` takes — so everything below is

@@ -147,18 +147,18 @@ describe("renderTimelineAtTime", () => {
       a: imageElement({ priority: 1, location: { x: 50, y: 60 }, width: 100, height: 100 }),
     };
 
-    // The rotation grip sits 50px above the element box.
+    // The rotation grip sits 20px above the element box.
     const off = render(timeline, 0, paintRenderers(), {
       controlOutlineEnabled: false,
       activeElementId: "a",
     });
-    expect(pixel(off.canvas, 100, 10)).toMatchObject({ r: 0x10, g: 0x10, b: 0x20 });
+    expect(pixel(off.canvas, 100, 40)).toMatchObject({ r: 0x10, g: 0x10, b: 0x20 });
 
     const other = render(timeline, 0, paintRenderers(), {
       controlOutlineEnabled: true,
       activeElementId: "someone-else",
     });
-    expect(pixel(other.canvas, 100, 10)).toMatchObject({
+    expect(pixel(other.canvas, 100, 40)).toMatchObject({
       r: 0x10,
       g: 0x10,
       b: 0x20,
@@ -168,7 +168,7 @@ describe("renderTimelineAtTime", () => {
       controlOutlineEnabled: true,
       activeElementId: "a",
     });
-    expect(pixel(on.canvas, 100, 10)).toMatchObject({ r: 255, g: 255, b: 255 });
+    expect(pixel(on.canvas, 100, 40)).toMatchObject({ r: 255, g: 255, b: 255 });
   });
 
   it("keeps compositing the rest of the frame when one element cannot draw", () => {

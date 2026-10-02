@@ -183,9 +183,8 @@ const PEN_FIRST_NODE = "#ffd400";
 /**
  * The crop tool's chrome.
  *
- * The grab band matches `preview/hitTest.ts#HANDLE_PADDING_PX` rather than the
- * pen's smaller radius: these are resize grips, and a crop grip should be as
- * easy to hit as the clip's own.
+ * The grab band is wider than the pen's radius: these are resize grips that
+ * sit on a frame the user is dragging, not points on a path.
  */
 const CROP_GRAB_PX = 20;
 const CROP_HANDLE_PX = 7;
@@ -1080,10 +1079,8 @@ export class PreviewCanvas extends LitElement {
 
     // A selected null draws its own handles, in `drawNullGizmos` above, from
     // the same geometry its hit test uses. Falling through to
-    // `renderControlOutline` here would put a second, differently-sized set of
-    // grips on top of them — that function measures in world pixels while every
-    // hit test measures in screen pixels — so the outline pass is now clips
-    // only.
+    // `renderControlOutline` here would put a second set of grips, of a
+    // different design, on top of them, so the outline pass is clips only.
     if (element.filetype === "group") {
       return;
     }
@@ -1110,7 +1107,11 @@ export class PreviewCanvas extends LitElement {
     ctx.transform(parent.a, parent.b, parent.c, parent.d, parent.e, parent.f);
     applyElementTransform(ctx, element, this.timelineCursor);
     const box = sampledBoxOf(element, this.timelineCursor);
-    renderControlOutline(ctx, 0, 0, box.width, box.height);
+    // In screen pixels, through the scale `hitZoneAt` divides by, so every grip
+    // stays one size at every zoom and sits on the band that grabs it.
+    renderControlOutline(ctx, 0, 0, box.width, box.height, {
+      unit: 1 / this.penScreenUnit(this.activeElementId),
+    });
     ctx.restore();
   }
 
@@ -1250,7 +1251,10 @@ export class PreviewCanvas extends LitElement {
    *
    * The pointer goes through the inverse of the same world matrix the renderer
    * draws with, so drawing and hit-testing cannot disagree. `worldScale` keeps
-   * the grips a fixed size on screen rather than in artwork pixels.
+   * the grips a fixed size on screen rather than in artwork pixels, and it has
+   * to carry the preview's zoom as well as the element's own scale: the pointer
+   * arrives in project pixels, so without the zoom a band was 8 screen pixels
+   * at fit view and 24 at 300%, while the grips drawn over it stay one size.
    */
   hitZoneAt(elementId: string, mx: number, my: number): HitZone {
     const element: any = this.timeline[elementId];
@@ -1273,7 +1277,7 @@ export class PreviewCanvas extends LitElement {
       applyPoint(invert(m), { x: mx, y: my }),
       width,
       height,
-      { worldScale: scaleOf(m) },
+      { worldScale: scaleOf(m) * this.geometry.scale },
     );
   }
 
@@ -1404,9 +1408,7 @@ export class PreviewCanvas extends LitElement {
    * between an element pixel and the screen. Every piece of pen chrome divides
    * by this, and so does the grab radius — through one function, so that what
    * the user can hit and what they can see cannot drift apart. The selection
-   * outline uses fixed world units instead and visibly shrinks as you zoom out;
-   * that is survivable for a box you have already grabbed and not for a target
-   * you are trying to hit.
+   * outline and `hitZoneAt` go through the same product, for the same reason.
    *
    * The polygon overlay divides by it too — same chrome, same problem, and it
    * is drawn in the same pass under the same transform.

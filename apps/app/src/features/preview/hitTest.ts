@@ -38,12 +38,22 @@ export type HitZone =
   | "stretchSE"
   | "none";
 
-/** Half-width of the grab band around an edge, in screen pixels. */
-export const HANDLE_PADDING_PX = 20;
+/**
+ * Half-width of the grab band around an edge, in screen pixels.
+ *
+ * Screen pixels at every zoom: `previewCanvas.hitZoneAt` divides by the
+ * preview's zoom as well as the element's own world scale, so the band stays
+ * the size of the grips `renderControlOutline` draws. It used to divide by the
+ * world scale alone, which left the band in project pixels, and these three
+ * values were 20, 25 and 75 of those: 8, 10 and 30 on screen at a 1080p
+ * project's fit view, three times that at 300%. They are now those fit-view
+ * sizes, so the view people work in feels as it did.
+ */
+export const HANDLE_PADDING_PX = 8;
 
 /** The rotation knob's box above the top edge, in screen pixels. */
-export const ROTATION_HANDLE_HALF_WIDTH_PX = 25;
-export const ROTATION_HANDLE_HEIGHT_PX = 75;
+export const ROTATION_HANDLE_HALF_WIDTH_PX = 10;
+export const ROTATION_HANDLE_HEIGHT_PX = 30;
 
 export type HitTestOptions = {
   /** Grab band around the edges. Defaults to `HANDLE_PADDING_PX`. */

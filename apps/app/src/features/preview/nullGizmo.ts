@@ -16,12 +16,10 @@
  * derive every length from the same constants and the same `worldScale`. A grip
  * drawn where nothing can be grabbed is the `collisionCheck` bug over again.
  *
- * This is also why `renderControlOutline` is *not* reused here. That function
- * measures its handles in **world** pixels (`padding = 10`), while every hit
- * test measures in **screen** pixels divided by the world scale. The two
- * already disagree for ordinary clips — a known wart, visible as grips that
- * shrink when you zoom out — and a null, whose entire visible existence is its
- * handles, cannot afford to inherit it.
+ * `renderControlOutline` is not reused here because a null's chrome is a
+ * different drawing (dashed, with an anchor and a state ladder), not because of
+ * units: both now measure in screen pixels divided by the element's world scale
+ * times the preview's zoom, which is the `worldScale` every function here takes.
  *
  * ## The interior is not part of the null
  *
@@ -74,8 +72,13 @@ export const NULL_GRIP_PX = 5;
 export const NULL_LINE_PX = 1.5;
 /** Radius of the rotation knob, centred inside the zone `hitZoneOf` defines. */
 export const NULL_KNOB_RADIUS_PX = 8;
-/** How far above the top edge the knob's centre sits. */
-export const NULL_KNOB_OFFSET_PX = 50;
+/**
+ * How far above the top edge the knob's centre sits: where a clip's knob sits,
+ * inside the `ROTATION_HANDLE_*` zone both answer to. It was 50 while that zone
+ * was measured in project pixels, which at a 1080p project's fit view put the
+ * drawn knob above the 30 screen pixels the pointer would take.
+ */
+export const NULL_KNOB_OFFSET_PX = 20;
 
 /**
  * How the gizmo is being looked at.

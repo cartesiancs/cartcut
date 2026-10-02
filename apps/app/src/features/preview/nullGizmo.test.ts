@@ -95,7 +95,7 @@ describe("nullHitZoneOf", () => {
   });
 
   it("takes the rotation knob above the top edge", () => {
-    expect(nullHitZoneOf({ x: W / 2, y: -50 }, W, H)).toBe("rotation");
+    expect(nullHitZoneOf({ x: W / 2, y: -20 }, W, H)).toBe("rotation");
   });
 
   it("prefers the anchor to a band when they overlap", () => {

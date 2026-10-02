@@ -3,12 +3,23 @@
  *
  * It used to carry a `dashed` option, and a pivot dot under it, for the one
  * caller that passed a group. Groups are drawn by
- * `features/renderer/nullGizmo.ts` now — from the same geometry their hit test
- * uses, which this function cannot offer: its handles are sized in *world*
- * pixels while every hit test sizes them in screen pixels divided by the world
- * scale. That mismatch is why a clip's grips shrink as you zoom out, and it is
- * the reason a null, whose handles are its entire visible existence, does not
- * share this path.
+ * `features/renderer/nullGizmo.ts` now, from the same geometry their hit test
+ * uses.
+ *
+ * ## Every size is in screen pixels
+ *
+ * The caller draws in the element's own space, so `unit` says how many of its
+ * pixels make one screen pixel: one over the element's world scale times the
+ * preview's zoom. Every length below is multiplied by it, so the grips, the
+ * line and the knob are the same size on screen at every zoom and at every
+ * scale a parent group applies. They used to be fixed in project pixels, which
+ * made them grow as you zoomed in and shrink to nothing as you zoomed out, while
+ * the bands `preview/hitTest.ts` answers for stayed put: a grip you could see
+ * that you could not grab, or one you could grab that you could not see.
+ *
+ * The knob sits inside `ROTATION_HANDLE_*` and the grips inside
+ * `HANDLE_PADDING_PX`, both in screen pixels; `controlOutline.test.ts` holds
+ * that, so the two cannot drift apart again.
  *
  * ## Every mark is drawn twice
  *
@@ -30,14 +41,19 @@
  * `difference` blending — Photoshop's marching ants — is the other classic and
  * fails on mid grey, which is exactly the backdrop a video preview usually is.
  *
- * So: `RIM` world pixels of `CASING` around everything, drawn as a first pass
- * under the whole mark rather than per shape, which keeps the two passes from
- * cutting into each other where the box stroke meets a grip.
+ * So: `RIM_PX` of `CASING` around everything, drawn as a first pass under the
+ * whole mark rather than per shape, which keeps the two passes from cutting
+ * into each other where the box stroke meets a grip.
  */
 export type ControlOutlineStyle = {
   color?: string;
   /** The contrast pass under `color`. Pass `"transparent"` to suppress it. */
   casing?: string;
+  /**
+   * How many of the current transform's units make one screen pixel. Defaults
+   * to 1, where every size below is taken literally.
+   */
+  unit?: number;
 };
 
 /** The bright mark. */
@@ -49,18 +65,17 @@ const MARK = "#ffffff";
  */
 const CASING = "rgba(0, 0, 0, 0.62)";
 /**
- * How far the casing stands out past the mark, in the same world pixels
- * everything else here is measured in. Half the line width, so the rim reads at
- * the zoom the outline was drawn for without thickening the outline itself.
+ * How far the casing stands out past the mark. Half the line width, so it reads
+ * as a rim without thickening the outline itself.
  */
-const RIM = 1.5;
+export const RIM_PX = 0.75;
 
-const LINE_WIDTH = 3;
+export const LINE_WIDTH_PX = 1.5;
 /** Half-size of a corner grip, and the unit the edge bars are derived from. */
-const PADDING = 10;
-/** The rotation knob: how far above the box, and how big. */
-const KNOB_OFFSET = 50;
-const KNOB_RADIUS = 15;
+export const GRIP_PX = 4;
+/** The rotation knob: how far above the box its centre sits, and how big. */
+export const KNOB_OFFSET_PX = 20;
+export const KNOB_RADIUS_PX = 6;
 
 export function renderControlOutline(
   ctx: CanvasRenderingContext2D,
@@ -74,7 +89,10 @@ export function renderControlOutline(
 
   ctx.globalAlpha = 1;
 
-  const padding = PADDING;
+  // A unit of zero or less would collapse every mark to a point, or flip it.
+  const unit = style.unit != null && style.unit > 0 ? style.unit : 1;
+  const padding = GRIP_PX * unit;
+  const rim = RIM_PX * unit;
 
   // Edge grips. The hit test has offered `stretchN/S/E/W` all along, but
   // nothing drew them, so the one gesture that resizes a single axis was
@@ -95,7 +113,7 @@ export function renderControlOutline(
   /**
    * One whole pass of the outline, every mark fattened by `grow`.
    *
-   * The casing is this same drawing with `grow = RIM`, which is what keeps the
+   * The casing is this same drawing with `grow = rim`, which is what keeps the
    * two in step: a mark added below gets its rim for free, and a bar the cap
    * above suppresses is suppressed in both passes — the `bw > 0` test reads the
    * *ungrown* size so a casing can never appear under a mark that is not there.
@@ -104,7 +122,7 @@ export function renderControlOutline(
     ctx.strokeStyle = paint;
     ctx.fillStyle = paint;
 
-    ctx.lineWidth = LINE_WIDTH + grow * 2;
+    ctx.lineWidth = LINE_WIDTH_PX * unit + grow * 2;
     ctx.strokeRect(x, y, w, h);
 
     const square = (cx: number, cy: number) => {
@@ -140,13 +158,19 @@ export function renderControlOutline(
     //draw control rotation
 
     ctx.beginPath();
-    ctx.arc(x + w / 2, y - KNOB_OFFSET, KNOB_RADIUS + grow, 0, 2 * Math.PI);
+    ctx.arc(
+      x + w / 2,
+      y - KNOB_OFFSET_PX * unit,
+      KNOB_RADIUS_PX * unit + grow,
+      0,
+      2 * Math.PI,
+    );
     ctx.fill();
   };
 
   const casing = style.casing ?? CASING;
   if (casing !== "transparent") {
-    pass(RIM, casing);
+    pass(rim, casing);
   }
   pass(0, style.color ?? MARK);
 

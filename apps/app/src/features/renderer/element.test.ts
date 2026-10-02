@@ -346,11 +346,11 @@ describe("renderElement", () => {
     });
 
     const plain = draw(el, 0, 300, false);
-    // the rotation grip sits 50px above the box
-    expect(pixel(plain.canvas, 150, 50)).toMatchObject({ r: 0, g: 0, b: 0 });
+    // the rotation grip sits 20px above the box
+    expect(pixel(plain.canvas, 150, 80)).toMatchObject({ r: 0, g: 0, b: 0 });
 
     const selected = draw(el, 0, 300, true);
-    expect(pixel(selected.canvas, 150, 50)).toMatchObject({
+    expect(pixel(selected.canvas, 150, 80)).toMatchObject({
       r: 255,
       g: 255,
       b: 255,
@@ -365,7 +365,7 @@ describe("renderElement", () => {
       opacity: 10,
     });
     const { canvas } = draw(el, 0, 300, true);
-    expect(pixel(canvas, 150, 50)).toMatchObject({ r: 255, g: 255, b: 255 });
+    expect(pixel(canvas, 150, 80)).toMatchObject({ r: 255, g: 255, b: 255 });
   });
 
   it("passes the element and cursor straight through to the renderer", () => {
