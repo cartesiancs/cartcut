@@ -79,6 +79,36 @@ export function shift(image: GrayImage, dx: number, dy: number): GrayImage {
   return { data, width: image.width, height: image.height };
 }
 
+/**
+ * The same picture turned by `radians` about `(cx, cy)`, which stays put.
+ *
+ * A subject that turns: the point does not move and the patch around it
+ * becomes a different picture, which is what a fixed reference cannot follow.
+ */
+export function rotate(
+  image: GrayImage,
+  cx: number,
+  cy: number,
+  radians: number,
+): GrayImage {
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const data = new Float32Array(image.width * image.height);
+  for (let y = 0; y < image.height; y++) {
+    for (let x = 0; x < image.width; x++) {
+      // Inverse map: where in the source this output pixel came from.
+      const dx = x - cx;
+      const dy = y - cy;
+      data[y * image.width + x] = sampleBilinear(
+        image,
+        cx + dx * cos + dy * sin,
+        cy - dx * sin + dy * cos,
+      );
+    }
+  }
+  return { data, width: image.width, height: image.height };
+}
+
 /** `gain * value + lift`, clamped — a shot that brightens under the tracker. */
 export function relight(
   image: GrayImage,

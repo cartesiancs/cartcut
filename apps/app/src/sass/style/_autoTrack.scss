@@ -1,0 +1,172 @@
+@import "../var";
+
+// The Auto Track panel: a stage, and a bar holding its two buttons.
+//
+// The bar takes `<preview-bottom-bar>`'s numbers (2rem, a 0.05rem rule)
+// because the panel stands in the preview's place in the column; a different
+// height would move the bottom edge every time the tab changed.
+
+.auto-track-stage {
+  position: relative;
+  flex: 1 1 auto;
+  // Without this a flex item refuses to shrink below its content, and the
+  // canvas's backing store would push the bar out of the column.
+  min-height: 0;
+  overflow: hidden;
+  // `playbackPreview.ts#CANVAS_BG`, which the canvas also paints, so there is
+  // no seam before the first frame arrives.
+  background-color: #101112;
+}
+
+.auto-track-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  // The stage owns pinch and swipe; without this a touch drag scrolls the page.
+  touch-action: none;
+}
+
+// Never a target: the pointer has to reach the canvas under it.
+.auto-track-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+  color: $opt-label;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}
+
+// Two classes, for the reason `_asset.scss` gives: `material-symbols/outlined`
+// is imported after this file and its single-class rule would win.
+.auto-track-overlay > .material-symbols-outlined {
+  font-size: 32px;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+// The spinner waits before it shows. Returning to the seed frame after a track
+// is usually one quick seek, and a spinner that flashes for 40ms reads as a
+// glitch rather than as work.
+.auto-track-overlay.is-loading {
+  animation: auto-track-appear 0s linear 250ms both;
+}
+
+@keyframes auto-track-appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.auto-track-overlay.is-error {
+  color: #e0a83a;
+}
+
+// The glyph carries the reason as its tooltip, so it alone takes the pointer.
+.auto-track-overlay.is-error > .material-symbols-outlined {
+  pointer-events: auto;
+  opacity: 1;
+  cursor: help;
+}
+
+.auto-track-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background-color: #4ade80;
+  // The width is written every 100ms; this fills the gaps between.
+  transition: width 100ms linear;
+}
+
+.auto-track-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 2rem;
+  padding: 0 0.4rem;
+  border-top: 0.05rem solid $background-border-color;
+  background-color: $background-color;
+}
+
+// `_toolbar.scss`'s `.tb-btn` family, at its 24px, with a label beside the
+// glyph. Nothing here is `.btn`, for the reason that file gives.
+.auto-track-btn {
+  appearance: none;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px 0 7px;
+  margin: 0;
+  border: 1px solid $opt-line-strong;
+  border-radius: 7px;
+  background-color: $opt-raised;
+  color: $opt-text;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    border-color 140ms ease-out,
+    color 140ms ease-out,
+    opacity 140ms ease-out;
+}
+
+.auto-track-btn > .material-symbols-outlined {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.auto-track-btn:hover:not(:disabled) {
+  background-color: #343b42;
+  color: $opt-bright;
+}
+
+// Track and Cancel are one button, so it keeps one width: a label that changes
+// length under the pointer would move the target it is about to be clicked on.
+.auto-track-btn.is-primary {
+  min-width: 76px;
+  border-color: $opt-bright;
+  background-color: $opt-bright;
+  color: #111315;
+}
+
+.auto-track-btn.is-primary:hover:not(:disabled) {
+  border-color: #ffffff;
+  background-color: #ffffff;
+  color: #111315;
+}
+
+.auto-track-btn.is-primary.is-cancel,
+.auto-track-btn.is-primary.is-cancel:hover:not(:disabled) {
+  border-color: rgba(199, 74, 63, 0.6);
+  background-color: rgba(199, 74, 63, 0.2);
+  color: #f3b9b2;
+}
+
+.auto-track-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.auto-track-btn:focus-visible {
+  outline: 1px solid #5a6067;
+  outline-offset: 1px;
+}

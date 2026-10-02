@@ -14,10 +14,21 @@
  *   its reach is its cost squared; a radius wide enough for a fast pan is a
  *   search nobody waits for.
  *
- * So LK predicts — cheaply, and over large motion, because the pyramid lets the
- * coarsest level see a 32-pixel jump as a 2-pixel one — and NCC then checks that
+ * So LK predicts (cheaply, and over large motion, because the pyramid lets the
+ * coarsest level see a 32-pixel jump as a 2-pixel one) and NCC then checks that
  * prediction against the *original* patch and corrects it within a small radius.
- * The correction is what removes the drift, because the reference never moves.
+ * The correction is what removes the drift, because the reference does not move
+ * while the match is good.
+ *
+ * It moves when the match weakens (`reanchorBelow`): a subject that turns or
+ * bows stops looking like the patch that was clicked long before the tracker
+ * is off it, and a reference that never moves ends the run there. Measured on
+ * a handheld shot of a face and on a drone orbit, the fixed reference stopped
+ * at 2 to 16 seconds on six of eleven points; re-taking below 0.8 reached the
+ * end on all but two, and came back to within 5px of the click when tracked
+ * in reverse on every point but a patch of foliage (17px, and 8px with the
+ * fixed reference). The two it did not finish were a face a hand passed over,
+ * which it followed onto the hand, and a fretting hand.
  *
  * The whole module is DOM-free and works on `GrayImage`, so `tracker.test.ts`
  * can drive it with synthetic sequences whose true displacement is known to the
@@ -57,7 +68,7 @@ export type TrackSample = {
   /** Position in the working image's pixels — see `frameSource.ts#toSourcePixels`. */
   x: number;
   y: number;
-  /** NCC against the seed patch, −1..1. */
+  /** NCC against the reference patch of that frame, the seed's or the last one re-taken, −1..1. */
   confidence: number;
 };
 
@@ -95,6 +106,24 @@ export type TrackOptions = {
   adaptTemplate: boolean;
   /** How much of the current patch is mixed in per frame when adapting. */
   adaptRate: number;
+  /**
+   * Re-take the reference patch from the current frame when a match scores
+   * below this, or `null` never to.
+   *
+   * After Effects' "if confidence is below, adapt feature". The fixed
+   * reference is what removes drift, and it is also what ends the run on a
+   * subject that turns: a face that bows is a new picture, and NCC against the
+   * one that was clicked falls under `confidenceThreshold` while the tracker is
+   * still on the head. Re-taking the patch while the match is merely weakening
+   * follows the change, and costs drift only at the frames that re-take it, so
+   * a feature that never scores below this tracks exactly as a fixed reference
+   * would. A frame that fails `confidenceThreshold` never re-takes it: that is
+   * an occlusion or a cut, and the patch it offers is whatever is in front.
+   *
+   * Ignored while `adaptTemplate` is on, which already moves the patch on
+   * every frame.
+   */
+  reanchorBelow: number | null;
 };
 
 export const DEFAULT_TRACK_OPTIONS: TrackOptions = {
@@ -108,6 +137,7 @@ export const DEFAULT_TRACK_OPTIONS: TrackOptions = {
   lostFrameTolerance: 3,
   adaptTemplate: false,
   adaptRate: 0.1,
+  reanchorBelow: 0.8,
 };
 
 export type TrackStatus =
@@ -274,15 +304,7 @@ export function stepTracker(
 
   return {
     ...state,
-    template:
-      state.options.adaptTemplate && matched
-        ? adaptPatch(
-            state.template,
-            nextPyramid[0],
-            point,
-            state.options.adaptRate,
-          )
-        : state.template,
+    template: nextTemplate(state, nextPyramid[0], point, confidence, matched),
     pyramid: nextPyramid,
     point,
     samples: [
@@ -326,6 +348,29 @@ export function trackSequence(
 }
 
 // ------------------------------------------------------------------ internals
+
+/** The reference the next frame is checked against. */
+function nextTemplate(
+  state: TrackerState,
+  image: GrayImage,
+  point: TrackPoint,
+  confidence: number,
+  matched: boolean,
+): Patch {
+  const { options, template } = state;
+  if (!matched) {
+    return template;
+  }
+  if (options.adaptTemplate) {
+    return adaptPatch(template, image, point, options.adaptRate);
+  }
+  if (options.reanchorBelow == null || confidence >= options.reanchorBelow) {
+    return template;
+  }
+  // No flat-patch guard is needed: `matched` means NCC scored at least
+  // `confidenceThreshold` here, and a flat patch scores 0.
+  return extractPatch(image, point.x, point.y, template.radius);
+}
 
 function levelsFor(image: GrayImage, options: TrackOptions): number {
   if (options.pyramidLevels > 0) {

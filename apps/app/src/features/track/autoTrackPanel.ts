@@ -1,17 +1,21 @@
 /**
  * The Auto Track panel.
  *
- * Select a video clip on the timeline, draw a box around something in it, press
- * Track, and get a null object whose `position` follows what was in the box.
- * Anything parented to that null then follows it too, through the pick-whip
- * that already exists — which is why the output is a null and not a new kind of
- * element: the whole "make this label stick to that sign" feature is already
- * built, and it was missing only something that knows where the sign is.
+ * Select a video clip on the timeline, click something in it, press Track, and
+ * get a null object whose `position` follows what was clicked. Anything
+ * parented to that null then follows it too, through the pick-whip that already
+ * exists, which is why the output is a null and not a new kind of element: the
+ * whole "make this label stick to that sign" feature is already built, and it
+ * was missing only something that knows where the sign is.
+ *
+ * The panel is a stage and two buttons, Track (Cancel while it runs) and Create
+ * Null, and it says nothing in sentences. A drag on the picture still sizes the
+ * box for anyone who wants a bigger one; a click gets `CLICK_BOX_RADIUS`.
  *
  * ## Why it draws the source rather than the composite
  *
  * The panel takes over the preview column, like every other utility panel, and
- * shows the clip's own decoded frame — not what the preview would draw. Three
+ * shows the clip's own decoded frame, not what the preview would draw. Three
  * reasons, in increasing order of how much trouble the alternative would be:
  * the tracker works in source pixels, so this is the picture whose coordinates
  * it will answer in; the clip may be scaled, rotated or half off-screen, and
@@ -19,6 +23,13 @@
  * putting a drag on `previewCanvas` would mean sharing the hit test, the
  * element drag and the mask pen tool's key handling, which CLAUDE.md already
  * describes as the thing in this codebase that fights everything else.
+ *
+ * ## The stage
+ *
+ * The canvas fills the panel and the frame is drawn into it through a viewport,
+ * the preview's own arithmetic with fit as a floor (`stageView.ts`, where the
+ * rules are and where they are tested). Pinch or ctrl+wheel zooms toward the
+ * pointer; a swipe, a middle or alt drag, or a drag from the margin pans.
  *
  * ## Why the canvas is drawn imperatively
  *
@@ -28,7 +39,7 @@
  * the progress number is throttled back into component state.
  */
 
-import { LitElement, html } from "lit";
+import { LitElement, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { v4 as uuidv4 } from "uuid";
 import type { TimelineElement } from "../../@types/timeline";
@@ -36,14 +47,24 @@ import { renderOptionStore } from "../../states/renderOptionStore";
 import { selectionStore } from "../../states/selectionStore";
 import { useTimelineStore } from "../../states/timelineStore";
 import { bakeRateFor } from "../animation/keyframes";
+import { CANVAS_BG } from "../preview/playbackPreview";
+import { fitViewport, type Viewport, type ViewportGeometry } from "../preview/viewport";
 import { frameDurationMs } from "../timeline/frames";
-import { sourceTimeAt, spanOf, timelineTimeAt } from "../timeline/geometry";
+import { sourceTimeAt, spanOf } from "../timeline/geometry";
 import { openFrameSource, type FrameSource } from "./frameSource";
-import { DEFAULT_TOLERANCE_PX, simplifyPath } from "./simplify";
+import { simplifyPath } from "./simplify";
+import {
+  containViewport,
+  panViewport,
+  pointerIntent,
+  stageGeometry,
+  stagePoint,
+  wheelViewport,
+  type StageSize,
+} from "./stageView";
 import { toProjectPath } from "./trackToTimeline";
 import { createTrackNull } from "./trackNullOp";
 import {
-  DEFAULT_TRACK_OPTIONS,
   finishTracker,
   startTracker,
   stepTracker,
@@ -57,6 +78,17 @@ const CLICK_BOX_RADIUS = 16;
 /** Smallest box worth tracking. Below this a drag reads as a click. */
 const MIN_BOX_RADIUS = 6;
 
+/**
+ * View px per working px past which the frame is drawn unsmoothed. Zooming in is
+ * for placing the box precisely, and a smoothed blow-up hides the very pixels
+ * the tracker is about to correlate.
+ */
+const PIXELATE_FROM_SCALE = 2;
+
+const BOX_COLOR = "#ffd400";
+const PATH_COLOR = "#4ade80";
+const FAILED_COLOR = "#f87171";
+
 type Box = { cx: number; cy: number; radius: number };
 
 type Phase = "idle" | "loading" | "ready" | "tracking" | "done" | "error";
@@ -65,32 +97,24 @@ type Phase = "idle" | "loading" | "ready" | "tracking" | "done" | "error";
 export class AutoTrackPanel extends LitElement {
   @state() private clipId: string | null = null;
   @state() private phase: Phase = "idle";
-  @state() private message = "";
+  /** Why the clip could not be opened, for the warning glyph's tooltip. */
+  @state() private error = "";
   @state() private progress = 0;
-  @state() private status: TrackerState["status"] | null = null;
-  @state() private sampleCount = 0;
-  @state() private searchRadius = DEFAULT_TRACK_OPTIONS.searchRadius;
-  @state() private tolerance = DEFAULT_TOLERANCE_PX;
-  @state() private adaptTemplate = DEFAULT_TRACK_OPTIONS.adaptTemplate;
-  /**
-   * Whether the user stopped this run.
-   *
-   * A panel fact rather than a tracker one: the tracker was not asked for more
-   * frames, which is not a state it can distinguish from having been given them
-   * all. Without it a cancelled run reports "Tracked 118 frames" in the same
-   * words as one that reached the end of the clip, and the partial track that
-   * "Create null" then writes looks like the whole thing.
-   */
-  @state() private cancelled = false;
+  @state() private box: Box | null = null;
+  @state() private result: TrackerState | null = null;
 
   private source: FrameSource | null = null;
-  private box: Box | null = null;
+  private viewport: Viewport = fitViewport(1, 1);
+  /** The canvas's CSS size, as the resize observer last reported it. */
+  private viewW = 0;
+  private viewH = 0;
   private dragFrom: { x: number; y: number } | null = null;
+  private pan: { x: number; y: number; from: Viewport } | null = null;
   private seedMs = 0;
-  private samples: TrackSample[] = [];
-  private result: TrackerState | null = null;
+  private samples: readonly TrackSample[] = [];
   private abort: AbortController | null = null;
   private disposers: (() => void)[] = [];
+  private resizeObserver: ResizeObserver | null = null;
   private lastProgressAt = 0;
 
   createRenderRoot() {
@@ -101,10 +125,11 @@ export class AutoTrackPanel extends LitElement {
     super.connectedCallback();
     // The host is a plain custom element with no shadow root, so it is inline
     // by default and collapses to its content. Sizing it here is what lets the
-    // column below give the frame the space left over and keep the controls on
+    // column below give the stage the space left over and keep the buttons on
     // screen. Done in `connectedCallback` rather than the constructor, which
     // may not touch attributes.
     this.style.display = "flex";
+    this.style.flexDirection = "column";
     this.style.width = "100%";
     this.style.height = "100%";
 
@@ -122,9 +147,20 @@ export class AutoTrackPanel extends LitElement {
       dispose();
     }
     this.disposers = [];
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     this.cancel();
     this.closeSource();
+    // Forget the clip with its decoder, or a reconnect would find the same
+    // selection, take it as already adopted and show a stage with no source.
+    this.clipId = null;
+    this.phase = "idle";
     super.disconnectedCallback();
+  }
+
+  updated(): void {
+    this.observeStage();
+    this.paint();
   }
 
   // ------------------------------------------------------------- selection
@@ -138,10 +174,10 @@ export class AutoTrackPanel extends LitElement {
   }
 
   /**
-   * Follow the selection onto a video clip — and onto nothing else.
+   * Follow the selection onto a video clip, and onto nothing else.
    *
    * A selection that names no video clip leaves the panel exactly as it is,
-   * rather than resetting it. Otherwise "Create null" would wipe the thing it
+   * rather than resetting it. Otherwise "Create Null" would wipe the thing it
    * had just been given: creating the null selects it, so that anything the
    * user parents to it is one click away in the option panel, and a panel that
    * reset on any non-video selection would throw away a track that took as
@@ -149,7 +185,7 @@ export class AutoTrackPanel extends LitElement {
    * space, would do the same.
    *
    * The clip going away is the one case that does reset, and it is handled by
-   * `clip()` answering null rather than here — a deleted clip is not a
+   * `clip()` answering null rather than here: a deleted clip is not a
    * selection change.
    */
   private adoptSelection(): void {
@@ -170,9 +206,7 @@ export class AutoTrackPanel extends LitElement {
     this.box = null;
     this.samples = [];
     this.result = null;
-    this.status = null;
-    this.sampleCount = 0;
-    this.message = "";
+    this.error = "";
     this.phase = "loading";
     this.closeSource();
 
@@ -200,6 +234,7 @@ export class AutoTrackPanel extends LitElement {
         return;
       }
       this.source = source;
+      this.viewport = fitViewport(source.workingWidth, source.workingHeight);
 
       this.seedMs = this.seedSourceMs(element);
       await source.grab(this.seedMs);
@@ -208,12 +243,12 @@ export class AutoTrackPanel extends LitElement {
       }
 
       this.phase = "ready";
-      this.message = "";
-      await this.updateComplete;
-      this.paint();
     } catch (error) {
+      if (this.clipId !== clipId) {
+        return;
+      }
       this.phase = "error";
-      this.message = error instanceof Error ? error.message : String(error);
+      this.error = error instanceof Error ? error.message : String(error);
     }
   }
 
@@ -221,9 +256,9 @@ export class AutoTrackPanel extends LitElement {
    * The source instant the panel opens on.
    *
    * The playhead when it is over the clip, and the clip's first frame when it
-   * is not — rather than refusing, because "move the playhead onto the clip
-   * first" is a rule the user has no way to have known about, and the first
-   * frame is a defensible place to start a forward track from.
+   * is not, rather than refusing: "move the playhead onto the clip first" is a
+   * rule the user has no way to have known about, and the first frame is a
+   * defensible place to start a forward track from.
    */
   private seedSourceMs(element: TimelineElement): number {
     const span = spanOf(element);
@@ -232,134 +267,287 @@ export class AutoTrackPanel extends LitElement {
     return sourceTimeAt(element as any, inside);
   }
 
-  // ------------------------------------------------------------- the canvas
+  private endSourceMs(element: TimelineElement): number {
+    return sourceTimeAt(element as any, spanOf(element).end);
+  }
+
+  // -------------------------------------------------------------- the stage
 
   private canvas(): HTMLCanvasElement | null {
-    return this.querySelector<HTMLCanvasElement>("#auto-track-canvas");
+    return this.querySelector<HTMLCanvasElement>(".auto-track-canvas");
+  }
+
+  /**
+   * Watch the canvas's box, from the first render that has one.
+   *
+   * Here and not in `firstUpdated`, which runs once per element: a disconnect
+   * drops the observer, and a reconnect has to find it missing and make another.
+   * The panel's own column hides it with `d-none` when another tab is on show,
+   * which reports 0x0 and stops `paint` until it comes back.
+   */
+  private observeStage(): void {
+    const canvas = this.canvas();
+    if (this.resizeObserver != null || canvas == null) {
+      return;
+    }
+    this.resizeObserver = new ResizeObserver((entries) => {
+      const rect = entries[entries.length - 1].contentRect;
+      this.viewW = rect.width;
+      this.viewH = rect.height;
+      const size = this.stageSize();
+      if (size != null) {
+        this.viewport = containViewport(this.viewport, size);
+      }
+      this.paint();
+    });
+    this.resizeObserver.observe(canvas);
+  }
+
+  private stageSize(): StageSize | null {
+    const source = this.source;
+    if (source == null || !(this.viewW > 0) || !(this.viewH > 0)) {
+      return null;
+    }
+    return {
+      viewW: this.viewW,
+      viewH: this.viewH,
+      frameW: source.workingWidth,
+      frameH: source.workingHeight,
+    };
+  }
+
+  /** Pointer client coordinates as CSS px from the canvas's top left. */
+  private toView(event: MouseEvent): { x: number; y: number } {
+    const rect = (this.canvas() as HTMLCanvasElement).getBoundingClientRect();
+    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  }
+
+  private canPlace(): boolean {
+    return this.phase === "ready" || this.phase === "done";
   }
 
   /** Redraw the frame, the box and whatever path has been found so far. */
   private paint(): void {
     const canvas = this.canvas();
-    const source = this.source;
-    if (canvas == null || source == null) {
+    if (canvas == null || !(this.viewW > 0) || !(this.viewH > 0)) {
       return;
     }
 
-    if (
-      canvas.width !== source.workingWidth ||
-      canvas.height !== source.workingHeight
-    ) {
-      canvas.width = source.workingWidth;
-      canvas.height = source.workingHeight;
+    const dpr = window.devicePixelRatio || 1;
+    const backingW = Math.round(this.viewW * dpr);
+    const backingH = Math.round(this.viewH * dpr);
+    if (canvas.width !== backingW || canvas.height !== backingH) {
+      canvas.width = backingW;
+      canvas.height = backingH;
     }
 
     const ctx = canvas.getContext("2d");
     if (ctx == null) {
       return;
     }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = CANVAS_BG;
+    ctx.fillRect(0, 0, backingW, backingH);
 
-    ctx.drawImage(source.canvas, 0, 0);
-    this.paintPath(ctx);
-    this.paintBox(ctx);
+    const size = this.stageSize();
+    if (size == null || this.clip() == null) {
+      return;
+    }
+
+    const geometry = stageGeometry(this.viewport, size);
+    ctx.setTransform(
+      dpr * geometry.scale,
+      0,
+      0,
+      dpr * geometry.scale,
+      dpr * geometry.offsetX,
+      dpr * geometry.offsetY,
+    );
+    ctx.imageSmoothingEnabled = geometry.scale < PIXELATE_FROM_SCALE;
+    ctx.drawImage((this.source as FrameSource).canvas, 0, 0);
+
+    // The marks in view px, so a line is two pixels wide at every zoom.
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.paintPath(ctx, geometry);
+    this.paintBox(ctx, geometry);
   }
 
-  private paintBox(ctx: CanvasRenderingContext2D): void {
+  private paintBox(
+    ctx: CanvasRenderingContext2D,
+    geometry: ViewportGeometry,
+  ): void {
     const box = this.box;
     if (box == null) {
       return;
     }
 
-    // The search region first, so the feature box reads as sitting inside it.
-    ctx.strokeStyle = "rgba(120, 110, 190, 0.9)";
-    ctx.setLineDash([4, 4]);
-    ctx.lineWidth = 1;
-    const outer = box.radius + this.searchRadius;
-    ctx.strokeRect(box.cx - outer, box.cy - outer, outer * 2, outer * 2);
+    // While it runs the box rides the newest sample, over the frame that sample
+    // came from, so what is being followed is visible as it is followed.
+    const head =
+      this.phase === "tracking" && this.samples.length > 0
+        ? this.samples[this.samples.length - 1]
+        : null;
+    const cx = (head?.x ?? box.cx) * geometry.scale + geometry.offsetX;
+    const cy = (head?.y ?? box.cy) * geometry.scale + geometry.offsetY;
+    const half = box.radius * geometry.scale;
 
-    ctx.setLineDash([]);
-    ctx.strokeStyle = "#ffd400";
+    ctx.strokeStyle =
+      this.result?.status === "no-texture" ? FAILED_COLOR : BOX_COLOR;
     ctx.lineWidth = 2;
-    ctx.strokeRect(
-      box.cx - box.radius,
-      box.cy - box.radius,
-      box.radius * 2,
-      box.radius * 2,
-    );
+    ctx.strokeRect(cx - half, cy - half, half * 2, half * 2);
 
     ctx.beginPath();
-    ctx.moveTo(box.cx - 6, box.cy);
-    ctx.lineTo(box.cx + 6, box.cy);
-    ctx.moveTo(box.cx, box.cy - 6);
-    ctx.lineTo(box.cx, box.cy + 6);
+    ctx.moveTo(cx - 6, cy);
+    ctx.lineTo(cx + 6, cy);
+    ctx.moveTo(cx, cy - 6);
+    ctx.lineTo(cx, cy + 6);
     ctx.stroke();
   }
 
-  private paintPath(ctx: CanvasRenderingContext2D): void {
-    if (this.samples.length < 2) {
+  private paintPath(
+    ctx: CanvasRenderingContext2D,
+    geometry: ViewportGeometry,
+  ): void {
+    const samples = this.samples;
+    if (samples.length < 2) {
       return;
     }
-    ctx.strokeStyle = "#4ade80";
+    const at = (sample: TrackSample) => ({
+      x: sample.x * geometry.scale + geometry.offsetX,
+      y: sample.y * geometry.scale + geometry.offsetY,
+    });
+
+    ctx.strokeStyle = PATH_COLOR;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(this.samples[0].x, this.samples[0].y);
-    for (let i = 1; i < this.samples.length; i++) {
-      ctx.lineTo(this.samples[i].x, this.samples[i].y);
+    const first = at(samples[0]);
+    ctx.moveTo(first.x, first.y);
+    for (let i = 1; i < samples.length; i++) {
+      const point = at(samples[i]);
+      ctx.lineTo(point.x, point.y);
     }
     ctx.stroke();
+
+    // Where the track ends, red when it ended by losing the feature, which is
+    // the one thing the old message said that the path alone does not.
+    if (this.result != null) {
+      const end = at(samples[samples.length - 1]);
+      ctx.fillStyle =
+        this.result.status === "lost" ? FAILED_COLOR : PATH_COLOR;
+      ctx.beginPath();
+      ctx.arc(end.x, end.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
-  /** Pointer client coordinates as a pixel in the decoded frame. */
-  private toFramePoint(event: PointerEvent): { x: number; y: number } | null {
+  private setCursor(cursor: string): void {
     const canvas = this.canvas();
-    if (canvas == null) {
-      return null;
+    if (canvas != null && canvas.style.cursor !== cursor) {
+      canvas.style.cursor = cursor;
     }
-    const rect = canvas.getBoundingClientRect();
-    if (!(rect.width > 0) || !(rect.height > 0)) {
-      return null;
-    }
-    return {
-      x: ((event.clientX - rect.left) / rect.width) * canvas.width,
-      y: ((event.clientY - rect.top) / rect.height) * canvas.height,
-    };
+  }
+
+  /** The cursor for a pointer hovering at `view`, with no button down. */
+  private hoverCursor(event: MouseEvent, size: StageSize): string {
+    const view = this.toView(event);
+    const intent = pointerIntent(
+      { button: 0, altKey: event.altKey },
+      stagePoint(this.viewport, size, view.x, view.y),
+      size,
+      this.canPlace(),
+    );
+    return intent === "place" ? "crosshair" : "grab";
   }
 
   private onPointerDown(event: PointerEvent): void {
-    if (this.phase !== "ready" && this.phase !== "done") {
+    const size = this.stageSize();
+    if (size == null || this.clip() == null) {
       return;
     }
-    const point = this.toFramePoint(event);
-    if (point == null) {
+    const view = this.toView(event);
+    const world = stagePoint(this.viewport, size, view.x, view.y);
+    const intent = pointerIntent(event, world, size, this.canPlace());
+    if (intent === "none") {
       return;
     }
+
+    // Also what stops a middle press from starting the browser's autoscroll.
+    event.preventDefault();
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-    this.dragFrom = point;
-    // Drawing a new box discards the previous run's path: it belongs to a
-    // feature the user has just stopped pointing at.
+
+    if (intent === "pan") {
+      this.pan = { x: view.x, y: view.y, from: this.viewport };
+      this.setCursor("grabbing");
+      return;
+    }
+
+    this.dragFrom = world;
+    // A new box discards the previous run's path: it belongs to a feature the
+    // user has just stopped pointing at.
     this.samples = [];
     this.result = null;
-    this.status = null;
-    this.sampleCount = 0;
-    this.setBoxFromDrag(point);
+    this.setBoxFromDrag(world);
   }
 
   private onPointerMove(event: PointerEvent): void {
-    if (this.dragFrom == null) {
+    const size = this.stageSize();
+    if (size == null || this.clip() == null) {
+      this.setCursor("");
       return;
     }
-    const point = this.toFramePoint(event);
-    if (point != null) {
-      this.setBoxFromDrag(point);
+    const view = this.toView(event);
+
+    if (this.pan != null) {
+      // From where the drag began rather than by increments, so a clamp at the
+      // edge gives the picture back as soon as the pointer turns round.
+      this.viewport = panViewport(
+        this.pan.from,
+        view.x - this.pan.x,
+        view.y - this.pan.y,
+        size,
+      );
+      this.paint();
+      return;
     }
+
+    if (this.dragFrom != null) {
+      this.setBoxFromDrag(stagePoint(this.viewport, size, view.x, view.y));
+      return;
+    }
+
+    this.setCursor(this.hoverCursor(event, size));
   }
 
   private onPointerUp(event: PointerEvent): void {
-    if (this.dragFrom == null) {
+    if (this.pan == null && this.dragFrom == null) {
       return;
     }
-    (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
+    const target = event.currentTarget as HTMLElement;
+    if (target.hasPointerCapture(event.pointerId)) {
+      target.releasePointerCapture(event.pointerId);
+    }
+    this.pan = null;
     this.dragFrom = null;
+
+    const size = this.stageSize();
+    if (size != null) {
+      this.setCursor(this.hoverCursor(event, size));
+    }
+    this.paint();
+  }
+
+  private onWheel(event: WheelEvent): void {
+    const size = this.stageSize();
+    if (size == null || this.clip() == null) {
+      return;
+    }
+    event.preventDefault();
+    this.viewport = wheelViewport(
+      this.viewport,
+      event,
+      this.toView(event),
+      size,
+    );
     this.paint();
   }
 
@@ -385,8 +573,6 @@ export class AutoTrackPanel extends LitElement {
             cy: (from.y + to.y) / 2,
             radius,
           };
-
-    this.paint();
   }
 
   // -------------------------------------------------------------- the track
@@ -399,10 +585,8 @@ export class AutoTrackPanel extends LitElement {
       return;
     }
 
-    const span = spanOf(element);
-    const endSourceMs = sourceTimeAt(element as any, span.end);
+    const endSourceMs = this.endSourceMs(element);
     if (!(endSourceMs > this.seedMs)) {
-      this.message = "There is nothing after this frame to track.";
       return;
     }
 
@@ -410,11 +594,9 @@ export class AutoTrackPanel extends LitElement {
     const abort = new AbortController();
     this.abort = abort;
     this.phase = "tracking";
-    this.message = "";
     this.progress = 0;
     this.samples = [];
     this.result = null;
-    this.cancelled = false;
 
     let state: TrackerState | null = null;
 
@@ -432,15 +614,11 @@ export class AutoTrackPanel extends LitElement {
               ? startTracker(
                   frame,
                   { x: box.cx, y: box.cy },
-                  {
-                    windowRadius: Math.round(box.radius),
-                    searchRadius: this.searchRadius,
-                    adaptTemplate: this.adaptTemplate,
-                  },
+                  { windowRadius: Math.round(box.radius) },
                 )
               : stepTracker(state, frame);
 
-          this.samples = state.samples as TrackSample[];
+          this.samples = state.samples;
           this.paint();
 
           // Throttled: the harvest reports at frame rate and this is the only
@@ -449,7 +627,6 @@ export class AutoTrackPanel extends LitElement {
           if (now - this.lastProgressAt > 100) {
             this.lastProgressAt = now;
             this.progress = progress;
-            this.sampleCount = this.samples.length;
           }
 
           if (state.status !== "tracking") {
@@ -458,58 +635,44 @@ export class AutoTrackPanel extends LitElement {
         },
       });
     } catch (error) {
+      // The clip changed under the run, and everything below would write this
+      // clip's track into the next one's panel.
+      if (this.source !== source) {
+        return;
+      }
       if ((error as Error)?.name !== "AbortError") {
         this.phase = "error";
-        this.message =
-          error instanceof Error ? error.message : String(error);
+        this.error = error instanceof Error ? error.message : String(error);
         this.abort = null;
         return;
       }
     }
+    if (this.source !== source) {
+      return;
+    }
 
     this.abort = null;
     this.result = state == null ? null : finishTracker(state);
-    this.status = this.result?.status ?? null;
-    this.sampleCount = this.result?.samples.length ?? 0;
-    this.progress = 1;
-    this.phase = "done";
-    this.message = this.describe();
-  }
+    this.samples = this.result?.samples ?? [];
 
-  private describe(): string {
-    const result = this.result;
-    if (result == null) {
-      return "No frames were decoded for this range.";
+    // Back to the seed frame. The harvest left the decoder on the last frame it
+    // read, and a box clicked there would be seeded at `seedMs` on a picture
+    // from somewhere else in the clip. `loading` until then, so the stage
+    // takes no click on the wrong frame.
+    this.phase = "loading";
+    try {
+      await source.grab(this.seedMs);
+    } catch {
+      // The path is already kept; failing to redraw the seed under it is not a
+      // reason to throw it away.
     }
-    if (result.status === "no-texture") {
-      return "There is not enough detail in that box to track. Try a corner or an edge with contrast.";
+    if (this.source !== source) {
+      return;
     }
-    if (result.status === "lost" && result.lostAtMs != null) {
-      const element = this.clip();
-      const at =
-        element == null
-          ? result.lostAtMs
-          : timelineMsOf(element, result.lostAtMs);
-      return `Lost the feature at ${formatMs(at)}. The track up to there is kept.`;
-    }
-    if (this.cancelled) {
-      const element = this.clip();
-      const last = result.samples[result.samples.length - 1];
-      const at =
-        element == null || last == null
-          ? null
-          : timelineMsOf(element, last.sourceMs);
-      return at == null
-        ? `Stopped after ${result.samples.length} frames.`
-        : `Stopped at ${formatMs(at)}, after ${result.samples.length} frames. What was tracked is kept.`;
-    }
-    return `Tracked ${result.samples.length} frames.`;
+    this.phase = "done";
   }
 
   private cancel(): void {
-    if (this.abort != null) {
-      this.cancelled = true;
-    }
     this.abort?.abort();
     this.abort = null;
   }
@@ -533,12 +696,11 @@ export class AutoTrackPanel extends LitElement {
       fps,
     });
 
-    const simplified = simplifyPath(path, this.tolerance);
     const nullId = uuidv4();
 
     useTimelineStore.getState().withCheckpoint((doc) =>
       createTrackNull(doc, {
-        samples: simplified,
+        samples: simplifyPath(path),
         nullId,
         newTrackId: uuidv4(),
         // `renderOption.duration` is in seconds.
@@ -548,231 +710,103 @@ export class AutoTrackPanel extends LitElement {
     );
 
     if (useTimelineStore.getState().timeline[nullId] == null) {
-      this.message = "There was nothing on the timeline to write.";
       return;
     }
 
-    // Select it, so the option panel opens on the thing that was just made and
-    // the pick-whip is one click away.
+    // Select it and open the inspector on it, so the pick-whip is one click
+    // away. Both, because the inspector does not follow `selectionStore`: it is
+    // shown by whoever made the selection (`elementTimelineCanvas#
+    // showSideOption`), and the selection alone left it on whatever it showed
+    // before. It is also the only confirmation, since the panel says nothing.
     selectionStore.getState().setIds([nullId]);
-    toast(`Null created from ${simplified.length} keyframes.`);
+    (document.querySelector("option-group") as any)?.showOption({
+      filetype: "group",
+      elementId: nullId,
+    });
   }
 
   // ---------------------------------------------------------------- render
 
   render() {
     const element = this.clip();
-
-    // A column rather than a scrolling block. The frame takes whatever height
-    // is left after the heading and the controls, so the Track button is on
-    // screen for a 9:16 phone clip and a 21:9 anamorphic one alike — which a
-    // full-width canvas is not, and which no fixed max-height gets right for
-    // both.
-    return html`
-      <div
-        class="p-4 w-100 h-100 d-flex flex-column overflow-auto"
-        style="max-width: 52rem; min-height: 0;"
-      >
-        <h5 class="text-light flex-shrink-0">Auto Track</h5>
-        <p class="text-secondary flex-shrink-0" style="font-size: 0.8rem;">
-          Follow something in a clip and turn its path into a null object.
-          Parent a title or a shape to that null and it sticks to what you
-          tracked.
-        </p>
-
-        ${element == null ? this.renderEmpty() : this.renderTracker(element)}
-      </div>
-    `;
-  }
-
-  private renderEmpty() {
-    return html`
-      <div class="alert alert-dark" style="font-size: 0.85rem;">
-        Select a video clip on the timeline to track something in it.
-      </div>
-    `;
-  }
-
-  private renderTracker(element: TimelineElement) {
     const busy = this.phase === "tracking";
-    const ready = this.phase === "ready" || this.phase === "done";
+    const canTrack =
+      element != null &&
+      this.canPlace() &&
+      this.box != null &&
+      this.endSourceMs(element) > this.seedMs;
+    const canCreate =
+      element != null &&
+      !busy &&
+      this.result != null &&
+      this.result.samples.length >= 2;
 
     return html`
-      <div class="mb-2 text-secondary flex-shrink-0" style="font-size: 0.8rem;">
-        ${this.phase === "loading"
-          ? "Opening the clip…"
-          : this.box == null
-            ? "Drag a box around what you want to follow — a corner, a logo, an eye. Something with contrast."
-            : `Tracking forward from ${formatMs(
-                timelineMsOf(element, this.seedMs),
-              )} to the end of the clip.`}
-      </div>
-
-      <!--
-        The canvas is capped in height rather than simply filling the width.
-        A portrait clip is twice as tall as it is wide, and at 100% width it
-        pushed the Track button and every setting below the fold, so the panel
-        looked like it had no controls at all. A max-height in viewport units
-        keeps them on screen whatever the aspect ratio, and the pointer mapping
-        is unaffected because it measures the canvas rather than assuming it.
-      -->
-      <div
-        class="position-relative mb-3 d-flex justify-content-center align-items-center flex-grow-1"
-        style="background: #111; border-radius: 4px; overflow: hidden; min-height: 8rem;"
-      >
+      <div class="auto-track-stage">
         <canvas
-          id="auto-track-canvas"
-          style="display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; cursor: crosshair; touch-action: none;"
+          class="auto-track-canvas"
           @pointerdown=${this.onPointerDown}
           @pointermove=${this.onPointerMove}
           @pointerup=${this.onPointerUp}
           @pointercancel=${this.onPointerUp}
+          @wheel=${{
+            handleEvent: (event: WheelEvent) => this.onWheel(event),
+            // A wheel listener has to be active to `preventDefault`, and a
+            // pinch it did not prevent zooms the whole window.
+            passive: false,
+          }}
         ></canvas>
+        ${this.renderOverlay(element)}
+        ${busy
+          ? html`<div
+              class="auto-track-progress"
+              style="width: ${Math.round(this.progress * 100)}%"
+            ></div>`
+          : nothing}
       </div>
 
-      <div class="d-flex align-items-center gap-2 mb-3 flex-wrap flex-shrink-0">
+      <div class="auto-track-bar">
         <button
-          class="btn btn-sm btn-primary"
-          ?disabled=${!ready || this.box == null}
-          @click=${() => void this.track()}
+          type="button"
+          class="auto-track-btn is-primary ${busy ? "is-cancel" : ""}"
+          ?disabled=${!busy && !canTrack}
+          @click=${() => (busy ? this.cancel() : void this.track())}
         >
-          ${busy ? "Tracking…" : "Track"}
+          <span class="material-symbols-outlined"
+            >${busy ? "stop" : "my_location"}</span
+          >${busy ? "Cancel" : "Track"}
         </button>
         <button
-          class="btn btn-sm btn-secondary"
-          ?disabled=${!busy}
-          @click=${() => this.cancel()}
-        >
-          Cancel
-        </button>
-        <button
-          class="btn btn-sm btn-success"
-          ?disabled=${this.result == null || this.sampleCount < 2}
+          type="button"
+          class="auto-track-btn"
+          ?disabled=${!canCreate}
           @click=${() => this.createNull()}
         >
-          Create null
+          <span class="material-symbols-outlined">filter_center_focus</span
+          >Create Null
         </button>
-        ${busy || this.sampleCount > 0
-          ? html`<span class="text-secondary" style="font-size: 0.8rem;">
-              ${this.sampleCount} frames
-            </span>`
-          : ""}
-      </div>
-
-      ${busy
-        ? html`<div class="progress mb-3" style="height: 4px;">
-            <div
-              class="progress-bar"
-              style="width: ${Math.round(this.progress * 100)}%"
-            ></div>
-          </div>`
-        : ""}
-      ${this.message
-        ? html`<p
-            class="${this.status === "lost" || this.phase === "error"
-              ? "text-warning"
-              : "text-secondary"}"
-            style="font-size: 0.8rem;"
-          >
-            ${this.message}
-          </p>`
-        : ""}
-
-      <div class="row g-3 flex-shrink-0" style="font-size: 0.8rem;">
-        <div class="col-4">
-          <label class="form-label text-secondary"
-            >Search radius — ${this.searchRadius}px</label
-          >
-          <input
-            type="range"
-            class="form-range"
-            min="2"
-            max="48"
-            .value=${String(this.searchRadius)}
-            ?disabled=${busy}
-            @input=${(e: Event) => {
-              this.searchRadius = Number(
-                (e.target as HTMLInputElement).value,
-              );
-              this.paint();
-            }}
-          />
-          <div class="text-secondary">How far it may move per frame.</div>
-        </div>
-
-        <div class="col-4">
-          <label class="form-label text-secondary"
-            >Smoothing — ${this.tolerance.toFixed(1)}px</label
-          >
-          <input
-            type="range"
-            class="form-range"
-            min="0"
-            max="4"
-            step="0.1"
-            .value=${String(this.tolerance)}
-            ?disabled=${busy}
-            @input=${(e: Event) => {
-              this.tolerance = Number((e.target as HTMLInputElement).value);
-            }}
-          />
-          <div class="text-secondary">
-            How far a keyframe may be dropped from the path. 0 keeps every frame.
-          </div>
-        </div>
-
-        <div class="col-4">
-          <div class="form-check mt-4">
-            <input
-              class="form-check-input"
-              type="checkbox"
-              id="auto-track-adapt"
-              .checked=${this.adaptTemplate}
-              ?disabled=${busy}
-              @change=${(e: Event) => {
-                this.adaptTemplate = (e.target as HTMLInputElement).checked;
-              }}
-            />
-            <label class="form-check-label text-secondary" for="auto-track-adapt">
-              Follow appearance changes
-            </label>
-          </div>
-          <div class="text-secondary">
-            For a subject that turns. Costs accuracy: it can drift.
-          </div>
-        </div>
       </div>
     `;
   }
-}
 
-/**
- * Source ms back onto the timeline, for anything shown to the user.
- *
- * Clamped to the clip's span, unlike `toProjectPath`, which drops an
- * out-of-span sample instead. The difference is deliberate: a keyframe outside
- * the clip is one that never plays and must not be written, but a *label*
- * saying where the track ended is better approximately right than absent.
- */
-function timelineMsOf(element: TimelineElement, sourceMs: number): number {
-  const span = spanOf(element);
-  const raw = timelineTimeAt(element as any, sourceMs);
-  return Math.min(Math.max(raw, span.start), span.end);
-}
-
-function formatMs(ms: number): string {
-  const total = Math.max(0, Math.round(ms));
-  const minutes = Math.floor(total / 60_000);
-  const seconds = Math.floor((total % 60_000) / 1000);
-  const hundredths = Math.floor((total % 1000) / 10);
-  return `${minutes}:${String(seconds).padStart(2, "0")}.${String(
-    hundredths,
-  ).padStart(2, "0")}`;
-}
-
-function toast(message: string): void {
-  (document.querySelector("toast-box") as any)?.showToast({
-    message,
-    delay: "3000",
-  });
+  private renderOverlay(element: TimelineElement | null) {
+    if (element == null) {
+      return html`<div class="auto-track-overlay">
+        <span class="material-symbols-outlined">movie</span>Select a clip
+      </div>`;
+    }
+    if (this.phase === "loading") {
+      return html`<div class="auto-track-overlay is-loading">
+        <span class="spinner-border spinner-border-sm"></span>
+      </div>`;
+    }
+    if (this.phase === "error") {
+      return html`<div class="auto-track-overlay is-error">
+        <span class="material-symbols-outlined" title=${this.error}
+          >error</span
+        >
+      </div>`;
+    }
+    return nothing;
+  }
 }

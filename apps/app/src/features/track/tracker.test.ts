@@ -5,6 +5,7 @@ import {
   makeTexture,
   occlude,
   relight,
+  rotate,
   shift,
 } from "./testFixtures";
 import {
@@ -154,6 +155,88 @@ describe("trackSequence", () => {
       y: 42.25,
       confidence: 1,
     });
+  });
+});
+
+/**
+ * A feature that turns while it pans: `degrees` more each frame about the seed,
+ * which the pan then carries, so frame `i`'s answer is `(160 + 0.5i, 120 + 0.3i)`.
+ */
+function turning(count: number, degrees: number): TrackFrame[] {
+  const base = makeTexture(WIDTH, HEIGHT, 13);
+  const frames: TrackFrame[] = [];
+  for (let i = 0; i < count; i++) {
+    frames.push({
+      sourceMs: i * 16,
+      image: shift(
+        rotate(base, 160, 120, (i * degrees * Math.PI) / 180),
+        0.5 * i,
+        0.3 * i,
+      ),
+    });
+  }
+  return frames;
+}
+
+describe("re-anchoring", () => {
+  it("follows a feature that turns, which a fixed reference loses", () => {
+    // Sixty degrees over the run. Against the patch that was clicked, NCC falls
+    // under the threshold about halfway, with the tracker still on the point.
+    const frames = turning(60, 1);
+
+    const fixed = trackSequence(frames, { x: 160, y: 120 }, {
+      reanchorBelow: null,
+    });
+    const anchored = trackSequence(frames, { x: 160, y: 120 });
+
+    expect(fixed.status).toBe("lost");
+    expect(fixed.samples.length).toBeLessThan(40);
+
+    expect(anchored.status).toBe("completed");
+    expect(anchored.samples).toHaveLength(60);
+    anchored.samples.forEach((sample, i) => {
+      expect(Math.hypot(sample.x - (160 + 0.5 * i), sample.y - (120 + 0.3 * i)))
+        .toBeLessThan(1.5);
+    });
+  });
+
+  it("changes nothing about a feature that never weakens", () => {
+    // The claim that makes it safe as a default: a rigid feature scores above
+    // the threshold on every frame, never re-takes its patch, and so tracks
+    // exactly as the fixed reference does, with none of the drift re-taking
+    // costs.
+    const frames = pan(makeTexture(WIDTH, HEIGHT, 3), 60, 0.37, 0.21);
+
+    const anchored = trackSequence(frames, { x: 100, y: 90 });
+    const fixed = trackSequence(frames, { x: 100, y: 90 }, {
+      reanchorBelow: null,
+    });
+
+    expect(anchored.template).toEqual(
+      startTracker(frames[0], { x: 100, y: 90 }).template,
+    );
+    expect(anchored.samples).toEqual(fixed.samples);
+  });
+
+  it("never takes its patch from a frame it did not believe", () => {
+    // Above every possible score, so any frame that matches re-takes the patch
+    // and the one that does not is the only thing being tested.
+    const options = { reanchorBelow: 1.01 };
+    const base = makeTexture(WIDTH, HEIGHT, 5);
+    const clean = pan(base, 3, 1, 0);
+    const covered: TrackFrame = {
+      sourceMs: 48,
+      image: occlude(shift(base, 3, 0), 163, 120, 40),
+    };
+
+    const seeded = startTracker(clean[0], { x: 160, y: 120 }, options);
+    const matched = stepTracker(seeded, clean[1]);
+    const hidden = stepTracker(matched, covered);
+
+    // Proof the setting is live: a frame it believed did re-take the patch.
+    expect(matched.template).not.toBe(seeded.template);
+    expect(hidden.lowStreak).toBe(1);
+    expect(hidden.template).toBe(matched.template);
   });
 });
 
