@@ -58,6 +58,14 @@ describe("previewSrcFor", () => {
     expect(previewSrcFor(webForm)).toBe(webForm);
   });
 
+  it("leaves a page-relative path alone", () => {
+    // The demo's preset clips point at media the static site itself serves.
+    // `toLocalPath` would send it to `/api/file`, which the demo does not have.
+    const demoSample = "/sample/106366-673007941.mp4";
+
+    expect(previewSrcFor(demoSample)).toBe(demoSample);
+  });
+
   it("escapes nothing and decodes nothing on the way through", () => {
     // `localpath` is not percent-encoded beyond `#`, so a general-purpose
     // encoder would corrupt these two names. Both are real: the second is what

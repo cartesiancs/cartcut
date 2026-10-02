@@ -430,8 +430,13 @@ export class PreviewCanvas extends LitElement {
     //document.querySelector("element-control").handleClickPreview();
   }
 
+  // `getState`, not `getInitialState`: the fields below are only seeded here
+  // and the subscription keeps them current from the next write on. The demo
+  // places its preset clips before this panel mounts, so a seed from the
+  // empty initial state left the preview drawing nothing, and decoding
+  // nothing, until something unrelated wrote to the store.
   @property()
-  timelineState: ITimelineStore = useTimelineStore.getInitialState();
+  timelineState: ITimelineStore = useTimelineStore.getState();
 
   @property()
   timeline = this.timelineState.timeline;

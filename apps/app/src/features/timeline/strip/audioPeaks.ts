@@ -33,11 +33,14 @@ export type AudioPeakProvider = PeakProvider & {
   readonly decodedFiles: number;
 };
 
-/** Mirrors `loadedAssetStore.getPath` so web mode resolves the same way. */
+/**
+ * Mirrors `loadedAssetStore.getPath`: only the web build has an `/api/file`.
+ * The demo is a static site serving its samples by their own path.
+ */
 function resolvePath(localpath: string): string {
-  return getLocationEnv() === "electron"
-    ? localpath
-    : `/api/file?path=${localpath}`;
+  return getLocationEnv() === "web"
+    ? `/api/file?path=${localpath}`
+    : localpath;
 }
 
 export function createAudioPeakProvider(): AudioPeakProvider {

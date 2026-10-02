@@ -51,11 +51,14 @@ export type HoverPreviewSource = {
  * `proxyBridge.ts` converts only `entry.source` on the way in, because the
  * source is what the table is keyed by.
  *
- * So the conversion is applied to the substituted case alone.
- * `loadedAssetStore.ts` wraps unconditionally instead, which on the web build
- * turns `/api/file?path=…` into `/api/file?path=/api/file?path=…` — latent
- * there only because the web build has no proxies, and not worth reproducing.
- * Handed a bare OS path, a `<video>` would resolve it against the page.
+ * So the conversion is applied to the substituted case alone. Handed a bare OS
+ * path, a `<video>` would resolve it against the page.
+ *
+ * `loadedAssetStore.ts` decodes every timeline video through this too. It used
+ * to wrap unconditionally, which was not harmless outside Electron: the web
+ * build's `/api/file?path=…` became `/api/file?path=/api/file?path=…`, and the
+ * demo's bundled `/sample/x.mp4` became `/api/file?path=/sample/x.mp4`, which
+ * the static host answers with `index.html`.
  */
 export function previewSrcFor(localpath: string): string {
   const chosen = playbackPathFor(localpath);

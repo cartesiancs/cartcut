@@ -311,6 +311,15 @@ export function enableIpcWrapper() {
         finishCombineFrame: async function (lang) {
           return "none";
         },
+        // `event.ts` subscribes to both at module top level. Missing, they threw
+        // there, and every line of `index.ts` after `import "./event"` was
+        // skipped in the web and demo builds, `toast-box` registration included.
+        v2Error: async function (callback) {
+          return "none";
+        },
+        v2Cancelled: async function (callback) {
+          return "none";
+        },
       },
       overlayRecord: {
         complete: async function (callback) {

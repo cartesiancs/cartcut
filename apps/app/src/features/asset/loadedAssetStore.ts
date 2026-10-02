@@ -11,8 +11,7 @@ import {
 import { VideoFilterPipeline } from "../renderer/filter/videoPipeline";
 import { isElementVisibleAtTime } from "../element/time";
 import { decodersFor } from "./decoderWindow";
-import { playbackPathFor } from "../../states/proxyStore";
-import { toLocalPath } from "../element/mediaProbe";
+import { previewSrcFor } from "./hoverPreviewOverlay";
 import { count as perfCount, gauge as perfGauge } from "../debug/frameStats";
 import { speedOf } from "../timeline/geometry";
 import { sourceTimeAtFrame } from "../timeline/frames";
@@ -329,13 +328,24 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
       // answers with, and `proxyStore`'s default mode is "prefer". Left as it
       // is on purpose: changing it changes what the app renders, which is a
       // separate decision from where the render runs.
-      const playbackPath = toLocalPath(playbackPathFor(videoElement.localpath));
+      //
+      // `previewSrcFor`, never `toLocalPath(playbackPathFor(...))`: only a
+      // substituted proxy is a bare OS path that needs converting. Wrapping the
+      // unsubstituted `localpath` too turned the demo's `/sample/x.mp4` into
+      // `/api/file?path=/sample/x.mp4`, which its static host answers with
+      // `index.html`, so no video in the demo ever decoded.
+      const playbackPath = previewSrcFor(videoElement.localpath);
       video.src = playbackPath;
 
       video.addEventListener(
         "loadeddata",
         () => {
-          video.currentTime = 0;
+          // No `currentTime = 0` here. A fresh handle is already at zero, and
+          // assigning it anyway starts a real seek: `readyState` drops to 1, so
+          // the repaint this load earns draws nothing, and `syncPlayback`
+          // leaves a seeking handle alone, so nothing repaints when it lands.
+          // That left the first frame black until the user scrubbed.
+          //
           // A brand new handle sits at zero whatever the old one was doing, so
           // any remembered request would suppress its first real placement.
           this._lastSeekRequests.delete(elementId);
@@ -655,7 +665,7 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
         // A proxy toggle changes nothing about the element, so this is the only
         // thing that notices it. Without it, turning proxies on would take
         // effect only for clips that happened to be loaded afterwards.
-        meta.playbackPath === toLocalPath(playbackPathFor(element.localpath)) &&
+        meta.playbackPath === previewSrcFor(element.localpath) &&
         (keep == null || keep.has(elementId));
 
       if (stillValid) {
