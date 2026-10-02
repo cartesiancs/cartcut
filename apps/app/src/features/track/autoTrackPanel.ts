@@ -24,7 +24,15 @@
  * element drag and the mask pen tool's key handling, which CLAUDE.md already
  * describes as the thing in this codebase that fights everything else.
  *
- * ## The stage
+ * ## The stage follows the playhead
+ *
+ * Outside a run the stage shows the frame under the playhead, so moving the
+ * playhead on the timeline below is how a track is started from the middle of
+ * a clip, and how a slipped one is found and fixed. A run starts on the frame
+ * on show; what it keeps of the track before it is `trackPath.ts#keptBy`'s
+ * decision, made from where the click lands, and the samples it would replace
+ * are drawn dimmed from the moment of the click. A ring marks where the track
+ * is at the playhead.
  *
  * The canvas fills the panel and the frame is drawn into it through a viewport,
  * the preview's own arithmetic with fit as a floor (`stageView.ts`, where the
@@ -62,6 +70,7 @@ import {
   wheelViewport,
   type StageSize,
 } from "./stageView";
+import { joinRun, keptBy, positionAt } from "./trackPath";
 import { toProjectPath } from "./trackToTimeline";
 import { createTrackNull } from "./trackNullOp";
 import {
@@ -79,6 +88,14 @@ const CLICK_BOX_RADIUS = 16;
 const MIN_BOX_RADIUS = 6;
 
 /**
+ * How far from the track a click may land and still correct it, in
+ * working-frame pixels: a twentieth of the 960px working width. A click is
+ * aimed at the feature, not at the track's dot, and the track is wrong at
+ * exactly the frames worth correcting.
+ */
+const NEAR_TRACK_PX = 48;
+
+/**
  * View px per working px past which the frame is drawn unsmoothed. Zooming in is
  * for placing the box precisely, and a smoothed blow-up hides the very pixels
  * the tracker is about to correlate.
@@ -88,10 +105,18 @@ const PIXELATE_FROM_SCALE = 2;
 const BOX_COLOR = "#ffd400";
 const PATH_COLOR = "#4ade80";
 const FAILED_COLOR = "#f87171";
+const RING_COLOR = "#ffffff";
+/** The part of the track the pending click would replace. */
+const REPLACED_ALPHA = 0.3;
 
 type Box = { cx: number; cy: number; radius: number };
 
-type Phase = "idle" | "loading" | "ready" | "tracking" | "done" | "error";
+/**
+ * `loading` is the decoder fetching the frame to show, and nothing may be
+ * clicked or tracked until it lands: the picture on the canvas is not the one
+ * a run would start from.
+ */
+type Phase = "idle" | "loading" | "ready" | "tracking" | "error";
 
 @customElement("auto-track-panel")
 export class AutoTrackPanel extends LitElement {
@@ -100,8 +125,16 @@ export class AutoTrackPanel extends LitElement {
   /** Why the clip could not be opened, for the warning glyph's tooltip. */
   @state() private error = "";
   @state() private progress = 0;
+  /** The click waiting for Track, on the frame on show. */
   @state() private box: Box | null = null;
-  @state() private result: TrackerState | null = null;
+  /** The clip's track, every run joined. What Create Null writes. */
+  @state() private path: readonly TrackSample[] = [];
+  /** The track ends where the feature was lost, not where the run was stopped. */
+  @state() private pathLost = false;
+  /** The box's patch had no texture, and the run it started changed nothing. */
+  @state() private boxRefused = false;
+  /** Source ms of the frame on the canvas; NaN while it is not known. */
+  @state() private shownMs = Number.NaN;
 
   private source: FrameSource | null = null;
   private viewport: Viewport = fitViewport(1, 1);
@@ -110,8 +143,14 @@ export class AutoTrackPanel extends LitElement {
   private viewH = 0;
   private dragFrom: { x: number; y: number } | null = null;
   private pan: { x: number; y: number; from: Viewport } | null = null;
-  private seedMs = 0;
-  private samples: readonly TrackSample[] = [];
+  /** During a run: what it keeps of `path`, and what it has found so far. */
+  private runKept: readonly TrackSample[] = [];
+  private runSamples: readonly TrackSample[] = [];
+  /** The newest frame asked for, and the one being fetched. */
+  private wantMs: number | null = null;
+  private fetchingMs: number | null = null;
+  /** The source a seek loop is running for, so only one ever runs. */
+  private seeking: FrameSource | null = null;
   private abort: AbortController | null = null;
   private disposers: (() => void)[] = [];
   private resizeObserver: ResizeObserver | null = null;
@@ -135,9 +174,12 @@ export class AutoTrackPanel extends LitElement {
 
     this.disposers.push(
       selectionStore.subscribe(() => this.adoptSelection()),
-      // The clip can be trimmed or moved while the panel is open, which changes
-      // the range a track may cover and which source frame the playhead names.
-      useTimelineStore.subscribe(() => this.requestUpdate()),
+      // The playhead, and also a trim or a move, which changes which source
+      // frame the playhead names and the range a track may cover.
+      useTimelineStore.subscribe(() => {
+        this.requestUpdate();
+        this.follow();
+      }),
     );
     this.adoptSelection();
   }
@@ -204,22 +246,28 @@ export class AutoTrackPanel extends LitElement {
     this.cancel();
     this.clipId = picked;
     this.box = null;
-    this.samples = [];
-    this.result = null;
+    this.path = [];
+    this.pathLost = false;
+    this.boxRefused = false;
+    this.runKept = [];
+    this.runSamples = [];
     this.error = "";
     this.phase = "loading";
     this.closeSource();
 
-    void this.openAndShow(picked);
+    void this.openSource(picked);
   }
 
   private closeSource(): void {
     this.source?.close();
     this.source = null;
+    this.shownMs = Number.NaN;
+    this.wantMs = null;
+    this.fetchingMs = null;
   }
 
-  /** Open the clip's own decoder and show the frame under the playhead. */
-  private async openAndShow(clipId: string): Promise<void> {
+  /** Open the clip's own decoder; `follow` then shows the playhead's frame. */
+  private async openSource(clipId: string): Promise<void> {
     const element = this.clip();
     if (element == null) {
       return;
@@ -235,14 +283,7 @@ export class AutoTrackPanel extends LitElement {
       }
       this.source = source;
       this.viewport = fitViewport(source.workingWidth, source.workingHeight);
-
-      this.seedMs = this.seedSourceMs(element);
-      await source.grab(this.seedMs);
-      if (this.clipId !== clipId) {
-        return;
-      }
-
-      this.phase = "ready";
+      this.follow();
     } catch (error) {
       if (this.clipId !== clipId) {
         return;
@@ -253,14 +294,13 @@ export class AutoTrackPanel extends LitElement {
   }
 
   /**
-   * The source instant the panel opens on.
+   * The source instant under the playhead.
    *
-   * The playhead when it is over the clip, and the clip's first frame when it
-   * is not, rather than refusing: "move the playhead onto the clip first" is a
-   * rule the user has no way to have known about, and the first frame is a
-   * defensible place to start a forward track from.
+   * Clamped onto the clip rather than refused: with the playhead off the clip
+   * the stage shows its nearest frame, and "move the playhead onto the clip
+   * first" is a rule the user has no way to have known about.
    */
-  private seedSourceMs(element: TimelineElement): number {
+  private playheadSourceMs(element: TimelineElement): number {
     const span = spanOf(element);
     const cursor = useTimelineStore.getState().cursor ?? span.start;
     const inside = Math.min(Math.max(cursor, span.start), span.end - 1);
@@ -269,6 +309,87 @@ export class AutoTrackPanel extends LitElement {
 
   private endSourceMs(element: TimelineElement): number {
     return sourceTimeAt(element as any, spanOf(element).end);
+  }
+
+  // ------------------------------------------------------------ the frame
+
+  /**
+   * Bring the stage to the frame under the playhead.
+   *
+   * Never during a run, which owns the decoder: the frame source is one
+   * `<video>`, and a seek landing in the middle of a harvest would move the
+   * picture the run is reading. Never while hidden either, where there is
+   * nobody to show it to; the resize observer calls this again on the way back.
+   */
+  private follow(): void {
+    const element = this.clip();
+    const source = this.source;
+    if (
+      element == null ||
+      source == null ||
+      this.phase === "tracking" ||
+      this.phase === "error" ||
+      !(this.viewW > 0)
+    ) {
+      return;
+    }
+
+    const target = this.playheadSourceMs(element);
+    if (target === (this.wantMs ?? this.fetchingMs ?? this.shownMs)) {
+      return;
+    }
+    this.wantMs = target;
+    void this.fetchFrames(source);
+  }
+
+  /**
+   * Seek, one frame at a time, to the newest one asked for.
+   *
+   * A drag of the playhead asks for dozens of frames a second, and a seek on a
+   * long-GOP recording takes most of one. Fetching only the newest request once
+   * the current one lands keeps the decoder one seek behind the pointer, where
+   * queueing every request would leave it seconds behind.
+   */
+  private async fetchFrames(source: FrameSource): Promise<void> {
+    if (this.seeking === source) {
+      return;
+    }
+    this.seeking = source;
+    this.phase = "loading";
+
+    try {
+      while (this.wantMs != null && this.source === source) {
+        const ms = this.wantMs;
+        this.wantMs = null;
+        this.fetchingMs = ms;
+        await source.grab(ms);
+        // Before anything is written: a loop for a clip that has since been
+        // replaced must not touch the next clip's bookkeeping.
+        if (this.source !== source) {
+          return;
+        }
+        this.fetchingMs = null;
+        if (ms !== this.shownMs) {
+          this.shownMs = ms;
+          // A box marks a feature on the frame it was clicked on.
+          this.box = null;
+          this.boxRefused = false;
+        }
+        this.paint();
+      }
+      if (this.source === source) {
+        this.phase = "ready";
+      }
+    } catch (error) {
+      if (this.source === source) {
+        this.phase = "error";
+        this.error = error instanceof Error ? error.message : String(error);
+      }
+    } finally {
+      if (this.seeking === source) {
+        this.seeking = null;
+      }
+    }
   }
 
   // -------------------------------------------------------------- the stage
@@ -283,7 +404,7 @@ export class AutoTrackPanel extends LitElement {
    * Here and not in `firstUpdated`, which runs once per element: a disconnect
    * drops the observer, and a reconnect has to find it missing and make another.
    * The panel's own column hides it with `d-none` when another tab is on show,
-   * which reports 0x0 and stops `paint` until it comes back.
+   * which reports 0x0 and stops `paint` and `follow` until it comes back.
    */
   private observeStage(): void {
     const canvas = this.canvas();
@@ -299,6 +420,7 @@ export class AutoTrackPanel extends LitElement {
         this.viewport = containViewport(this.viewport, size);
       }
       this.paint();
+      this.follow();
     });
     this.resizeObserver.observe(canvas);
   }
@@ -323,10 +445,27 @@ export class AutoTrackPanel extends LitElement {
   }
 
   private canPlace(): boolean {
-    return this.phase === "ready" || this.phase === "done";
+    return this.phase === "ready" && Number.isFinite(this.shownMs);
   }
 
-  /** Redraw the frame, the box and whatever path has been found so far. */
+  /** The track as it stands, with a run's progress joined on while it runs. */
+  private shownPath(): readonly TrackSample[] {
+    return this.phase === "tracking"
+      ? joinRun(this.runKept, this.runSamples)
+      : this.path;
+  }
+
+  /** How much of `path` the box waiting for Track would keep. */
+  private keptByBox(box: Box): readonly TrackSample[] {
+    return keptBy(
+      this.path,
+      this.shownMs,
+      { x: box.cx, y: box.cy },
+      Math.max(NEAR_TRACK_PX, box.radius * 2),
+    );
+  }
+
+  /** Redraw the frame, the box and the track. */
   private paint(): void {
     const canvas = this.canvas();
     if (canvas == null || !(this.viewW > 0) || !(this.viewH > 0)) {
@@ -346,6 +485,7 @@ export class AutoTrackPanel extends LitElement {
       return;
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
     ctx.fillStyle = CANVAS_BG;
     ctx.fillRect(0, 0, backingW, backingH);
 
@@ -369,6 +509,7 @@ export class AutoTrackPanel extends LitElement {
     // The marks in view px, so a line is two pixels wide at every zoom.
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.paintPath(ctx, geometry);
+    this.paintRing(ctx, geometry);
     this.paintBox(ctx, geometry);
   }
 
@@ -384,15 +525,14 @@ export class AutoTrackPanel extends LitElement {
     // While it runs the box rides the newest sample, over the frame that sample
     // came from, so what is being followed is visible as it is followed.
     const head =
-      this.phase === "tracking" && this.samples.length > 0
-        ? this.samples[this.samples.length - 1]
+      this.phase === "tracking" && this.runSamples.length > 0
+        ? this.runSamples[this.runSamples.length - 1]
         : null;
     const cx = (head?.x ?? box.cx) * geometry.scale + geometry.offsetX;
     const cy = (head?.y ?? box.cy) * geometry.scale + geometry.offsetY;
     const half = box.radius * geometry.scale;
 
-    ctx.strokeStyle =
-      this.result?.status === "no-texture" ? FAILED_COLOR : BOX_COLOR;
+    ctx.strokeStyle = this.boxRefused ? FAILED_COLOR : BOX_COLOR;
     ctx.lineWidth = 2;
     ctx.strokeRect(cx - half, cy - half, half * 2, half * 2);
 
@@ -404,11 +544,36 @@ export class AutoTrackPanel extends LitElement {
     ctx.stroke();
   }
 
+  /** Where the track is on the frame on show. */
+  private paintRing(
+    ctx: CanvasRenderingContext2D,
+    geometry: ViewportGeometry,
+  ): void {
+    if (this.phase === "tracking") {
+      return;
+    }
+    const at = positionAt(this.path, this.shownMs);
+    if (at == null) {
+      return;
+    }
+    ctx.strokeStyle = RING_COLOR;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(
+      at.x * geometry.scale + geometry.offsetX,
+      at.y * geometry.scale + geometry.offsetY,
+      7,
+      0,
+      Math.PI * 2,
+    );
+    ctx.stroke();
+  }
+
   private paintPath(
     ctx: CanvasRenderingContext2D,
     geometry: ViewportGeometry,
   ): void {
-    const samples = this.samples;
+    const samples = this.shownPath();
     if (samples.length < 2) {
       return;
     }
@@ -417,26 +582,44 @@ export class AutoTrackPanel extends LitElement {
       y: sample.y * geometry.scale + geometry.offsetY,
     });
 
-    ctx.strokeStyle = PATH_COLOR;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    const first = at(samples[0]);
-    ctx.moveTo(first.x, first.y);
-    for (let i = 1; i < samples.length; i++) {
-      const point = at(samples[i]);
-      ctx.lineTo(point.x, point.y);
-    }
-    ctx.stroke();
+    // A box waiting for Track keeps a prefix of the track and replaces the
+    // rest, and the rest is drawn faint so the click says what it will do
+    // before Track is pressed.
+    const keep =
+      this.phase !== "tracking" && this.box != null && !this.boxRefused
+        ? this.keptByBox(this.box).length
+        : samples.length;
+
+    const stroke = (from: number, to: number, alpha: number) => {
+      if (to - from < 1) {
+        return;
+      }
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = PATH_COLOR;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const first = at(samples[from]);
+      ctx.moveTo(first.x, first.y);
+      for (let i = from + 1; i <= to; i++) {
+        const point = at(samples[i]);
+        ctx.lineTo(point.x, point.y);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    };
+    stroke(0, Math.max(0, keep - 1), 1);
+    stroke(Math.max(0, keep - 1), samples.length - 1, REPLACED_ALPHA);
 
     // Where the track ends, red when it ended by losing the feature, which is
     // the one thing the old message said that the path alone does not.
-    if (this.result != null) {
+    if (this.phase !== "tracking") {
       const end = at(samples[samples.length - 1]);
-      ctx.fillStyle =
-        this.result.status === "lost" ? FAILED_COLOR : PATH_COLOR;
+      ctx.globalAlpha = keep < samples.length ? REPLACED_ALPHA : 1;
+      ctx.fillStyle = this.pathLost ? FAILED_COLOR : PATH_COLOR;
       ctx.beginPath();
       ctx.arc(end.x, end.y, 4, 0, Math.PI * 2);
       ctx.fill();
+      ctx.globalAlpha = 1;
     }
   }
 
@@ -482,10 +665,7 @@ export class AutoTrackPanel extends LitElement {
     }
 
     this.dragFrom = world;
-    // A new box discards the previous run's path: it belongs to a feature the
-    // user has just stopped pointing at.
-    this.samples = [];
-    this.result = null;
+    this.boxRefused = false;
     this.setBoxFromDrag(world);
   }
 
@@ -581,28 +761,29 @@ export class AutoTrackPanel extends LitElement {
     const element = this.clip();
     const source = this.source;
     const box = this.box;
-    if (element == null || source == null || box == null) {
+    const seedMs = this.shownMs;
+    if (element == null || source == null || box == null || !this.canPlace()) {
       return;
     }
 
     const endSourceMs = this.endSourceMs(element);
-    if (!(endSourceMs > this.seedMs)) {
+    if (!(endSourceMs > seedMs)) {
       return;
     }
 
     const fps = renderOptionStore.getState().options.fps;
     const abort = new AbortController();
     this.abort = abort;
+    this.runKept = this.keptByBox(box);
+    this.runSamples = [];
     this.phase = "tracking";
     this.progress = 0;
-    this.samples = [];
-    this.result = null;
 
     let state: TrackerState | null = null;
 
     try {
       await source.harvest({
-        startMs: this.seedMs,
+        startMs: seedMs,
         endMs: endSourceMs,
         // The project's own grid. A finer stride is work whose answer gets
         // snapped onto a keyframe time another sample already holds.
@@ -618,7 +799,7 @@ export class AutoTrackPanel extends LitElement {
                 )
               : stepTracker(state, frame);
 
-          this.samples = state.samples;
+          this.runSamples = state.samples;
           this.paint();
 
           // Throttled: the harvest reports at frame rate and this is the only
@@ -641,9 +822,10 @@ export class AutoTrackPanel extends LitElement {
         return;
       }
       if ((error as Error)?.name !== "AbortError") {
+        this.abort = null;
+        this.runSamples = [];
         this.phase = "error";
         this.error = error instanceof Error ? error.message : String(error);
-        this.abort = null;
         return;
       }
     }
@@ -652,24 +834,30 @@ export class AutoTrackPanel extends LitElement {
     }
 
     this.abort = null;
-    this.result = state == null ? null : finishTracker(state);
-    this.samples = this.result?.samples ?? [];
+    const result = state == null ? null : finishTracker(state);
+    const run = result?.samples ?? [];
 
-    // Back to the seed frame. The harvest left the decoder on the last frame it
-    // read, and a box clicked there would be seeded at `seedMs` on a picture
-    // from somewhere else in the clip. `loading` until then, so the stage
-    // takes no click on the wrong frame.
-    this.phase = "loading";
-    try {
-      await source.grab(this.seedMs);
-    } catch {
-      // The path is already kept; failing to redraw the seed under it is not a
-      // reason to throw it away.
-    }
-    if (this.source !== source) {
+    if (run.length === 0) {
+      // Refused at the seed, or nothing decoded. Nothing was replaced, so the
+      // old track stands whole, and the box stays up to show which click it
+      // was. The harvest read no further than the seed frame.
+      this.boxRefused = result?.status === "no-texture";
+      this.runSamples = [];
+      this.phase = "ready";
       return;
     }
-    this.phase = "done";
+
+    this.path = joinRun(this.runKept, run);
+    this.pathLost = result?.status === "lost";
+    this.runKept = [];
+    this.runSamples = [];
+    this.box = null;
+
+    // The harvest left the decoder on the last frame it read, so the frame on
+    // show is not known until the stage catches up with the playhead.
+    this.shownMs = Number.NaN;
+    this.phase = "ready";
+    this.follow();
   }
 
   private cancel(): void {
@@ -682,13 +870,12 @@ export class AutoTrackPanel extends LitElement {
   private createNull(): void {
     const element = this.clip();
     const source = this.source;
-    const result = this.result;
-    if (element == null || source == null || result == null) {
+    if (element == null || source == null || this.path.length < 2) {
       return;
     }
 
     const { fps, duration } = renderOptionStore.getState().options;
-    const path = toProjectPath(result.samples, {
+    const path = toProjectPath(this.path, {
       elements: useTimelineStore.getState().timeline,
       clipId: this.clipId as string,
       frameWidth: source.workingWidth,
@@ -734,12 +921,9 @@ export class AutoTrackPanel extends LitElement {
       element != null &&
       this.canPlace() &&
       this.box != null &&
-      this.endSourceMs(element) > this.seedMs;
-    const canCreate =
-      element != null &&
-      !busy &&
-      this.result != null &&
-      this.result.samples.length >= 2;
+      !this.boxRefused &&
+      this.endSourceMs(element) > this.shownMs;
+    const canCreate = element != null && !busy && this.path.length >= 2;
 
     return html`
       <div class="auto-track-stage">
