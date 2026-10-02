@@ -18,8 +18,13 @@ import {
   installScrollActivity,
 } from "./features/ui/scrollActivity";
 import { installScrollerWatch } from "./features/ui/scrollerWatch";
+import { getLocationEnv } from "./functions/getLocationEnv";
+import { installNativeContextMenuGuard } from "./features/editor/nativeContextMenu";
 
 enableIpcWrapper();
+
+// The browser builds only. Electron already shows no native right-click menu.
+installNativeContextMenuGuard(getLocationEnv(), window);
 
 // A recording made in the recorder's own windows arrives here as a path, once,
 // when it is finished. Subscribed before anything else mounts so a take that

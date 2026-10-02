@@ -7,6 +7,13 @@ import { getLocationEnv } from "../../functions/getLocationEnv";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { placeNewElement } from "../timeline/placement";
 
+/**
+ * How long `/sample/106366-673007941.mp4` is: 596 frames at 60fps, 9933.33ms
+ * by both ffprobe and Chromium. The preset used to claim 60000, so the clip ran
+ * fifty seconds past the file's last frame.
+ */
+const SAMPLE_VIDEO_MS = 9933;
+
 @customElement("warning-demo")
 export class WarningDemo extends LitElement {
   hasUpdatedOnce: boolean;
@@ -58,7 +65,7 @@ export class WarningDemo extends LitElement {
         // track each element lands on.
         blob: "blob:file:///668d3bda-547a-4bb6-ab7a-53cc1c8000ef",
         startTime: 0,
-        duration: 60000,
+        duration: SAMPLE_VIDEO_MS,
         opacity: 100,
         location: {
           x: 0,
@@ -66,9 +73,9 @@ export class WarningDemo extends LitElement {
         },
         trim: {
           startTime: 0,
-          endTime: 60000,
+          endTime: SAMPLE_VIDEO_MS,
         },
-        sourceDuration: 60000,
+        sourceDuration: SAMPLE_VIDEO_MS,
         rotation: 0,
         width: 1920,
         height: 1080,
