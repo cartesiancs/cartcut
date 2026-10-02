@@ -42,7 +42,7 @@ AI 에이전트를 위한 영상편집 소프트웨어
 
 ## 프로젝트 소개
 
-[이 링크](https://demo.nugget.cartesiancs.com/)에서 기능이 제한된 웹 데모를 사용해 볼 수 있습니다.
+[이 링크](https://cartcut.cartesiancs.com/)에서 기능이 제한된 웹 데모를 사용해 볼 수 있습니다.
 
 ## 기능
 

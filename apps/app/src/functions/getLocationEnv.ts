@@ -1,7 +1,7 @@
 export function getLocationEnv(): "web" | "electron" | "demo" {
   const proto = window.location.protocol;
 
-  if (window.location.host == "demo.nugget.cartesiancs.com") {
+  if (window.location.host == "cartcut.cartesiancs.com") {
     return "demo";
   }
 

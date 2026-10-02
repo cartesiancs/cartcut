@@ -42,7 +42,7 @@ It also supports layer-based editing, which differs from traditional track-based
 
 ## About The Project
 
-You can check out a limited demo of the website at the [following link](https://demo.nugget.cartesiancs.com/).
+You can check out a limited demo of the website at the [following link](https://cartcut.cartesiancs.com/).
 
 ## Features
 
