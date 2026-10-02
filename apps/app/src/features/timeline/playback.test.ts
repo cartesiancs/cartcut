@@ -551,6 +551,92 @@ describe("applyIntent", () => {
   });
 });
 
+describe("a clip that plays to the end of its file", () => {
+  /**
+   * A `<video>` with the two behaviours of the real element this depends on,
+   * both measured in Chrome: `play()` on an ended element seeks back to the
+   * start, and assigning `currentTime` clears `ended` at once.
+   */
+  function realisticVideo() {
+    let time = 0;
+    const handle = {
+      ...fakeVideo(),
+      ended: false,
+      get currentTime() {
+        return time;
+      },
+      set currentTime(value: number) {
+        time = value;
+        handle.ended = false;
+      },
+      play() {
+        if (handle.ended) {
+          time = 0;
+          handle.ended = false;
+        }
+        handle.paused = false;
+      },
+    };
+    return {
+      handle,
+      /** What the element does by itself when its decode clock reaches the end. */
+      runToEnd(durationSec: number) {
+        time = durationSec;
+        handle.ended = true;
+        handle.paused = true;
+      },
+    };
+  }
+
+  // Out-point at the file's end: 8s of a 10s source from 2s in, at 5s, so the
+  // clip spans [5000, 13000) and its last 60fps frame starts at 12983.3.
+  const toTheEnd = () =>
+    clip({ duration: 8000, trim: { startTime: 2000, endTime: 10_000 } });
+  const FPS = 60;
+  const LAST_FRAME_MS = 12_983.333333333334;
+
+  /** Play from 12.9s, as the preview does, and let the handle reach the end. */
+  function playToTheEnd() {
+    const { handle, runToEnd } = realisticVideo();
+    const one = doc({ a: toTheEnd() });
+    const lastRequests = new Map<string, number>();
+
+    // Pressing play: one exact placement, then the handle rolls.
+    syncPlayback(one, 12_900, true, { a: handle }, undefined, lastRequests, undefined, FPS);
+    expect(handle.paused).toBe(false);
+
+    // It runs ahead of the floored playhead and finishes first.
+    runToEnd(10);
+    return { handle, one, lastRequests };
+  }
+
+  it("is not sent back to its first frame while the playhead is still inside it", () => {
+    const { handle, one, lastRequests } = playToTheEnd();
+
+    // The playhead's last frame inside the clip. Before the guard this repaint
+    // called `play()` on the ended handle and the spec rewound it to 0.
+    syncPlayback(one, LAST_FRAME_MS, true, { a: handle }, undefined, lastRequests, undefined, FPS);
+
+    expect(handle.currentTime).toBe(10);
+    expect(handle.ended).toBe(true);
+
+    // And not on the repaint after it either.
+    syncPlayback(one, LAST_FRAME_MS, true, { a: handle }, undefined, lastRequests, undefined, FPS);
+    expect(handle.currentTime).toBe(10);
+  });
+
+  it("still plays when the playhead is sent back into the clip", () => {
+    const { handle, one, lastRequests } = playToTheEnd();
+
+    // A click on the ruler mid-playback: 6000 on the timeline is 3s of source.
+    syncPlayback(one, 6000, true, { a: handle }, undefined, lastRequests, undefined, FPS);
+
+    expect(handle.paused).toBe(false);
+    expect(handle.currentTime).toBeGreaterThan(2.9);
+    expect(handle.currentTime).toBeLessThan(3.1);
+  });
+});
+
 describe("syncPlayback", () => {
   it("handles a whole document in one pass", () => {
     const a = fakeVideo();

@@ -48,6 +48,12 @@ export interface MediaHandle {
    * seeks asynchronously actually is.
    */
   readonly seeking?: boolean;
+  /**
+   * Whether the handle has played to the end of its file.
+   *
+   * Optional for the reason `seeking` is: absent reads as "not ended".
+   */
+  readonly ended?: boolean;
   muted: boolean;
   /**
    * Linear gain, 0..1 — the unit the DOM uses, **not** the element's
@@ -511,7 +517,19 @@ export function applyIntent(
   }
 
   if (intent.playing) {
-    if (handle.paused) {
+    // **Never `play()` a handle that has run off the end of its file.** The
+    // spec makes that a seek to the start. A rolling handle runs up to two
+    // frames ahead of the playhead (it is placed at a frame's centre, the
+    // playhead is floored to the frame's start), so a clip whose out-point is
+    // the end of the file reaches `ended` with the playhead still inside it.
+    // The restart then put the footage's first frame on screen for one repaint
+    // at the end of the clip: in Chrome with the GPU, 8 of 40 playthroughs, and
+    // none once this guard was in.
+    //
+    // An ended handle is already showing its last frame, which is the right
+    // picture for what is left of the clip. A real seek back into it, above,
+    // clears `ended` the moment `currentTime` is assigned, so re-entry plays.
+    if (handle.paused && handle.ended !== true) {
       handle.play();
     }
   } else if (!handle.paused) {
