@@ -67,13 +67,14 @@ describe("canAnimate / animatableProperties", () => {
     expect(canAnimate(audioElement({}))).toBe(true);
   });
 
-  it("offers all five properties where the type supports them", () => {
+  it("offers an image the transform five and its corner radius", () => {
     expect(animatableProperties(imageElement({}))).toEqual([
       "position",
       "opacity",
       "scale",
       "rotation",
       "size",
+      "cornerRadius",
     ]);
   });
 
@@ -153,5 +154,16 @@ describe("canAnimate / animatableProperties", () => {
     expect(
       animatableProperties(videoElement({ isExistAudio: false })),
     ).not.toContain("volumeDb");
+  });
+
+  it("offers a corner radius on image and video, square ones included", () => {
+    // Offered with no radius set, so the stopwatch can start a card from
+    // square corners. A shape has its own radius in `geometry` and a gif has
+    // no animation block, so neither is offered a second one.
+    expect(animatableProperties(imageElement({}))).toContain("cornerRadius");
+    expect(animatableProperties(videoElement({}))).toContain("cornerRadius");
+    expect(animatableProperties(shapeElement({}))).not.toContain("cornerRadius");
+    expect(animatableProperties(textElement({}))).not.toContain("cornerRadius");
+    expect(animatableProperties(gifElement({}))).not.toContain("cornerRadius");
   });
 });

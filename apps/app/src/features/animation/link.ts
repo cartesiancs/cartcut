@@ -281,6 +281,8 @@ function staticFieldOf(
       return finite(element.volumeDb) ?? 0;
     case "intensity":
       return finite(element.intensity) ?? 100;
+    case "cornerRadius":
+      return finite(element.cornerRadius) ?? 0;
     default:
       // A `fx:<key>` parameter, or a mask field. Read from where it lives, and
       // answer `null` for anything with no static value at all — which reads

@@ -155,10 +155,12 @@ Everything that rewrites keyframes walks
 move, paste and a frame-rate change carry any track for free. A field of its own
 means reimplementing `cloneAnimation`, `rebaseAnimation`, `sliceAnimation` and
 `rebakeElement`, and the one anybody forgets fails silently on one edit.
-Unconditional tracks are seeded in `emptyAnimation`; conditional ones (the
-mask's five, `revealProgress`, `volumeDb`, `intensity`, `fx:<key>`) are minted
-by `keyframeOps.trackOrEmpty` when the stopwatch is armed and deleted when the
-last curve goes. `keyframes.ts#carriesTrack` is the table of which is which.
+Unconditional tracks are seeded in `emptyAnimation`. Conditional ones are
+either minted by `keyframeOps.trackOrEmpty` when the stopwatch is armed and
+deleted when the last curve goes (`volumeDb`, `intensity`, `fx:<key>`,
+`cornerRadius`), or seeded and removed by the op that owns them (the mask's
+five, `revealProgress`). `keyframes.ts#carriesTrack` is the table of which is
+which.
 
 **Pure ops never read a store.** `features/timeline/` and `features/animation/`
 take `fps` (or `bakeHz`) as an argument, which is what keeps them DOM-free and

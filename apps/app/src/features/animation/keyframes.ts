@@ -25,6 +25,7 @@ import {
   fxParamKeyOf,
   isAudibleElement,
   isFxParamTrack,
+  isRoundable,
   type CubicKeyframeType,
   type TimelineElement,
 } from "../../@types/timeline";
@@ -1102,6 +1103,11 @@ export function isLevelTrack(property: string): boolean {
   return property === "volumeDb";
 }
 
+/** Whether a track name is a clip's corner radius. */
+export function isCornerTrack(property: string): boolean {
+  return property === "cornerRadius";
+}
+
 /**
  * The tracks that exist only while the element carries the thing they describe,
  * and how to ask whether it does.
@@ -1159,6 +1165,15 @@ const CONDITIONAL_TRACKS: Array<{
   {
     match: isLevelTrack,
     present: (element) => isAudibleElement(element),
+    foreign: false,
+  },
+  // `foreign: false` for the level's reason: a radius going from a card to
+  // full frame is the clip's own movement, so the "None" tile clears it and
+  // `hasAnimation` counts it. Conditional on the filetype, so a radius track
+  // on a shape, from a hand-edited file, is collected on ingress.
+  {
+    match: isCornerTrack,
+    present: (element) => isRoundable(element),
     foreign: false,
   },
 ];

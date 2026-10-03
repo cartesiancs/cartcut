@@ -16,6 +16,12 @@ import {
   type TimelineDocument,
 } from "./tracks";
 import {
+  addKeyframe,
+  normalizeAnimations,
+  setTrackActive,
+  toggleKeyframe,
+} from "../animation/keyframeOps";
+import {
   audioElement,
   gifElement,
   groupElement,
@@ -249,5 +255,84 @@ describe("cornerRadiusAt", () => {
       },
     } as any);
     expect(cornerRadiusAt(shape, 0)).toBe(0);
+  });
+});
+
+describe("the cornerRadius keyframe track", () => {
+  it("is minted on an image when the stopwatch is armed, seeded from the field", () => {
+    const d = setCornerRadius(doc(), "image", 24);
+    expect((d.elements.image as any).animation.cornerRadius).toBeUndefined();
+
+    // `atMs` is clip-local: the image starts at 4000 on the timeline.
+    const armed = setTrackActive(d, "image", "cornerRadius", true, { atMs: 0 });
+    const minted = (armed.elements.image as any).animation.cornerRadius;
+    expect(minted.isActivate).toBe(true);
+    expect(minted.x).toHaveLength(1);
+    expect(minted.x[0].p[1]).toBe(24);
+  });
+
+  it("is refused on a shape, which has its own radius", () => {
+    const d = doc();
+    expect(setTrackActive(d, "shape", "cornerRadius", true, { atMs: 0 })).toBe(d);
+  });
+
+  it("is deleted when disarmed with no curve on it", () => {
+    const original = doc();
+    const armed = setTrackActive(original, "image", "cornerRadius", true);
+    expect((armed.elements.image as any).animation.cornerRadius).toBeDefined();
+
+    const disarmed = setTrackActive(armed, "image", "cornerRadius", false);
+    expect(JSON.stringify(disarmed.elements.image)).toBe(
+      JSON.stringify(original.elements.image),
+    );
+  });
+
+  it("writes its last value back to the field when its last key goes", () => {
+    let d = setTrackActive(doc(), "image", "cornerRadius", true, { atMs: 0 });
+    d = addKeyframe(d, "image", "cornerRadius", "x", 0, 40);
+    d = toggleKeyframe(d, "image", "cornerRadius", 4000, 30);
+
+    expect((d.elements.image as any).animation.cornerRadius).toBeUndefined();
+    expect(d.elements.image).toMatchObject({ cornerRadius: 40 });
+  });
+
+  it("leaves a clip keyed down to square exactly as one never rounded", () => {
+    const original = doc();
+    let d = setCornerRadius(original, "image", 24);
+    d = setTrackActive(d, "image", "cornerRadius", true, { atMs: 0 });
+    d = addKeyframe(d, "image", "cornerRadius", "x", 0, 0);
+    d = toggleKeyframe(d, "image", "cornerRadius", 4000, 30);
+
+    expect(JSON.stringify(d.elements.image)).toBe(
+      JSON.stringify(original.elements.image),
+    );
+  });
+
+  it("is collected on load from a type that cannot carry it", () => {
+    // `normalizeAnimations` is the ingress pass project load runs, and
+    // deliberately not part of `normalizeDocument`.
+    const loaded = normalizeAnimations(normalizeDocument({
+      schemaVersion: SCHEMA_VERSION,
+      tracks: [createTrack("v0", "video", 0)],
+      elements: {
+        shape: shapeElement({
+          trackId: "v0",
+          animation: {
+            ...shapeElement().animation,
+            cornerRadius: track([[0, 40]]),
+          },
+        } as any),
+        image: imageElement({
+          trackId: "v0",
+          startTime: 4000,
+          animation: {
+            ...imageElement().animation,
+            cornerRadius: track([[0, 40]]),
+          },
+        } as any),
+      },
+    }));
+    expect((loaded.elements.shape as any).animation.cornerRadius).toBeUndefined();
+    expect((loaded.elements.image as any).animation.cornerRadius).toBeDefined();
   });
 });

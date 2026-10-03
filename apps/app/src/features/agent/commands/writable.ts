@@ -20,7 +20,8 @@
  *    the arithmetic.
  *  - a shape's `shape` point list is unbounded.
  *  - `reveal` cannot seed its own keyframe track. `keyframeOps.isMintableTrack`
- *    covers `intensity`, `fx:*` and `volumeDb` and nothing else, so a raw
+ *    covers `intensity`, `fx:*`, `volumeDb` and `cornerRadius` and nothing
+ *    else, so a raw
  *    `setIn` would leave a clip whose `revealProgress` is advertised by
  *    `animatableProperties` and declined by every keyframe op, in silence. A
  *    path write would also skip `coerceReveal`, storing a `fade: 0` the rule

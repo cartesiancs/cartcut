@@ -1892,6 +1892,22 @@ export function isRoundable(
 }
 
 /**
+ * The track a roundable clip carries: its corner radius, in element pixels.
+ *
+ * The same name as the static field it keyframes, the contract `volumeDb`
+ * states: `cornerOps.ts#cornerRadiusAt` samples the track and falls back to
+ * `cornerRadiusOf`, so a keyframed radius behaves exactly like a typed one.
+ *
+ * Offered on every image and video, a square one included, so the stopwatch
+ * can start a card from square corners. Minted when it is armed and deleted
+ * with its last curve, so a clip nobody has animated carries no track.
+ */
+export const CORNER_ANIMATABLE_PROPERTIES = ["cornerRadius"] as const;
+
+export type CornerAnimatableProperty =
+  (typeof CORNER_ANIMATABLE_PROPERTIES)[number];
+
+/**
  * The prefix that makes an effect preset's parameter into a track name.
  *
  * **Split on the FIRST colon.** `presetValidate.ts` requires `param.uniform` to
@@ -1951,6 +1967,7 @@ export type AnimatableProperty =
   | TextAnimatableProperty
   | EffectAnimatableProperty
   | AudioAnimatableProperty
+  | CornerAnimatableProperty
   | FxParamAnimatableProperty;
 
 /**
@@ -1973,6 +1990,7 @@ export const ALL_ANIMATABLE_PROPERTIES: readonly AnimatableProperty[] = [
   ...TEXT_ANIMATABLE_PROPERTIES,
   ...EFFECT_ANIMATABLE_PROPERTIES,
   ...AUDIO_ANIMATABLE_PROPERTIES,
+  ...CORNER_ANIMATABLE_PROPERTIES,
 ];
 
 /**
@@ -2051,6 +2069,9 @@ export function animatableProperties(
   // step with the waveform, which `draw.ts#canShowWaveform` gates identically.
   if (isAudibleElement(element)) {
     own.push(...AUDIO_ANIMATABLE_PROPERTIES);
+  }
+  if (isRoundable(element)) {
+    own.push(...CORNER_ANIMATABLE_PROPERTIES);
   }
   if ((element as { mask?: unknown }).mask != null) {
     own.push(...MASK_ANIMATABLE_PROPERTIES);

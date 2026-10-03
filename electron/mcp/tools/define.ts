@@ -196,9 +196,9 @@ export const BLEND_MODES = [
  * input — a surface an agent can only discover by being refused.
  *
  * The five `mask*` entries only exist on a clip that has a mask,
- * `revealProgress` only on a text clip that has a reveal, and `volumeDb` only
- * on a clip that makes a sound; `animatableProperties` is the gate, and the
- * commands decline through it.
+ * `revealProgress` only on a text clip that has a reveal, `volumeDb` only on a
+ * clip that makes a sound, and `cornerRadius` only on an image or a video;
+ * `animatableProperties` is the gate, and the commands decline through it.
  */
 export const ANIMATABLE = [
   "position",
@@ -214,6 +214,7 @@ export const ANIMATABLE = [
   "revealProgress",
   "intensity",
   "volumeDb",
+  "cornerRadius",
 ] as const;
 
 /**
@@ -247,7 +248,8 @@ export const animatableProperty = z
     "On an effect: `intensity` is 0-100, and `fx:<key>` is a preset parameter in whatever units its " +
       "manifest declares. list_effect_presets reports each `key`, `min` and `max`. Only parameters it " +
       "reports as `number` animate. On audio, and on video that still carries its sound, `volumeDb` " +
-      "is the level envelope in decibels, -60 to +12, where 0 is unmodified and -60 is silence.",
+      "is the level envelope in decibels, -60 to +12, where 0 is unmodified and -60 is silence. On " +
+      "an image or video, `cornerRadius` is the corner rounding in clip pixels, 0 square.",
   );
 
 /** The mask shapes a clip can be cut to. A copy of `MASK_SHAPES`. */

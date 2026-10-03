@@ -35,6 +35,7 @@ import {
 import { DEFAULT_REVEAL_PROGRESS, revealOf } from "../text/reveal";
 import { volumeDbOf } from "../timeline/audio";
 import { setVolumeDb } from "../timeline/audioOps";
+import { cornerRadiusOf, setCornerRadius } from "../timeline/cornerOps";
 import { setClipMaskFields } from "../timeline/maskOps";
 import { scaleTenthsOf, setClipScale } from "../timeline/scaleOps";
 import { setClipTextRevealFields } from "../timeline/textRevealOps";
@@ -48,6 +49,7 @@ import {
   type Baked,
   addKeyframe as addToList,
   bakeTrack,
+  isCornerTrack,
   isForeignTrack,
   isEffectIntensityTrack,
   isLevelTrack,
@@ -93,13 +95,15 @@ type Resolved = {
  *
  * It was `isEffectTrack` while the effect's two families were the only ones.
  * The level envelope is the third, and it is the first that has to mint the
- * `animation` block as well as the track: see `trackOrEmpty`.
+ * `animation` block as well as the track: see `trackOrEmpty`. The corner
+ * radius is the fourth, on a clip that already has the block.
  */
 function isMintableTrack(property: string): boolean {
   return (
     isEffectIntensityTrack(property) ||
     isFxParamTrack(property) ||
-    isLevelTrack(property)
+    isLevelTrack(property) ||
+    isCornerTrack(property)
   );
 }
 
@@ -716,6 +720,10 @@ function staticValueOf(
     // into the lane, where nothing downstream checks it again.
     case "volumeDb":
       return volumeDbOf(element);
+    // Through the guard as well: square for a clip that has never been
+    // rounded, and a hand-edited negative floored before it can be baked.
+    case "cornerRadius":
+      return cornerRadiusOf(element);
   }
   // `fx:<key>`, the open half of the union, so this is a branch rather than a
   // case. The value is in the preset's own units, whatever the manifest says
@@ -1013,6 +1021,12 @@ function withStaticValue(
     // stamp a redundant `volumeDb: 0` onto a clip that had none.
     case "volumeDb":
       return setVolumeDb(doc, elementId, value);
+
+    // `setCornerRadius` deletes the key at 0, which `setIn` cannot: a radius
+    // keyed down to square and then un-keyed has to leave the clip a clip
+    // nobody rounded, byte for byte.
+    case "cornerRadius":
+      return setCornerRadius(doc, elementId, value);
   }
   // `fx:<key>`. `setEffectParams` merges one key and leaves the rest alone, so
   // this never has to read the other parameters first.

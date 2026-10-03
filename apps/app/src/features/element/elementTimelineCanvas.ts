@@ -236,6 +236,9 @@ const ANIMATION_MENU: Record<string, { label: string; icon: string }> = {
   // fader"); one thing gets one name, the rule the LUT section states about
   // "filter".
   volumeDb: { label: "Level", icon: "volume_up" },
+  // The same icon as the mask's Roundness, which is never on the same panel:
+  // that one sits in "Animate mask", this one in "Animate".
+  cornerRadius: { label: "Corner radius", icon: "rounded_corner" },
 };
 
 /**
