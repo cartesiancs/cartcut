@@ -12,7 +12,12 @@ import {
   type TransformMemo,
 } from "../timeline/transform";
 import { blendOf, DEFAULT_BLEND, isBlendIsolating } from "./blend";
-import { isDecorated } from "./decoration";
+import {
+  boxOutline,
+  isDecorated,
+  isFramed,
+  paintDecoration,
+} from "./decoration";
 import { resolveLinks, type SampleOverrides } from "../animation/link";
 import { renderControlOutline } from "./controlOutline";
 import { adjustToneFor, applyFinish, finishRenderFor } from "./adjust/apply";
@@ -453,24 +458,47 @@ function drawDirect<T extends VisualTimelineElement>(
   }
   ctx.globalAlpha *= opacityScaledBy100 / 100;
 
-  // Saved around the picture alone, so the outline below is drawn in clean box
-  // space. The mirror never needed it, since a flip about the box centre leaves
-  // a symmetric outline where it was, but a crop installs a clip region and a
-  // scale, and an outline drawn under those would be cut off and magnified.
-  ctx.save();
+  // An image's or a video's outline: its box. Traced here, in box space and
+  // before the mirror and the crop, because both put a transform on the
+  // context that an outline must not inherit. Under a crop's scale the box
+  // would land on the uncropped frame, and the crop's own clip would cut the
+  // border and the shadow away.
+  const outline = isFramed(sized) ? boxOutline(width, height) : null;
 
-  // Both inside the box and after the transform, so the picture turns over and
-  // is reframed while the box does not move. See `mirror.ts` and `crop.ts`.
-  //
-  // The mirror goes first, which is not arbitrary: it makes the *kept* picture
-  // the thing that turns over. Reversed, flipping a cropped clip would also
-  // slide its framing.
-  applyMirror(ctx, sized, width, height);
-  applyCrop(ctx, sized, width, height);
+  const drawPicture = () => {
+    // Saved around the picture alone, so the decoration and the selection
+    // outline are drawn in clean box space. The mirror never needed it, since
+    // a flip about the box centre leaves a symmetric outline where it was, but
+    // a crop installs a clip region and a scale, and an outline drawn under
+    // those would be cut off and magnified.
+    ctx.save();
 
-  renderFunction(ctx, elementId, sized, timelineCursor, backdrop);
+    // Both inside the box and after the transform, so the picture turns over
+    // and is reframed while the box does not move. See `mirror.ts` and
+    // `crop.ts`.
+    //
+    // The mirror goes first, which is not arbitrary: it makes the *kept*
+    // picture the thing that turns over. Reversed, flipping a cropped clip
+    // would also slide its framing.
+    applyMirror(ctx, sized, width, height);
+    applyCrop(ctx, sized, width, height);
 
-  ctx.restore();
+    renderFunction(ctx, elementId, sized, timelineCursor, backdrop);
+
+    ctx.restore();
+  };
+
+  // The silhouette is the box, so a shadow cast from the box is a shadow cast
+  // from the picture. A transparent PNG therefore casts a rectangular shadow,
+  // which is what a card wants and what every design tool's Drop Shadow on a
+  // frame does, and a chroma-keyed video's keyed-out region still casts: the
+  // shadow belongs to the clip, and one that changed shape frame by frame as
+  // the key moved would read as a bug.
+  if (outline != null) {
+    paintDecoration(ctx, sized, outline, drawPicture);
+  } else {
+    drawPicture();
+  }
 
   if (controlOutlineEnabled) {
     renderControlOutline(ctx, 0, 0, width, height);

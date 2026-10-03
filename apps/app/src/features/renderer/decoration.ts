@@ -17,7 +17,9 @@
  * **The path is the clip's real outline.** For a shape that is the same
  * `outlineInBox` the fill traces, so a rounded rectangle's border is rounded
  * and a star's follows its points. Tracing a bounding box instead would be
- * right for exactly one shape kind.
+ * right for exactly one shape kind. For an image or a video it is the box,
+ * traced in box space by `element.ts#drawDirect`; see `isFramed` for why it
+ * is not their renderers that trace it.
  *
  * **The order is the one `paintLettering` uses**: shadow, then the picture,
  * then the stroke. The stroke goes last so it sits over the edge of the
@@ -238,6 +240,23 @@ export function isDecorated(
 export type ClipOutline = {
   trace: (ctx: CanvasRenderingContext2D) => void;
 };
+
+const FRAMED = new Set<string>(["image", "video"]);
+
+/**
+ * Whether a clip's picture fills its box, so its silhouette is the box.
+ *
+ * An image and a video, decorated by `element.ts#drawDirect` in box space
+ * rather than by their own renderers, because by the time a renderer runs the
+ * mirror and the crop are on the context, and an outline traced under the
+ * crop's scale lands on the *uncropped* frame and is cut off by the crop's own
+ * clip. A shape has neither and decorates itself; see `renderer/shape.ts`.
+ */
+export function isFramed(
+  element: TimelineElement | null | undefined,
+): boolean {
+  return element != null && FRAMED.has(element.filetype);
+}
 
 /**
  * The outline of a clip that fills its box.

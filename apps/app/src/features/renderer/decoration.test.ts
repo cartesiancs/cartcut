@@ -12,9 +12,17 @@
  * to disagree.
  */
 
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 
-import { inkBounds, pixel, scene, shapeElement, solid } from "./testing";
+import {
+  imageElement,
+  inkBounds,
+  pixel,
+  scene,
+  shapeElement,
+  solid,
+} from "./testing";
+import { resetLayers } from "./surface";
 
 const store = { getImage: vi.fn<[string], unknown>() };
 
@@ -24,6 +32,7 @@ vi.mock("../asset/loadedAssetStore", () => ({
 
 const { renderShape } = await import("./shape");
 const { renderImage } = await import("./image");
+const { renderElement } = await import("./element");
 const { isDecorated, shadowOf, strokeOf } = await import("./decoration");
 
 /** A red square filling 0,0..100,100 in element space. */
@@ -46,6 +55,10 @@ const GREEN_STROKE = {
 
 beforeEach(() => {
   store.getImage.mockReset();
+});
+
+afterEach(() => {
+  resetLayers();
 });
 
 describe("the read guards", () => {
@@ -249,39 +262,101 @@ describe("renderShape with a drop shadow", () => {
   });
 });
 
-describe("renderImage with decoration", () => {
-  it("borders the box", () => {
+/**
+ * An image is decorated by `element.ts#drawDirect`, not by `renderImage`: by
+ * the time a renderer runs the crop's scale is on the context, and an outline
+ * traced under it misses the box. So these draw through `renderElement`, which
+ * is the only way an image reaches a frame.
+ */
+describe("an image with decoration", () => {
+  function draw(over: Record<string, unknown> = {}) {
     store.getImage.mockReturnValue(solid(10, 10, "#ff0000"));
-
     const { canvas, ctx } = scene(200, 200, "#000000");
-    renderImage(
+    renderElement(
       ctx,
       "i",
-      {
-        ...(square() as any),
-        filetype: "image",
-        localpath: "/a.png",
-        stroke: { ...GREEN_STROKE, align: "inner" },
-      },
+      imageElement({ localpath: "/a.png", ...over } as any),
       0,
+      false,
+      renderImage,
     );
+    return canvas;
+  }
+
+  const INNER_GREEN = { ...GREEN_STROKE, align: "inner" as const };
+
+  const BLUE_SHADOW = {
+    enable: true,
+    offsetX: 20,
+    offsetY: 20,
+    blur: 0,
+    color: "#0000ff",
+    opacity: 100,
+  };
+
+  it("borders the box", () => {
+    const canvas = draw({ stroke: INNER_GREEN });
 
     expect(pixel(canvas, 50, 50)).toMatchObject({ r: 255, g: 0, b: 0 });
     expect(pixel(canvas, 50, 97)).toMatchObject({ g: 255 });
   });
 
   it("draws the picture unchanged with no decoration", () => {
-    store.getImage.mockReturnValue(solid(10, 10, "#ff0000"));
+    const canvas = draw();
 
+    expect(pixel(canvas, 1, 1)).toMatchObject({ r: 255, g: 0, b: 0 });
+    expect(pixel(canvas, 110, 50)).toMatchObject({ r: 0, g: 0, b: 0 });
+  });
+
+  it("leaves renderImage drawing the picture and nothing else", () => {
+    // The other half of the move: a renderer that still decorated would
+    // border every image twice, once in box space and once under the crop.
+    store.getImage.mockReturnValue(solid(10, 10, "#ff0000"));
     const { canvas, ctx } = scene(200, 200, "#000000");
     renderImage(
       ctx,
       "i",
-      { ...(square() as any), filetype: "image", localpath: "/a.png" },
+      imageElement({ localpath: "/a.png", stroke: INNER_GREEN } as any),
       0,
     );
 
-    expect(pixel(canvas, 1, 1)).toMatchObject({ r: 255, g: 0, b: 0 });
-    expect(pixel(canvas, 110, 50)).toMatchObject({ r: 0, g: 0, b: 0 });
+    expect(pixel(canvas, 50, 97)).toMatchObject({ r: 255, g: 0, b: 0 });
+  });
+
+  describe("on a cropped clip", () => {
+    // Keep the right half of the source. The crop maps it onto the box with a
+    // `scale(2, 1)`, which is what an outline traced inside the renderer used
+    // to inherit: its box landed on the uncropped frame, from x = -100 to 100,
+    // and the crop's own clip cut away everything outside the real one.
+    const RIGHT_HALF = { x: 0.5, y: 0, width: 0.5, height: 1 };
+
+    it("borders all four edges of the box", () => {
+      const canvas = draw({ crop: RIGHT_HALF, stroke: INNER_GREEN });
+
+      expect(pixel(canvas, 50, 50)).toMatchObject({ r: 255, g: 0, b: 0 });
+      expect(pixel(canvas, 2, 50)).toMatchObject({ r: 0, g: 255 });
+      expect(pixel(canvas, 97, 50)).toMatchObject({ r: 0, g: 255 });
+      expect(pixel(canvas, 50, 2)).toMatchObject({ r: 0, g: 255 });
+      expect(pixel(canvas, 50, 97)).toMatchObject({ r: 0, g: 255 });
+    });
+
+    it("keeps the border the width it was asked for", () => {
+      // Under the crop's horizontal doubling a 6px border came out 12 wide on
+      // the vertical edges, so x = 92 was green.
+      const canvas = draw({ crop: RIGHT_HALF, stroke: INNER_GREEN });
+
+      expect(pixel(canvas, 92, 50)).toMatchObject({ r: 255, g: 0, b: 0 });
+      expect(pixel(canvas, 8, 50)).toMatchObject({ r: 255, g: 0, b: 0 });
+    });
+
+    it("casts its shadow", () => {
+      // The crop's clip region clipped the shadow pass too, so the part of the
+      // shadow outside the box, which is all of it that shows, was gone.
+      const cropped = draw({ crop: RIGHT_HALF, shadow: BLUE_SHADOW });
+      const whole = draw({ shadow: BLUE_SHADOW });
+
+      expect(pixel(cropped, 110, 110)).toMatchObject({ r: 0, g: 0, b: 255 });
+      expect(pixel(cropped, 110, 110)).toEqual(pixel(whole, 110, 110));
+    });
   });
 });

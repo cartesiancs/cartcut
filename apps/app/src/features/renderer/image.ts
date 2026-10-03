@@ -2,7 +2,6 @@ import type { ImageElementType } from "../../@types/timeline";
 import type { ElementRenderFunction } from "./type";
 
 import { loadedAssetStore } from "../asset/loadedAssetStore";
-import { boxOutline, paintDecoration } from "./decoration";
 
 export const renderImage: ElementRenderFunction<ImageElementType> = (
   ctx,
@@ -20,12 +19,9 @@ export const renderImage: ElementRenderFunction<ImageElementType> = (
     return;
   }
 
-  // The silhouette is the box: this is one `drawImage` filling `0,0,w,h`, so a
-  // shadow cast from the box is a shadow cast from the picture. A transparent
-  // PNG therefore casts a rectangular shadow rather than a shaped one, which
-  // is what a card wants and what every design tool's Drop Shadow on a frame
-  // does — a shaped one would need the alpha channel and a second buffer.
-  paintDecoration(ctx, imageElement, boxOutline(width, height), () => {
-    ctx.drawImage(loadedImage, 0, 0, width, height);
-  });
+  // One `drawImage` filling `0,0,w,h`, and nothing else: the border and
+  // the shadow are drawn around this by `element.ts#drawDirect`, in box
+  // space, because the crop's scale is already on the context here and an
+  // outline traced under it would miss the box.
+  ctx.drawImage(loadedImage, 0, 0, width, height);
 };
