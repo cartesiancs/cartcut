@@ -17,9 +17,9 @@
  * **The path is the clip's real outline.** For a shape that is the same
  * `outlineInBox` the fill traces, so a rounded rectangle's border is rounded
  * and a star's follows its points. Tracing a bounding box instead would be
- * right for exactly one shape kind. For an image or a video it is the box,
- * traced in box space by `element.ts#drawDirect`; see `isFramed` for why it
- * is not their renderers that trace it.
+ * right for exactly one shape kind. For an image or a video it is the box with
+ * its `cornerRadius`, traced in box space by `element.ts#drawDirect`; see
+ * `isFramed` for why it is not their renderers that trace it.
  *
  * **The order is the one `paintLettering` uses**: shadow, then the picture,
  * then the stroke. The stroke goes last so it sits over the edge of the
@@ -251,6 +251,10 @@ const FRAMED = new Set<string>(["image", "video"]);
  * mirror and the crop are on the context, and an outline traced under the
  * crop's scale lands on the *uncropped* frame and is cut off by the crop's own
  * clip. A shape has neither and decorates itself; see `renderer/shape.ts`.
+ *
+ * The same two types as `ROUNDABLE_FILETYPES` today, kept apart because they
+ * answer different questions: this one is "is the outline the box", that one
+ * is "may the box be rounded".
  */
 export function isFramed(
   element: TimelineElement | null | undefined,
@@ -259,16 +263,35 @@ export function isFramed(
 }
 
 /**
- * The outline of a clip that fills its box.
+ * The outline of a clip that fills its box, with its corners rounded.
  *
- * An image and a video are each one `drawImage` over `0,0,width,height`, so
- * their silhouette *is* the box. A shape has a real outline and traces that
- * instead; see `renderer/shape.ts#shapeOutlineOf`.
+ * The silhouette of one `drawImage` over `0,0,width,height` is the box. A
+ * shape has a real outline and traces that instead; see
+ * `renderer/shape.ts#shapeOutlineOf`.
+ *
+ * The radius is clamped to half the shorter side here, the one place that has
+ * the sampled box, which turns a radius larger than the clip into a pill
+ * rather than into whatever `roundRect` does with radii that overlap. A square
+ * clip traces exactly the `rect` it always did: a zero-radius `roundRect` is a
+ * different path, and `golden.test.ts`'s digests are the proof that nothing
+ * changed for a clip nobody rounded.
  */
-export function boxOutline(width: number, height: number): ClipOutline {
+export function frameOutline(
+  width: number,
+  height: number,
+  radius: number,
+): ClipOutline {
+  const r = Math.min(radius, width / 2, height / 2);
+  if (!(r > 0)) {
+    return {
+      trace: (ctx) => {
+        ctx.rect(0, 0, width, height);
+      },
+    };
+  }
   return {
     trace: (ctx) => {
-      ctx.rect(0, 0, width, height);
+      ctx.roundRect(0, 0, width, height, r);
     },
   };
 }

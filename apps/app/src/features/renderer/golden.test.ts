@@ -336,6 +336,107 @@ describe("golden frames, scaled", () => {
 });
 
 /**
+ * The same scene with rounded corners, kept apart from the plain one for the
+ * reason the scaled scene is: the plain digests are the proof that a project
+ * nobody has rounded renders exactly as it did before `cornerRadius` existed.
+ *
+ * The flyer carries everything that has to agree about one outline: a radius,
+ * a border, a shadow, and a crop whose `scale(2, 1)` would turn the corners
+ * elliptical if the outline were traced under it. The backdrop's radius is a
+ * keyframe track from square to 60, so the digests also pin that a sampled
+ * radius reaches the picture, which no unit test of `cornerRadiusAt` can.
+ */
+function roundedTimeline(): Timeline {
+  const base = timeline();
+  return {
+    ...base,
+    backdrop: {
+      ...base.backdrop,
+      animation: {
+        ...inactiveAnimation(),
+        cornerRadius: {
+          isActivate: true,
+          x: [],
+          ax: points([0, 0], [4000, 60]),
+        },
+      },
+    },
+    flyer: {
+      ...base.flyer,
+      cornerRadius: 14,
+      crop: { x: 0.25, y: 0, width: 0.5, height: 1 },
+      stroke: {
+        enable: true,
+        width: 4,
+        color: "#00ccff",
+        opacity: 100,
+        align: "inner",
+      },
+      shadow: {
+        enable: true,
+        offsetX: 6,
+        offsetY: 8,
+        blur: 10,
+        color: "#000000",
+        opacity: 60,
+      },
+    },
+  } as Timeline;
+}
+
+describe("golden frames, rounded", () => {
+  it("composites a stable frame at each sampled timecode", () => {
+    const frames = Object.fromEntries(
+      [0, 1000, 2000, 3000, 3999].map((t) => [
+        t,
+        frameDigest(t, roundedTimeline()),
+      ]),
+    );
+    expect(frames).toMatchSnapshot();
+  });
+
+  it("is deterministic: the same timecode digests identically", () => {
+    expect(frameDigest(2000, roundedTimeline())).toBe(
+      frameDigest(2000, roundedTimeline()),
+    );
+  });
+
+  it("differs from the same scene composited square", () => {
+    for (const t of [0, 1000, 2000, 3000]) {
+      expect(frameDigest(t, roundedTimeline())).not.toBe(frameDigest(t));
+    }
+  });
+
+  it("moves with the backdrop's radius track", () => {
+    // Only the top-left pixel, which the flyer never reaches, so this compares
+    // the backdrop's corner alone: square at 0, 60 at the end. The baked lane
+    // is read by nearest sample, so the two-point track steps at 2000.
+    const square = frameData(0, roundedTimeline());
+    const round = frameData(3999, roundedTimeline());
+    const corner = (data: Uint8ClampedArray) =>
+      Array.from(data.slice(0, 4)).join(",");
+    expect(corner(square)).not.toBe(corner(round));
+    // At 3999 the top-left pixel is the frame's own background showing
+    // through the rounded corner.
+    expect(corner(round)).toBe("16,16,32,255");
+  });
+
+  // Absent and 0 have to be the same picture as well as the same bytes on
+  // disk, or `cornerOps` deleting the key at 0 would be a visible change.
+  it("renders a zero radius identically to no radius at all", () => {
+    const base = timeline();
+    const explicit = {
+      ...base,
+      backdrop: { ...base.backdrop, cornerRadius: 0 },
+      flyer: { ...base.flyer, cornerRadius: 0 },
+    } as Timeline;
+    for (const t of [0, 1000, 2000, 3000]) {
+      expect(frameDigest(t, explicit)).toBe(frameDigest(t));
+    }
+  });
+});
+
+/**
  * The same scene with a **shape recipe** on the badge.
  *
  * The badge is the fixture's shape, and it is a triangle drawn from a stored

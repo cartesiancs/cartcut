@@ -59,10 +59,10 @@ const _renderVideo = (
   // `features/timeline/playback.ts` owns that, driven from the preview's draw
   // path where every handle is visited whether it is on screen or not.
   //
-  // Both branches fill `0,0,w,h` and draw nothing else: the border and
-  // the shadow are drawn around this by `element.ts#drawDirect`, in box
-  // space, because the crop's scale is already on the context here and an
-  // outline traced under it would miss the box.
+  // Both branches fill `0,0,w,h` and draw nothing else: the border, the
+  // shadow and the rounded corners are drawn around this by
+  // `element.ts#drawDirect`, in box space, because the crop's scale is already
+  // on the context here and an outline traced under it would miss the box.
   if (videoElement.filter.enable) {
     store.videoFilterPipeline!.render(
       ctx,

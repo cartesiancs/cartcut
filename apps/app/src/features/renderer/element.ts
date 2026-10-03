@@ -13,11 +13,12 @@ import {
 } from "../timeline/transform";
 import { blendOf, DEFAULT_BLEND, isBlendIsolating } from "./blend";
 import {
-  boxOutline,
+  frameOutline,
   isDecorated,
   isFramed,
   paintDecoration,
 } from "./decoration";
+import { cornerRadiusAt } from "../timeline/cornerOps";
 import { resolveLinks, type SampleOverrides } from "../animation/link";
 import { renderControlOutline } from "./controlOutline";
 import { adjustToneFor, applyFinish, finishRenderFor } from "./adjust/apply";
@@ -458,12 +459,16 @@ function drawDirect<T extends VisualTimelineElement>(
   }
   ctx.globalAlpha *= opacityScaledBy100 / 100;
 
-  // An image's or a video's outline: its box. Traced here, in box space and
-  // before the mirror and the crop, because both put a transform on the
-  // context that an outline must not inherit. Under a crop's scale the box
-  // would land on the uncropped frame, and the crop's own clip would cut the
-  // border and the shadow away.
-  const outline = isFramed(sized) ? boxOutline(width, height) : null;
+  // An image's or a video's outline: its box, with its corners rounded. Traced
+  // here, in box space and before the mirror and the crop, because both put a
+  // transform on the context that an outline must not inherit. Under a crop's
+  // scale the box would land on the uncropped frame, its corners would turn
+  // elliptical, and the crop's own clip would cut the border and the shadow
+  // away. Before the mirror, so a flipped clip keeps its corners where they
+  // are on screen.
+  const framed = isFramed(sized);
+  const radius = framed ? cornerRadiusAt(element, timelineCursor) : 0;
+  const outline = framed ? frameOutline(width, height, radius) : null;
 
   const drawPicture = () => {
     // Saved around the picture alone, so the decoration and the selection
@@ -472,6 +477,15 @@ function drawDirect<T extends VisualTimelineElement>(
     // a crop installs a clip region and a scale, and an outline drawn under
     // those would be cut off and magnified.
     ctx.save();
+
+    // A clip region and one draw is still one draw, so a rounded clip stays on
+    // `renderElement`'s fast path and needs no layer. Nothing is installed for
+    // a square one, which is what keeps `golden.test.ts`'s digests in place.
+    if (outline != null && radius > 0) {
+      ctx.beginPath();
+      outline.trace(ctx);
+      ctx.clip();
+    }
 
     // Both inside the box and after the transform, so the picture turns over
     // and is reframed while the box does not move. See `mirror.ts` and

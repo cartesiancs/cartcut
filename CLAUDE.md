@@ -134,7 +134,8 @@ migrator. So absent means default, answered on the way in, and setting a field
 back to its default **deletes the key** rather than storing it. A project nobody
 has used the feature on saves byte-identically to one written before it existed.
 `blend`, `lut`, `adjust`, `mask`, `reveal`, `geometry`, `reversed`, `mirror`,
-`replaceable` and the conditional keyframe tracks all follow this.
+`cornerRadius`, `replaceable` and the conditional keyframe tracks all follow
+this.
 
 **`normalizeX` guards reads, `coerceX` validates writes.** The first runs on
 every draw and must never throw; the second runs once, where a value is stored,
@@ -211,9 +212,9 @@ Things that bite:
   context carries zoom and DPR on top of the project transform, so the wrong one
   is exact in every node suite (all at identity) and misplaced in the app.
 - **An image's or a video's outline is traced in `element.ts#drawDirect`,
-  before the mirror and the crop**: its border and its shadow. A per-type
-  renderer runs under the crop's scale and clip, so an outline traced there
-  lands on the uncropped frame and the crop's clip cuts it away.
+  before the mirror and the crop**: its border, shadow and `cornerRadius`. A
+  per-type renderer runs under the crop's scale and clip, so an outline traced
+  there lands on the uncropped frame and the crop's clip cuts it away.
 - **`timeline/transform.ts#sampledBoxOf` is the only way to ask how big a clip
   is** at a cursor. Renderer, mask, selection outline, grips, hit test and resize
   origin all go through it; one left reading `element.width` puts the picture in

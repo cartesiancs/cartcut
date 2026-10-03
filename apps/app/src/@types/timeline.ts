@@ -412,6 +412,30 @@ type Croppable = {
 };
 
 /**
+ * A clip whose picture can have rounded corners.
+ *
+ * Video and image, the same two as `Croppable` and `Mirrorable`. A shape is
+ * left out because it already has a radius, `geometry.radius`, and two radii on
+ * one clip would disagree about which wins. A gif is left out for the reason
+ * `Decorated` gives.
+ *
+ * `cornerRadius` is in **element space**, in pixels of the sampled box, so it
+ * grows with `scale` the way a border does and stays put while `size` changes
+ * the box. It is stored as authored and clamped to half the shorter side only
+ * where it is drawn, so a box that a `size` track shrinks and grows again gets
+ * the same corners back.
+ *
+ * Absent means square, and setting 0 deletes the key, so a project nobody has
+ * rounded saves byte-identically to one written before the feature and
+ * `SCHEMA_VERSION` did not move. The static value is the fallback for a
+ * same-named keyframe track, as `volumeDb` is: read it through
+ * `features/timeline/cornerOps.ts#cornerRadiusAt`, never directly.
+ */
+type Rounded = {
+  cornerRadius?: number;
+};
+
+/**
  * Where a reversed clip came from, so reversing it back is instant.
  *
  * A reversed clip's `localpath` points at a *new file*, the clip's trimmed
@@ -852,6 +876,7 @@ export type ImageElementType = TimelinePlaced &
   Adjustable &
   Mirrorable &
   Croppable &
+  Rounded &
   Maskable &
   Decorated &
   Replaceable & {
@@ -966,6 +991,7 @@ export type VideoElementType = TimelinePlaced &
   Adjustable &
   Mirrorable &
   Croppable &
+  Rounded &
   Maskable &
   Decorated &
   Replaceable & {
@@ -1844,6 +1870,26 @@ export const AUDIO_ANIMATABLE_PROPERTIES = ["volumeDb"] as const;
 
 export type AudioAnimatableProperty =
   (typeof AUDIO_ANIMATABLE_PROPERTIES)[number];
+
+/** The element types that can carry `Rounded.cornerRadius`. */
+export const ROUNDABLE_FILETYPES = ["image", "video"] as const;
+
+/**
+ * Whether this clip's corners can be rounded.
+ *
+ * Here rather than in `features/timeline/cornerOps.ts`, which re-exports it,
+ * for the reason `isAudibleElement` is: `animatableProperties` below has to ask,
+ * and so does `keyframes.ts#CONDITIONAL_TRACKS`, and neither may import a
+ * feature module.
+ */
+export function isRoundable(
+  element: TimelineElement | null | undefined,
+): boolean {
+  return (
+    element != null &&
+    (ROUNDABLE_FILETYPES as readonly string[]).includes(element.filetype)
+  );
+}
 
 /**
  * The prefix that makes an effect preset's parameter into a track name.
