@@ -24,6 +24,7 @@ import "./controlClipSpeed";
 import "./controlSpeedCurve";
 import "./controlClipOrientation";
 import "./controlClipCrop";
+import "./controlClipCorners";
 import "./optionLutSection";
 import "./optionDecorationSection";
 import "./optionAdjustSection";
@@ -272,6 +273,15 @@ export class OptionVideo extends LitElement {
         because they share the field: all three draw a picture inside a box.
         Text has its own pair under Effects, which strokes the glyphs.
       -->
+      <!--
+        Corners, then the border and shadow that trace them: one look, so one
+        place. Image and video only; a shape's radius is in its Shape section.
+      -->
+      <clip-corners
+        .elementId=${this.elementId}
+        .isShow=${this.isShow}
+      ></clip-corners>
+
       <option-decoration-section
         .elementIds=${[this.elementId]}
       ></option-decoration-section>
