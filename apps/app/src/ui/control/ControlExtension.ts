@@ -1,42 +1,26 @@
-import { LitElement, html, type TemplateResult } from "lit";
+import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { customElement, state } from "lit/decorators.js";
 
-import { contributionStore } from "../../features/extension/contributions";
-import { hostStateMessage, hostStateStore } from "../../features/extension/hostState";
+import { contributionStore, type ContributedCommand } from "../../features/extension/contributions";
+import { hostNotice, hostStateStore } from "../../features/extension/hostState";
 import { runContributedCommand } from "../../features/extension/bridge";
-
-type Listing = {
-  id: string;
-  dir: string;
-  origin: "installed" | "unpacked";
-  displayName: string;
-  version: string;
-  description: string;
-  permissions: string[];
-  enabled: boolean;
-  phase: string;
-  errors: string[];
-  configuration: { title?: string; properties?: Record<string, ConfigProperty> } | null;
-};
-
-type ConfigProperty = {
-  type: "string" | "number" | "integer" | "boolean";
-  default?: string | number | boolean;
-  description?: string;
-  enum?: Array<string | number>;
-  minimum?: number;
-  maximum?: number;
-};
+import {
+  listingStatus,
+  matchesQuery,
+  permissionChip,
+  settingLabel,
+  STATUS_LABELS,
+  type ConfigProperty,
+  type Listing,
+} from "../../features/extension/listing";
+import { iconButton } from "../../features/option/optionKit";
 
 type LogLine = { at: number; level: string; text: string };
 
 /**
- * The Extensions panel.
- *
- * What replaced two dev buttons and a commented-out `<webview>`. The old panel
- * could open a folder as an extension and nothing else: no list, no way to
- * turn one off, no way to see why one had not loaded, and no way to remove it
- * short of finding the temp directory it had been unzipped into.
+ * The Extensions panel, in the sidebar's own vocabulary: the browse bar of the
+ * file and template panels on top, one inspector card per extension under it,
+ * and the contributed commands last. The look is `_extension.scss`.
  *
  * Everything it can do goes through `electronAPI.req.ext`, and every call
  * names an extension by **id**. Main owns `userData/extensions`, so there is
@@ -60,16 +44,15 @@ export class ControlExtension extends LitElement {
   @state() private expanded: string | null = null;
   @state() private logLines: LogLine[] = [];
   @state() private configValues: Record<string, string | number | boolean> = {};
-  @state() private commandFilter = "";
+  @state() private query = "";
 
   connectedCallback(): void {
     super.connectedCallback();
     void this.refresh();
 
     // The host reports each extension's phase as it changes, and those arrive
-    // after the first listing. Without this the panel shows "Idle" for an
-    // extension that activated a moment later, until something else happens to
-    // re-render it.
+    // after the first listing. Without this the panel shows an extension as
+    // idle that activated a moment later, until something else re-renders it.
     const api = (window as never as { electronAPI?: { res?: { ext?: Record<string, Function> } } })
       .electronAPI?.res?.ext;
     this.stopWatching = api?.onExtensionState?.(() => void this.refresh()) ?? null;
@@ -136,7 +119,7 @@ export class ControlExtension extends LitElement {
         | undefined;
 
       if (inspected?.ok !== true) {
-        this.notify("That file is not an extension: " + (inspected?.error ?? "unknown reason"));
+        this.notify("Not an extension: " + (inspected?.error ?? "unknown reason"));
         return;
       }
 
@@ -147,7 +130,7 @@ export class ControlExtension extends LitElement {
           inspected.version +
           "?",
         "",
-        ...(inspected.permissions ?? []).map((permission) => "• " + permission.description),
+        ...(inspected.permissions ?? []).map((permission) => "- " + permission.description),
         "",
         "Extensions run with the same access to your computer that this app has.",
       ];
@@ -165,7 +148,7 @@ export class ControlExtension extends LitElement {
         | undefined;
       this.notify(
         outcome?.ok === true
-          ? inspected.displayName + " installed."
+          ? inspected.displayName + " installed"
           : "Could not install: " + (outcome?.error ?? "unknown reason"),
       );
     });
@@ -177,7 +160,7 @@ export class ControlExtension extends LitElement {
         | { ok?: boolean; cancelled?: boolean; error?: string }
         | undefined;
       if (outcome?.ok !== true) {
-        this.notify("Could not load that folder: " + (outcome?.error ?? "unknown reason"));
+        this.notify("Could not load: " + (outcome?.error ?? "unknown reason"));
       }
     });
   };
@@ -217,6 +200,9 @@ export class ControlExtension extends LitElement {
       return;
     }
     this.expanded = listing.id;
+    // Cleared first, so the card does not open on the previous one's log.
+    this.logLines = [];
+    this.configValues = {};
     const log = (await this.api?.log?.(listing.id)) as { ok?: boolean; lines?: LogLine[] } | undefined;
     this.logLines = log?.ok === true ? (log.lines ?? []) : [];
     const config = (await this.api?.getConfig?.(listing.id)) as
@@ -233,62 +219,213 @@ export class ControlExtension extends LitElement {
       this.configValues = answer.values ?? this.configValues;
       return;
     }
-    this.notify("That setting was refused: " + (answer?.error ?? "unknown reason"));
+    this.notify("Setting refused: " + (answer?.error ?? "unknown reason"));
   }
 
-  private badge(listing: Listing): TemplateResult {
-    if (!listing.enabled) {
-      return html`<span class="badge bg-secondary">Disabled</span>`;
+  // -------------------------------------------------------------------- bar
+
+  private bar(): TemplateResult {
+    return html`<div class="browse-bar is-floating">
+      <label class="browse-field">
+        <span class="material-symbols-outlined browse-field-icon">search</span>
+        <input
+          type="search"
+          class="browse-input"
+          spellcheck="false"
+          placeholder="Search"
+          .value=${this.query}
+          @input=${(event: Event) => {
+            this.query = (event.target as HTMLInputElement).value;
+          }}
+        />
+      </label>
+      <button
+        type="button"
+        class="browse-btn"
+        title="Install from file"
+        aria-label="Install from file"
+        ?disabled=${this.busy}
+        @click=${this.handleInstall}
+      >
+        <span class="material-symbols-outlined">upload</span>
+      </button>
+      <button
+        type="button"
+        class="browse-btn"
+        title="Load unpacked"
+        aria-label="Load unpacked"
+        ?disabled=${this.busy}
+        @click=${this.handleLoadUnpacked}
+      >
+        <span class="material-symbols-outlined">folder_code</span>
+      </button>
+    </div>`;
+  }
+
+  private notice(): TemplateResult | typeof nothing {
+    const notice = hostNotice(hostStateStore.getState());
+    if (notice == null) {
+      return nothing;
     }
-    if (listing.phase === "failed") {
-      return html`<span class="badge bg-danger">Failed</span>`;
-    }
-    if (listing.phase === "active") {
-      return html`<span class="badge bg-success">Active</span>`;
-    }
-    return html`<span class="badge bg-secondary">Idle</span>`;
+    return html`<div class="browse-alert ext-alert" role="status">
+      <span class="material-symbols-outlined">warning</span>
+      <div class="ext-alert-text">
+        <b>${notice.label}</b>
+        ${notice.detail == null
+          ? nothing
+          : html`<span title=${notice.detail}>${notice.detail}</span>`}
+      </div>
+      ${notice.restartable
+        ? iconButton({
+            icon: "restart_alt",
+            title: "Restart",
+            disabled: this.busy,
+            onClick: this.handleRestart,
+          })
+        : nothing}
+    </div>`;
+  }
+
+  // ------------------------------------------------------------------- cards
+
+  private card(listing: Listing): TemplateResult {
+    const status = listingStatus(listing);
+    const open = this.expanded === listing.id;
+
+    return html`<div
+      class="opt-section ext-card ${status === "off" ? "is-off" : ""}"
+      data-extension=${listing.id}
+    >
+      <div class="opt-head ext-head">
+        <button
+          type="button"
+          class="ext-title"
+          aria-expanded=${open ? "true" : "false"}
+          title=${listing.description === "" ? listing.displayName : listing.description}
+          @click=${() => void this.expand(listing)}
+        >
+          <span class="ext-dot is-${status}" title=${STATUS_LABELS[status]}></span>
+          <span class="ext-name">${listing.displayName}</span>
+          ${listing.origin === "unpacked"
+            ? html`<span class="material-symbols-outlined ext-tag" title="Unpacked">code</span>`
+            : nothing}
+          <span class="material-symbols-outlined ext-chevron">keyboard_arrow_down</span>
+        </button>
+        <button
+          type="button"
+          class="ext-switch"
+          role="switch"
+          aria-checked=${listing.enabled ? "true" : "false"}
+          title=${listing.enabled ? "On" : "Off"}
+          aria-label=${listing.displayName}
+          ?disabled=${this.busy}
+          @click=${() => this.toggleEnabled(listing)}
+        ></button>
+      </div>
+
+      ${listing.errors.length === 0
+        ? nothing
+        : html`<div class="ext-error">
+            <span class="material-symbols-outlined">error</span>
+            <span>${listing.errors.join(" ")}</span>
+          </div>`}
+      ${open ? this.details(listing) : nothing}
+    </div>`;
+  }
+
+  private details(listing: Listing): TemplateResult {
+    const properties = Object.entries(listing.configuration?.properties ?? {});
+
+    return html`<div class="opt-body ext-body">
+      ${listing.permissions.length === 0
+        ? nothing
+        : html`<div class="ext-chips">
+            ${listing.permissions.map((permission) => {
+              const chip = permissionChip(permission);
+              return html`<span class="ext-chip" title=${permission}>
+                <span class="material-symbols-outlined">${chip.icon}</span>${chip.label}
+              </span>`;
+            })}
+          </div>`}
+      ${properties.length === 0
+        ? nothing
+        : html`<div>
+            <div class="ext-sub">Settings</div>
+            ${properties.map(([key, property]) => this.configField(listing, key, property))}
+          </div>`}
+      ${this.logLines.length === 0
+        ? nothing
+        : html`<div>
+            <div class="ext-sub">
+              <span>Log</span>
+              <span class="browse-section-count">${this.logLines.length}</span>
+            </div>
+            <pre class="ext-log">${this.logLines.map((line) => line.text).join("\n")}</pre>
+          </div>`}
+      ${this.foot(listing)}
+    </div>`;
+  }
+
+  /** The version and the folder at one end, Remove at the other. */
+  private foot(listing: Listing): TemplateResult {
+    const trimmed = listing.dir.replace(/[\\/]+$/, "");
+    const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+    const parent = cut < 0 ? "" : trimmed.slice(0, cut + 1);
+    const leaf = cut < 0 ? listing.dir : trimmed.slice(cut + 1);
+    const unpacked = listing.origin === "unpacked";
+
+    return html`<div class="ext-foot">
+      <span class="ext-version">${/^\d/.test(listing.version) ? "v" : ""}${listing.version}</span>
+      <span class="browse-path" title=${listing.dir}
+        ><bdi dir="ltr">${parent}<span class="browse-path-leaf">${leaf}</span></bdi></span
+      >
+      <button
+        type="button"
+        class="opt-text-btn"
+        title=${unpacked ? "Stop loading this folder" : "Remove"}
+        ?disabled=${this.busy}
+        @click=${() => this.uninstall(listing)}
+      >
+        <span class="material-symbols-outlined">${unpacked ? "link_off" : "delete"}</span>
+        ${unpacked ? "Unlink" : "Remove"}
+      </button>
+    </div>`;
   }
 
   private configField(listing: Listing, key: string, property: ConfigProperty): TemplateResult {
     const value = this.configValues[key];
+    const label = settingLabel(key);
 
+    let control: TemplateResult;
     if (property.type === "boolean") {
-      return html`<div class="form-check form-switch">
-        <input
-          class="form-check-input"
-          type="checkbox"
-          .checked=${value === true}
-          @change=${(event: Event) =>
-            void this.writeConfig(listing.id, key, (event.target as HTMLInputElement).checked)}
-        />
-        <label class="form-check-label text-light">${property.description ?? key}</label>
-      </div>`;
-    }
-
-    if (property.enum != null) {
-      return html`<label class="w-100 mb-2">
-        <span class="text-secondary" style="font-size: 0.7rem">${property.description ?? key}</span>
-        <select
-          class="form-select form-select-sm"
-          @change=${(event: Event) =>
-            void this.writeConfig(listing.id, key, (event.target as HTMLSelectElement).value)}
-        >
-          ${property.enum.map(
-            (option) =>
-              html`<option value=${String(option)} ?selected=${String(option) === String(value)}>
-                ${String(option)}
-              </option>`,
-          )}
-        </select>
-      </label>`;
-    }
-
-    const numeric = property.type === "number" || property.type === "integer";
-    return html`<label class="w-100 mb-2">
-      <span class="text-secondary" style="font-size: 0.7rem">${property.description ?? key}</span>
-      <input
-        class="form-control form-control-sm"
+      control = html`<button
+        type="button"
+        class="ext-switch"
+        role="switch"
+        aria-checked=${value === true ? "true" : "false"}
+        aria-label=${label}
+        @click=${() => void this.writeConfig(listing.id, key, value !== true)}
+      ></button>`;
+    } else if (property.enum != null) {
+      control = html`<select
+        class="opt-select"
+        aria-label=${label}
+        @change=${(event: Event) =>
+          void this.writeConfig(listing.id, key, (event.target as HTMLSelectElement).value)}
+      >
+        ${property.enum.map(
+          (option) =>
+            html`<option value=${String(option)} ?selected=${String(option) === String(value)}>
+              ${String(option)}
+            </option>`,
+        )}
+      </select>`;
+    } else {
+      const numeric = property.type === "number" || property.type === "integer";
+      control = html`<input
+        class=${numeric ? "opt-num" : "opt-text-input"}
         type=${numeric ? "number" : "text"}
+        aria-label=${label}
         .value=${String(value ?? "")}
         min=${property.minimum ?? ""}
         max=${property.maximum ?? ""}
@@ -297,87 +434,18 @@ export class ControlExtension extends LitElement {
           const raw = (event.target as HTMLInputElement).value;
           void this.writeConfig(listing.id, key, numeric ? Number(raw) : raw);
         }}
-      />
-    </label>`;
-  }
+      />`;
+    }
 
-  private details(listing: Listing): TemplateResult {
-    const properties = listing.configuration?.properties ?? {};
-
-    return html`<div class="mt-2 ps-2 border-start border-secondary">
-      ${listing.permissions.length === 0
-        ? html`<p class="text-secondary mb-1" style="font-size: 0.75rem">
-            Asks for nothing beyond reading your timeline.
-          </p>`
-        : html`<p class="text-secondary mb-1" style="font-size: 0.75rem">
-            Permissions: ${listing.permissions.join(", ")}
-          </p>`}
-
-      <p class="text-secondary mb-2" style="font-size: 0.7rem">${listing.dir}</p>
-
-      ${Object.keys(properties).length === 0
-        ? html``
-        : html`<div class="mb-2">
-            <b class="text-light" style="font-size: 0.8rem">Settings</b>
-            ${Object.entries(properties).map(([key, property]) =>
-              this.configField(listing, key, property as ConfigProperty),
-            )}
-          </div>`}
-
-      <b class="text-light" style="font-size: 0.8rem">Log</b>
-      <pre
-        class="bg-black text-secondary p-2 mt-1"
-        style="max-height: 12rem; overflow: auto; font-size: 0.7rem; white-space: pre-wrap"
-      >
-${this.logLines.length === 0 ? "Nothing logged yet." : this.logLines.map((line) => line.text).join("\n")}</pre
-      >
+    return html`<div class="opt-field" title=${property.description ?? key}>
+      <div class="opt-row">
+        <span class="opt-label">${label}</span>
+        ${control}
+      </div>
     </div>`;
   }
 
-  private row(listing: Listing): TemplateResult {
-    return html`<div class="p-2 mb-2 rounded" style="background-color: #1a1b1e">
-      <div class="d-flex align-items-center gap-2">
-        <b class="text-light">${listing.displayName}</b>
-        <span class="text-secondary" style="font-size: 0.75rem">${listing.version}</span>
-        ${this.badge(listing)}
-        ${listing.origin === "unpacked"
-          ? html`<span class="badge bg-info text-dark">Unpacked</span>`
-          : html``}
-      </div>
-
-      ${listing.description === ""
-        ? html``
-        : html`<p class="text-secondary mb-1" style="font-size: 0.75rem">${listing.description}</p>`}
-
-      ${listing.errors.length === 0
-        ? html``
-        : html`<p class="text-danger mb-1" style="font-size: 0.75rem">
-            ${listing.errors.join(" ")}
-          </p>`}
-
-      <div class="d-flex gap-1 mt-1">
-        <button
-          class="btn btn-sm btn-default text-light"
-          ?disabled=${this.busy}
-          @click=${() => this.toggleEnabled(listing)}
-        >
-          ${listing.enabled ? "Disable" : "Enable"}
-        </button>
-        <button
-          class="btn btn-sm btn-default text-light"
-          ?disabled=${this.busy}
-          @click=${() => this.uninstall(listing)}
-        >
-          ${listing.origin === "unpacked" ? "Forget" : "Remove"}
-        </button>
-        <button class="btn btn-sm btn-default text-light" @click=${() => void this.expand(listing)}>
-          ${this.expanded === listing.id ? "Hide details" : "Details"}
-        </button>
-      </div>
-
-      ${this.expanded === listing.id ? this.details(listing) : html``}
-    </div>`;
-  }
+  // ---------------------------------------------------------------- commands
 
   /**
    * The command list, which doubles as this release's command palette.
@@ -387,89 +455,109 @@ ${this.logLines.length === 0 ? "Nothing logged yet." : this.logLines.map((line) 
    * and no menu entry would otherwise be unreachable, and an extension author
    * testing one should not have to add a menu item first.
    */
-  private commandList(): TemplateResult {
-    const filter = this.commandFilter.trim().toLowerCase();
-    const commands = contributionStore
-      .getState()
-      .commands.filter(
-        (command) => filter === "" || command.title.toLowerCase().includes(filter),
-      );
-
-    if (contributionStore.getState().commands.length === 0) {
-      return html``;
+  private commandList(commands: ContributedCommand[]): TemplateResult | typeof nothing {
+    if (commands.length === 0) {
+      return nothing;
     }
-
-    return html`<div class="mt-3">
-      <b class="text-light" style="font-size: 0.8rem">Commands</b>
-      <input
-        class="form-control form-control-sm mt-1"
-        type="search"
-        placeholder="Filter commands"
-        .value=${this.commandFilter}
-        @input=${(event: Event) => {
-          this.commandFilter = (event.target as HTMLInputElement).value;
-        }}
-      />
-      <div class="mt-1">
+    return html`<section>
+      <div class="browse-section-head ext-group-head">
+        <span class="browse-section-title">Commands</span>
+        <span class="browse-section-count">${commands.length}</span>
+      </div>
+      <div class="opt-section ext-commands">
         ${commands.map(
           (command) => html`<button
-            class="btn btn-sm btn-default text-light w-100 text-start mb-1"
+            type="button"
+            class="ext-command"
+            title=${command.title}
             @click=${() => void runContributedCommand(command.extId, command.commandId)}
           >
-            ${command.title}
+            <span class="material-symbols-outlined">${command.icon ?? "play_arrow"}</span>
+            <span class="ext-command-name">${command.title}</span>
           </button>`,
         )}
+      </div>
+    </section>`;
+  }
+
+  // ------------------------------------------------------------------ render
+
+  private empty(): TemplateResult {
+    return html`<div class="browse-empty">
+      <div class="browse-empty-icon">
+        <span class="material-symbols-outlined">extension</span>
+      </div>
+      <div class="browse-empty-title">No extensions</div>
+      <div class="ext-empty-actions">
+        <button
+          type="button"
+          class="browse-text-btn is-primary"
+          ?disabled=${this.busy}
+          @click=${this.handleInstall}
+        >
+          <span class="material-symbols-outlined">upload</span>
+          Install
+        </button>
+        <button
+          type="button"
+          class="browse-text-btn"
+          ?disabled=${this.busy}
+          @click=${this.handleLoadUnpacked}
+        >
+          <span class="material-symbols-outlined">folder_code</span>
+          Load unpacked
+        </button>
       </div>
     </div>`;
   }
 
-  render() {
-    const host = hostStateStore.getState();
-    const message = hostStateMessage(host);
-
-    return html`<div class="h-100">
-      <div class="d-flex flex-wrap gap-1">
-        <button
-          class="btn btn-sm btn-default text-light"
-          ?disabled=${this.busy}
-          @click=${this.handleInstall}
-        >
-          Install from file
-        </button>
-        <button
-          class="btn btn-sm btn-default text-light"
-          ?disabled=${this.busy}
-          @click=${this.handleLoadUnpacked}
-        >
-          Load unpacked
-        </button>
-        <button class="btn btn-sm btn-default text-light" @click=${this.handleOpenFolder}>
-          Open folder
-        </button>
-        <button
-          class="btn btn-sm btn-default text-light"
-          ?disabled=${this.busy}
-          @click=${this.handleRestart}
-        >
-          Restart host
-        </button>
+  private noMatches(): TemplateResult {
+    return html`<div class="browse-empty">
+      <div class="browse-empty-icon">
+        <span class="material-symbols-outlined">search_off</span>
       </div>
-
-      ${message == null
-        ? html``
-        : html`<div class="alert alert-warning py-2 px-2 mt-2 mb-0" style="font-size: 0.75rem">
-            ${message}
-          </div>`}
-
-      <div class="mt-3">
-        ${this.listings.length === 0
-          ? html`<p class="text-secondary" style="font-size: 0.8rem">
-              No extensions yet. Install one from a file, or load a folder you are working on.
-            </p>`
-          : this.listings.map((listing) => this.row(listing))}
-      </div>
-
-      ${this.commandList()}
+      <div class="browse-empty-title">No matches</div>
     </div>`;
+  }
+
+  render() {
+    const allCommands = contributionStore.getState().commands;
+    const listings = this.listings.filter((listing) =>
+      matchesQuery(this.query, listing.displayName, listing.id, listing.description),
+    );
+    const commands = allCommands.filter((command) => matchesQuery(this.query, command.title));
+
+    let body: TemplateResult;
+    if (this.listings.length === 0 && allCommands.length === 0) {
+      body = this.empty();
+    } else if (listings.length === 0 && commands.length === 0) {
+      body = this.noMatches();
+    } else {
+      body = html`${listings.length === 0
+          ? nothing
+          : html`<section>
+              <div class="browse-section-head ext-group-head">
+                <span class="browse-section-title">Installed</span>
+                <span class="browse-section-count">${listings.length}</span>
+                <span class="ext-group-actions">
+                  ${iconButton({
+                    icon: "folder",
+                    title: "Open extensions folder",
+                    onClick: this.handleOpenFolder,
+                  })}
+                  ${iconButton({
+                    icon: "restart_alt",
+                    title: "Restart extensions",
+                    disabled: this.busy,
+                    onClick: this.handleRestart,
+                  })}
+                </span>
+              </div>
+              ${listings.map((listing) => this.card(listing))}
+            </section>`}
+        ${this.commandList(commands)}`;
+    }
+
+    return html`${this.bar()} ${this.notice()} ${body}`;
   }
 }

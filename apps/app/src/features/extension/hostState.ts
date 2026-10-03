@@ -41,20 +41,22 @@ export const hostStateStore = createStore<IHostStateStore>((set) => ({
     }),
 }));
 
-/** The sentence the notice shows. Null when there is nothing to say. */
-export function hostStateMessage(state: IHostStateStore): string | null {
-  if (state.state === "ready" || state.state === "idle" || state.state === "starting") {
-    return null;
-  }
+export interface HostNotice {
+  /** One word: what the host is doing. */
+  label: string;
+  /** Why, when main said. */
+  detail: string | null;
+  /** Whether a restart button belongs beside it: not while one is under way. */
+  restartable: boolean;
+}
+
+/** What the Extensions panel's notice shows. Null when there is nothing to say. */
+export function hostNotice(state: IHostStateStore): HostNotice | null {
   if (state.state === "restarting") {
-    return "Extensions stopped and are restarting" + (state.lastError == null ? "." : ": " + state.lastError);
+    return { label: "Restarting", detail: state.lastError, restartable: false };
   }
   if (state.state === "degraded") {
-    return (
-      "Extensions have stopped" +
-      (state.lastError == null ? "." : ": " + state.lastError) +
-      " Your project is untouched."
-    );
+    return { label: "Stopped", detail: state.lastError, restartable: true };
   }
   return null;
 }

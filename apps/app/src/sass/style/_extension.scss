@@ -1,0 +1,444 @@
+/*
+ * ------------------------------------------------------- the Extensions panel
+ *
+ * `ui/control/ControlExtension.ts`, built from `_browse.scss`'s bar, section
+ * heads and empty state and `_option.scss`'s card, rows and fields. Only what
+ * neither has lives here: the status dot, the on/off switch, the permission
+ * chips, the log well and the command rows.
+ *
+ * Icon sizes are stated with two classes, for the reason `_asset.scss` gives:
+ * `material-symbols/outlined` loads after this file, and its single-class rule
+ * would otherwise win at 24px.
+ */
+
+@import "../var";
+
+$ext-hover: #1f2327;
+$ext-active: #4cc38a;
+$ext-starting: #e0b060;
+$ext-failed: #e5484d;
+$ext-failed-text: #ec8a8d;
+$ext-idle: #5c646d;
+
+control-ui-extension {
+  display: block;
+}
+
+/* ------------------------------------------------------------------ groups */
+
+/*
+ * `.browse-section-head` with a third thing in it: the group's own buttons,
+ * pushed to the far end, with the count kept beside the title.
+ */
+.browse-section-head.ext-group-head {
+  align-items: center;
+  justify-content: flex-start;
+  padding: 10px 0 6px 5px;
+}
+
+.ext-group-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+/* -------------------------------------------------------------------- card */
+
+.opt-head.ext-head {
+  padding: 3px 7px 3px 3px;
+}
+
+/*
+ * Everything in the head but the switch is one button that opens the details,
+ * so the target is the whole name rather than a 16px chevron at its end. The
+ * switch stays outside it: a button inside a button is not valid markup and
+ * the click would open the card as well.
+ */
+.ext-title {
+  appearance: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 4px 0 7px;
+  margin: 0;
+  border: none;
+  border-radius: 7px;
+  background-color: transparent;
+  color: $opt-text;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.ext-title:hover {
+  background-color: $ext-hover;
+  color: $opt-bright;
+}
+
+.ext-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ext-title > .ext-tag {
+  flex: none;
+  font-size: 13px;
+  line-height: 1;
+  color: $opt-label;
+}
+
+.ext-title > .ext-chevron {
+  flex: none;
+  margin-left: auto;
+  font-size: 16px;
+  line-height: 1;
+  color: $opt-label;
+  transition: transform 160ms ease-out;
+}
+
+.ext-title[aria-expanded="true"] > .ext-chevron {
+  transform: rotate(180deg);
+}
+
+.ext-card.is-off .ext-name {
+  color: $opt-label;
+}
+
+/* ---------------------------------------------------------------- the dot */
+
+.ext-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: $ext-idle;
+}
+
+.ext-dot.is-active {
+  background-color: $ext-active;
+  box-shadow: 0 0 0 3px rgba($ext-active, 0.14);
+}
+
+.ext-dot.is-starting {
+  background-color: $ext-starting;
+  animation: ext-pulse 0.9s ease-in-out infinite alternate;
+}
+
+.ext-dot.is-failed {
+  background-color: $ext-failed;
+  box-shadow: 0 0 0 3px rgba($ext-failed, 0.16);
+}
+
+/* A ring, so "off" reads as absent rather than as a fifth colour. */
+.ext-dot.is-off {
+  background-color: transparent;
+  box-shadow: inset 0 0 0 1.5px $ext-idle;
+}
+
+@keyframes ext-pulse {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ext-dot.is-starting {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------- the switch */
+
+/*
+ * A bare `role="switch"` button rather than Bootstrap's `.form-switch`, which
+ * floats its input and paints a white track (see `style.scss#form-switch-row`).
+ * On is the light fill `.browse-text-btn.is-primary` uses, so the sidebar keeps
+ * one meaning for "lit".
+ */
+.ext-switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 15px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid $opt-line-strong;
+  border-radius: 999px;
+  background-color: $opt-raised;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease-out,
+    border-color 160ms ease-out;
+}
+
+.ext-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background-color: $opt-label;
+  transition:
+    transform 160ms ease-out,
+    background-color 160ms ease-out;
+}
+
+.ext-switch[aria-checked="true"] {
+  border-color: transparent;
+  background-color: $opt-bright;
+}
+
+/* 24px inside the border, less the 2px inset either side and the 9px knob. */
+.ext-switch[aria-checked="true"]::after {
+  transform: translateX(11px);
+  background-color: $opt-card;
+}
+
+.ext-switch:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.ext-switch:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ext-title:focus-visible,
+.ext-switch:focus-visible,
+.ext-command:focus-visible {
+  outline: 1px solid #5a6067;
+  outline-offset: 1px;
+}
+
+/* ------------------------------------------------------------------ errors */
+
+.ext-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 6px 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  color: $ext-failed-text;
+  font-size: 10px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.ext-error > .material-symbols-outlined {
+  flex: none;
+  font-size: 13px;
+  line-height: 1.1;
+}
+
+/* ----------------------------------------------------------------- details */
+
+.opt-body.ext-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ext-body .opt-field + .opt-field {
+  margin-top: 8px;
+}
+
+.ext-sub {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  color: $opt-label;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+
+.ext-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ext-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px 0 5px;
+  border: 1px solid $opt-line;
+  border-radius: 6px;
+  background-color: $opt-field;
+  color: $opt-text;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.ext-chip > .material-symbols-outlined {
+  font-size: 13px;
+  line-height: 1;
+  color: $opt-label;
+}
+
+/* A setting's field at the row's end, beside its name. */
+.ext-body input.opt-text-input,
+.ext-body select.opt-select {
+  flex: none;
+  width: 58%;
+  height: 22px;
+}
+
+.ext-body input.opt-num {
+  width: 5em;
+}
+
+.ext-log {
+  max-height: 9rem;
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border: 1px solid $opt-line;
+  border-radius: 7px;
+  background-color: #0b0c0e;
+  color: $opt-label;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Version and folder at one end, Remove at the other. */
+.ext-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ext-version {
+  flex: none;
+  color: $opt-label;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ext-foot > .browse-path {
+  font-size: 10px;
+}
+
+.ext-foot .opt-text-btn > .material-symbols-outlined {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.ext-foot .opt-text-btn:hover:not(:disabled) {
+  color: $ext-failed-text;
+}
+
+/* ------------------------------------------------------------------- notice */
+
+.browse-alert.ext-alert {
+  align-items: center;
+}
+
+.ext-alert-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ext-alert-text > b {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ext-alert-text > span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  opacity: 0.85;
+}
+
+.ext-alert .opt-icon-btn {
+  color: inherit;
+}
+
+/* ---------------------------------------------------------------- commands */
+
+.opt-section.ext-commands {
+  padding: 3px;
+}
+
+.ext-command {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  margin: 0;
+  border: none;
+  border-radius: 7px;
+  background-color: transparent;
+  color: $opt-text;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.ext-command:hover {
+  background-color: $ext-hover;
+  color: $opt-bright;
+}
+
+.ext-command > .material-symbols-outlined {
+  flex: none;
+  font-size: 15px;
+  line-height: 1;
+  color: $opt-label;
+  transition: color 140ms ease-out;
+}
+
+.ext-command:hover > .material-symbols-outlined {
+  color: $opt-text;
+}
+
+.ext-command-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ------------------------------------------------------------------- empty */
+
+.ext-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 10px;
+}
