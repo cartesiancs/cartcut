@@ -79,6 +79,72 @@ describe("update_clip writes scale", () => {
   });
 });
 
+describe("update_clip writes cornerRadius", () => {
+  it("sets it, reports it, and deletes the key at 0", async () => {
+    const written = await run("update_clip", {
+      elementId: "a",
+      patch: { cornerRadius: 24 },
+    });
+    expect((doc().elements.a as any).cornerRadius).toBe(24);
+    expect(written.clip.cornerRadius).toBe(24);
+
+    // Square removes the field rather than storing a 0, so a clip rounded and
+    // then squared saves byte-identically to one nobody touched.
+    const squared = await run("update_clip", {
+      elementId: "a",
+      patch: { cornerRadius: 0 },
+    });
+    expect("cornerRadius" in (doc().elements.a as any)).toBe(false);
+    expect("cornerRadius" in squared.clip).toBe(false);
+  });
+
+  it("refuses a negative radius and one past the ceiling", async () => {
+    await expect(
+      run("update_clip", { elementId: "a", patch: { cornerRadius: -4 } }),
+    ).rejects.toThrow(/cornerRadius/);
+    await expect(
+      run("update_clip", { elementId: "a", patch: { cornerRadius: 1e6 } }),
+    ).rejects.toThrow(/cornerRadius/);
+    expect("cornerRadius" in (doc().elements.a as any)).toBe(false);
+  });
+
+  it("is not offered on a clip that cannot carry one", async () => {
+    await expect(
+      run("update_clip", { elementId: "sound", patch: { cornerRadius: 12 } }),
+    ).rejects.toThrow(/cornerRadius/);
+  });
+
+  it("is in get_clip whatever its value, on a clip that can carry one", async () => {
+    expect((await run("get_clip", { elementId: "a" })).cornerRadius).toBe(0);
+    await run("update_clip", { elementId: "a", patch: { cornerRadius: 30 } });
+    expect((await run("get_clip", { elementId: "a" })).cornerRadius).toBe(30);
+    expect(
+      "cornerRadius" in (await run("get_clip", { elementId: "sound" })),
+    ).toBe(false);
+  });
+
+  it("animates through set_keyframes like any other track", async () => {
+    await run("set_keyframes", {
+      writes: [
+        {
+          elementId: "b",
+          property: "cornerRadius",
+          keyframes: [
+            { atMs: 4000, value: 40 },
+            { atMs: 6000, value: 0 },
+          ],
+        },
+      ],
+    });
+
+    const clip = await run("get_clip", { elementId: "b" });
+    const track = clip.animation.find(
+      (one: any) => one.property === "cornerRadius",
+    );
+    expect(track.lanes.x.times).toEqual([4000, 6000]);
+  });
+});
+
 describe("the two readers agree about when a keyframe is", () => {
   it("reports the same absolute times from get_clip and get_keyframes", async () => {
     // Keyframes are stored relative to the clip's start and every time in this

@@ -38,6 +38,7 @@ import { isAdjustable } from "../timeline/adjustOps";
 import { isBlendable } from "../timeline/blendOps";
 import { isMirrorable, mirrorOf } from "../timeline/mirrorOps";
 import { cropOf, isCropped, isCroppable } from "../timeline/cropOps";
+import { cornerRadiusOf, isRoundable } from "../timeline/cornerOps";
 import { isReversed } from "../timeline/reverseOps";
 import { isGradable } from "../timeline/lutOps";
 import { maskOf } from "../mask/maskShape";
@@ -251,6 +252,13 @@ export function clipRow(
       `${percent(crop.width)}x${percent(crop.height)}%`;
   }
 
+  // Only when rounded, for `mirror`'s reason. The static field: a keyed
+  // radius is in the detail view's animation block, where its curve is.
+  const cornerRadius = cornerRadiusOf(element);
+  if (cornerRadius > 0) {
+    row.cornerRadius = cornerRadius;
+  }
+
   switch (element.filetype) {
     case "text": {
       row.text = truncate(element.text, TEXT_PREVIEW_CHARS);
@@ -457,6 +465,13 @@ export function clipDetail(
       width: crop.width,
       height: crop.height,
     };
+  }
+
+  // Whatever its value on the types that can carry one, for `crop`'s reason:
+  // 0 is "square", absent is "this kind of clip has no corners to round". In
+  // clip pixels, the unit `update_clip` takes.
+  if (isRoundable(element)) {
+    detail.cornerRadius = cornerRadiusOf(element);
   }
 
   // Reported whatever its value on the types that can carry one, and absent on

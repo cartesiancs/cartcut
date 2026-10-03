@@ -80,6 +80,8 @@ export function registerTextTools(define: Registrar) {
       description:
         "Edit appearance: position, size, opacity, rotation, scale; for text the words, colour, size and " +
         "alignment; for a shape its fill colour; for a group its name. " +
+        "On an image or video, `cornerRadius` rounds the corners in clip pixels: 0 is square, and " +
+        "set_keyframes animates it. " +
         "**`scale` and `size` are different things.** Scale is uniform, about the centre, in tenths (10 is " +
         "unscaled, 12 is 120%) and never touches the box; width and height are the box itself. " +
         "Timing is deliberately not writable here — startTime, duration and trim are coupled by invariants — " +

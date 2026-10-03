@@ -94,7 +94,8 @@ export function registerShapeTools(define: Registrar) {
         "lift every layout has, across as many clips as you like in one undo step. " +
         "**Do not build a border out of two stacked shapes**; that is what this replaces. " +
         "A shape's border follows its real outline, so a rounded rectangle's corners are rounded and a " +
-        "star's border follows its points. An image or video is bordered on its box. " +
+        "star's border follows its points. An image or video is bordered on its box, rounded by its " +
+        "cornerRadius (update_clip). " +
         "Sizes are in the clip's own pixels, so a border grows when the clip is scaled, and the shadow " +
         "rotates with it. `strokeAlign` matters at any useful width: \"inner\" keeps the border inside the " +
         "outline, \"outer\" outside it, \"center\" straddles. " +

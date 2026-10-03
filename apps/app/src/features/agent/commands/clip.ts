@@ -21,6 +21,7 @@ import { flatten, rejectionFor, writablePaths } from "./writable";
 import { affectsTextBlock, withFittedTextHeights } from "../../element/textFit";
 import { setTextWithRuns } from "../../timeline/textRunOps";
 import { setClipScale } from "../../timeline/scaleOps";
+import { setCornerRadius } from "../../timeline/cornerOps";
 import { isLinkableProperty, linkOf } from "../../animation/link";
 
 registerCommands({
@@ -88,7 +89,7 @@ registerCommands({
       affectsTextBlock(writes.map(([path]) => path)) &&
       !writes.some(([path]) => path.join(".") === "height");
 
-    // Two fields cannot be a plain `setIn`, for two different reasons.
+    // Three fields cannot be a plain `setIn`, for two different reasons.
     //
     // A text clip's per-range styling is stored as offsets into its string, so
     // rewriting the string without moving them leaves every styled stretch on
@@ -106,6 +107,13 @@ registerCommands({
       ([path, value]) =>
         path.length === 1 && path[0] === "scale" && typeof value === "number",
     );
+    // A square corner deletes its key the same way; `setCornerRadius` owns it.
+    const cornerWrite = writes.find(
+      ([path, value]) =>
+        path.length === 1 &&
+        path[0] === "cornerRadius" &&
+        typeof value === "number",
+    );
 
     checkpoint((d) => {
       let base =
@@ -115,10 +123,17 @@ registerCommands({
       if (scaleWrite != null) {
         base = setClipScale(base, params.elementId, scaleWrite[1] as number);
       }
+      if (cornerWrite != null) {
+        base = setCornerRadius(base, params.elementId, cornerWrite[1] as number);
+      }
 
       let updated: TimelineElement = base.elements[params.elementId];
       for (const [path, value] of writes) {
-        if (path === textWrite?.[0] || path === scaleWrite?.[0]) {
+        if (
+          path === textWrite?.[0] ||
+          path === scaleWrite?.[0] ||
+          path === cornerWrite?.[0]
+        ) {
           continue;
         }
         updated = setIn(updated, path, value);

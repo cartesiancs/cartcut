@@ -35,6 +35,7 @@
 
 import type { TimelineElement } from "../../../@types/timeline";
 import { isScalable } from "../../timeline/scaleOps";
+import { MAX_CORNER_RADIUS } from "../../timeline/cornerOps";
 
 /** Property paths `update_clip` will write, by element type. */
 export /**
@@ -121,6 +122,10 @@ const WRITABLE: Record<string, string[][]> = {
     ["shadow", "opacity"],
   ],
   image: [
+    // Corner rounding, in element pixels. **Not a plain `setIn`**, for the
+    // reason `scale` above is not: 0 deletes the key, so `update_clip` routes
+    // it through `cornerOps#setCornerRadius`. Animated with `set_keyframes`.
+    ["cornerRadius"],
     // A border and a drop shadow, as leaves: `flatten` recurses into a nested
     // patch, so a `["stroke"]` entry would never match anything it produces.
     // `set_clip_decoration` is the multi-clip form.
@@ -139,6 +144,10 @@ const WRITABLE: Record<string, string[][]> = {
   video: [
     ["filter", "enable"],
     ["volumeDb"],
+    // Corner rounding, in element pixels. **Not a plain `setIn`**, for the
+    // reason `scale` above is not: 0 deletes the key, so `update_clip` routes
+    // it through `cornerOps#setCornerRadius`. Animated with `set_keyframes`.
+    ["cornerRadius"],
     // A border and a drop shadow, as leaves: `flatten` recurses into a nested
     // patch, so a `["stroke"]` entry would never match anything it produces.
     // `set_clip_decoration` is the multi-clip form.
@@ -207,6 +216,10 @@ export const RANGES: Record<string, { min?: number; max?: number }> = {
   // Canvas throws on a negative `shadowBlur`, so this bound is not cosmetic.
   "shadow.blur": { min: 0, max: 500 },
   "shadow.opacity": { min: 0, max: 100 },
+  // Rejected past the stored ceiling rather than clamped, for the reason
+  // `volumeDb` gives. Half the box's shorter side is the clamp that shapes the
+  // picture, and it is applied where the corners are drawn.
+  cornerRadius: { min: 0, max: MAX_CORNER_RADIUS },
 };
 
 /** Values that must be one of a fixed set. */

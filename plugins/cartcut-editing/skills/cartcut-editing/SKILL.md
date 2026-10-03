@@ -354,6 +354,7 @@ counter-animate `position` yourself.
 | Change which clip draws on top | `move_track` |
 | Keep part of the frame, hide the rest | `set_crop` (fractions, as `get_clip` reports) |
 | Flip a clip, or turn footage shot sideways | `set_mirror`, `rotate_clips` |
+| Round a video or image's corners into a card | `update_clip` `{cornerRadius}` (clip px), with `set_clip_decoration` for its border and shadow |
 | Cut picture and sound apart | `detach_audio` |
 | Type a title on, a piece at a time | `apply_typewriter` |
 | Change text, colour, position, size, opacity | `update_clip` |
