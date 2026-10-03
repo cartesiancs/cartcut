@@ -123,6 +123,39 @@ describe("update_clip writes cornerRadius", () => {
     ).toBe(false);
   });
 
+  it("switches corners the user turned off back on when written", async () => {
+    await run("update_clip", { elementId: "a", patch: { cornerRadius: 24 } });
+    const store = useTimelineStore.getState();
+    store.withCheckpoint((d) => ({
+      ...d,
+      elements: {
+        ...d.elements,
+        a: { ...d.elements.a, cornerRadiusOff: true } as any,
+      },
+    }));
+
+    // Reported while off, so a stored 24 on a square clip is explained, and
+    // left out of the list row, which describes what is on screen.
+    const hidden = await run("get_clip", { elementId: "a" });
+    expect(hidden.cornerRadius).toBe(24);
+    expect(hidden.cornerRadiusOff).toBe(true);
+    const listed = await run("list_clips", {});
+    const row = listed.clips.find((clip: any) => clip.id === "a");
+    expect(row).toBeDefined();
+    expect("cornerRadius" in row).toBe(false);
+
+    const written = await run("update_clip", {
+      elementId: "a",
+      patch: { cornerRadius: 30 },
+    });
+    expect((doc().elements.a as any).cornerRadius).toBe(30);
+    expect("cornerRadiusOff" in (doc().elements.a as any)).toBe(false);
+    expect(written.clip.cornerRadius).toBe(30);
+    expect(
+      "cornerRadiusOff" in (await run("get_clip", { elementId: "a" })),
+    ).toBe(false);
+  });
+
   it("animates through set_keyframes like any other track", async () => {
     await run("set_keyframes", {
       writes: [

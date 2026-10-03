@@ -433,6 +433,13 @@ type Croppable = {
  */
 type Rounded = {
   cornerRadius?: number;
+  /**
+   * The Corners section's eye, switched off: the clip draws square while its
+   * radius and any curve on it are kept, so switching it back on returns
+   * them. The rule a disabled border keeps with `stroke.enable: false`.
+   * Stored as `true` or not at all, and only while there is something to hide.
+   */
+  cornerRadiusOff?: true;
 };
 
 /**

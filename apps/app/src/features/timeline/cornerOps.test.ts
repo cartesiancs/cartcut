@@ -5,9 +5,14 @@ import {
   coerceCornerRadius,
   cornerRadiusAt,
   cornerRadiusOf,
+  cornerRadiusOffOf,
+  cornersOn,
+  defaultCornerRadius,
   isRoundable,
   setCornerRadius,
   setCornerRadiusMany,
+  setCornerRadiusOff,
+  showCorners,
 } from "./cornerOps";
 import {
   SCHEMA_VERSION,
@@ -334,5 +339,114 @@ describe("the cornerRadius keyframe track", () => {
     }));
     expect((loaded.elements.shape as any).animation.cornerRadius).toBeUndefined();
     expect((loaded.elements.image as any).animation.cornerRadius).toBeDefined();
+  });
+});
+
+describe("the Corners eye", () => {
+  /** An image at 4000 with a radius of 24, through the op like the app. */
+  const rounded = () => setCornerRadius(doc(), "image", 24);
+
+  /** The same image with an armed curve and a square static field. */
+  function keyed(): TimelineDocument {
+    let d = setTrackActive(doc(), "image", "cornerRadius", true, { atMs: 0 });
+    d = addKeyframe(d, "image", "cornerRadius", "x", 0, 40);
+    return d;
+  }
+
+  it("reads only a literal true as off", () => {
+    expect(cornerRadiusOffOf(imageElement({ cornerRadiusOff: true }))).toBe(true);
+    expect(cornerRadiusOffOf(imageElement())).toBe(false);
+    expect(
+      cornerRadiusOffOf(imageElement({ cornerRadiusOff: "yes" } as any)),
+    ).toBe(false);
+    expect(
+      cornerRadiusOffOf(shapeElement({ cornerRadiusOff: true } as any)),
+    ).toBe(false);
+  });
+
+  it("is on for a radius or an armed curve, and off for a square clip", () => {
+    expect(cornersOn(rounded().elements.image)).toBe(true);
+    expect(cornersOn(keyed().elements.image)).toBe(true);
+    expect(cornersOn(doc().elements.image)).toBe(false);
+    expect(cornersOn(doc().elements.shape)).toBe(false);
+  });
+
+  it("switches off without losing the radius", () => {
+    const off = setCornerRadiusOff(rounded(), "image", true);
+    const image = off.elements.image;
+
+    expect(cornersOn(image)).toBe(false);
+    expect(cornerRadiusAt(image, 4000)).toBe(0);
+    // What is stored is untouched; only what is drawn changes.
+    expect(cornerRadiusOf(image)).toBe(24);
+  });
+
+  it("switches back on to exactly the clip it was", () => {
+    const before = rounded();
+    const after = showCorners(
+      setCornerRadiusOff(before, "image", true),
+      "image",
+      99,
+    );
+    // The radius that was there, not the default handed in.
+    expect(JSON.stringify(after.elements.image)).toBe(
+      JSON.stringify(before.elements.image),
+    );
+  });
+
+  it("keeps a curve while off, and plays it again once on", () => {
+    const off = setCornerRadiusOff(keyed(), "image", true);
+    expect(cornerRadiusAt(off.elements.image, 4000)).toBe(0);
+    expect((off.elements.image as any).animation.cornerRadius.x).toHaveLength(1);
+
+    const on = showCorners(off, "image", 99);
+    expect(cornerRadiusAt(on.elements.image, 4000)).toBe(40);
+    expect(on.elements.image).not.toHaveProperty("cornerRadius");
+  });
+
+  it("rounds a square clip with the radius it is handed", () => {
+    const d = showCorners(doc(), "image", 54);
+    expect(d.elements.image).toMatchObject({ cornerRadius: 54 });
+    expect(cornersOn(d.elements.image)).toBe(true);
+  });
+
+  it("declines by identity for the state a clip is already in", () => {
+    const on = rounded();
+    expect(showCorners(on, "image", 54)).toBe(on);
+    expect(setCornerRadiusOff(on, "image", false)).toBe(on);
+
+    const off = setCornerRadiusOff(on, "image", true);
+    expect(setCornerRadiusOff(off, "image", true)).toBe(off);
+  });
+
+  it("declines to switch off a clip with nothing to hide", () => {
+    const d = doc();
+    expect(setCornerRadiusOff(d, "image", true)).toBe(d);
+    expect(setCornerRadiusOff(d, "shape", true)).toBe(d);
+    expect(showCorners(d, "shape", 54)).toBe(d);
+  });
+
+  it("drops the switch with the radius, unless a curve is left to hide", () => {
+    const squared = setCornerRadius(
+      setCornerRadiusOff(rounded(), "image", true),
+      "image",
+      0,
+    );
+    expect(JSON.stringify(squared.elements.image)).toBe(
+      JSON.stringify(doc().elements.image),
+    );
+
+    let d = setCornerRadius(keyed(), "image", 24);
+    d = setCornerRadiusOff(d, "image", true);
+    d = setCornerRadius(d, "image", 0);
+    expect(d.elements.image).toMatchObject({ cornerRadiusOff: true });
+  });
+
+  it("defaults to a twentieth of the shorter side, never below 1", () => {
+    expect(defaultCornerRadius(1920, 1080)).toBe(54);
+    expect(defaultCornerRadius(3600, 2338)).toBe(117);
+    expect(defaultCornerRadius(10, 10)).toBe(1);
+    expect(defaultCornerRadius(0, 100)).toBe(1);
+    expect(defaultCornerRadius(Number.NaN, 100)).toBe(1);
   });
 });

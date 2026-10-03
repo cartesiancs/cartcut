@@ -8,6 +8,12 @@
  * for one that cannot be rounded, which is every type but image and video. A
  * shape keeps its own radius in the Shape section.
  *
+ * Built like Border and Shadow beside it: the eye on the head switches the
+ * corners off and on, and the body is there only while they are on. Off keeps
+ * the radius and any curve on it (`cornerRadiusOff`), so switching back on
+ * gives them back; on, for a square clip, rounds it with a twentieth of its
+ * shorter side, the way the border's eye writes its defaults.
+ *
  * Keyframeable the way the level fader is, with the same arrangement: the
  * field shows the radius at the playhead through `cornerRadiusAt`, and with the
  * stopwatch armed an edit keys the playhead as well as the field. That rule is
@@ -17,13 +23,21 @@
 import { LitElement, html, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { useTimelineStore } from "../../states/timelineStore";
-import { cornerRadiusAt, isRoundable } from "../timeline/cornerOps";
+import {
+  cornerRadiusAt,
+  cornersOn,
+  defaultCornerRadius,
+  isRoundable,
+  setCornerRadiusOff,
+  showCorners,
+} from "../timeline/cornerOps";
 import { editCornerRadius } from "../timeline/cornerEdit";
 import { sampledBoxOf } from "../timeline/transform";
 import { projectBakeHz } from "../editor/frameRate";
 import { refusesEdit } from "../editor/timelineLock";
 import { GestureCommit } from "./gestureCommit";
-import { section, sliderField } from "./optionKit";
+import { eyeButton, section, sliderField } from "./optionKit";
+import type { TimelineDocument } from "../timeline/tracks";
 import "./controlKeyframeNav";
 
 @customElement("clip-corners")
@@ -83,21 +97,39 @@ export class ClipCornersControl extends LitElement {
     this.requestUpdate();
   };
 
-  private typed = (next: number): void => {
+  /** One immediate step, for the eye or a typed number. */
+  private write(fn: (doc: TimelineDocument) => TimelineDocument): void {
     this.gesture.flush();
     // `GestureCommit.apply` refuses under the caption lock on its own; a
-    // straight `withCheckpoint` does not, so a typed value has to ask.
+    // straight `withCheckpoint` does not, so this has to ask.
     if (refusesEdit()) {
       this.requestUpdate();
       return;
     }
+    useTimelineStore.getState().withCheckpoint(fn);
+    this.requestUpdate();
+  }
+
+  private typed = (next: number): void => {
     const id = this.elementId;
     const cursor = useTimelineStore.getState().cursor;
     const bakeHz = projectBakeHz();
-    useTimelineStore
-      .getState()
-      .withCheckpoint((doc) => editCornerRadius(doc, id, next, cursor, bakeHz));
-    this.requestUpdate();
+    this.write((doc) => editCornerRadius(doc, id, next, cursor, bakeHz));
+  };
+
+  private toggle = (): void => {
+    const id = this.elementId;
+    const element = useTimelineStore.getState().timeline[id];
+    if (element == null) {
+      return;
+    }
+    if (cornersOn(element)) {
+      this.write((doc) => setCornerRadiusOff(doc, id, true));
+      return;
+    }
+    const box = sampledBoxOf(element, useTimelineStore.getState().cursor);
+    const radius = defaultCornerRadius(box.width, box.height);
+    this.write((doc) => showCorners(doc, id, radius));
   };
 
   private invalid = (): void => {
@@ -109,6 +141,17 @@ export class ClipCornersControl extends LitElement {
     if (element == null || !isRoundable(element)) {
       return nothing;
     }
+    const on = cornersOn(element);
+    const eye = eyeButton(
+      on,
+      on ? "Turn corners off" : "Turn corners on",
+      this.toggle,
+      "corner-radius",
+    );
+    if (!on) {
+      return section({ title: "Corners", actions: eye });
+    }
+
     const cursor = useTimelineStore.getState().cursor;
     const radius = Math.round(cornerRadiusAt(element, cursor));
     // Half the shorter side of the box being drawn, which is where the corners
@@ -118,16 +161,18 @@ export class ClipCornersControl extends LitElement {
     const box = sampledBoxOf(element, cursor);
     const ceiling = Math.max(1, Math.round(Math.min(box.width, box.height) / 2));
 
-    // The stopwatch on the head rather than beside the box, where Volume keeps
-    // its own: the column is about 150px, and three nav buttons in the row
-    // left the label four letters wide.
+    // The keyframe nav on the head beside the eye, rather than beside the
+    // box: the column is about 150px, and three nav buttons in the row left
+    // the label four letters wide. Only while the corners are on, since off
+    // there is nothing on screen to key.
     return section({
       title: "Corners",
       actions: html`<control-keyframe-nav
-        .elementId=${this.elementId}
-        .property=${"cornerRadius"}
-        .label=${"corner radius"}
-      ></control-keyframe-nav>`,
+          .elementId=${this.elementId}
+          .property=${"cornerRadius"}
+          .label=${"corner radius"}
+        ></control-keyframe-nav>
+        ${eye}`,
       body: html`
         <div class="opt-field" data-corner-radius>
           ${sliderField({
@@ -135,7 +180,10 @@ export class ClipCornersControl extends LitElement {
             suffix: "px",
             value: radius,
             rangeValue: Math.min(ceiling, radius),
-            min: 0,
+            // 1, not 0: a radius of 0 is square, which is the eye off, and a
+            // drag that reached it would fold the section away under the
+            // pointer. A typed 0 still squares the clip, deliberately.
+            min: 1,
             max: ceiling,
             onScrub: this.scrub,
             onCommit: this.commit,

@@ -131,6 +131,14 @@ describe("a rounded clip", () => {
     expect(bytes(draw({ cornerRadius: Number.NaN }))).toEqual(bytes(draw()));
   });
 
+  it("draws square while the eye has it off, radius kept or not", () => {
+    // Off is a switch over what is stored, so the picture has to be the
+    // square one exactly, not merely close to it.
+    const off = draw({ cornerRadius: 30, cornerRadiusOff: true } as any);
+    expect(bytes(off)).toEqual(bytes(draw()));
+    expect(bytes(off)).not.toEqual(bytes(draw({ cornerRadius: 30 })));
+  });
+
   it("rounds the box, not the cropped frame", () => {
     // A crop of a flat picture is the same flat picture, so the frame must be
     // identical with the crop and without it. An outline traced under the

@@ -21,7 +21,7 @@ import { flatten, rejectionFor, writablePaths } from "./writable";
 import { affectsTextBlock, withFittedTextHeights } from "../../element/textFit";
 import { setTextWithRuns } from "../../timeline/textRunOps";
 import { setClipScale } from "../../timeline/scaleOps";
-import { setCornerRadius } from "../../timeline/cornerOps";
+import { setCornerRadius, setCornerRadiusOff } from "../../timeline/cornerOps";
 import { isLinkableProperty, linkOf } from "../../animation/link";
 
 registerCommands({
@@ -108,6 +108,9 @@ registerCommands({
         path.length === 1 && path[0] === "scale" && typeof value === "number",
     );
     // A square corner deletes its key the same way; `setCornerRadius` owns it.
+    // Naming a radius also switches the panel's eye back on, the rule
+    // `set_clip_decoration` follows for a border: an agent that writes 24 and
+    // sees nothing change has no way to learn why.
     const cornerWrite = writes.find(
       ([path, value]) =>
         path.length === 1 &&
@@ -125,6 +128,7 @@ registerCommands({
       }
       if (cornerWrite != null) {
         base = setCornerRadius(base, params.elementId, cornerWrite[1] as number);
+        base = setCornerRadiusOff(base, params.elementId, false);
       }
 
       let updated: TimelineElement = base.elements[params.elementId];

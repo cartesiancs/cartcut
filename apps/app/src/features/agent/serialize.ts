@@ -38,7 +38,11 @@ import { isAdjustable } from "../timeline/adjustOps";
 import { isBlendable } from "../timeline/blendOps";
 import { isMirrorable, mirrorOf } from "../timeline/mirrorOps";
 import { cropOf, isCropped, isCroppable } from "../timeline/cropOps";
-import { cornerRadiusOf, isRoundable } from "../timeline/cornerOps";
+import {
+  cornerRadiusOf,
+  cornerRadiusOffOf,
+  isRoundable,
+} from "../timeline/cornerOps";
 import { isReversed } from "../timeline/reverseOps";
 import { isGradable } from "../timeline/lutOps";
 import { maskOf } from "../mask/maskShape";
@@ -252,10 +256,11 @@ export function clipRow(
       `${percent(crop.width)}x${percent(crop.height)}%`;
   }
 
-  // Only when rounded, for `mirror`'s reason. The static field: a keyed
-  // radius is in the detail view's animation block, where its curve is.
+  // Only when rounded, for `mirror`'s reason, and not while the panel's eye
+  // has the corners off, since the row describes what is on screen. The
+  // static field: a keyed radius is in the detail view's animation block.
   const cornerRadius = cornerRadiusOf(element);
-  if (cornerRadius > 0) {
+  if (cornerRadius > 0 && !cornerRadiusOffOf(element)) {
     row.cornerRadius = cornerRadius;
   }
 
@@ -472,6 +477,11 @@ export function clipDetail(
   // clip pixels, the unit `update_clip` takes.
   if (isRoundable(element)) {
     detail.cornerRadius = cornerRadiusOf(element);
+    // Only while it is set: a stored radius that draws nothing needs saying,
+    // or an agent reads 24 off a clip that shows square corners.
+    if (cornerRadiusOffOf(element)) {
+      detail.cornerRadiusOff = true;
+    }
   }
 
   // Reported whatever its value on the types that can carry one, and absent on
