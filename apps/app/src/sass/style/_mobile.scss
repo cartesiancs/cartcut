@@ -193,13 +193,28 @@ html.mobile-layout {
   .m-transport {
     height: $m-transport-h;
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    // `minmax(0, 1fr)` rather than `1fr`: a bare `1fr` cannot shrink below
+    // its content, so a wider timecode on one side would make the two side
+    // columns unequal and push the play button off the centre line. The
+    // padding is symmetric for the same reason.
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
-    padding: 0 6px 0 14px;
+    padding: 0 6px;
     border-bottom: 1px solid $m-line;
   }
 
+  .m-transport-left {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 2px;
+  }
+
   .m-timecode {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    padding-left: 8px;
     font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
     font-variant-numeric: tabular-nums;
     font-size: 12px;
@@ -214,15 +229,10 @@ html.mobile-layout {
     color: $m-text-dim;
   }
 
-  .m-transport-center {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-  }
-
   .m-transport-right {
     display: flex;
     justify-content: flex-end;
+    min-width: 0;
   }
 
   .m-play-btn {

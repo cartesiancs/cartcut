@@ -202,15 +202,15 @@ export class MobileTransport extends LitElement {
 
   render() {
     return html`<div class="m-transport">
-      <div class="m-timecode">
-        <span class="m-timecode-now"
-          >${phoneTimecode(this.cursor, this.fps, true)}</span
-        >
-        <span class="m-timecode-total"
-          >/ ${phoneTimecode(this.durationMs, this.fps, false)}</span
-        >
-      </div>
-      <div class="m-transport-center">
+      <div class="m-transport-left">
+        <div class="m-timecode">
+          <span class="m-timecode-now"
+            >${phoneTimecode(this.cursor, this.fps, true)}</span
+          >
+          <span class="m-timecode-total"
+            >/ ${phoneTimecode(this.durationMs, this.fps, false)}</span
+          >
+        </div>
         <button
           type="button"
           class="m-icon-btn"
@@ -219,18 +219,20 @@ export class MobileTransport extends LitElement {
         >
           <span class="material-symbols-outlined">skip_previous</span>
         </button>
-        <button
-          type="button"
-          id="mobilePlayToggle"
-          class="m-play-btn"
-          aria-label=${this.isPlay ? "Stop" : "Play"}
-          @click=${this.togglePlay}
-        >
-          <span class="material-symbols-outlined"
-            >${this.isPlay ? "pause" : "play_arrow"}</span
-          >
-        </button>
       </div>
+      <!-- Play alone in the middle column, so it sits on the screen's centre
+           line whatever the two sides hold. -->
+      <button
+        type="button"
+        id="mobilePlayToggle"
+        class="m-play-btn"
+        aria-label=${this.isPlay ? "Stop" : "Play"}
+        @click=${this.togglePlay}
+      >
+        <span class="material-symbols-outlined"
+          >${this.isPlay ? "pause" : "play_arrow"}</span
+        >
+      </button>
       <div class="m-transport-right">
         <button
           type="button"
