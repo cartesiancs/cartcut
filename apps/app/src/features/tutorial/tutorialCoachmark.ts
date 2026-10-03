@@ -19,6 +19,7 @@ import {
   TUTORIAL_RESTART_EVENT,
   browserTutorialFlagPort,
 } from "./tutorialFlag";
+import { MOBILE_LAYOUT } from "../mobile/install";
 
 /** Which way the card travels as it arrives: towards its target. */
 const ENTER_FROM: Record<string, (px: number) => string> = {
@@ -107,6 +108,12 @@ export class TutorialCoachmark extends LitElement {
 
   // Arrow properties: `removeEventListener` needs the reference it was given.
   private handleTourDone = () => {
+    // Every step points at the desktop editor: the sidebar's tabs, the folder
+    // picker, the Duration field. The phone layout hides the sidebar and has
+    // no folder to pick, so a card there would point at nothing.
+    if (MOBILE_LAYOUT) {
+      return;
+    }
     void this.runner?.startIfNew();
   };
 

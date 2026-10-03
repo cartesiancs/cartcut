@@ -530,7 +530,12 @@ export function applyIntent(
     // picture for what is left of the clip. A real seek back into it, above,
     // clears `ended` the moment `currentTime` is assigned, so re-entry plays.
     if (handle.paused && handle.ended !== true) {
-      handle.play();
+      // A real element answers with a promise, which rejects when a pause
+      // lands before playback has begun: stopping straight after pressing
+      // play. That pause is the outcome wanted, and nothing here awaits the
+      // start, so the rejection is absorbed rather than left unhandled.
+      const started: unknown = handle.play();
+      (started as Promise<void> | undefined)?.catch?.(() => {});
     }
   } else if (!handle.paused) {
     handle.pause();

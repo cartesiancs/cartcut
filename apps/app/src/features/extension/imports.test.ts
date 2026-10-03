@@ -28,6 +28,7 @@ const FEATURE = "features/extension/";
  *
  * - `index.ts` starts it, for effect, exactly as it starts the agent bridge.
  * - `Control.ts` renders contributed tabs, panels and inspector sections.
+ * - `mobileShell.ts` lists the same contributed tabs in the phone's tool row.
  * - `App.ts` mounts the status strip.
  * - `elementTimelineCanvas.ts` holds the keybinding and context-menu seams.
  * - `menuCommands.ts` runs a contributed command from the app menu.
@@ -45,6 +46,7 @@ const ALLOWED_IMPORTERS = new Set([
   "App.ts",
   "ui/control/Control.ts",
   "ui/control/ControlExtension.ts",
+  "features/mobile/mobileShell.ts",
   "features/element/elementTimelineCanvas.ts",
   "features/editor/menuCommands.ts",
   "features/agent/commit.ts",

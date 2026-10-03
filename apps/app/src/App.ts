@@ -11,6 +11,8 @@ import { installTemplateResolver } from "./features/renderer/template";
 import { IS_MAC } from "./utils/platform";
 import { exportElementRenderers } from "./features/export/renderers";
 import { templateFor, refreshTemplateLibrary } from "./features/template/templateRegistry";
+import { MOBILE_LAYOUT } from "./features/mobile/install";
+import "./features/mobile/mobileShell";
 
 @customElement("app-root")
 export class App extends LitElement {
@@ -79,18 +81,38 @@ export class App extends LitElement {
     this.uiState.updateVertical(this.resize.vertical.bottom + 2);
   }
 
-  render() {
+  /**
+   * The editor on a phone: the same `control-ui` and `timeline-ui`, stacked in
+   * one column between the phone chrome, with `_mobile.scss` turning the two
+   * side columns into sheets. The chat sidebar is left out; it needs the
+   * Electron bridge, which no phone has.
+   */
+  private mobileEditor() {
     return html`
-      <asset-upload-drop></asset-upload-drop>
+      <div class="m-app">
+        <mobile-top-bar></mobile-top-bar>
+        <control-ui id="split_top" class="m-preview"></control-ui>
+        <mobile-transport></mobile-transport>
+        <timeline-ui
+          id="split_bottom"
+          class="m-timeline position-relative bg-darker"
+        ></timeline-ui>
+        <mobile-toolbar></mobile-toolbar>
+      </div>
+    `;
+  }
 
+  private desktopTopBar() {
+    return html`
       <div class="top-bar ${IS_MAC ? "top-bar-mac" : "top-bar-pc"}">
         <b>${this.topBarTitle}</b>
         <export-button></export-button>
       </div>
+    `;
+  }
 
-      <body class="h-100 bg-dark">
-        <div id="app"></div>
-
+  private desktopColumns() {
+    return html`
         <div class="d-flex col justify-content-start">
           <div
             style="height: 97vh;padding-left: var(--bs-gutter-x,.75rem);width: calc(100% - ${this
@@ -110,6 +132,19 @@ export class App extends LitElement {
 
           <chat-sidebar width="${this.resize.chatSidebar}px"></chat-sidebar>
         </div>
+    `;
+  }
+
+  render() {
+    return html`
+      <asset-upload-drop></asset-upload-drop>
+
+      ${MOBILE_LAYOUT ? "" : this.desktopTopBar()}
+
+      <body class="h-100 bg-dark">
+        <div id="app"></div>
+
+        ${MOBILE_LAYOUT ? this.mobileEditor() : this.desktopColumns()}
 
         <offcanvas-list-ui></offcanvas-list-ui>
         <modal-list-ui></modal-list-ui>

@@ -337,6 +337,8 @@ features/tutorial/     the coachmarks after the tour: seven steps judged from
                        snapshots, a pure runner over ports; targets are data-tutorial
 features/editor/       actions, menuCommands, shortcuts, frameRate
 features/extension/    the extension host's editor half: bridge, dispatch, batches
+features/mobile/       the web build on a phone: touch to mouse bridge, the phone
+                       layout (CSS over the desktop columns), its tool row and sheets
 electron/extension/    the extension host, its protocol, the webview sandbox
 electron/mcp/          the MCP server, the tools, the bridge to the renderer
 electron/render/       ffmpegArgs, the frame pipe, the audio envelope expression
