@@ -128,8 +128,13 @@ function clampFade(value: unknown): number {
 /** The most units that may be in flight at once. See `RevealAnimate.window`. */
 export const MAX_REVEAL_WINDOW = 8;
 
-/** Inert defaults: an animator with nothing set changes no pixel. */
-const ANIMATE_DEFAULTS = {
+/**
+ * Inert defaults: an animator with nothing set changes no pixel.
+ *
+ * Exported for the option panel, which deletes a key set back to one of these
+ * rather than storing it.
+ */
+export const REVEAL_ANIMATE_DEFAULTS = {
   scale: 100,
   offsetX: 0,
   offsetY: 0,
@@ -137,6 +142,40 @@ const ANIMATE_DEFAULTS = {
   blur: 0,
   opacity: 0,
 } as const;
+
+const ANIMATE_DEFAULTS = REVEAL_ANIMATE_DEFAULTS;
+
+/**
+ * Where each animator field is clamped, read and write alike.
+ *
+ * Exported so the option panel's boxes stop where this module clamps: a scrub
+ * that ran past the bound would show a number the store then overrules.
+ * `electron/mcp/tools/reveal.ts` restates them in zod, since `electron/` may not
+ * import from here.
+ */
+export const REVEAL_ANIMATE_RANGES = {
+  window: [0, MAX_REVEAL_WINDOW],
+  scale: [0, 1000],
+  offsetX: [-10_000, 10_000],
+  offsetY: [-10_000, 10_000],
+  rotation: [-3600, 3600],
+  blur: [0, 500],
+  opacity: [0, 100],
+} as const satisfies Record<
+  Exclude<keyof RevealAnimate, "easing">,
+  readonly [number, number]
+>;
+
+/**
+ * How many units an arriving unit stays in flight for, once an animator exists.
+ *
+ * `window` when it is set, otherwise `fade`, otherwise one unit. Exported so the
+ * option panel shows the window the renderer will actually use rather than the
+ * 0 that means "not set".
+ */
+export function animatorSpan(window: number, fade: number): number {
+  return window > 0 ? window : fade > 0 ? fade : 1;
+}
 
 function clampNumber(value: unknown, min: number, max: number): number | null {
   const n = finiteNumber(value);
@@ -158,14 +197,19 @@ export function animateOf(raw: unknown): Required<Omit<RevealAnimate, "easing">>
   }
   const source = raw as Record<string, unknown>;
 
+  const read = (key: keyof typeof REVEAL_ANIMATE_RANGES) => {
+    const [min, max] = REVEAL_ANIMATE_RANGES[key];
+    return clampNumber(source[key], min, max);
+  };
+
   const next = {
-    window: clampNumber(source.window, 0, MAX_REVEAL_WINDOW) ?? 0,
-    scale: clampNumber(source.scale, 0, 1000) ?? ANIMATE_DEFAULTS.scale,
-    offsetX: clampNumber(source.offsetX, -10_000, 10_000) ?? ANIMATE_DEFAULTS.offsetX,
-    offsetY: clampNumber(source.offsetY, -10_000, 10_000) ?? ANIMATE_DEFAULTS.offsetY,
-    rotation: clampNumber(source.rotation, -3600, 3600) ?? ANIMATE_DEFAULTS.rotation,
-    blur: clampNumber(source.blur, 0, 500) ?? ANIMATE_DEFAULTS.blur,
-    opacity: clampNumber(source.opacity, 0, 100) ?? ANIMATE_DEFAULTS.opacity,
+    window: read("window") ?? 0,
+    scale: read("scale") ?? ANIMATE_DEFAULTS.scale,
+    offsetX: read("offsetX") ?? ANIMATE_DEFAULTS.offsetX,
+    offsetY: read("offsetY") ?? ANIMATE_DEFAULTS.offsetY,
+    rotation: read("rotation") ?? ANIMATE_DEFAULTS.rotation,
+    blur: read("blur") ?? ANIMATE_DEFAULTS.blur,
+    opacity: read("opacity") ?? ANIMATE_DEFAULTS.opacity,
     easing: typeof source.easing === "string" ? source.easing : null,
   };
 
@@ -195,23 +239,18 @@ export function coerceRevealAnimate(value: unknown): RevealAnimate | null {
   const source = value as Record<string, unknown>;
   const next: RevealAnimate = {};
 
-  const put = (key: keyof RevealAnimate, min: number, max: number) => {
+  for (const key of Object.keys(REVEAL_ANIMATE_RANGES) as Array<
+    keyof typeof REVEAL_ANIMATE_RANGES
+  >) {
     if (!(key in source)) {
-      return;
+      continue;
     }
+    const [min, max] = REVEAL_ANIMATE_RANGES[key];
     const read = clampNumber(source[key], min, max);
     if (read != null) {
-      (next[key] as unknown) = read;
+      next[key] = read;
     }
-  };
-
-  put("window", 0, MAX_REVEAL_WINDOW);
-  put("scale", 0, 1000);
-  put("offsetX", -10_000, 10_000);
-  put("offsetY", -10_000, 10_000);
-  put("rotation", -3600, 3600);
-  put("blur", 0, 500);
-  put("opacity", 0, 100);
+  }
 
   if (typeof source.easing === "string" && resolveEasing(source.easing) != null) {
     next.easing = source.easing;
@@ -530,7 +569,7 @@ export function revealPlan(
   // because `fade` is bounded at 1 — which is the path every reveal written
   // before the animator takes, unchanged. With one, `window` says, defaulting
   // to `fade` when there is one so the two never contradict each other.
-  const span = moving == null ? softness : moving.window > 0 ? moving.window : softness > 0 ? softness : 1;
+  const span = moving == null ? softness : animatorSpan(moving.window, softness);
 
   const curve = moving?.easing == null ? null : resolveEasing(moving.easing);
 

@@ -23,10 +23,25 @@
  * inside one `GestureCommit`. Doing them separately is what let a scrub record
  * one undo step per mousemove, and what let an active track immediately
  * overwrite the number the user had just typed.
+ *
+ * ## The Animator card
+ *
+ * What a unit does on its way in (`TextReveal.animate`), the panel half of
+ * `set_text_reveal`'s `animate*` arguments; until this card it was reachable
+ * from MCP alone. Its rules are in `revealAnimatorFields.ts`, node-tested.
+ *
+ * The eye arms the card and **writes nothing**, the rule `controlSpeedCurve`
+ * states: an animator whose every field is inert is not stored, so arming shows
+ * the inert values and the first edit is what creates it. Every edit re-arms,
+ * so dragging the last movement back to inert deletes the animator without
+ * closing the card under the pointer. Overlap and Easing are dimmed until
+ * something moves, because neither makes an animator on its own and the op
+ * would decline the edit.
  */
 
-import { LitElement, html } from "lit";
+import { LitElement, html, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
+import { live } from "lit/directives/live.js";
 
 import {
   REVEAL_UNITS,
@@ -49,7 +64,17 @@ import {
 import { GestureCommit } from "./gestureCommit";
 import "./controlKeyframeNav";
 import "../../components/input/input";
-import { section } from "./optionKit";
+import { eyeButton, section } from "./optionKit";
+import {
+  ANIMATOR_BOXES,
+  animatorEasingOptions,
+  animatorEasingPatch,
+  animatorMovePatch,
+  animatorValuesOf,
+  animatorWindowPatch,
+  hasAnimator,
+  type AnimatorMoveKey,
+} from "./revealAnimatorFields";
 
 /** One word each. The panel has no prose in it, deliberately. */
 const UNIT_LABEL: Record<RevealUnit, string> = {
@@ -84,6 +109,17 @@ export class OptionTextRevealSection extends LitElement {
 
   private gesture = new GestureCommit();
   private teardown: Array<() => void> = [];
+
+  /**
+   * The selection the Animator card was armed for, or `null`.
+   *
+   * Keyed by the ids rather than a boolean reset on a property change, because
+   * `option-text` hands over its array on every render and a reset keyed on
+   * identity would close the card on any unrelated store write. Not a field on
+   * the element: an armed card with nothing in it is where the user is
+   * looking, and saving it would store a key for nothing.
+   */
+  private animatorArmedFor: string | null = null;
 
   createRenderRoot() {
     this.teardown.push(useTimelineStore.subscribe(() => this.requestUpdate()));
@@ -211,6 +247,65 @@ export class OptionTextRevealSection extends LitElement {
     this.requestUpdate();
   }
 
+  private get selectionKey(): string {
+    return this.elementIds.join(",");
+  }
+
+  /** Whether the Animator card is open: the clip has one, or the eye was clicked. */
+  private get animatorArmed(): boolean {
+    return (
+      hasAnimator(this.reveal) || this.animatorArmedFor === this.selectionKey
+    );
+  }
+
+  /**
+   * Arm the card, or take the movement off every selected clip.
+   *
+   * Off is `animate: null`, which keeps the reveal and its keyframes and drops
+   * only the movement. Disarmed after the write, so the card closes on the
+   * render that write causes rather than a frame later.
+   */
+  private handleAnimatorToggle() {
+    if (!this.animatorArmed) {
+      this.animatorArmedFor = this.selectionKey;
+      this.requestUpdate();
+      return;
+    }
+    const ids = [...this.elementIds];
+    useTimelineStore
+      .getState()
+      .withCheckpoint((doc) =>
+        ids.reduce(
+          (acc, id) => setClipTextRevealFields(acc, id, { animate: null }),
+          doc,
+        ),
+      );
+    this.animatorArmedFor = null;
+    this.requestUpdate();
+  }
+
+  /** A scrubbed animator box, through the same gesture the fields above use. */
+  private commitAnimate(patch: Record<string, unknown>) {
+    this.animatorArmedFor = this.selectionKey;
+    this.commitField({ animate: patch });
+  }
+
+  /** A pick from the Easing dropdown: one change, one undo step. */
+  private handleAnimateEasing(event: Event) {
+    const ids = [...this.elementIds];
+    const patch = animatorEasingPatch((event.target as HTMLSelectElement).value);
+    this.animatorArmedFor = this.selectionKey;
+    useTimelineStore
+      .getState()
+      .withCheckpoint((doc) =>
+        ids.reduce(
+          (acc, id) => setClipTextRevealFields(acc, id, { animate: patch }),
+          doc,
+        ),
+      );
+    this.requestUpdate();
+  }
+
   /** The value out of one of the rows' `<number-input>`s. */
   private numberAt(event: Event): number {
     const value = (event.target as any)?.value;
@@ -230,16 +325,127 @@ export class OptionTextRevealSection extends LitElement {
     `;
   }
 
-  private row(label: string, inputs: unknown, keyed: boolean) {
+  /**
+   * One named field. `title` is the label's tooltip, and `dim` draws the
+   * controls quiet and out of reach for a field that cannot be written yet.
+   */
+  private row(
+    label: string,
+    inputs: unknown,
+    keyed: boolean,
+    title: string = label,
+    dim = false,
+  ) {
     return html`
       <div class="opt-field">
         <div class="opt-row">
-          <label class="opt-label" title=${label}>${label}</label>
-          <div class="opt-row-controls">
+          <label class="opt-label" title=${title}>${label}</label>
+          <div
+            class="opt-row-controls"
+            style=${dim ? "opacity: 0.4; pointer-events: none;" : nothing}
+            aria-disabled=${dim ? "true" : nothing}
+          >
             ${inputs}${keyed ? this.keyButton() : ""}
           </div>
         </div>
       </div>
+    `;
+  }
+
+  /** One animator box. Its range is the op's clamp; see `ANIMATOR_BOXES`. */
+  private animatorInput(
+    key: AnimatorMoveKey | "window",
+    value: number,
+    write: (next: number) => Record<string, unknown>,
+  ) {
+    const spec = ANIMATOR_BOXES[key];
+    return html`
+      <number-input
+        aria-event="reveal-animate-${key}"
+        .value=${value}
+        min=${spec.min}
+        max=${spec.max}
+        step=${spec.step}
+        sensitivity=${spec.sensitivity}
+        @onChange=${(e: Event) => this.commitAnimate(write(this.numberAt(e)))}
+      ></number-input>
+    `;
+  }
+
+  /**
+   * The Animator card's rows. Every value is where a unit **starts**; it
+   * settles on the clip's own.
+   */
+  private animatorBody(reveal: TextReveal) {
+    const values = animatorValuesOf(reveal);
+    const moving = hasAnimator(reveal);
+    const move = (key: AnimatorMoveKey) =>
+      this.animatorInput(key, values[key], (next) =>
+        animatorMovePatch(key, next),
+      );
+    const later = moving ? "" : " Takes effect once a unit moves.";
+
+    return html`
+      ${this.row(
+        "Scale",
+        move("scale"),
+        false,
+        "Size a unit starts at, in percent. 100 does not scale.",
+      )}
+      ${this.row(
+        "Offset",
+        html`${move("offsetX")}${move("offsetY")}`,
+        false,
+        "Where a unit starts, in pixels from where it lands. Positive Y is down.",
+      )}
+      ${this.row(
+        "Rotation",
+        move("rotation"),
+        false,
+        "Degrees a unit starts turned, about its own centre.",
+      )}
+      ${this.row("Blur", move("blur"), false, "Blur a unit starts at, in pixels.")}
+      ${this.row(
+        "Opacity",
+        move("opacity"),
+        false,
+        "Opacity a unit starts at. 0 fades in; 100 does not fade.",
+      )}
+      ${this.row(
+        "Overlap",
+        this.animatorInput("window", values.window, animatorWindowPatch),
+        false,
+        "Units moving at once. 1 is one at a time; 3 staggers." + later,
+        !moving,
+      )}
+      ${this.row(
+        "Easing",
+        html`
+          <select
+            class="opt-select"
+            style="width: 112px;"
+            aria-label="reveal easing"
+            aria-event="reveal-animate-easing"
+            ?disabled=${!moving}
+            .value=${live(values.easing)}
+            @change=${(e: Event) => this.handleAnimateEasing(e)}
+          >
+            ${animatorEasingOptions().map(
+              (option) => html`
+                <option
+                  value=${option.value}
+                  ?selected=${option.value === values.easing}
+                >
+                  ${option.label}
+                </option>
+              `,
+            )}
+          </select>
+        `,
+        false,
+        "How a unit travels from where it starts to where it lands." + later,
+        !moving,
+      )}
     `;
   }
 
@@ -303,7 +509,22 @@ export class OptionTextRevealSection extends LitElement {
       return section({ title: "Reveal", body: html`${units}${typewriter}` });
     }
 
-    return section({
+    const armed = this.animatorArmed;
+    // Its own card rather than more rows under Softness: it is optional, it is
+    // eight fields, and a reveal without it is the common case. Shown only
+    // once there is a reveal, since a movement needs units to move.
+    const animator = section({
+      title: "Animator",
+      actions: eyeButton(
+        armed,
+        armed ? "Stop animating each unit" : "Animate each unit as it appears",
+        () => this.handleAnimatorToggle(),
+        "reveal-animator-toggle",
+      ),
+      body: armed ? this.animatorBody(reveal) : undefined,
+    });
+
+    return html`${section({
       title: "Reveal",
       body: html`
         ${units}${typewriter}
@@ -343,6 +564,6 @@ export class OptionTextRevealSection extends LitElement {
           false,
         )}
       `,
-    });
+    })}${animator}`;
   }
 }
