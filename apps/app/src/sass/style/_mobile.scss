@@ -1,0 +1,647 @@
+// The phone layout. Everything here is scoped under `html.mobile-layout`, which
+// `features/mobile/install.ts` sets only for a phone on the web build, so the
+// desktop editor and the Electron app never match a single rule in this file.
+//
+// The arrangement follows the phone editors people already know (CapCut, VN,
+// InShot): preview on top, a transport row under it, the timeline filling the
+// rest, a scrolling tool row at the bottom that turns into clip tools while a
+// clip is selected, and every panel as a sheet over the timeline so the
+// preview stays in view while it is being changed.
+//
+// The desktop columns are reused rather than rebuilt. Their widths are inline
+// percentages from `uiStore`, which is why the overrides below need
+// `!important`: an inline style beats any selector without it.
+
+$m-bg: #0b0c0e;
+$m-surface: #16181b;
+$m-surface-raised: #1f2226;
+$m-line: #2a2e33;
+$m-text: #e9ecef;
+$m-text-dim: #8b939b;
+$m-accent: #2563eb;
+$m-danger: #f05252;
+
+$m-top-h: 48px;
+$m-transport-h: 52px;
+$m-toolbar-h: 64px;
+$m-sheet-header-h: 48px;
+
+html.mobile-layout {
+  // The height the shell really has; `install.ts` keeps it current as the
+  // browser's toolbars collapse and the keyboard opens. `100dvh` until then.
+  --m-vh: 100dvh;
+  --m-safe-top: env(safe-area-inset-top, 0px);
+  --m-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --m-middle: calc(
+    var(--m-vh) - var(--m-safe-top) - var(--m-safe-bottom) - #{$m-top-h} -
+      #{$m-transport-h} - #{$m-toolbar-h}
+  );
+  --m-preview-h: calc(var(--m-middle) * 0.5);
+  // A sheet covers the timeline and the tool row and nothing above them.
+  --m-sheet-top: calc(
+    var(--m-safe-top) + #{$m-top-h} + var(--m-preview-h) + #{$m-transport-h}
+  );
+
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background-color: $m-bg;
+
+  body {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+    background-color: $m-bg !important;
+    // No double-tap zoom and no 300ms click delay anywhere on the page.
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    // A long press is the context menu here, not iOS's link and image callout.
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  input,
+  textarea,
+  [contenteditable] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  // Surfaces the touch bridge drives. Without `touch-action: none` the browser
+  // starts its own pan before the bridge's `preventDefault` lands on iOS.
+  element-timeline-canvas,
+  element-timeline-left-option,
+  element-timeline-ruler,
+  element-timeline-cursor,
+  element-timeline-bottom-scroll,
+  preview-canvas,
+  keyframe-editor canvas,
+  clip-speed-curve canvas,
+  number-input,
+  .track-resize-grip,
+  [data-touch-mouse] {
+    touch-action: none;
+  }
+
+  .m-app {
+    position: fixed;
+    inset: 0;
+    height: var(--m-vh);
+    display: flex;
+    flex-direction: column;
+    padding-top: var(--m-safe-top);
+    padding-bottom: var(--m-safe-bottom);
+    background-color: $m-bg;
+    color: $m-text;
+  }
+
+  // ------------------------------------------------------------------ top bar
+
+  mobile-top-bar {
+    display: block;
+    flex: none;
+  }
+
+  .m-top-bar {
+    height: $m-top-h;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 8px 0 4px;
+  }
+
+  .m-brand {
+    flex: 1;
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 0.01em;
+    color: $m-text;
+  }
+
+  // The desktop export pill, made the obvious primary action it is on a phone.
+  mobile-top-bar export-button button,
+  mobile-top-bar export-button .btn {
+    min-height: 34px;
+    padding: 0 14px !important;
+    border-radius: 17px !important;
+    font-size: 14px !important;
+  }
+
+  .m-icon-btn {
+    appearance: none;
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 0;
+    border-radius: 20px;
+    background: transparent;
+    color: $m-text;
+
+    .material-symbols-outlined {
+      font-size: 24px;
+    }
+
+    &:active {
+      background-color: $m-surface-raised;
+    }
+
+    &:disabled {
+      color: #4a5057;
+    }
+  }
+
+  // ------------------------------------------------------------------ preview
+
+  control-ui.m-preview {
+    display: flex;
+    flex: none;
+    height: var(--m-preview-h);
+    margin: 0;
+    padding: 0;
+    position: relative;
+  }
+
+  #split_col_1,
+  #split_col_3 {
+    display: none;
+  }
+
+  #split_col_2 {
+    width: 100% !important;
+    height: 100%;
+    background-color: #000;
+  }
+
+  .split-col-bar,
+  .split-bottom-bar {
+    display: none;
+  }
+
+  // ---------------------------------------------------------------- transport
+
+  mobile-transport {
+    display: block;
+    flex: none;
+  }
+
+  .m-transport {
+    height: $m-transport-h;
+    display: grid;
+    // `minmax(0, 1fr)` rather than `1fr`: a bare `1fr` cannot shrink below
+    // its content, so a wider timecode on one side would make the two side
+    // columns unequal and push the play button off the centre line. The
+    // padding is symmetric for the same reason.
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    padding: 0 6px;
+    border-bottom: 1px solid $m-line;
+  }
+
+  .m-transport-left {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 2px;
+  }
+
+  .m-timecode {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    padding-left: 8px;
+    font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .m-timecode-now {
+    color: $m-text;
+  }
+
+  .m-timecode-total {
+    color: $m-text-dim;
+  }
+
+  .m-transport-right {
+    display: flex;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+
+  .m-play-btn {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 22px;
+    background-color: $m-text;
+    color: $m-bg;
+
+    .material-symbols-outlined {
+      font-size: 30px;
+      font-variation-settings: "FILL" 1;
+    }
+
+    &:active {
+      transform: scale(0.94);
+    }
+  }
+
+  // ----------------------------------------------------------------- timeline
+
+  timeline-ui.m-timeline {
+    display: block;
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+
+    // Play, the timecode, the desktop tool row and the zoom slider: the phone
+    // has its own transport above and its own tools below, and pinching is the
+    // zoom. The ruler is placed against this row's height, so it moves up.
+    > .row.mb-2 {
+      display: none;
+    }
+
+    > element-timeline-ruler {
+      top: 0 !important;
+    }
+
+    // On the desktop these are flex items of a Bootstrap `.row`, which is what
+    // makes them blocks; here they would be inline and measure 0x0. The 5px is
+    // the offset the desktop row leaves between the ruler and the rows.
+    > element-timeline {
+      display: block;
+      margin-top: 5px;
+    }
+
+    > element-timeline-bottom-scroll {
+      display: block;
+    }
+
+    // Fixed to the window 20px up, which on a phone is the middle of the tool
+    // row's labels. Moved to sit on the row's top edge as a thin indicator: a
+    // finger scrolls the rows themselves, so it is read more than dragged.
+    .timeline-bottom-scroll {
+      bottom: calc(var(--m-safe-bottom) + #{$m-toolbar-h} + 2px) !important;
+      height: 6px !important;
+      background-color: transparent !important;
+    }
+
+    .timeline-bottom-scroll-thumb {
+      height: 4px !important;
+      border-radius: 2px;
+      background-color: #50565d !important;
+    }
+
+    // The status bar: the frame rate is in the Project sheet and the help
+    // glyph opens the keyboard shortcuts, neither of which a phone needs on
+    // screen. It is fixed to the window, so it would sit over the tool row.
+    > element-timeline-bottom {
+      display: none;
+    }
+  }
+
+  // ------------------------------------------------------------------ toolbar
+
+  mobile-toolbar {
+    display: block;
+    flex: none;
+  }
+
+  .m-toolbar {
+    height: $m-toolbar-h;
+    display: flex;
+    align-items: stretch;
+    border-top: 1px solid $m-line;
+    background-color: $m-bg;
+  }
+
+  .m-toolbar-back {
+    appearance: none;
+    flex: none;
+    width: 44px;
+    border: 0;
+    border-right: 1px solid $m-line;
+    background: $m-surface;
+    color: $m-text;
+
+    .material-symbols-outlined {
+      font-size: 28px;
+    }
+  }
+
+  .m-toolbar-scroll {
+    flex: 1;
+    display: flex;
+    align-items: stretch;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 4px;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  .m-tool {
+    appearance: none;
+    flex: none;
+    min-width: 62px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 0 6px;
+    border: 0;
+    background: transparent;
+    color: $m-text;
+
+    .material-symbols-outlined {
+      font-size: 24px;
+    }
+
+    .m-tool-label {
+      font-size: 11px;
+      line-height: 1;
+      color: $m-text-dim;
+      white-space: nowrap;
+    }
+
+    &.is-active {
+      .material-symbols-outlined,
+      .m-tool-label {
+        color: #6ea0ff;
+      }
+    }
+
+    &.is-danger .material-symbols-outlined {
+      color: $m-danger;
+    }
+
+    &:disabled {
+      opacity: 0.35;
+    }
+
+    &:active:not(:disabled) {
+      background-color: $m-surface;
+    }
+  }
+
+  .m-track-menu {
+    position: fixed;
+    // Over an open sheet too: the menu belongs to the tool row under it.
+    right: 8px;
+    bottom: calc(var(--m-safe-bottom) + #{$m-toolbar-h} + 8px);
+    z-index: 6600;
+    min-width: 180px;
+    padding: 6px;
+    border: 1px solid $m-line;
+    border-radius: 14px;
+    background-color: $m-surface-raised;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  }
+
+  .m-track-menu-item {
+    appearance: none;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: $m-text;
+    font-size: 14px;
+    text-align: left;
+
+    &:active {
+      background-color: $m-surface;
+    }
+  }
+
+  // ------------------------------------------------------------------- sheets
+
+  .m-sheet-header {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: var(--m-sheet-top);
+    height: $m-sheet-header-h;
+    z-index: 6500;
+    display: flex;
+    align-items: center;
+    padding: 0 6px 0 16px;
+    border-radius: 16px 16px 0 0;
+    border-top: 1px solid $m-line;
+    background-color: $m-surface;
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.45);
+  }
+
+  .m-sheet-grabber {
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    width: 36px;
+    height: 4px;
+    margin-left: -18px;
+    border-radius: 2px;
+    background-color: #3c4248;
+  }
+
+  .m-sheet-action {
+    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    margin-right: 4px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 16px;
+    background-color: $m-accent;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+
+    .material-symbols-outlined {
+      font-size: 18px;
+    }
+  }
+
+  .m-sheet-title {
+    flex: 1;
+    font-size: 15px;
+    font-weight: 700;
+    color: $m-text;
+  }
+
+  // `!important` throughout because both columns carry Bootstrap utilities
+  // (`position-relative`, `h-100`, `p-0`), and those are `!important` too.
+  // The sheet stops at the tool row rather than covering it, so another tab is
+  // one tap away while a sheet is open.
+  &.m-sheet-panel #split_col_1,
+  &.m-sheet-option #split_col_3 {
+    display: block;
+    position: fixed !important;
+    left: 0;
+    right: 0;
+    top: calc(var(--m-sheet-top) + #{$m-sheet-header-h});
+    bottom: calc(var(--m-safe-bottom) + #{$m-toolbar-h});
+    width: 100% !important;
+    height: auto !important;
+    z-index: 6500;
+    background-color: $m-surface !important;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  &.m-sheet-option #split_col_3 {
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    padding: 4px 12px 16px !important;
+  }
+
+  // Windows docked into the preview (Automatic Caption, Text to Speech, an
+  // extension's panel). A docked window takes its share of the preview's width,
+  // which on a phone leaves a picture a few dozen pixels wide, and the preview
+  // is exactly what these panels are edited against. So the content keeps the
+  // whole preview and the window becomes one more sheet over the timeline, with
+  // its own title bar and close button. `windowLayout.ts` still lays both out;
+  // these rules only decide where its rects are drawn.
+  #split_col_2 window-host {
+    .window-host-content {
+      left: 0 !important;
+      top: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+    }
+
+    .window-splitter {
+      display: none !important;
+    }
+
+    .app-window {
+      position: fixed !important;
+      left: 0 !important;
+      right: 0 !important;
+      top: var(--m-sheet-top) !important;
+      bottom: calc(var(--m-safe-bottom) + #{$m-toolbar-h}) !important;
+      width: auto !important;
+      height: auto !important;
+      z-index: 6400;
+      border-radius: 16px 16px 0 0;
+      overflow: hidden;
+      background-color: $m-surface;
+      box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.45);
+    }
+  }
+
+  // The left column's own tab strip is replaced by the tool row.
+  #split_col_1 #sidebar {
+    display: none !important;
+  }
+
+  #split_col_1 .tab-content {
+    width: 100% !important;
+    border-right: 0;
+    overscroll-behavior: contain;
+    padding: 4px 12px 16px !important;
+    background-color: $m-surface;
+  }
+
+  // Finger-sized controls inside the sheets. 16px text in a field is also what
+  // keeps iOS from zooming the page when it takes focus.
+  #split_col_1,
+  #split_col_3 {
+    input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not(
+        [type="color"]
+      ),
+    select,
+    textarea {
+      font-size: 16px !important;
+    }
+
+    input[type="range"] {
+      min-height: 28px;
+    }
+  }
+
+  // ---------------------------------------------------- dialogs and overlays
+
+  .modal-dialog {
+    margin: 12px;
+    max-width: calc(100vw - 24px);
+  }
+
+  // ---------------------------------------------------------------- landscape
+
+  // A phone turned sideways: the preview takes the left half at full height and
+  // everything else stacks on the right, so the picture is as large as the
+  // screen allows and the timeline still has rows.
+  @media (orientation: landscape) {
+    --m-sheet-top: calc(var(--m-safe-top) + #{$m-top-h});
+
+    .m-app {
+      display: grid;
+      grid-template-columns: 50% 50%;
+      grid-template-rows: #{$m-top-h} #{$m-transport-h} minmax(0, 1fr) #{$m-toolbar-h};
+      padding-left: env(safe-area-inset-left, 0px);
+      padding-right: env(safe-area-inset-right, 0px);
+    }
+
+    mobile-top-bar {
+      grid-column: 1 / 3;
+      grid-row: 1;
+    }
+
+    control-ui.m-preview {
+      grid-column: 1;
+      grid-row: 2 / 5;
+      height: auto;
+    }
+
+    mobile-transport {
+      grid-column: 2;
+      grid-row: 2;
+    }
+
+    timeline-ui.m-timeline {
+      grid-column: 2;
+      grid-row: 3;
+    }
+
+    mobile-toolbar {
+      grid-column: 2;
+      grid-row: 4;
+    }
+
+    .m-sheet-header,
+    #split_col_2 window-host .app-window {
+      left: 50% !important;
+    }
+
+    &.m-sheet-panel #split_col_1,
+    &.m-sheet-option #split_col_3 {
+      left: 50%;
+      width: auto !important;
+    }
+  }
+}

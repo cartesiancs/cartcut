@@ -20,11 +20,18 @@ import {
 import { installScrollerWatch } from "./features/ui/scrollerWatch";
 import { getLocationEnv } from "./functions/getLocationEnv";
 import { installNativeContextMenuGuard } from "./features/editor/nativeContextMenu";
+import { installMobile } from "./features/mobile/install";
 
 enableIpcWrapper();
 
 // The browser builds only. Electron already shows no native right-click menu.
 installNativeContextMenuGuard(getLocationEnv(), window);
+
+// The browser builds only: finger input for the mouse-driven surfaces, and on
+// a phone the phone layout. Before `App` first renders, which is a microtask
+// after this module finishes evaluating, so the layout class is already on
+// `<html>` when the template that depends on it is chosen.
+installMobile();
 
 // A recording made in the recorder's own windows arrives here as a path, once,
 // when it is finished. Subscribed before anything else mounts so a take that

@@ -55,7 +55,7 @@ import {
 } from "./actions";
 import { shortcutLabel, type ShortcutId } from "./shortcuts";
 
-type ToolbarButton = {
+export type ToolbarButton = {
   icon: string;
   label: string;
   /**
@@ -82,7 +82,7 @@ function tooltip(spec: ToolbarButton): string {
  * whole — and cost the row its regularity, since each rule carried its own
  * margin and left the gaps visibly unequal.
  */
-const BUTTONS: ToolbarButton[] = [
+export const BUTTONS: ToolbarButton[] = [
   {
     icon: "undo",
     label: "Undo",

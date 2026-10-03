@@ -71,6 +71,16 @@ export async function startExport(): Promise<void> {
     return;
   }
 
+  // The demo is a static site: there is no render server behind it, so the
+  // HTTP route below would ask `/api/path/temp`, get a 404 and reject with
+  // nothing on screen. Say what the welcome dialog already said instead.
+  if (getLocationEnv() === "demo") {
+    toast(
+      "Export is not available in the demo. Install the desktop app to export your edit.",
+    );
+    return;
+  }
+
   if (getLocationEnv() !== "electron") {
     await requestHttpRender();
     return;

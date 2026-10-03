@@ -1970,6 +1970,15 @@ export class PreviewCanvas extends LitElement {
       filetype: fileType,
       elementId: elementId,
     });
+
+    // Every press that picks a clip on the preview passes through here. The
+    // desktop keeps the preview's pick apart from the timeline's selection;
+    // the phone layout listens for this and joins them, since its tool row
+    // acts on the timeline's selection and a phone has no second column to
+    // show the difference in.
+    this.dispatchEvent(
+      new CustomEvent("preview-pick", { bubbles: true, detail: { elementId } }),
+    );
   }
 
   /**

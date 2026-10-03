@@ -191,6 +191,8 @@ import { penCapturesKey } from "../mask/penSession";
 import { count as perfCount } from "../debug/frameStats";
 import { canShowMediaInfo, openMediaInfo } from "../mediaInfo/mediaInfoSession";
 import { targetForElement } from "../mediaInfo/mediaInfoView";
+import { timelineTouchMode } from "../mobile/timelineTouch";
+import type { SurfaceMode } from "../mobile/touchGesture";
 
 /** What a click on a bare cut reaches for first. */
 const DEFAULT_TRANSITION_PRESET = "com.cartcut.cross-dissolve";
@@ -1738,6 +1740,24 @@ export class elementTimelineCanvas extends LitElement {
     }
     this.applyDrag();
     return true;
+  }
+
+  /**
+   * What a finger landing at client (`x`, `y`) should do, for the touch bridge.
+   *
+   * Asked here because only this component holds the layout a press is hit
+   * tested against; the rule itself is `mobile/timelineTouch.ts`.
+   */
+  touchModeAt(clientX: number, clientY: number): SurfaceMode {
+    const rect = this.canvas.getBoundingClientRect();
+    const hit = hitTest(
+      this.layout,
+      clientX - rect.left,
+      clientY - rect.top,
+      this.currentDoc().elements,
+      this.timelineRange,
+    );
+    return timelineTouchMode(hit, this.targetId);
   }
 
   // --------------------------------------------------------------- events
