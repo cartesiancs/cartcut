@@ -1,0 +1,46 @@
+/*
+ * A gradient clipped to the letters, its angle turning. An unregistered custom
+ * property cannot be interpolated, it flips from one value to the next, so the
+ * angle is registered with @property as an <angle>. The host hoists the rule to
+ * the document and renames it per program, so two graphics that both register
+ * `--angle` do not share one.
+ */
+
+@property --angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.title {
+  margin: 0;
+  max-width: 100%;
+  padding: 0 0.06em;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.2;
+  text-wrap: balance;
+  background-image: linear-gradient(var(--angle), var(--from), var(--via), var(--to), var(--from));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: sweep calc(var(--period) * 1s) linear infinite;
+}
+
+@keyframes sweep {
+  from { --angle: 0deg; }
+  to { --angle: 360deg; }
+}

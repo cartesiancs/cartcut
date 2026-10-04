@@ -1,0 +1,14 @@
+<svg class="defs" width="0" height="0" aria-hidden="true">
+  <filter id="liquid" x="-10%" y="-40%" width="120%" height="180%">
+    <feTurbulence type="fractalNoise" baseFrequency="0.008 0.03" numOctaves="2" seed="7" result="noise">
+      <animate attributeName="baseFrequency" values="0.008 0.03;0.014 0.05;0.008 0.03" dur="7s" repeatCount="indefinite"/>
+    </feTurbulence>
+    <feColorMatrix in="noise" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0 1" result="opaque"/>
+    <feFlood class="calm" result="calm"/>
+    <feComposite in="calm" in2="opaque" operator="over" result="map"/>
+    <feDisplacementMap in="SourceGraphic" in2="map" scale="80" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+</svg>
+<div class="stage">
+  <h1 class="title" data-param="text">Liquid</h1>
+</div>

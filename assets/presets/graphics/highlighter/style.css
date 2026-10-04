@@ -1,0 +1,56 @@
+/*
+ * A marker stroke sweeping in behind the words. The stroke is the <mark>'s own
+ * background, grown from nothing to full width; with
+ * `box-decoration-break: clone` every line of a wrapped title gets a whole
+ * stroke of its own, ends rounded, all sweeping together, where one background
+ * across a wrapped inline would be cut at each line end.
+ *
+ * A <mark> is drawn by default in the machine's highlight colours, so both its
+ * colour and its background are set here.
+ */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.title {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.35;
+  text-wrap: balance;
+  animation: appear 0.4s ease-out both;
+}
+
+.marker {
+  color: var(--color);
+  background-color: transparent;
+  background-image: linear-gradient(var(--marker), var(--marker));
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  background-size: 0% calc(var(--thickness) * 1%);
+  padding: 0 0.15em;
+  border-radius: 0.12em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  animation: sweep calc(var(--speed) * 1s) cubic-bezier(0.65, 0, 0.35, 1) 0.25s both;
+}
+
+@keyframes appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sweep {
+  from { background-size: 0% calc(var(--thickness) * 1%); }
+  to { background-size: 100% calc(var(--thickness) * 1%); }
+}

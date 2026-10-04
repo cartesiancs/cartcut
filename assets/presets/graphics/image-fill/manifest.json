@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.graphic.image-fill",
+  "kind": "graphic",
+  "name": "Image Fill",
+  "category": "stylized",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "html",
+    "source": "index.html",
+    "styles": ["style.css"],
+    "layout": "scale",
+    "designSize": { "width": 1600, "height": 400 },
+    "bleed": 40,
+    "bindings": { "text": "text", "font": "font", "color": "color", "fontSize": "size" }
+  },
+  "params": [
+    { "key": "text", "label": "Text", "type": "text", "default": "TEXTURE", "maxLength": 200, "multiline": true },
+    { "key": "font", "label": "Font", "type": "font", "default": "bundled:Anton-Regular.ttf" },
+    { "key": "size", "label": "Size", "type": "number", "default": 280, "min": 8, "max": 600, "step": 1 },
+    { "key": "image", "label": "Image", "type": "image", "default": "" },
+    { "key": "color", "label": "Fallback start", "type": "color", "default": "#ff6b6b" },
+    { "key": "accent", "label": "Fallback end", "type": "color", "default": "#4d7cff" },
+    { "key": "drift", "label": "Drift (s)", "type": "number", "default": 8, "min": 1, "max": 60, "step": 0.5 }
+  ]
+}

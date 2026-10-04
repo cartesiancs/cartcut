@@ -22,21 +22,41 @@
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
+import { existsSync } from "fs";
 import path from "path";
 import { createHash } from "crypto";
 import { scanPresetRoot } from "../../../../../electron/lib/presetScan";
 import { validatePreset } from "./presetValidate";
-import { categoriesFor, type FxPreset } from "./presetTypes";
+import { categoriesFor, type FxHtmlRender, type FxPreset } from "./presetTypes";
+import { mountSpecOf } from "../graphic/mountSpec";
 
 const PRESET_ROOT = path.resolve(__dirname, "../../../../../assets/presets");
 
 /** The floor the catalogue was built to. Below it the panel is a demo. */
 const MINIMUM_PER_KIND = 30;
 
+/**
+ * The typography catalogue's floor: one graphic per row of the coverage matrix
+ * that names a preset (`typographyCoverage.test.ts`), plus the backgrounds.
+ */
+const MINIMUM_GRAPHICS = 24;
+
+/** The fonts a `bundled:` value may name. */
+const BUNDLED_FONTS = path.resolve(__dirname, "../../../../../assets/fonts/google");
+
+/**
+ * The one HTML graphic without a font parameter. It animates the weight axis,
+ * which needs a variable face, and no bundled face is one; it names the
+ * editor's own variable Noto Sans KR instead.
+ */
+const NO_FONT_PARAMETER = ["com.cartcut.graphic.weight-wave"];
+
 type Entry = {
   preset: FxPreset;
   /** The folder the preset lives in, which is what "mechanism" means here. */
   mechanism: string;
+  /** What the validator would tell an author, which a shipped preset must not need told. */
+  warnings: string[];
 };
 
 let entries: Entry[] = [];
@@ -53,6 +73,7 @@ beforeAll(async () => {
     entries.push({
       preset: result.preset,
       mechanism: path.basename(payload.dir),
+      warnings: result.warnings ?? [],
     });
   }
 });
@@ -72,6 +93,28 @@ function normalize(source: string): string {
 }
 
 /**
+ * Markup or a stylesheet with its comments and whitespace removed. Not
+ * `normalize`: CSS has no `//` comment, and stripping one would eat a
+ * `content: "//"` along with the rest of its line.
+ */
+function normalizeHtmlOrCss(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/\s+/g, "");
+}
+
+/** The markup and every style sheet of an HTML graphic, as one text. */
+function htmlSourcesOf(preset: FxPreset): string {
+  if (preset.render.type !== "html") {
+    return "";
+  }
+  return [preset.render.source, ...(preset.render.styles ?? [])]
+    .map((name) => preset.sources[name] ?? "")
+    .join("\n");
+}
+
+/**
  * Everything the compositor will actually run, in order.
  *
  * The *pipeline* rather than each file, because a shared helper is not
@@ -87,6 +130,15 @@ function pipelineOf(preset: FxPreset): string {
     // shipped tables grade alike — needs the parsed data and lives in
     // `lut/lutCatalogue.test.ts`.
     return "lut:" + preset.id;
+  }
+  if (preset.render.type === "html") {
+    // An HTML graphic's pipeline is its markup and its sheets: two graphics
+    // that differ only in a default are one graphic with a parameter.
+    const files = [preset.render.source, ...(preset.render.styles ?? [])];
+    const body = files
+      .map((name) => name + ":" + normalizeHtmlOrCss(preset.sources[name] ?? ""))
+      .join("|");
+    return createHash("sha1").update(body).digest("hex");
   }
   if (preset.render.type !== "shader") {
     return "overlay:" + preset.render.source;
@@ -136,6 +188,10 @@ describe("the shipped catalogue", () => {
         kind + "s: " + count + ", need " + MINIMUM_PER_KIND,
       ).toBeGreaterThanOrEqual(MINIMUM_PER_KIND);
     }
+    const graphics = entries.filter((e) => e.preset.kind === "graphic").length;
+    expect(graphics, "graphics: " + graphics + ", need " + MINIMUM_GRAPHICS).toBeGreaterThanOrEqual(
+      MINIMUM_GRAPHICS,
+    );
   });
 
   it("gives every preset a distinct id", () => {
@@ -158,8 +214,16 @@ describe("the shipped catalogue", () => {
     // they are genuinely different things: one is a shader with parameters, the
     // other a fixed table. The segment is what keeps the ids distinct without
     // making either folder name worse.
+    //
+    // Graphics carry `graphic.` for the same reason: Glitch is an effect and a
+    // graphic, and Light Leak could be either.
     for (const { preset, mechanism } of entries) {
-      const prefix = preset.kind === "lut" ? "com.cartcut.lut." : "com.cartcut.";
+      const prefix =
+        preset.kind === "lut"
+          ? "com.cartcut.lut."
+          : preset.kind === "graphic"
+            ? "com.cartcut.graphic."
+            : "com.cartcut.";
       expect(preset.id, mechanism).toBe(prefix + mechanism);
     }
   });
@@ -242,11 +306,88 @@ describe("the shipped catalogue", () => {
       const key = preset.kind + "/" + preset.category;
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-    for (const kind of ["effect", "transition", "lut"] as const) {
+    for (const kind of ["effect", "transition", "lut", "graphic"] as const) {
       for (const category of categoriesFor(kind)) {
         const count = counts.get(kind + "/" + category) ?? 0;
         expect(count, kind + "/" + category).toBeGreaterThanOrEqual(3);
       }
+    }
+  });
+});
+
+describe("the shipped graphics", () => {
+  const graphics = () => entries.filter((e) => e.preset.kind === "graphic");
+  const htmlGraphics = () => graphics().filter((e) => e.preset.render.type === "html");
+
+  it("validate without a single warning", () => {
+    // A warning is the validator telling an author something is probably
+    // wrong, such as a parameter nothing reads. The catalogue is what authors
+    // copy, so it has to be the example of none.
+    const warned = graphics()
+      .filter((e) => e.warnings.length > 0)
+      .map((e) => e.preset.id + ": " + e.warnings.join(" | "));
+    expect(warned).toEqual([]);
+  });
+
+  it("each declare which text parameter a text clip's words go into", () => {
+    // `apply_typography` converts a text clip by its bindings. A graphic with
+    // no `bindings.text` would take the clip and drop its words.
+    for (const { preset } of htmlGraphics()) {
+      const render = preset.render as FxHtmlRender;
+      const key = render.bindings?.text;
+      expect(key, preset.id).toBeTypeOf("string");
+      const param = preset.params.find((p) => p.key === key);
+      expect(param?.type, preset.id + " binds text to " + key).toBe("text");
+    }
+  });
+
+  it("each break Korean by eojeol, not between syllables", () => {
+    // Matrix row 13. Chromium's default breaks Hangul between any two
+    // syllables; `keep-all` breaks at the spaces, which is how Korean wraps.
+    for (const { preset } of htmlGraphics()) {
+      expect(htmlSourcesOf(preset), preset.id).toMatch(/word-break:\s*keep-all/);
+    }
+  });
+
+  it("each take a font, defaulting to a face every install has", () => {
+    for (const { preset } of htmlGraphics()) {
+      const fonts = preset.params.filter((p) => p.type === "font");
+      if (NO_FONT_PARAMETER.includes(preset.id)) {
+        expect(fonts, preset.id).toEqual([]);
+        continue;
+      }
+      expect(fonts.length, preset.id).toBeGreaterThan(0);
+      for (const font of fonts) {
+        const value = font.default as string;
+        expect(value.startsWith("bundled:"), preset.id + ": " + value).toBe(true);
+        expect(
+          existsSync(path.join(BUNDLED_FONTS, value.slice("bundled:".length))),
+          preset.id + ": " + value + " is not in assets/fonts/google",
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("lose nothing to the sanitiser or the stylesheet filter", () => {
+    // The read side sanitises every program again before mounting it. A
+    // shipped preset that loses a node or a declaration there draws something
+    // other than what its author saw, and nobody is told.
+    const lost = htmlGraphics().flatMap(({ preset }) =>
+      (mountSpecOf(preset)?.removed ?? []).map(
+        (d) => preset.id + " " + (d.file ?? "") + ":" + (d.line ?? "") + " " + d.message,
+      ),
+    );
+    expect(lost).toEqual([]);
+  });
+
+  it("never name a face by a path, or load anything", () => {
+    for (const { preset } of htmlGraphics()) {
+      // Comments out first: a comment may well explain what `url(...)` holds.
+      const text = htmlSourcesOf(preset)
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/<!--[\s\S]*?-->/g, "");
+      expect(text, preset.id).not.toMatch(/@font-face|@import/);
+      expect(text, preset.id).not.toMatch(/url\(\s*(?!["']?#)/);
     }
   });
 });

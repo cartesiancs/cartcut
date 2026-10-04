@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.graphic.vertical-title",
+  "kind": "graphic",
+  "name": "Vertical Title",
+  "category": "layout",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "html",
+    "source": "index.html",
+    "styles": ["style.css"],
+    "layout": "scale",
+    "designSize": { "width": 400, "height": 1200 },
+    "bleed": 80,
+    "bindings": { "text": "text", "font": "font", "color": "color", "fontSize": "size" }
+  },
+  "params": [
+    { "key": "text", "label": "Text", "type": "text", "default": "여름의 끝", "maxLength": 40, "multiline": true },
+    { "key": "number", "label": "Number", "type": "text", "default": "25", "maxLength": 4 },
+    { "key": "font", "label": "Font", "type": "font", "default": "bundled:Oswald-Bold.ttf" },
+    { "key": "size", "label": "Size", "type": "number", "default": 150, "min": 8, "max": 600, "step": 1 },
+    { "key": "color", "label": "Colour", "type": "color", "default": "#ffffff" },
+    { "key": "accent", "label": "Number colour", "type": "color", "default": "#ff5a36" },
+    { "key": "stagger", "label": "Stagger (ms)", "type": "number", "default": 90, "min": 0, "max": 400, "step": 1 }
+  ]
+}

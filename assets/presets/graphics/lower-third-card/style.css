@@ -1,0 +1,95 @@
+/*
+ * A name and a role on a panel, with an accent bar. The bar grows first, the
+ * panel opens out of it, then the two lines slide in; at the end of the clip
+ * the whole card leaves, timed from `--dur`.
+ *
+ * The card is a flex row anchored to the left of the box and the panel a flex
+ * column centred vertically, so a one-line role and a three-line role both sit
+ * in the middle of the bar. The role is justified with hyphenation, which
+ * needs the `lang` the markup gives it; its last line stays ragged.
+ */
+
+.card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  max-width: 100%;
+  display: flex;
+  align-items: stretch;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  color: var(--color);
+  word-break: keep-all;
+  line-break: strict;
+  animation: leave 0.5s cubic-bezier(0.5, 0, 0.75, 0) calc((var(--dur) - 0.5) * 1s) forwards;
+}
+
+.bar {
+  flex: 0 0 auto;
+  width: 0.18em;
+  background: var(--accent);
+  transform-origin: 50% 100%;
+  animation: bar-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.12em;
+  min-width: 0;
+  padding: 0 1.1em 0 0.8em;
+  background: color-mix(in srgb, var(--panel) calc(var(--opacity) * 100%), transparent);
+  animation: panel-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) 0.2s both;
+}
+
+.name {
+  font-size: 1em;
+  line-height: 1.1;
+  white-space: nowrap;
+  animation: slide 0.6s cubic-bezier(0.22, 1, 0.36, 1) 0.35s both;
+}
+
+.role {
+  max-width: 22em;
+  font-size: 0.5em;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--color) 78%, transparent);
+  text-align: justify;
+  text-align-last: start;
+  hyphens: auto;
+  animation: slide 0.6s cubic-bezier(0.22, 1, 0.36, 1) 0.45s both;
+}
+
+@keyframes bar-in {
+  from { transform: scaleY(0); }
+  to { transform: none; }
+}
+
+@keyframes panel-in {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+
+@keyframes slide {
+  from {
+    opacity: 0;
+    transform: translateX(-0.6em);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes leave {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-0.4em);
+  }
+}

@@ -1,0 +1,55 @@
+/*
+ * Each letter flies in along a straight line from a direction of its own.
+ * `--rand` is fixed per letter for a given program and seed, so the scatter is
+ * the same on every frame and in every export; `seed` deals a new one, and it
+ * also turns the whole field of directions so two seeds never share a shape.
+ *
+ * `order` picks what decides when a letter sets off: its `--rand` (0), or its
+ * `--from-center` (1), which lands the middle letters first and the ends last.
+ */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.title {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.15;
+  color: var(--color);
+  text-wrap: balance;
+}
+
+.title .char {
+  --heading: calc((var(--rand) * 360 + var(--seed) * 47) * 1deg);
+  --start: calc(var(--rand) * (1 - var(--order)) + var(--from-center) * var(--order));
+  animation: scatter-in calc(var(--fly) * 1s) cubic-bezier(0.16, 1, 0.3, 1)
+    calc(var(--start) * var(--fly) * 0.4s) both;
+}
+
+@keyframes scatter-in {
+  from {
+    opacity: 0;
+    transform:
+      translate(
+        calc(cos(var(--heading)) * var(--distance) * 1px),
+        calc(sin(var(--heading)) * var(--distance) * 1px)
+      )
+      rotate(calc((var(--rand) - 0.5) * 720deg))
+      scale(calc(0.3 + var(--rand)));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

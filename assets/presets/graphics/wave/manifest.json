@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.graphic.wave",
+  "kind": "graphic",
+  "name": "Wave",
+  "category": "kinetic",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "html",
+    "source": "index.html",
+    "styles": ["style.css"],
+    "layout": "scale",
+    "designSize": { "width": 1600, "height": 400 },
+    "bleed": 120,
+    "bindings": { "text": "text", "font": "font", "color": "color", "fontSize": "size" }
+  },
+  "params": [
+    { "key": "text", "label": "Text", "type": "text", "default": "Ride the wave", "maxLength": 200, "multiline": true },
+    { "key": "font", "label": "Font", "type": "font", "default": "bundled:Poppins-SemiBold.ttf" },
+    { "key": "size", "label": "Size", "type": "number", "default": 150, "min": 8, "max": 600, "step": 1 },
+    { "key": "color", "label": "Colour", "type": "color", "default": "#ffffff" },
+    { "key": "height", "label": "Height", "type": "number", "default": 36, "min": 0, "max": 200, "step": 1 },
+    { "key": "period", "label": "Period", "type": "number", "default": 1.4, "min": 0.2, "max": 6, "step": 0.05 },
+    { "key": "spread", "label": "Spread", "type": "number", "default": 0.08, "min": 0, "max": 0.5, "step": 0.01 }
+  ]
+}

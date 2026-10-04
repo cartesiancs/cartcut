@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.graphic.tracking-breathe",
+  "kind": "graphic",
+  "name": "Tracking Breathe",
+  "category": "kinetic",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "html",
+    "source": "index.html",
+    "styles": ["style.css"],
+    "layout": "scale",
+    "designSize": { "width": 1600, "height": 400 },
+    "bleed": 100,
+    "bindings": { "text": "text", "font": "font", "color": "color", "fontSize": "size" }
+  },
+  "params": [
+    { "key": "text", "label": "Text", "type": "text", "default": "BREATHE", "maxLength": 200, "multiline": true },
+    { "key": "font", "label": "Font", "type": "font", "default": "bundled:Raleway-SemiBold.ttf" },
+    { "key": "size", "label": "Size", "type": "number", "default": 130, "min": 8, "max": 600, "step": 1 },
+    { "key": "color", "label": "Colour", "type": "color", "default": "#ffffff" },
+    { "key": "tracking", "label": "Tracking", "type": "number", "default": 10, "min": -20, "max": 100, "step": 1 },
+    { "key": "swing", "label": "Swing", "type": "number", "default": 40, "min": 0, "max": 100, "step": 1 },
+    { "key": "period", "label": "Period", "type": "number", "default": 3, "min": 0.5, "max": 12, "step": 0.1 },
+    { "key": "glow", "label": "Glow", "type": "color", "default": "#9ad7ff" },
+    { "key": "blur", "label": "Glow size", "type": "number", "default": 24, "min": 0, "max": 120, "step": 1 }
+  ]
+}

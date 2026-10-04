@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.graphic.extrude",
+  "kind": "graphic",
+  "name": "Extrude",
+  "category": "stylized",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "html",
+    "source": "index.html",
+    "styles": ["style.css"],
+    "layout": "scale",
+    "designSize": { "width": 1600, "height": 400 },
+    "bleed": 120,
+    "bindings": { "text": "text", "font": "font", "color": "color", "fontSize": "size" }
+  },
+  "params": [
+    { "key": "text", "label": "Text", "type": "text", "default": "EXTRUDE", "maxLength": 200, "multiline": true },
+    { "key": "font", "label": "Font", "type": "font", "default": "bundled:BebasNeue-Regular.ttf" },
+    { "key": "size", "label": "Size", "type": "number", "default": 220, "min": 8, "max": 600, "step": 1 },
+    { "key": "color", "label": "Face", "type": "color", "default": "#f7f7f2" },
+    { "key": "side", "label": "Side", "type": "color", "default": "#3a86ff" },
+    { "key": "depth", "label": "Depth", "type": "number", "default": 1.5, "min": 0, "max": 4, "step": 0.1 },
+    { "key": "tilt", "label": "Tilt", "type": "number", "default": 24, "min": 0, "max": 60, "step": 1 }
+  ]
+}

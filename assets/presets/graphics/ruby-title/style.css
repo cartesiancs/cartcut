@@ -1,0 +1,84 @@
+/*
+ * A title with its reading set above it as ruby, and a kicker line in small
+ * capitals. Both are typesetting a text clip cannot do: ruby is laid out by
+ * the browser against the base text, centred over it, and `all-small-caps`
+ * uses the face's own small capitals where it has them and synthesises them
+ * where it does not.
+ *
+ * The <rp> parentheses are what shows where ruby is not supported, and are
+ * hidden where it is.
+ */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.block {
+  max-width: 100%;
+  font-family: var(--font);
+  color: var(--color);
+}
+
+.kicker {
+  margin: 0 0 0.2em;
+  font-size: calc(var(--size) * 0.3px);
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.14em;
+  animation: kicker-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.title {
+  margin: 0;
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.1;
+  animation: rise 0.8s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+}
+
+.reading {
+  font-size: calc(var(--ratio) * 1em);
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  ruby-align: center;
+  animation: reading-in 0.6s ease-out 0.7s both;
+}
+
+@keyframes kicker-in {
+  from {
+    opacity: 0;
+    letter-spacing: 0.5em;
+  }
+  to {
+    opacity: 1;
+    letter-spacing: 0.14em;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(0.25em);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes reading-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.4em);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

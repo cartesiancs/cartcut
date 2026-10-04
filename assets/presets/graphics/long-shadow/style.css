@@ -1,0 +1,91 @@
+/*
+ * A long hard shadow: forty-eight copies of the letters, each one step further
+ * along `direction` and a little more transparent. The step is scaled by
+ * `--grow`, registered as a <number> so it can be animated, which draws the
+ * shadow out of the letters on entry instead of having it already there.
+ */
+
+@property --grow {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.title {
+  --sx: calc(cos(var(--direction) * 1deg) * var(--step) * var(--grow) * 1px);
+  --sy: calc(sin(var(--direction) * 1deg) * var(--step) * var(--grow) * 1px);
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.2;
+  text-wrap: balance;
+  color: var(--color);
+  text-shadow:
+    calc(var(--sx) * 1) calc(var(--sy) * 1) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 2.08%), transparent),
+    calc(var(--sx) * 2) calc(var(--sy) * 2) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 4.17%), transparent),
+    calc(var(--sx) * 3) calc(var(--sy) * 3) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 6.25%), transparent),
+    calc(var(--sx) * 4) calc(var(--sy) * 4) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 8.33%), transparent),
+    calc(var(--sx) * 5) calc(var(--sy) * 5) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 10.42%), transparent),
+    calc(var(--sx) * 6) calc(var(--sy) * 6) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 12.5%), transparent),
+    calc(var(--sx) * 7) calc(var(--sy) * 7) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 14.58%), transparent),
+    calc(var(--sx) * 8) calc(var(--sy) * 8) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 16.67%), transparent),
+    calc(var(--sx) * 9) calc(var(--sy) * 9) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 18.75%), transparent),
+    calc(var(--sx) * 10) calc(var(--sy) * 10) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 20.83%), transparent),
+    calc(var(--sx) * 11) calc(var(--sy) * 11) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 22.92%), transparent),
+    calc(var(--sx) * 12) calc(var(--sy) * 12) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 25%), transparent),
+    calc(var(--sx) * 13) calc(var(--sy) * 13) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 27.08%), transparent),
+    calc(var(--sx) * 14) calc(var(--sy) * 14) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 29.17%), transparent),
+    calc(var(--sx) * 15) calc(var(--sy) * 15) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 31.25%), transparent),
+    calc(var(--sx) * 16) calc(var(--sy) * 16) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 33.33%), transparent),
+    calc(var(--sx) * 17) calc(var(--sy) * 17) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 35.42%), transparent),
+    calc(var(--sx) * 18) calc(var(--sy) * 18) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 37.5%), transparent),
+    calc(var(--sx) * 19) calc(var(--sy) * 19) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 39.58%), transparent),
+    calc(var(--sx) * 20) calc(var(--sy) * 20) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 41.67%), transparent),
+    calc(var(--sx) * 21) calc(var(--sy) * 21) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 43.75%), transparent),
+    calc(var(--sx) * 22) calc(var(--sy) * 22) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 45.83%), transparent),
+    calc(var(--sx) * 23) calc(var(--sy) * 23) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 47.92%), transparent),
+    calc(var(--sx) * 24) calc(var(--sy) * 24) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 50%), transparent),
+    calc(var(--sx) * 25) calc(var(--sy) * 25) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 52.08%), transparent),
+    calc(var(--sx) * 26) calc(var(--sy) * 26) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 54.17%), transparent),
+    calc(var(--sx) * 27) calc(var(--sy) * 27) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 56.25%), transparent),
+    calc(var(--sx) * 28) calc(var(--sy) * 28) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 58.33%), transparent),
+    calc(var(--sx) * 29) calc(var(--sy) * 29) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 60.42%), transparent),
+    calc(var(--sx) * 30) calc(var(--sy) * 30) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 62.5%), transparent),
+    calc(var(--sx) * 31) calc(var(--sy) * 31) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 64.58%), transparent),
+    calc(var(--sx) * 32) calc(var(--sy) * 32) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 66.67%), transparent),
+    calc(var(--sx) * 33) calc(var(--sy) * 33) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 68.75%), transparent),
+    calc(var(--sx) * 34) calc(var(--sy) * 34) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 70.83%), transparent),
+    calc(var(--sx) * 35) calc(var(--sy) * 35) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 72.92%), transparent),
+    calc(var(--sx) * 36) calc(var(--sy) * 36) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 75%), transparent),
+    calc(var(--sx) * 37) calc(var(--sy) * 37) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 77.08%), transparent),
+    calc(var(--sx) * 38) calc(var(--sy) * 38) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 79.17%), transparent),
+    calc(var(--sx) * 39) calc(var(--sy) * 39) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 81.25%), transparent),
+    calc(var(--sx) * 40) calc(var(--sy) * 40) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 83.33%), transparent),
+    calc(var(--sx) * 41) calc(var(--sy) * 41) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 85.42%), transparent),
+    calc(var(--sx) * 42) calc(var(--sy) * 42) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 87.5%), transparent),
+    calc(var(--sx) * 43) calc(var(--sy) * 43) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 89.58%), transparent),
+    calc(var(--sx) * 44) calc(var(--sy) * 44) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 91.67%), transparent),
+    calc(var(--sx) * 45) calc(var(--sy) * 45) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 93.75%), transparent),
+    calc(var(--sx) * 46) calc(var(--sy) * 46) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 95.83%), transparent),
+    calc(var(--sx) * 47) calc(var(--sy) * 47) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 97.92%), transparent),
+    calc(var(--sx) * 48) calc(var(--sy) * 48) 0 color-mix(in srgb, var(--shadow) calc(100% - var(--fade) * 100%), transparent);
+  animation: grow 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+}
+
+@keyframes grow {
+  from { --grow: 0; }
+  to { --grow: 1; }
+}

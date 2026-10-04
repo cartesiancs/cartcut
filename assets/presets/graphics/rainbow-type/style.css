@@ -1,0 +1,46 @@
+/*
+ * A colour per letter, from the letter's index, rotating with the program
+ * clock. The hue reads `--t` directly rather than through a keyframe loop, so
+ * any `cycle` is a smooth turn and a split clip carries on in step.
+ */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.title {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.title .char {
+  color: hsl(
+    calc(var(--char-index) * var(--spread) * 1deg + var(--t) * var(--cycle) * 360deg)
+    calc(var(--saturation) * 1%)
+    calc(var(--lightness) * 1%)
+  );
+  animation: pop 0.5s cubic-bezier(0.3, 1.6, 0.5, 1) calc(var(--char-index) * 40ms) both;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.2);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

@@ -1,0 +1,72 @@
+/*
+ * A number counting up to `target`. The count is `--n`, registered as an
+ * <integer>, so animating it lands on whole numbers only; a CSS counter is
+ * reset to it on every frame and printed with counter(). Nothing here runs a
+ * script: the browser does the counting as part of seeking the animation.
+ *
+ * Tabular figures keep every digit the same width, so the number does not
+ * shuffle sideways as it counts.
+ */
+
+@property --n {
+  syntax: "<integer>";
+  inherits: false;
+  initial-value: 0;
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.block {
+  max-width: 100%;
+  font-family: var(--font);
+  color: var(--color);
+  animation: appear 0.5s ease-out both;
+}
+
+.figure {
+  font-size: calc(var(--size) * 1px);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.num {
+  counter-reset: n var(--n);
+  animation: count calc(var(--countSeconds) * 1s) cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+}
+
+.num::after {
+  content: counter(n);
+}
+
+.label {
+  margin-top: 0.4em;
+  font-size: calc(var(--size) * 0.22px);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+@keyframes count {
+  from { --n: 0; }
+  to { --n: var(--target); }
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+    transform: translateY(0.3em);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

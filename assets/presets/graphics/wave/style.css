@@ -1,0 +1,43 @@
+/*
+ * Every letter rides the same loop, each one `spread` of a period behind the
+ * letter before it. The delays are negative, so the wave is already moving on
+ * the first frame instead of starting from a flat line.
+ */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.title {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.2;
+  color: var(--color);
+  text-wrap: balance;
+  animation: appear 0.5s ease-out both;
+}
+
+.title .char {
+  animation: wave calc(var(--period) * 1s) ease-in-out infinite;
+  animation-delay: calc(var(--char-index) * var(--spread) * var(--period) * -1s);
+}
+
+@keyframes appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes wave {
+  0%, 100% { transform: translateY(calc(var(--height) * -0.5px)); }
+  50% { transform: translateY(calc(var(--height) * 0.5px)); }
+}

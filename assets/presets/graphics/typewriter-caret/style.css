@@ -1,0 +1,54 @@
+/*
+ * Letters arriving one at a time, with a caret that follows the last one.
+ *
+ * A letter not yet typed is `display: none` rather than transparent, so it
+ * takes no room and the caret, which comes after all of them in the markup,
+ * sits right after the last one shown. A word typed past the end of a line
+ * jumps to the next line as it grows, which is what a typed line does.
+ */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 4%;
+  text-align: left;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.line {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.3;
+  color: var(--color);
+}
+
+.typed .char {
+  animation: type 1ms linear calc(var(--char-index) * var(--interval) * 1ms + 0.2s) both;
+}
+
+.caret {
+  display: inline-block;
+  width: 0.08em;
+  height: 1.05em;
+  margin-inline-start: 0.04em;
+  vertical-align: -0.15em;
+  background: var(--caret);
+  animation: blink calc(var(--blink) * 1s) steps(1, end) infinite;
+}
+
+@keyframes type {
+  from { display: none; }
+  to { display: inline-block; }
+}
+
+@keyframes blink {
+  0% { opacity: 1; }
+  50% { opacity: 0; }
+}

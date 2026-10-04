@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.graphic.quote-card",
+  "kind": "graphic",
+  "name": "Quote Card",
+  "category": "layout",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "html",
+    "source": "index.html",
+    "styles": ["style.css"],
+    "layout": "scale",
+    "designSize": { "width": 1200, "height": 700 },
+    "bleed": 60,
+    "bindings": { "text": "quote", "font": "font", "color": "color", "fontSize": "size" }
+  },
+  "params": [
+    { "key": "quote", "label": "Quote", "type": "text", "default": "Every cut is a decision about what the audience should feel next.", "maxLength": 400, "multiline": true },
+    { "key": "author", "label": "Author", "type": "text", "default": "The Editor", "maxLength": 80 },
+    { "key": "font", "label": "Font", "type": "font", "default": "bundled:Lora-Bold.ttf" },
+    { "key": "size", "label": "Size", "type": "number", "default": 60, "min": 8, "max": 300, "step": 1 },
+    { "key": "color", "label": "Text", "type": "color", "default": "#ffffff" },
+    { "key": "accent", "label": "Quote mark", "type": "color", "default": "#ffcc33" },
+    { "key": "panel", "label": "Panel", "type": "color", "default": "#000000" },
+    { "key": "opacity", "label": "Panel opacity", "type": "number", "default": 0.55, "min": 0, "max": 1, "step": 0.01 }
+  ]
+}

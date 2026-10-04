@@ -1,0 +1,63 @@
+/*
+ * The letters seen through moving water: noise displaces every pixel, and the
+ * noise's frequency is animated (SMIL, seeked to the program time by the host)
+ * so the surface keeps moving.
+ *
+ * A displacement map's `scale` is an attribute, which no stylesheet can reach.
+ * `amount` gets to it another way: a flat 50% grey, which displaces nothing, is
+ * laid over the noise at an opacity of 1 - amount. At 0 the map is all grey and
+ * the letters sit still; at 1 it is all noise. Displacement is linear in the
+ * map, so it is linear in `amount` too, and that needs the filter to work in
+ * sRGB, where 50% grey is 0.5.
+ */
+
+#liquid {
+  color-interpolation-filters: sRGB;
+}
+
+.calm {
+  flood-color: rgb(128 128 128);
+  flood-opacity: calc(1 - var(--amount));
+}
+
+.defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.title {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.25;
+  text-wrap: balance;
+  color: var(--color);
+  filter: url(#liquid);
+  animation: surface 1.2s ease-out both;
+}
+
+@keyframes surface {
+  from {
+    opacity: 0;
+    transform: translateY(0.2em);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

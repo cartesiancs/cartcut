@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.graphic.rainbow-type",
+  "kind": "graphic",
+  "name": "Rainbow Type",
+  "category": "stylized",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "html",
+    "source": "index.html",
+    "styles": ["style.css"],
+    "layout": "scale",
+    "designSize": { "width": 1600, "height": 400 },
+    "bleed": 80,
+    "bindings": { "text": "text", "font": "font", "fontSize": "size" }
+  },
+  "params": [
+    { "key": "text", "label": "Text", "type": "text", "default": "Rainbow", "maxLength": 200, "multiline": true },
+    { "key": "font", "label": "Font", "type": "font", "default": "bundled:Nunito-Bold.ttf" },
+    { "key": "size", "label": "Size", "type": "number", "default": 170, "min": 8, "max": 600, "step": 1 },
+    { "key": "spread", "label": "Hue per letter", "type": "number", "default": 28, "min": 0, "max": 120, "step": 1 },
+    { "key": "cycle", "label": "Turns per second", "type": "number", "default": 0.3, "min": -2, "max": 2, "step": 0.05 },
+    { "key": "saturation", "label": "Saturation", "type": "number", "default": 90, "min": 0, "max": 100, "step": 1 },
+    { "key": "lightness", "label": "Lightness", "type": "number", "default": 62, "min": 0, "max": 100, "step": 1 }
+  ]
+}

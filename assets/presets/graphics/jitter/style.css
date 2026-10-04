@@ -1,0 +1,62 @@
+/*
+ * Line boil: each letter holds one of three slightly different poses and
+ * snaps between them `rate` times a second, the way hand-drawn animation is
+ * redrawn on every frame and never quite matches. The poses are made from the
+ * letter's own `--rand` through sin() and cos(), so no two letters boil alike
+ * and the same letter boils the same way on every render.
+ */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.title {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.25;
+  text-wrap: balance;
+  color: var(--color);
+}
+
+.title .char {
+  animation: boil calc(3s / var(--rate)) steps(1, end) infinite;
+  animation-delay: calc(var(--rand) * -3s / var(--rate));
+}
+
+@keyframes boil {
+  0%,
+  100% {
+    transform:
+      translate(
+        calc((var(--rand) - 0.5) * var(--amount) * 3px),
+        calc(sin(var(--rand) * 9) * var(--amount) * 2px)
+      )
+      rotate(calc((var(--rand) - 0.5) * var(--amount) * 6deg));
+  }
+  33.333% {
+    transform:
+      translate(
+        calc(sin(var(--rand) * 17) * var(--amount) * 2.5px),
+        calc((0.5 - var(--rand)) * var(--amount) * 3px)
+      )
+      rotate(calc(sin(var(--rand) * 23) * var(--amount) * 4deg));
+  }
+  66.667% {
+    transform:
+      translate(
+        calc(cos(var(--rand) * 13) * var(--amount) * 2px),
+        calc(cos(var(--rand) * 29) * var(--amount) * 2.5px)
+      )
+      rotate(calc(cos(var(--rand) * 31) * var(--amount) * -5deg));
+  }
+}

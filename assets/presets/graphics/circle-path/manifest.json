@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.graphic.circle-path",
+  "kind": "graphic",
+  "name": "Circle Path",
+  "category": "layout",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "html",
+    "source": "index.html",
+    "styles": ["style.css"],
+    "layout": "scale",
+    "designSize": { "width": 1000, "height": 1000 },
+    "bleed": 40,
+    "bindings": { "text": "text", "font": "font", "color": "color", "fontSize": "size" }
+  },
+  "params": [
+    { "key": "text", "label": "Ring text", "type": "text", "default": "ROUND AND ROUND AND ROUND AND ", "maxLength": 120 },
+    { "key": "center", "label": "Centre text", "type": "text", "default": "360", "maxLength": 12 },
+    { "key": "font", "label": "Font", "type": "font", "default": "bundled:BebasNeue-Regular.ttf" },
+    { "key": "size", "label": "Size", "type": "number", "default": 72, "min": 8, "max": 200, "step": 1 },
+    { "key": "color", "label": "Ring colour", "type": "color", "default": "#ffffff" },
+    { "key": "accent", "label": "Centre colour", "type": "color", "default": "#ffcc33" },
+    { "key": "spin", "label": "Spin (deg/s)", "type": "number", "default": 12, "min": -180, "max": 180, "step": 1 }
+  ]
+}

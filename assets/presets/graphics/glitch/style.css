@@ -1,0 +1,96 @@
+/*
+ * Three copies of the text stacked in one grid cell. The two behind are the
+ * colour channels: each shows only a thin slice at a time (`clip-path`), shifted
+ * sideways, and the slices jump rather than slide (`steps`). The copy in front
+ * is split into letters, each of which jolts on its own beat, offset by its
+ * `--rand`.
+ *
+ * Every text parameter fills every element that names it, which is how one
+ * `text` parameter feeds all three copies.
+ */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.stack {
+  display: grid;
+  max-width: 100%;
+}
+
+.layer {
+  grid-area: 1 / 1;
+  margin: 0;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.split-a {
+  color: var(--left);
+  mix-blend-mode: screen;
+  animation: slice-a calc(var(--period) * 1s) steps(1, end) infinite;
+  animation-delay: calc(var(--seed) * -0.173s);
+}
+
+.split-b {
+  color: var(--right);
+  mix-blend-mode: screen;
+  animation: slice-b calc(var(--period) * 1s) steps(1, end) infinite;
+  animation-delay: calc(var(--seed) * -0.291s);
+}
+
+.face {
+  color: var(--color);
+  text-shadow:
+    calc(var(--amount) * 0.02em) 0 var(--left),
+    calc(var(--amount) * -0.02em) 0 var(--right);
+}
+
+.face .char {
+  animation: jolt calc(var(--period) * 1s) steps(1, end) infinite;
+  animation-delay: calc(var(--rand) * var(--period) * -1s);
+}
+
+@keyframes slice-a {
+  0% { clip-path: inset(0 0 100% 0); transform: none; }
+  8% { clip-path: inset(12% 0 58% 0); transform: translateX(calc(var(--amount) * -0.08em)); }
+  14% { clip-path: inset(64% 0 8% 0); transform: translateX(calc(var(--amount) * 0.05em)); }
+  22% { clip-path: inset(0 0 100% 0); transform: none; }
+  56% { clip-path: inset(38% 0 40% 0); transform: translateX(calc(var(--amount) * 0.1em)); }
+  61% { clip-path: inset(0 0 100% 0); transform: none; }
+  100% { clip-path: inset(0 0 100% 0); transform: none; }
+}
+
+@keyframes slice-b {
+  0% { clip-path: inset(0 0 100% 0); transform: none; }
+  10% { clip-path: inset(70% 0 4% 0); transform: translateX(calc(var(--amount) * 0.07em)); }
+  18% { clip-path: inset(20% 0 66% 0); transform: translateX(calc(var(--amount) * -0.06em)); }
+  26% { clip-path: inset(0 0 100% 0); transform: none; }
+  72% { clip-path: inset(48% 0 30% 0); transform: translateX(calc(var(--amount) * -0.1em)); }
+  78% { clip-path: inset(0 0 100% 0); transform: none; }
+  100% { clip-path: inset(0 0 100% 0); transform: none; }
+}
+
+@keyframes jolt {
+  0% { transform: none; }
+  70% {
+    transform: translate(
+      calc((var(--rand) - 0.5) * var(--amount) * 0.25em),
+      calc((0.5 - var(--rand)) * var(--amount) * 0.1em)
+    );
+  }
+  74% { transform: none; }
+  90% { transform: translateX(calc((var(--rand) - 0.5) * var(--amount) * -0.15em)) skewX(calc(var(--amount) * 12deg)); }
+  93% { transform: none; }
+  100% { transform: none; }
+}

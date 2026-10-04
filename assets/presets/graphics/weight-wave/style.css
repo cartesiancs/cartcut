@@ -1,0 +1,42 @@
+/*
+ * A wave through the weight axis, letter by letter. It needs a variable face,
+ * and none of the bundled faces is one, so this graphic has no font parameter:
+ * it names the editor's own Noto Sans KR (weights 100 to 900 on one axis, with
+ * Hangul), which every install loads.
+ *
+ * A wider letter pushes its neighbours along, so the line reflows on every
+ * frame. That is the point of the effect, and the host lays out each frame
+ * anyway.
+ */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.title {
+  margin: 0;
+  max-width: 100%;
+  font-family: "Noto Sans KR", sans-serif;
+  font-size: calc(var(--size) * 1px);
+  font-weight: 400;
+  line-height: 1.2;
+  color: var(--color);
+  text-wrap: balance;
+}
+
+.title .char {
+  animation: weight calc(var(--period) * 1s) ease-in-out infinite;
+  animation-delay: calc(var(--char-index) * var(--spread) * var(--period) * -1s);
+}
+
+@keyframes weight {
+  0%, 100% { font-variation-settings: "wght" var(--light); }
+  50% { font-variation-settings: "wght" var(--heavy); }
+}

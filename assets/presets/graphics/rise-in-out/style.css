@@ -1,0 +1,63 @@
+/*
+ * An entrance and an exit in one clip. The exit is timed from `--dur`, the
+ * whole program's length, so trimming the clip moves the exit with its end:
+ * the last letter finishes leaving on the last frame.
+ *
+ * The exit fills `forwards` only. Filling `both` would apply its first frame
+ * before it starts, and as the later animation in the list that would hide the
+ * entrance entirely.
+ */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.title {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.15;
+  color: var(--color);
+  text-wrap: balance;
+}
+
+.title .char {
+  animation:
+    rise-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) calc(var(--char-index) * var(--stagger) * 1ms) both,
+    fall-out 0.5s cubic-bezier(0.64, 0, 0.78, 0)
+      calc((var(--dur) - 0.5) * 1s - (var(--char-count) - 1 - var(--char-index)) * var(--stagger) * 0.5ms)
+      forwards;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--distance) * 1em)) rotate(6deg);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+@keyframes fall-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(calc(var(--distance) * -0.6em));
+  }
+}

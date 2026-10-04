@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.graphic.gradient-sweep",
+  "kind": "graphic",
+  "name": "Gradient Sweep",
+  "category": "stylized",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "html",
+    "source": "index.html",
+    "styles": ["style.css"],
+    "layout": "scale",
+    "designSize": { "width": 1600, "height": 400 },
+    "bleed": 60,
+    "bindings": { "text": "text", "font": "font", "color": "from", "fontSize": "size" }
+  },
+  "params": [
+    { "key": "text", "label": "Text", "type": "text", "default": "Gradient", "maxLength": 200, "multiline": true },
+    { "key": "font", "label": "Font", "type": "font", "default": "bundled:Poppins-SemiBold.ttf" },
+    { "key": "size", "label": "Size", "type": "number", "default": 180, "min": 8, "max": 600, "step": 1 },
+    { "key": "from", "label": "First colour", "type": "color", "default": "#ff4d8d" },
+    { "key": "via", "label": "Second colour", "type": "color", "default": "#ffd166" },
+    { "key": "to", "label": "Third colour", "type": "color", "default": "#3ae0ff" },
+    { "key": "period", "label": "Seconds per turn", "type": "number", "default": 4, "min": 0.5, "max": 30, "step": 0.1 }
+  ]
+}

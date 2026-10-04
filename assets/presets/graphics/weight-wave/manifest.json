@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.graphic.weight-wave",
+  "kind": "graphic",
+  "name": "Weight Wave",
+  "category": "kinetic",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "html",
+    "source": "index.html",
+    "styles": ["style.css"],
+    "layout": "scale",
+    "designSize": { "width": 1600, "height": 400 },
+    "bleed": 80,
+    "bindings": { "text": "text", "color": "color", "fontSize": "size" }
+  },
+  "params": [
+    { "key": "text", "label": "Text", "type": "text", "default": "가변 글꼴 Variable", "maxLength": 200, "multiline": true },
+    { "key": "size", "label": "Size", "type": "number", "default": 140, "min": 8, "max": 600, "step": 1 },
+    { "key": "color", "label": "Colour", "type": "color", "default": "#ffffff" },
+    { "key": "light", "label": "Lightest weight", "type": "number", "default": 150, "min": 100, "max": 900, "step": 1 },
+    { "key": "heavy", "label": "Heaviest weight", "type": "number", "default": 900, "min": 100, "max": 900, "step": 1 },
+    { "key": "period", "label": "Period", "type": "number", "default": 2, "min": 0.3, "max": 10, "step": 0.1 },
+    { "key": "spread", "label": "Spread", "type": "number", "default": 0.08, "min": 0, "max": 0.5, "step": 0.01 }
+  ]
+}

@@ -1,0 +1,68 @@
+/*
+ * Letters flip up about their own horizontal axis, in perspective. The
+ * perspective is set on each word, the letters' parent, so every letter is seen
+ * from in front of its own word rather than from the middle of the frame.
+ *
+ * `exit` is a 1 or a 0 multiplied into the exit's end pose: at 0 the exit
+ * animation runs from rest to rest and does nothing, so a bool can switch an
+ * animation off without a second stylesheet.
+ */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.title {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.15;
+  color: var(--color);
+  text-wrap: balance;
+}
+
+.title .word {
+  perspective: calc(var(--depth) * 1px);
+  transform-style: preserve-3d;
+}
+
+.title .char {
+  transform-origin: 50% 50% -0.4em;
+  backface-visibility: hidden;
+  animation:
+    flip-in 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) calc(var(--char-index) * var(--stagger) * 1ms) both,
+    flip-out 0.5s cubic-bezier(0.5, 0, 0.75, 0)
+      calc((var(--dur) - 0.5) * 1s - (var(--char-count) - 1 - var(--char-index)) * var(--stagger) * 0.5ms)
+      forwards;
+}
+
+@keyframes flip-in {
+  from {
+    opacity: 0;
+    transform: rotateX(-110deg);
+  }
+  to {
+    opacity: 1;
+    transform: rotateX(0deg);
+  }
+}
+
+@keyframes flip-out {
+  from {
+    opacity: 1;
+    transform: rotateX(0deg);
+  }
+  to {
+    opacity: calc(1 - var(--exit));
+    transform: rotateX(calc(var(--exit) * 110deg));
+  }
+}

@@ -1,0 +1,59 @@
+/*
+ * Two outlines with a clear gap between them.
+ *
+ * The inner one is the text's own stroke, drawn under the fill (`paint-order:
+ * stroke fill`) so only its outer half shows and the letters keep their
+ * weight. The outer ring is the filter in the markup: the letters' alpha grown
+ * by two amounts, the smaller cut out of the larger, and the band left over
+ * flooded with the ring colour. The gap is transparent, not painted, so the
+ * picture underneath shows through it. Both growths animate from zero, which
+ * is the ring expanding out of the letters.
+ */
+
+.defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.ring-ink {
+  flood-color: var(--ring);
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.title {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.2;
+  text-wrap: balance;
+  color: var(--fill);
+  -webkit-text-stroke: calc(var(--inner) * 2px) var(--stroke);
+  paint-order: stroke fill;
+  filter: url(#ring);
+  animation: settle 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes settle {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

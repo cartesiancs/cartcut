@@ -1,0 +1,49 @@
+/*
+ * The outline of every letter drawn as if by a pen, then filled.
+ *
+ * A dash as long as the longest glyph outline, offset by its own length, draws
+ * nothing; animating the offset to zero draws the whole outline. Dashing starts
+ * again on every contour, so all the letters draw at once, each from its own
+ * starting point. The text is an SVG <text>, which does not wrap: this preset
+ * is for a word or a short line.
+ */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  word-break: keep-all;
+}
+
+.art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.ink {
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  fill: var(--color);
+  fill-opacity: 0;
+  stroke: var(--stroke);
+  stroke-width: calc(var(--weight) * 1px);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1600 1600;
+  stroke-dashoffset: 1600;
+  animation:
+    draw calc(var(--speed) * 1s) cubic-bezier(0.45, 0, 0.55, 1) both,
+    ink 0.8s ease-out calc(var(--speed) * 0.75s) both;
+}
+
+@keyframes draw {
+  from { stroke-dashoffset: 1600; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes ink {
+  from { fill-opacity: 0; }
+  to { fill-opacity: 1; }
+}

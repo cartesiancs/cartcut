@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.graphic.wipe-reveal",
+  "kind": "graphic",
+  "name": "Wipe Reveal",
+  "category": "reveal",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "html",
+    "source": "index.html",
+    "styles": ["style.css"],
+    "layout": "scale",
+    "designSize": { "width": 1600, "height": 400 },
+    "bleed": 40,
+    "bindings": { "text": "text", "font": "font", "color": "color", "fontSize": "size" }
+  },
+  "params": [
+    { "key": "text", "label": "Text", "type": "text", "default": "Wipe Reveal", "maxLength": 200, "multiline": true },
+    { "key": "font", "label": "Font", "type": "font", "default": "bundled:Inter-Bold.ttf" },
+    { "key": "size", "label": "Size", "type": "number", "default": 150, "min": 8, "max": 600, "step": 1 },
+    { "key": "color", "label": "Colour", "type": "color", "default": "#ffffff" },
+    { "key": "direction", "label": "Direction", "type": "number", "default": 90, "min": 0, "max": 360, "step": 1 },
+    { "key": "soft", "label": "Softness", "type": "number", "default": 20, "min": 0, "max": 60, "step": 1 },
+    { "key": "speed", "label": "Wipe (s)", "type": "number", "default": 1.2, "min": 0.2, "max": 5, "step": 0.05 },
+    { "key": "exit", "label": "Wipe out at the end", "type": "bool", "default": true }
+  ]
+}

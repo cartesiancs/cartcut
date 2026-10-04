@@ -1,0 +1,61 @@
+/*
+ * Letters with depth: sixteen copies stacked straight down, each darker than
+ * the one above, read as the side of a solid block, with a soft contact shadow
+ * under the last. The block tips back in perspective as it lands, which is what
+ * sells the side as a side rather than a shadow.
+ */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+  perspective: 1400px;
+}
+
+.title {
+  --d: calc(var(--depth) * 1px);
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.05;
+  text-wrap: balance;
+  color: var(--color);
+  transform-origin: 50% 100%;
+  text-shadow:
+    0 calc(var(--d) * 1) 0 color-mix(in srgb, var(--side), #000 3.44%),
+    0 calc(var(--d) * 2) 0 color-mix(in srgb, var(--side), #000 6.88%),
+    0 calc(var(--d) * 3) 0 color-mix(in srgb, var(--side), #000 10.31%),
+    0 calc(var(--d) * 4) 0 color-mix(in srgb, var(--side), #000 13.75%),
+    0 calc(var(--d) * 5) 0 color-mix(in srgb, var(--side), #000 17.19%),
+    0 calc(var(--d) * 6) 0 color-mix(in srgb, var(--side), #000 20.63%),
+    0 calc(var(--d) * 7) 0 color-mix(in srgb, var(--side), #000 24.06%),
+    0 calc(var(--d) * 8) 0 color-mix(in srgb, var(--side), #000 27.5%),
+    0 calc(var(--d) * 9) 0 color-mix(in srgb, var(--side), #000 30.94%),
+    0 calc(var(--d) * 10) 0 color-mix(in srgb, var(--side), #000 34.38%),
+    0 calc(var(--d) * 11) 0 color-mix(in srgb, var(--side), #000 37.81%),
+    0 calc(var(--d) * 12) 0 color-mix(in srgb, var(--side), #000 41.25%),
+    0 calc(var(--d) * 13) 0 color-mix(in srgb, var(--side), #000 44.69%),
+    0 calc(var(--d) * 14) 0 color-mix(in srgb, var(--side), #000 48.13%),
+    0 calc(var(--d) * 15) 0 color-mix(in srgb, var(--side), #000 51.56%),
+    0 calc(var(--d) * 16) 0 color-mix(in srgb, var(--side), #000 55%),
+    0 calc(var(--d) * 18) calc(var(--d) * 10) rgb(0 0 0 / 0.45);
+  animation: tilt-in 1.1s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes tilt-in {
+  from {
+    opacity: 0;
+    transform: rotateX(calc(var(--tilt) * 1deg + 70deg)) translateY(0.3em);
+  }
+  to {
+    opacity: 1;
+    transform: rotateX(calc(var(--tilt) * 1deg));
+  }
+}

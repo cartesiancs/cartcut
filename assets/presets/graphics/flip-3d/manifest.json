@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.graphic.flip-3d",
+  "kind": "graphic",
+  "name": "3D Flip",
+  "category": "kinetic",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "html",
+    "source": "index.html",
+    "styles": ["style.css"],
+    "layout": "scale",
+    "designSize": { "width": 1600, "height": 400 },
+    "bleed": 120,
+    "bindings": { "text": "text", "font": "font", "color": "color", "fontSize": "size" }
+  },
+  "params": [
+    { "key": "text", "label": "Text", "type": "text", "default": "Flip it over", "maxLength": 200, "multiline": true },
+    { "key": "font", "label": "Font", "type": "font", "default": "bundled:Montserrat-ExtraBold.ttf" },
+    { "key": "size", "label": "Size", "type": "number", "default": 150, "min": 8, "max": 600, "step": 1 },
+    { "key": "color", "label": "Colour", "type": "color", "default": "#ffffff" },
+    { "key": "stagger", "label": "Stagger (ms)", "type": "number", "default": 50, "min": 0, "max": 300, "step": 1 },
+    { "key": "depth", "label": "Perspective", "type": "number", "default": 700, "min": 100, "max": 4000, "step": 10 },
+    { "key": "exit", "label": "Flip out at the end", "type": "bool", "default": true }
+  ]
+}

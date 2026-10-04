@@ -1,0 +1,48 @@
+/*
+ * Tracking, glow and opacity breathing together: the style fields a text clip
+ * can only set once, here on a loop. `tracking` and `swing` are in hundredths
+ * of an em and are ordinary number parameters, so either can be keyframed on
+ * its `fx:` track and the loop follows.
+ *
+ * Letter spacing is added after every letter, the last one included, which
+ * pushes centred text left. The same amount of padding on the start side puts
+ * it back, line by line.
+ */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.title {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.2;
+  color: var(--color);
+  text-wrap: balance;
+  animation: breathe calc(var(--period) * 0.5s) ease-in-out infinite alternate;
+}
+
+@keyframes breathe {
+  from {
+    letter-spacing: calc(var(--tracking) * 0.01em);
+    padding-inline-start: calc(var(--tracking) * 0.01em);
+    text-shadow: 0 0 0 transparent;
+    opacity: 0.8;
+  }
+  to {
+    letter-spacing: calc((var(--tracking) + var(--swing)) * 0.01em);
+    padding-inline-start: calc((var(--tracking) + var(--swing)) * 0.01em);
+    text-shadow: 0 0 calc(var(--blur) * 1px) var(--glow);
+    opacity: 1;
+  }
+}

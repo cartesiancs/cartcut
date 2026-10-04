@@ -1,0 +1,20 @@
+<svg class="defs" width="0" height="0" aria-hidden="true">
+  <filter id="ring" x="-25%" y="-50%" width="150%" height="200%">
+    <feMorphology in="SourceAlpha" operator="dilate" radius="22" result="outer">
+      <animate attributeName="radius" values="0;22" dur="0.7s" fill="freeze"/>
+    </feMorphology>
+    <feMorphology in="SourceAlpha" operator="dilate" radius="12" result="gap">
+      <animate attributeName="radius" values="0;12" dur="0.7s" fill="freeze"/>
+    </feMorphology>
+    <feComposite in="outer" in2="gap" operator="out" result="band"/>
+    <feFlood class="ring-ink" result="ink"/>
+    <feComposite in="ink" in2="band" operator="in" result="halo"/>
+    <feMerge>
+      <feMergeNode in="halo"/>
+      <feMergeNode in="SourceGraphic"/>
+    </feMerge>
+  </filter>
+</svg>
+<div class="stage">
+  <h1 class="title" data-param="text">Outline</h1>
+</div>

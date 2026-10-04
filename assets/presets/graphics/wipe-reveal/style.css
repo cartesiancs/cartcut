@@ -1,0 +1,61 @@
+/*
+ * A soft-edged mask sweeping across the letters. Where the edge is, is
+ * `--reveal`, registered as a <percentage> so it can be animated; the mask is
+ * opaque up to `soft` before that point and clear after it, so the edge
+ * travels `100% + soft` to clear the letters completely.
+ *
+ * The exit runs the same edge back, timed from `--dur`. `exit` is multiplied
+ * into where it ends, so at 0 it ends where it started and does nothing.
+ */
+
+@property --reveal {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.title {
+  margin: 0;
+  max-width: 100%;
+  font-family: var(--font);
+  font-size: calc(var(--size) * 1px);
+  font-weight: normal;
+  line-height: 1.2;
+  text-wrap: balance;
+  color: var(--color);
+  -webkit-mask-image: linear-gradient(
+    calc(var(--direction) * 1deg),
+    #000 calc(var(--reveal) - var(--soft) * 1%),
+    transparent var(--reveal)
+  );
+  mask-image: linear-gradient(
+    calc(var(--direction) * 1deg),
+    #000 calc(var(--reveal) - var(--soft) * 1%),
+    transparent var(--reveal)
+  );
+  animation:
+    wipe-in calc(var(--speed) * 1s) cubic-bezier(0.65, 0, 0.35, 1) both,
+    wipe-out calc(var(--speed) * 1s) cubic-bezier(0.65, 0, 0.35, 1)
+      calc((var(--dur) - var(--speed)) * 1s) forwards;
+}
+
+@keyframes wipe-in {
+  from { --reveal: 0%; }
+  to { --reveal: calc(100% + var(--soft) * 1%); }
+}
+
+@keyframes wipe-out {
+  from { --reveal: calc(100% + var(--soft) * 1%); }
+  to { --reveal: calc((1 - var(--exit)) * (100% + var(--soft) * 1%)); }
+}
