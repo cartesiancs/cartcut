@@ -83,6 +83,35 @@ describe("renderTimelineAtTime", () => {
     expect(pixel(canvas, 10, 10)).toMatchObject({ r: 255, g: 0, b: 0 });
   });
 
+  it("skips a clip whose filetype has no renderer and draws the rest", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const timeline: Timeline = {
+      back: imageElement({
+        priority: 1,
+        location: { x: 0, y: 0 },
+        width: SIZE,
+        height: SIZE,
+      }),
+      // A filetype from a newer build: in the map, with no renderer here.
+      future: {
+        ...shapeElement({
+          priority: 2,
+          location: { x: 0, y: 0 },
+          width: SIZE,
+          height: SIZE,
+        }),
+        filetype: "hologram",
+      } as any,
+    };
+    const { canvas } = render(timeline, 0);
+    expect(pixel(canvas, 100, 100)).toMatchObject({ r: 255, g: 0, b: 0 });
+    render(timeline, 0);
+    expect(
+      warn.mock.calls.filter((call) => String(call[0]).includes("hologram")),
+    ).toHaveLength(1);
+    warn.mockRestore();
+  });
+
   it("sorts by priority regardless of insertion order", () => {
     const timeline: Timeline = {
       front: shapeElement({

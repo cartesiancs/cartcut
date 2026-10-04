@@ -77,6 +77,10 @@ const VISIBLE_COST: Record<string, number> = {
   image: 1,
   text: 0.35,
   shape: 0.3,
+  // A GLSL graphic is a shader pass at box size; an HTML one waits for a paint
+  // and a layout, measured at about 7ms and 6ms a frame at 1080p
+  // (tests/e2e/FINDINGS.md section 10). Weighted for the HTML case.
+  graphic: 3,
 };
 
 /** Fallback for a filetype added later without a weight of its own. */

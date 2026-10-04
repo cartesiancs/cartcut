@@ -11,6 +11,36 @@ import { planFrame, type FramePlan } from "./fx/planFrame";
 import type { FxRuntime } from "./fx/runtime";
 import type { ElementRenderFunction } from "./type";
 
+
+/** Filetypes already reported as having no renderer, so the console hears once. */
+const unrenderable = new Set<string>();
+
+/**
+ * The renderer for an element, or `null` when this table has none.
+ *
+ * `TimelineRenderers` makes a missing entry a compile error for every table the
+ * build typechecks, so this guards what it cannot see: a document written by a
+ * newer build with a filetype this one does not know, and a table compiled
+ * outside the app's program (the offscreen window's). Such a clip draws nothing
+ * and the rest of the frame draws, where calling `undefined` would have thrown
+ * on every frame and taken the whole picture with it.
+ */
+function rendererFor<T extends VisualTimelineElement>(
+  renderers: TimelineRenderers,
+  element: T,
+): ElementRenderFunction<T> | null {
+  const render = (renderers as Record<string, unknown>)[element.filetype];
+  if (typeof render === "function") {
+    return render as ElementRenderFunction<T>;
+  }
+  if (!unrenderable.has(element.filetype)) {
+    unrenderable.add(element.filetype);
+    console.warn(
+      `renderer: no renderer for "${element.filetype}" clips; they are skipped`,
+    );
+  }
+  return null;
+}
 export type TimelineRenderers = {
   [K in VisualTimelineElement["filetype"]]: ElementRenderFunction<
     Extract<VisualTimelineElement, { filetype: K }>
@@ -178,13 +208,17 @@ function paint(
     if (element == null || !isVisualTimelineElement(element)) {
       return;
     }
+    const render = rendererFor(renderers, element);
+    if (render == null) {
+      return;
+    }
     renderElement(
       into,
       elementId,
       element,
       timeInMs,
       false,
-      renderers[element.filetype] as ElementRenderFunction<typeof element>,
+      render,
       isolatedContext,
     );
   };
@@ -203,7 +237,7 @@ function paint(
     if (plan != null && fx != null) {
       const transition = plan.transitions.get(elementId);
       if (transition != null) {
-        const preset = fx.presetOf(transition.element.presetId);
+        const preset = fx.presetOf(transition.element);
         if (preset != null) {
           fx.compositor.drawTransition(
             ctx,
@@ -223,7 +257,7 @@ function paint(
 
       const effect = plan.effects.get(elementId);
       if (effect != null) {
-        const preset = fx.presetOf(effect.element.presetId);
+        const preset = fx.presetOf(effect.element);
         if (preset != null) {
           fx.compositor.applyEffect(
             ctx,
@@ -261,6 +295,11 @@ function paint(
       continue;
     }
 
+    const render = rendererFor(renderers, element);
+    if (render == null) {
+      continue;
+    }
+
     renderElement(
       ctx,
       elementId,
@@ -268,7 +307,7 @@ function paint(
       timeInMs,
       outlineOptions.controlOutlineEnabled &&
         elementId === outlineOptions.activeElementId,
-      renderers[element.filetype] as ElementRenderFunction<typeof element>,
+      render,
       context,
     );
 

@@ -121,6 +121,29 @@ export function innerCursorOf(
   return Math.min(Math.max(offset, 0), Math.max(0, durationMs));
 }
 
+/**
+ * A placed template's contents and inner cursor at a project cursor, the way
+ * `renderTemplate` will draw them, or `null` when the template is not ready.
+ *
+ * For the graphic prepare step, which has to rasterise an HTML graphic inside a
+ * template before the synchronous composite reaches it, and must plan against
+ * the same ids and the same clamped inner time the renderer will use.
+ */
+export function templateCompositionAt(
+  elementId: string,
+  element: TemplateElementType,
+  timelineCursor: number,
+): { elements: Timeline; cursor: number } | null {
+  const data = resolveTemplate(element.templateId);
+  if (data == null) {
+    return null;
+  }
+  return {
+    elements: compositionFor(data, elementId, element),
+    cursor: innerCursorOf(element, timelineCursor, data.durationMs),
+  };
+}
+
 export function renderTemplate(
   ctx: CanvasRenderingContext2D,
   elementId: string,

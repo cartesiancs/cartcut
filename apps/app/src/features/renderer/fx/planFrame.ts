@@ -32,6 +32,7 @@ import { isTimeInRange } from "../../../utils/time";
 import { spanOf } from "../../timeline/geometry";
 import { frameStartMs } from "../../timeline/frames";
 import { progressOf, windowOf } from "../../timeline/transitionGeometry";
+import type { ProgramHolder } from "../../fx/resolvePreset";
 import { effectSampleAt } from "./effectSample";
 
 /** How a preset wants to be executed. `null` when it is not installed. */
@@ -129,7 +130,7 @@ export type PlanFrameInput = {
    * and the frame renders as though it were not there, which is the
    * pass-through behaviour the whole feature promises.
    */
-  modeOf: (presetId: string) => PresetMode | null;
+  modeOf: (element: ProgramHolder) => PresetMode | null;
 };
 
 /**
@@ -179,7 +180,7 @@ export function planFrame(input: PlanFrameInput): FramePlan {
       if (from == null || to == null) {
         continue;
       }
-      if (modeOf(element.presetId) == null) {
+      if (modeOf(element) == null) {
         // Preset not installed. The clips still draw normally through the
         // ordinary path — a missing transition degrades to a cut, which is the
         // edit that was there before anyone added one.
@@ -208,7 +209,7 @@ export function planFrame(input: PlanFrameInput): FramePlan {
     }
 
     if (element.filetype === "effect") {
-      const mode = modeOf(element.presetId);
+      const mode = modeOf(element);
       if (mode == null) {
         continue;
       }

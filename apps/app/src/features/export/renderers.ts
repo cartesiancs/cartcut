@@ -22,6 +22,7 @@ import { renderGif } from "../renderer/gif";
 import { renderText } from "../renderer/text";
 import { renderShape } from "../renderer/shape";
 import { renderTemplate } from "../renderer/template";
+import { renderGraphic } from "../renderer/graphic";
 import type { TimelineRenderers } from "../renderer/timeline";
 
 export const exportElementRenderers: TimelineRenderers = {
@@ -36,4 +37,7 @@ export const exportElementRenderers: TimelineRenderers = {
   // by `renderVideoWithWait` here and by `renderVideoWithoutWait` in the
   // preview, exactly as a top-level clip is.
   template: renderTemplate,
+  // Synchronous like the rest: a GLSL graphic draws on the spot, an HTML one
+  // draws the raster `prepareGraphics` made for this frame before the composite.
+  graphic: renderGraphic,
 };

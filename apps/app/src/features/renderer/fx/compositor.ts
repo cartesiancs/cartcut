@@ -33,6 +33,8 @@
  * degrades to a pass-through and reports once.
  */
 
+import { BoundedCache } from "../lut/boundedCache";
+import { isUniformParam } from "../../fx/presetTypes";
 import type {
   FxParamValues,
   FxPreset,
@@ -103,8 +105,22 @@ function geometryFor(preset: FxPreset): Geometry {
   return quadGeometry();
 }
 
+/**
+ * How many inline programs keep a compiled program each.
+ *
+ * An installed preset compiles once and is kept for the life of the compositor:
+ * the set is small and fixed. An inline one is keyed by its content hash, so an
+ * agent iterating on a shader mints a new key on every edit, and an unbounded
+ * map would hold a GL program for each draft until the app quit.
+ */
+export const INLINE_PROGRAM_CAPACITY = 64;
+
 export class FxCompositor {
   private programs = new Map<string, FxProgram>();
+  private inlinePrograms = new BoundedCache<string, FxProgram>(
+    INLINE_PROGRAM_CAPACITY,
+    (_key, program) => program.dispose(),
+  );
   private textures = new Map<string, WebGLTexture | null>();
   private reported = new Set<string>();
 
@@ -210,7 +226,8 @@ export class FxCompositor {
     const name = sourceName ?? preset.render.source;
     const key = preset.id + "|" + name;
 
-    const cached = this.programs.get(key);
+    const inline = preset.origin === "inline";
+    const cached = inline ? this.inlinePrograms.get(key) : this.programs.get(key);
     if (cached != null) {
       return cached.ok ? cached : null;
     }
@@ -245,7 +262,11 @@ export class FxCompositor {
       samplers,
     });
 
-    this.programs.set(key, program);
+    if (inline) {
+      this.inlinePrograms.set(key, program);
+    } else {
+      this.programs.set(key, program);
+    }
 
     if (!program.ok) {
       this.reportOnce(
@@ -336,6 +357,9 @@ export class FxCompositor {
   ): void {
     const gl = this.gl;
     for (const param of preset.params) {
+      if (!isUniformParam(param)) {
+        continue;
+      }
       const location = program.uniform(param.uniform);
       if (location == null) {
         // Declared but unused, so the compiler removed it. Not an error.
@@ -902,6 +926,7 @@ export class FxCompositor {
       program.dispose();
     }
     this.programs.clear();
+    this.inlinePrograms.clear();
     this.blit?.dispose();
     this.blit = null;
     this.lut?.dispose();

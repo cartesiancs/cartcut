@@ -10,6 +10,8 @@ import { renderVideoWithWait } from "@app/features/renderer/video";
 import { renderGif } from "@app/features/renderer/gif";
 import { renderText } from "@app/features/renderer/text";
 import { renderShape } from "@app/features/renderer/shape";
+import { renderTemplate } from "@app/features/renderer/template";
+import { renderGraphic } from "@app/features/renderer/graphic";
 import type { TimelineRenderers } from "@app/features/renderer/timeline";
 
 /**
@@ -22,12 +24,20 @@ import type { TimelineRenderers } from "@app/features/renderer/timeline";
  * progress alongside each frame rather than through the progress modal.
  */
 
+/**
+ * `template` and `graphic` draw nothing here: this window installs neither the
+ * template resolver nor the graphic runtime, and both answer an uninstalled
+ * lookup with an empty picture. They are listed so the table satisfies
+ * `TimelineRenderers` and a project holding one exports the rest of its frame.
+ */
 const elementRenderers: TimelineRenderers = {
   image: renderImage,
   video: renderVideoWithWait,
   gif: renderGif,
   text: renderText,
   shape: renderShape,
+  template: renderTemplate,
+  graphic: renderGraphic,
 };
 
 export class RenderController implements ReactiveController {

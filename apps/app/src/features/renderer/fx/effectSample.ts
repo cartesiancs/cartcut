@@ -32,7 +32,7 @@ export type EffectSample = {
 };
 
 /** The track under `property`, but only while it is switched on. */
-function activeTrack(element: EffectElementType, property: string): any {
+function activeTrack(element: { animation?: unknown }, property: string): any {
   const track = (element as any)?.animation?.[property];
   return track != null && track.isActivate === true ? track : null;
 }
@@ -64,7 +64,6 @@ export function effectSampleAt(
   element: EffectElementType,
   cursor: number,
 ): EffectSample {
-  const animation = (element as any)?.animation;
   const startTime = element.startTime;
 
   const intensityTrack = activeTrack(element, "intensity");
@@ -75,38 +74,56 @@ export function effectSampleAt(
           sampleTrack(intensityTrack, startTime, cursor, element.intensity),
         );
 
-  let params = element.params;
-  if (animation != null) {
-    for (const property of Object.keys(animation)) {
-      if (!isFxParamTrack(property)) {
-        continue;
-      }
-      const track = activeTrack(element, property);
-      if (track == null) {
-        continue;
-      }
-      const key = fxParamKeyOf(property);
-      const fallback = element.params?.[key];
-      if (typeof fallback !== "number") {
-        // The parameter has gone, or was never a number. `carriesTrack` says
-        // this track is an orphan and `normalizeAnimation` will collect it on
-        // the next ingress; until then it drives nothing, which is the same
-        // thing a missing preset does.
-        continue;
-      }
-      const value = sampleTrack(track, startTime, cursor, fallback);
-      if (value === fallback) {
-        continue;
-      }
-      // Copied at the first substitution and not before, so an effect with
-      // tracks that all happen to sit on their static value this frame still
-      // hands the compositor the element's own object.
-      if (params === element.params) {
-        params = { ...element.params };
-      }
-      params[key] = value;
-    }
-  }
+  return { intensity, params: sampleFxParams(element, cursor) };
+}
 
-  return { intensity, params };
+/**
+ * A clip's preset parameters at `cursor`, with every live `fx:` track
+ * substituted. Shared by the effect and the graphic, which store parameters the
+ * same way.
+ *
+ * Answers the element's own `params` **by identity** when nothing is animated,
+ * or every track sits on its static value this frame, so the common path
+ * allocates nothing and a renderer caching on the object keeps its cache.
+ */
+export function sampleFxParams(
+  element: { startTime: number; params: FxParams; animation?: unknown },
+  cursor: number,
+): FxParams {
+  const animation = (element as any)?.animation;
+  const startTime = element.startTime;
+  let params = element.params;
+  if (animation == null) {
+    return params;
+  }
+  for (const property of Object.keys(animation)) {
+    if (!isFxParamTrack(property)) {
+      continue;
+    }
+    const track = activeTrack(element, property);
+    if (track == null) {
+      continue;
+    }
+    const key = fxParamKeyOf(property);
+    const fallback = element.params?.[key];
+    if (typeof fallback !== "number") {
+      // The parameter has gone, or was never a number. `carriesTrack` says
+      // this track is an orphan and `normalizeAnimation` will collect it on
+      // the next ingress; until then it drives nothing, which is the same
+      // thing a missing preset does.
+      continue;
+    }
+    const value = sampleTrack(track, startTime, cursor, fallback);
+    if (value === fallback) {
+      continue;
+    }
+    // Copied at the first substitution and not before, so a clip with tracks
+    // that all happen to sit on their static value this frame still hands
+    // the renderer its own object.
+    if (params === element.params) {
+      params = { ...element.params };
+    }
+    params[key] = value;
+  }
+  return params;
 }

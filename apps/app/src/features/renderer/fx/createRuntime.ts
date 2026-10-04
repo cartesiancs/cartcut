@@ -14,6 +14,7 @@
 
 import type { EffectElementType } from "../../../@types/timeline";
 import { presetById } from "../../fx/presetRegistry";
+import { resolvePreset, type ProgramHolder } from "../../fx/resolvePreset";
 import { lutFor } from "../../lut/lutRegistry";
 import type { FxPreset } from "../../fx/presetTypes";
 import { FxCompositor } from "./compositor";
@@ -30,7 +31,11 @@ import type { FxRuntime } from "./runtime";
  * its parameters are untouched in the document, so saving loses nothing.
  */
 export function modeOfPreset(presetId: string): PresetMode | null {
-  const preset = presetById(presetId);
+  return modeOfResolved(presetById(presetId));
+}
+
+/** The same question of a preset already in hand. */
+export function modeOfResolved(preset: FxPreset | null): PresetMode | null {
   if (preset == null) {
     return null;
   }
@@ -38,6 +43,16 @@ export function modeOfPreset(presetId: string): PresetMode | null {
     return "overlay";
   }
   return preset.render.type === "lut" ? "lut" : "shader";
+}
+
+/**
+ * How an element's preset runs, inline programs included.
+ *
+ * `modeOfPreset` stays for callers that hold an installed id and no element,
+ * such as the preset browser's tiles.
+ */
+export function modeOfElement(element: ProgramHolder): PresetMode | null {
+  return modeOfResolved(resolvePreset(element));
 }
 
 let previewGl: WebGLRenderingContext | null = null;
@@ -78,8 +93,8 @@ function runtimeWith(
   return {
     compositor: compositor ?? new FxCompositor(gl, { blocking }),
     fps,
-    modeOf: modeOfPreset,
-    presetOf: (presetId: string): FxPreset | null => presetById(presetId),
+    modeOf: modeOfElement,
+    presetOf: resolvePreset,
     // Synchronous, and `null` until the table has been read off disk. The
     // preview repaints and picks it up on the next frame; an export cannot
     // wait like that, which is why `renderTimeline.ts` preloads first.
@@ -89,7 +104,7 @@ function runtimeWith(
       element: EffectElementType,
       timeInMs: number,
     ) => {
-      const preset = presetById(element.presetId);
+      const preset = resolvePreset(element);
       if (preset == null) {
         return null;
       }

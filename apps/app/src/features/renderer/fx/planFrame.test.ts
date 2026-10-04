@@ -48,7 +48,7 @@ const noneInstalled = () => null;
 function plan(
   doc: TimelineDocument,
   timeInMs: number,
-  modeOf: (presetId: string) => PresetMode | null = allShaders,
+  modeOf: (element: { presetId: string }) => PresetMode | null = allShaders,
 ) {
   return planFrame({ elements: doc.elements, timeInMs, fps: 60, modeOf });
 }
@@ -190,7 +190,7 @@ describe("effects", () => {
     let mixed = addEffect(baseDoc(), "fx1", "overlay-preset", 0, 2000, "e0");
     mixed = addEffect(mixed, "fx2", "lut-preset", 0, 2000, "e1");
 
-    const result = plan(mixed, 1000, (id) =>
+    const result = plan(mixed, 1000, ({ presetId: id }) =>
       id === "overlay-preset" ? "overlay" : "lut",
     );
     expect(result.effects.size).toBe(2);
@@ -207,7 +207,7 @@ describe("effects", () => {
     let mixed = addEffect(baseDoc(), "fx1", "overlay-preset", 0, 2000, "e0");
     mixed = addEffect(mixed, "fx2", "shader-preset", 0, 2000, "e1");
 
-    const result = plan(mixed, 1000, (id) =>
+    const result = plan(mixed, 1000, ({ presetId: id }) =>
       id === "overlay-preset" ? "overlay" : "shader",
     );
     expect(result.effects.size).toBe(2);

@@ -12,6 +12,7 @@
 
 import type { EffectElementType } from "../../../@types/timeline";
 import type { FxPreset } from "../../fx/presetTypes";
+import type { ProgramHolder } from "../../fx/resolvePreset";
 import type { LutData } from "../../lut/lutData";
 import type { FxCompositor } from "./compositor";
 import type { PresetMode } from "./planFrame";
@@ -26,10 +27,15 @@ export type FxRuntime = {
    * produce the same number. See `transitionGeometry.ts#progressOf`.
    */
   fps: number;
-  /** How a preset runs, or `null` when it is not installed. */
-  modeOf: (presetId: string) => PresetMode | null;
-  /** The preset itself, or `null` when it is not installed. */
-  presetOf: (presetId: string) => FxPreset | null;
+  /**
+   * How an element's preset runs, or `null` when there is none to run.
+   *
+   * Takes the element rather than its id: an inline program is on the element,
+   * and an id alone cannot find it. See `fx/resolvePreset.ts`.
+   */
+  modeOf: (element: ProgramHolder) => PresetMode | null;
+  /** The element's preset itself, or `null` when there is none to run. */
+  presetOf: (element: ProgramHolder) => FxPreset | null;
   /**
    * The colour table behind a LUT preset, or `null` when it is not ready.
    *
