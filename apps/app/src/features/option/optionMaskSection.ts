@@ -1,9 +1,9 @@
 /**
  * The Mask pane of a clip's inspector.
  *
- * One component included by all four inspectors that have one, rather than four
+ * One component included by all five inspectors that have one, rather than five
  * copies of the same eleven controls — which is what `Maskable` being a mixin
- * over the same five types as `Blendable` and `Gradable` means in the UI, and
+ * over the same six types as `Blendable` and `Gradable` means in the UI, and
  * exactly the argument `optionLutSection` makes for itself.
  *
  * ## Words and icons, no prose

@@ -33,7 +33,9 @@ import {
 } from "../timeline/effectOps";
 import { addKeyframe } from "../animation/keyframeOps";
 import { projectBakeHz } from "../editor/frameRate";
-import { defaultParamsFor, presetById, presetsOfKind } from "../fx/presetRegistry";
+import { defaultParamsFor, presetsOfKind } from "../fx/presetRegistry";
+import { resolvePreset } from "../fx/resolvePreset";
+import "./optionProgramSection";
 import { renderParamControls } from "../fx/fxParamControls";
 import { GestureCommit } from "./gestureCommit";
 import { scrubOn } from "../input/inputScrub";
@@ -249,8 +251,9 @@ export class OptionEffect extends LitElement {
       return html``;
     }
 
-    const preset = presetById(effect.presetId);
+    const preset = resolvePreset(effect);
     const installed = presetsOfKind("effect");
+    const inline = effect.program != null;
     const isOverlay = preset?.render.type === "overlay";
 
     return html`
@@ -267,11 +270,17 @@ export class OptionEffect extends LitElement {
             ${
               // A preset that is not installed still appears, selected, so the
               // dropdown does not silently show a different one as current.
-              preset == null
+              // An inline program is never in the installed list either, and is
+              // shown by its own name.
+              inline
                 ? html`<option value=${effect.presetId} selected>
-                    ${effect.presetId} (missing)
+                    ${effect.program?.manifest?.name ?? "Inline"} (inline)
                   </option>`
-                : ""
+                : preset == null
+                  ? html`<option value=${effect.presetId} selected>
+                      ${effect.presetId} (missing)
+                    </option>`
+                  : ""
             }
             ${installed.map(
               (entry) =>
@@ -292,7 +301,7 @@ export class OptionEffect extends LitElement {
       ${section({
         title: "Settings",
         body: html`
-          ${preset == null
+          ${preset == null && !inline
             ? html`<div class="opt-hint" style="margin-bottom: 12px;">
                 <span class="material-symbols-outlined opt-hint-icon"
                   >warning</span
@@ -376,6 +385,12 @@ export class OptionEffect extends LitElement {
             : ""}
         `,
       })}
+      ${inline
+        ? html`<option-program-section
+            .elementId=${this.elementId}
+            .program=${effect.program}
+          ></option-program-section>`
+        : ""}
     `;
   }
 }

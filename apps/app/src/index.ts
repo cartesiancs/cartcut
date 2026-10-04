@@ -77,6 +77,7 @@ import "./features/option/optionGroupElement";
 import "./features/option/optionTemplate";
 import "./features/option/optionEffect";
 import "./features/option/optionTransition";
+import "./features/option/optionGraphic";
 
 import "./features/input/inputText";
 // The title bar's export trigger. The settings it exports with live in

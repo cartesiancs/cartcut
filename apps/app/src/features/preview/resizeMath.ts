@@ -241,7 +241,9 @@ function constrainedSize(
  * a text-wrapping width rather than a picture; a group for the same reason, its
  * `width`/`height` being an invisible frame whose job is to sit where the user
  * wants the pivot; and a shape, because a rectangle that can only scale is not
- * a rectangle tool.
+ * a rectangle tool. A graphic too: a reflowing HTML layout's box is a page it
+ * lays out into, like a caption's, and a generated background fills whatever
+ * box it is given.
  *
  * Shift then **inverts** that default rather than always meaning "lock". A
  * caption or a shape is free and Shift holds its proportions; a photo is locked
@@ -249,7 +251,10 @@ function constrainedSize(
  */
 export function constrainsAspect(filetype: string, shiftKey: boolean): boolean {
   const freeByDefault =
-    filetype === "text" || filetype === "group" || filetype === "shape";
+    filetype === "text" ||
+    filetype === "group" ||
+    filetype === "shape" ||
+    filetype === "graphic";
   return freeByDefault ? shiftKey : !shiftKey;
 }
 

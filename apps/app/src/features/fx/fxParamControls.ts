@@ -22,7 +22,12 @@
 
 import { html, type TemplateResult } from "lit";
 import type { AnimatableProperty } from "../../@types/timeline";
-import type { FxParamSpec, FxParamValues } from "./presetTypes";
+import type {
+  FxParamSpec,
+  FxParamValues,
+  HtmlParamSpec,
+  PresetParamSpec,
+} from "./presetTypes";
 import { scrubOn } from "../input/inputScrub";
 import { sweepSpec } from "../input/numberScrub";
 import "../option/controlKeyframeNav";
@@ -46,11 +51,14 @@ export type ParamChange = (key: string, value: number | string | boolean | numbe
 export type ParamKeyframeHost = {
   elementId: string;
   /** The track name for a parameter, or `null` when it may not carry one. */
-  trackFor: (param: FxParamSpec) => AnimatableProperty | null;
+  trackFor: (param: PresetParamSpec) => AnimatableProperty | null;
 };
 
+/** A typeface a `font` parameter can be set to, as the panel lists it. */
+export type FontChoice = { value: string; label: string };
+
 export type ParamControlOptions = {
-  params: FxParamSpec[];
+  params: PresetParamSpec[];
   values: FxParamValues;
   /** Called continuously while a slider moves; coalesce these. */
   onScrub: ParamChange;
@@ -58,6 +66,10 @@ export type ParamControlOptions = {
   onCommit: ParamChange;
   /** Absent on a panel whose parameters cannot be animated. */
   keyframe?: ParamKeyframeHost;
+  /** What a `font` parameter offers. The panel loads it; absent shows the value alone. */
+  fonts?: FontChoice[];
+  /** Asks the user for a picture, for an `image` parameter. `null` when cancelled. */
+  pickImage?: () => Promise<string | null>;
 };
 
 /** The value to show, falling back to the preset's default. */
@@ -262,7 +274,144 @@ function pointControl(
   `;
 }
 
-/** One control per declared parameter, in manifest order. */
+function stringValueOf(param: HtmlParamSpec, values: FxParamValues): string {
+  const stored = values[param.key];
+  return typeof stored === "string" ? stored : param.default;
+}
+
+/**
+ * Words the program shows. Typed changes scrub, so a sentence is one undo step
+ * when the field is left; nothing is sent while an IME is composing, or a
+ * Korean syllable would be committed one jamo at a time.
+ */
+function textControl(
+  param: Extract<HtmlParamSpec, { type: "text" }>,
+  values: FxParamValues,
+  opts: ParamControlOptions,
+): TemplateResult {
+  const value = stringValueOf(param, values);
+  const limit = Math.min(5000, param.maxLength ?? 500);
+  const onInput = (e: Event) => {
+    if ((e as InputEvent).isComposing) {
+      return;
+    }
+    opts.onScrub(param.key, (e.target as HTMLInputElement).value.slice(0, limit));
+  };
+  const onEnd = (e: Event) =>
+    opts.onScrub(param.key, (e.target as HTMLInputElement).value.slice(0, limit));
+  const onChange = (e: Event) =>
+    opts.onCommit(param.key, (e.target as HTMLInputElement).value.slice(0, limit));
+  return html`
+    <div class="opt-field">
+      <div class="opt-row">
+        <label class="opt-label" title=${param.label}>${param.label}</label>
+      </div>
+      ${param.multiline === true
+        ? html`<textarea
+            class="opt-textarea"
+            rows="3"
+            style="margin-top: 4px;"
+            aria-label=${param.label}
+            maxlength=${limit}
+            .value=${value}
+            @input=${onInput}
+            @compositionend=${onEnd}
+            @change=${onChange}
+          ></textarea>`
+        : html`<input
+            type="text"
+            class="opt-text-input"
+            style="width: 100%; margin-top: 4px;"
+            aria-label=${param.label}
+            maxlength=${limit}
+            .value=${value}
+            @input=${onInput}
+            @compositionend=${onEnd}
+            @change=${onChange}
+          />`}
+    </div>
+  `;
+}
+
+/** A typeface, from the list the panel loaded. The current value is always offered. */
+function fontControl(
+  param: Extract<HtmlParamSpec, { type: "font" }>,
+  values: FxParamValues,
+  opts: ParamControlOptions,
+): TemplateResult {
+  const value = stringValueOf(param, values);
+  const choices = opts.fonts ?? [];
+  const listed = choices.some((choice) => choice.value === value);
+  const label = (v: string) =>
+    v === "default" ? "Default" : (v.split(/[\\/:]/).pop() ?? v);
+  return html`
+    <div class="opt-field">
+      <div class="opt-row">
+        <label class="opt-label" title=${param.label}>${param.label}</label>
+        <select
+          class="opt-select"
+          style="width: 60%;"
+          aria-label=${param.label}
+          .value=${value}
+          @change=${(e: Event) =>
+            opts.onCommit(param.key, (e.target as HTMLSelectElement).value)}
+        >
+          ${listed ? "" : html`<option value=${value} selected>${label(value)}</option>`}
+          ${choices.map(
+            (choice) =>
+              html`<option value=${choice.value} ?selected=${choice.value === value}>
+                ${choice.label}
+              </option>`,
+          )}
+        </select>
+      </div>
+    </div>
+  `;
+}
+
+/** A picture: its file name, a button to choose another, and one to clear it. */
+function imageControl(
+  param: Extract<HtmlParamSpec, { type: "image" }>,
+  values: FxParamValues,
+  opts: ParamControlOptions,
+): TemplateResult {
+  const value = stringValueOf(param, values);
+  const name = value === "" ? "None" : (value.split(/[\\/]/).pop() ?? value);
+  return html`
+    <div class="opt-field">
+      <div class="opt-row">
+        <label class="opt-label" title=${param.label}>${param.label}</label>
+        <span class="opt-value" title=${value}>${name}</span>
+        ${opts.pickImage == null
+          ? ""
+          : iconButton({
+              icon: "image",
+              title: "Choose a picture",
+              onClick: () => {
+                void opts.pickImage?.().then((path) => {
+                  if (path != null && path !== "") {
+                    opts.onCommit(param.key, path);
+                  }
+                });
+              },
+            })}
+        ${value === ""
+          ? ""
+          : iconButton({
+              icon: "close",
+              title: "Clear",
+              onClick: () => opts.onCommit(param.key, ""),
+            })}
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * One control per declared parameter, in manifest order. Every type is named:
+ * the fallback used to be the point editor, so a type added without a case
+ * here rendered as two number boxes and no error anywhere.
+ */
 export function renderParamControls(
   opts: ParamControlOptions,
 ): TemplateResult[] {
@@ -277,8 +426,15 @@ export function renderParamControls(
       case "select":
         return selectControl(param, opts.values, opts);
       case "point":
-      default:
         return pointControl(param, opts.values, opts);
+      case "text":
+        return textControl(param, opts.values, opts);
+      case "font":
+        return fontControl(param, opts.values, opts);
+      case "image":
+        return imageControl(param, opts.values, opts);
+      default:
+        return html``;
     }
   });
 }

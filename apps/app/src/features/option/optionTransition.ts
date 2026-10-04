@@ -40,9 +40,10 @@ import {
 } from "../timeline/transitionGeometry";
 import {
   defaultParamsFor,
-  presetById,
   presetsOfKind,
 } from "../fx/presetRegistry";
+import { resolvePreset } from "../fx/resolvePreset";
+import "./optionProgramSection";
 import { renderParamControls } from "../fx/fxParamControls";
 import { GestureCommit } from "./gestureCommit";
 import { beginInputScrub } from "../input/inputScrub";
@@ -212,8 +213,9 @@ export class OptionTransition extends LitElement {
       return html``;
     }
 
-    const preset = presetById(transition.presetId);
+    const preset = resolvePreset(transition);
     const installed = presetsOfKind("transition");
+    const inline = transition.program != null;
     const max = this.maxMs(transition);
     const finiteMax = Number.isFinite(max) ? max : 10_000;
     const clamped =
@@ -235,11 +237,15 @@ export class OptionTransition extends LitElement {
             ${
               // A preset that is not installed still appears, selected, so the
               // dropdown does not silently show a different one as current.
-              preset == null
+              inline
                 ? html`<option value=${transition.presetId} selected>
-                    ${transition.presetId} (missing)
+                    ${transition.program?.manifest?.name ?? "Inline"} (inline)
                   </option>`
-                : ""
+                : preset == null
+                  ? html`<option value=${transition.presetId} selected>
+                      ${transition.presetId} (missing)
+                    </option>`
+                  : ""
             }
             ${installed.map(
               (entry) =>
@@ -260,7 +266,7 @@ export class OptionTransition extends LitElement {
       ${section({
         title: "Settings",
         body: html`
-          ${preset == null
+          ${preset == null && !inline
             ? html`<div class="opt-hint" style="margin-bottom: 12px;">
                 <span class="material-symbols-outlined opt-hint-icon"
                   >warning</span
@@ -358,6 +364,12 @@ export class OptionTransition extends LitElement {
             : ""}
         `,
       })}
+      ${inline
+        ? html`<option-program-section
+            .elementId=${this.elementId}
+            .program=${transition.program}
+          ></option-program-section>`
+        : ""}
 
       <button
         type="button"

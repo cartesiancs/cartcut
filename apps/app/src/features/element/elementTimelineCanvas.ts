@@ -44,6 +44,8 @@ import {
   setTransitionDuration,
 } from "../timeline/transitionOps";
 import { addEffect } from "../timeline/effectOps";
+import { addGraphic } from "../timeline/graphicOps";
+import { newGraphicOptions } from "../graphic/graphicPlacement";
 import { isGradable, setClipLut } from "../timeline/lutOps";
 import { mirrorToggleTarget, type MirrorAxis } from "../timeline/mirrorOps";
 import { isReversed, isReversible } from "../timeline/reverseOps";
@@ -67,6 +69,7 @@ import {
   presetsOfKind,
   subscribePresets,
 } from "../fx/presetRegistry";
+import { resolvePreset } from "../fx/resolvePreset";
 import {
   RULER_OFFSET,
   clipsInRect,
@@ -286,7 +289,7 @@ function labelForTrack(
   const key = fxParamKeyOf(property);
   const param =
     element.filetype === "effect"
-      ? presetById(element.presetId)?.params.find((p) => p.key === key)
+      ? resolvePreset(element)?.params.find((p) => p.key === key)
       : undefined;
   if (param != null) {
     return param.type === "number" ? { label: param.label, icon: "tune" } : null;
@@ -310,7 +313,7 @@ const MASK_ANIMATION_PROPERTIES = new Set<string>(MASK_ANIMATABLE_PROPERTIES);
  */
 function labelForClip(element: TimelineElement): string {
   if (element.filetype === "effect") {
-    return presetById(element.presetId)?.name ?? clipLabel(element);
+    return resolvePreset(element)?.name ?? clipLabel(element);
   }
   return clipLabel(element);
 }
@@ -2345,6 +2348,28 @@ export class elementTimelineCanvas extends LitElement {
       }
       this.commit((doc) => setClipLut(doc, hit.elementId, presetId));
       selectionStore.getState().setIds([hit.elementId]);
+      return;
+    }
+
+    if (preset.kind === "graphic") {
+      // On the row under the pointer when it is the right kind and free there;
+      // `placeNewElement` decides otherwise, as for any new clip.
+      const size = renderOptionStore.getState().options?.previewSize;
+      const project = { w: size?.w ?? 1920, h: size?.h ?? 1080 };
+      const id = uuidv4();
+      this.commit((doc) =>
+        addGraphic(
+          doc,
+          id,
+          uuidv4(),
+          newGraphicOptions(preset, startMs, project, trackAtY(this.layout, y) ?? undefined),
+        ),
+      );
+      if (this.currentDoc().elements[id] != null) {
+        this.targetId = [id];
+        this.showSideOption(id);
+      }
+      this.drawCanvas();
       return;
     }
 

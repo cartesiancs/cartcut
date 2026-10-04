@@ -771,6 +771,7 @@ export class Control extends LitElement {
           -->
           <option-effect></option-effect>
           <option-transition></option-transition>
+          <option-graphic></option-graphic>
         </option-group>
 
         <!-- Extension sections, under the app's own panels and resolved from
