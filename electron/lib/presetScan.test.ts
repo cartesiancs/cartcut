@@ -21,6 +21,7 @@ import * as fsp from "fs/promises";
 import os from "os";
 import {
   ASSET_EXTENSIONS,
+  TEXT_SOURCE_EXTENSIONS,
   MAX_SHADER_BYTES,
   SHADER_EXTENSIONS,
   readPresetDir,
@@ -29,6 +30,7 @@ import {
 import {
   ASSET_EXTENSIONS as RENDERER_ASSET_EXTENSIONS,
   SHADER_EXTENSIONS as RENDERER_SHADER_EXTENSIONS,
+  TEXT_SOURCE_EXTENSIONS as RENDERER_TEXT_SOURCE_EXTENSIONS,
   validatePreset,
 } from "../../apps/app/src/features/fx/presetValidate";
 
@@ -41,6 +43,9 @@ describe("the hand-copied extension lists", () => {
     // reported as "not present" with the file sitting right there.
     expect([...SHADER_EXTENSIONS].sort()).toEqual(
       [...RENDERER_SHADER_EXTENSIONS].sort(),
+    );
+    expect([...TEXT_SOURCE_EXTENSIONS].sort()).toEqual(
+      [...RENDERER_TEXT_SOURCE_EXTENSIONS].sort(),
     );
     expect([...ASSET_EXTENSIONS].sort()).toEqual(
       [...RENDERER_ASSET_EXTENSIONS].sort(),

@@ -36,6 +36,14 @@ export type PresetOrigin = "builtin" | "user" | "extension";
 export const SHADER_EXTENSIONS = [".frag", ".vert", ".glsl"];
 
 /**
+ * An HTML graphic's markup and styles, read as text the same way and under the
+ * same size cap. Must match `presetValidate.ts`. `.svg` is here rather than an
+ * asset because a graphic inlines its vectors into the markup, where the
+ * sanitiser sees them.
+ */
+export const TEXT_SOURCE_EXTENSIONS = [".html", ".css", ".svg"];
+
+/**
  * Exposed as absolute paths. Must match `presetValidate.ts`.
  *
  * `.cube` and `.3dl` are here rather than in `SHADER_EXTENSIONS` even though
@@ -57,6 +65,11 @@ export const ASSET_EXTENSIONS = [
   ".mov",
   ".cube",
   ".3dl",
+  // A graphic's own typeface, registered by the host from the preset folder.
+  ".woff2",
+  ".woff",
+  ".ttf",
+  ".otf",
 ];
 
 /**
@@ -142,7 +155,7 @@ export async function readPresetDir(
 
       const extension = path.extname(entry.name).toLowerCase();
 
-      if (SHADER_EXTENSIONS.includes(extension)) {
+      if (SHADER_EXTENSIONS.includes(extension) || TEXT_SOURCE_EXTENSIONS.includes(extension)) {
         try {
           const stat = await fsp.stat(full);
           if (stat.size > MAX_SHADER_BYTES) {

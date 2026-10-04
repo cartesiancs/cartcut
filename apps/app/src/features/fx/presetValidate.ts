@@ -25,6 +25,8 @@
  * `environment: "node"` and is tested directly.
  */
 
+import { INLINE_PRESET_PREFIX } from "../../@types/timeline";
+import { hashProgram, inlinePresetId } from "./programHash";
 import {
   declaredUniforms,
   declaresEntryPoint,
@@ -35,10 +37,13 @@ import {
 import {
   GLSL_TYPE_FOR_PARAM,
   MAX_PASSES,
+  TEXT_BINDING_FIELDS,
   categoriesFor,
+  isUniformParam,
 } from "./presetTypes";
 import type {
   FxCategory,
+  FxHtmlRender,
   FxKind,
   FxParamSpec,
   FxPassSpec,
@@ -49,6 +54,7 @@ import type {
   MeshSpec,
   PrecomputeKind,
   PrecomputeSpec,
+  PresetParamSpec,
   RawPresetPayload,
 } from "./presetTypes";
 
@@ -56,7 +62,7 @@ import type {
 export const PRESET_SCHEMA_VERSION = 1;
 
 /** Everything a `kind` may say. See `presetTypes.ts#FxKind`. */
-const KNOWN_KINDS: FxKind[] = ["effect", "transition", "lut"];
+const KNOWN_KINDS: FxKind[] = ["effect", "transition", "lut", "graphic"];
 
 /** Analyses the app can actually run. See `presetTypes.ts#PrecomputeKind`. */
 const KNOWN_PRECOMPUTE: PrecomputeKind[] = ["luma", "opticalFlow", "edge"];
@@ -65,6 +71,44 @@ const KNOWN_PRECOMPUTE: PrecomputeKind[] = ["luma", "opticalFlow", "edge"];
 const IMPLEMENTED_PRECOMPUTE: PrecomputeKind[] = ["luma"];
 
 const PARAM_TYPES = ["number", "color", "bool", "select", "point"];
+
+/** The extra parameter kinds an HTML graphic takes, which bind no uniform. */
+const HTML_PARAM_TYPES = ["text", "font", "image"];
+
+/** Extensions read as text for an HTML graphic. Must match `presetScan.ts`. */
+export const TEXT_SOURCE_EXTENSIONS = [".html", ".css", ".svg"];
+
+/**
+ * An HTML parameter's key becomes the CSS variable `--<key>`, so it must be a
+ * CSS identifier, and it may not shadow a variable the host itself sets.
+ */
+const CSS_KEY = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+const HOST_VARIABLES = [
+  "t",
+  "progress",
+  "dur",
+  "w",
+  "h",
+  "rand",
+  "from-center",
+  "char-index",
+  "char-count",
+  "char-in-word",
+  "word-index",
+  "word-count",
+  "line-index",
+  "line-count",
+  "fit",
+];
+
+/** A font parameter's value: the default face, a bundled one, or an absolute path. */
+const FONT_VALUE = /^(default|bundled:[A-Za-z0-9][A-Za-z0-9._-]*\.(ttf|otf|woff2?))$/;
+function isFontValue(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    (FONT_VALUE.test(value) || value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value))
+  );
+}
 
 /** Extensions the loader reads as shader text. */
 export const SHADER_EXTENSIONS = [".frag", ".vert", ".glsl"];
@@ -81,13 +125,93 @@ export const ASSET_EXTENSIONS = [
   ".mov",
   ".cube",
   ".3dl",
+  ".woff2",
+  ".woff",
+  ".ttf",
+  ".otf",
 ];
 
 export type ValidationResult =
-  | { ok: true; preset: FxPreset }
+  | {
+      ok: true;
+      preset: FxPreset;
+      /**
+       * Things that do not stop the preset loading but that its author would
+       * want to hear: a parameter nothing reads, say. Absent when there are
+       * none, so every caller written before warnings existed is unaffected.
+       */
+      warnings?: string[];
+    }
   | { ok: false; errors: string[] };
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * The most one source of an inline program may hold, in UTF-8 bytes.
+ *
+ * The scanner's `MAX_SHADER_BYTES` for a file on disk, so a program that fits
+ * on a clip also fits in a folder when it is saved as a preset.
+ */
+export const MAX_INLINE_SOURCE_BYTES = 512 * 1024;
+
+/** And all of its sources together. The element is saved in every `.ngt`. */
+export const MAX_INLINE_TOTAL_BYTES = 1024 * 1024;
+
+function utf8Length(text: string): number {
+  return new TextEncoder().encode(text).length;
+}
+
+/**
+ * What an inline program may not use, which an installed preset may.
+ *
+ * Every one of these names a file beside the manifest, and an inline program
+ * has no folder: its media would have to be smuggled in as absolute paths that
+ * stop meaning anything on the next machine. A program that needs them is
+ * saved as a preset first (`save_program_as_preset`).
+ */
+function checkInlineRender(render: FxRenderSpec, errors: string[]): void {
+  if (render.type === "overlay" || render.type === "lut") {
+    errors.push(
+      "render.type: an inline program cannot be an " +
+        render.type +
+        "; save it as a preset to ship media with it",
+    );
+    return;
+  }
+  if (render.type !== "shader") {
+    return;
+  }
+  for (const field of ["vertex", "mesh", "textures", "precompute"] as const) {
+    if (render[field] != null) {
+      errors.push(
+        "render." +
+          field +
+          ": not available to an inline program; save it as a preset first",
+      );
+    }
+  }
+}
+
+function checkInlineSizes(
+  sources: Record<string, string>,
+  errors: string[],
+): void {
+  let total = 0;
+  for (const [name, text] of Object.entries(sources)) {
+    const bytes = utf8Length(typeof text === "string" ? text : "");
+    total += bytes;
+    if (bytes > MAX_INLINE_SOURCE_BYTES) {
+      errors.push(
+        name + ": " + bytes + " bytes, more than " + MAX_INLINE_SOURCE_BYTES,
+      );
+    }
+  }
+  if (total > MAX_INLINE_TOTAL_BYTES) {
+    errors.push(
+      "sources: " + total + " bytes together, more than " + MAX_INLINE_TOTAL_BYTES,
+    );
+  }
+}
 const GLSL_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
@@ -121,12 +245,66 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   );
 }
 
+function validateHtmlParam(
+  raw: Record<string, unknown>,
+  where: string,
+  key: string,
+  label: string,
+  errors: string[],
+): PresetParamSpec | null {
+  const value = raw.default;
+  if (raw.type === "text") {
+    const { maxLength, multiline } = raw;
+    if (
+      maxLength != null &&
+      (typeof maxLength !== "number" || !Number.isInteger(maxLength) || maxLength < 1 || maxLength > 5000)
+    ) {
+      errors.push(where + " (" + key + "): `maxLength` must be a whole number 1..5000");
+      return null;
+    }
+    const limit = typeof maxLength === "number" ? maxLength : 500;
+    if (typeof value !== "string" || value.length > limit) {
+      errors.push(where + " (" + key + "): `default` must be text of at most " + limit + " characters");
+      return null;
+    }
+    if (multiline != null && typeof multiline !== "boolean") {
+      errors.push(where + " (" + key + "): `multiline` must be true or false");
+      return null;
+    }
+    return {
+      key,
+      label,
+      type: "text",
+      default: value,
+      ...(typeof maxLength === "number" ? { maxLength } : {}),
+      ...(multiline === true ? { multiline: true } : {}),
+    };
+  }
+  if (raw.type === "font") {
+    if (!isFontValue(value)) {
+      errors.push(
+        where + " (" + key + '): `default` must be "default", "bundled:<file>" or an absolute path',
+      );
+      return null;
+    }
+    return { key, label, type: "font", default: value as string };
+  }
+  // image
+  if (typeof value !== "string") {
+    errors.push(where + " (" + key + '): `default` must be a path, or "" for none');
+    return null;
+  }
+  return { key, label, type: "image", default: value };
+}
+
 function validateParam(
   raw: unknown,
   index: number,
   reserved: readonly string[],
   errors: string[],
-): FxParamSpec | null {
+  /** HTML graphics take three more kinds, and bind no uniforms. */
+  html: boolean = false,
+): PresetParamSpec | null {
   const where = "params[" + index + "]";
 
   if (!isPlainObject(raw)) {
@@ -134,7 +312,7 @@ function validateParam(
     return null;
   }
 
-  const { key, label, uniform, type } = raw;
+  const { key, label, type } = raw;
 
   if (typeof key !== "string" || key.trim() === "") {
     errors.push(where + ": `key` must be a non-empty string");
@@ -144,17 +322,40 @@ function validateParam(
     errors.push(where + " (" + key + "): `label` must be a non-empty string");
     return null;
   }
-  if (typeof uniform !== "string" || !GLSL_IDENTIFIER.test(uniform)) {
+  if (html) {
+    if (!CSS_KEY.test(key)) {
+      errors.push(where + " (" + key + "): an html parameter's key must be a CSS name, like `title` or `accent-color`");
+      return null;
+    }
+    if (HOST_VARIABLES.includes(key)) {
+      errors.push(where + " (" + key + "): `--" + key + "` is set by the host and cannot be a parameter");
+      return null;
+    }
+    if (typeof type === "string" && HTML_PARAM_TYPES.includes(type)) {
+      return validateHtmlParam(raw, where, key, label, errors);
+    }
+  } else if (typeof type === "string" && HTML_PARAM_TYPES.includes(type)) {
+    errors.push(where + " (" + key + "): `" + type + "` is for html graphics; a shader has no uniform for it");
+    return null;
+  }
+  // An HTML parameter binds a CSS variable named after its key, not a uniform.
+  // Filling `uniform` from the key keeps the shared shape `FxParamSpec` has for
+  // the five kinds both renderers take; nothing compiles it, so it is held to
+  // the key's CSS rule above and not to GLSL's, or `accent-color` would be
+  // refused as a colour and accepted as a text.
+  const declared = html ? key : raw.uniform;
+  if (typeof declared !== "string" || (!html && !GLSL_IDENTIFIER.test(declared))) {
     errors.push(
       where + " (" + key + "): `uniform` must be a GLSL identifier",
     );
     return null;
   }
-  if (uniform.startsWith("gl_")) {
+  const uniform: string = declared;
+  if (!html && uniform.startsWith("gl_")) {
     errors.push(where + " (" + key + "): `gl_` is reserved by GLSL");
     return null;
   }
-  if (reserved.includes(uniform)) {
+  if (!html && reserved.includes(uniform)) {
     errors.push(
       where +
         " (" +
@@ -171,7 +372,7 @@ function validateParam(
         " (" +
         key +
         "): `type` must be one of " +
-        PARAM_TYPES.join(", "),
+        (html ? [...PARAM_TYPES, ...HTML_PARAM_TYPES] : PARAM_TYPES).join(", "),
     );
     return null;
   }
@@ -457,6 +658,149 @@ function validatePasses(
   return passes;
 }
 
+function validateHtmlRender(
+  raw: Record<string, unknown>,
+  hasText: (name: string) => boolean,
+  errors: string[],
+): FxHtmlRender | null {
+  const { source, styles, layout, designSize, bleed, bindings } = raw;
+  if (typeof source !== "string" || !isSafeRelativePath(source) || !source.endsWith(".html")) {
+    errors.push("render.source: must be an .html file inside the preset");
+    return null;
+  }
+  if (!hasText(source)) {
+    errors.push("render.source: `" + source + "` is not a file here");
+    return null;
+  }
+  const sheets: string[] = [];
+  if (styles != null) {
+    if (!Array.isArray(styles)) {
+      errors.push("render.styles: must be an array of .css files");
+      return null;
+    }
+    for (const sheet of styles) {
+      if (typeof sheet !== "string" || !isSafeRelativePath(sheet) || !sheet.endsWith(".css") || !hasText(sheet)) {
+        errors.push("render.styles: `" + String(sheet) + "` is not a .css file here");
+        return null;
+      }
+      sheets.push(sheet);
+    }
+  }
+  if (layout != null && layout !== "reflow" && layout !== "scale") {
+    errors.push("render.layout: must be reflow or scale");
+    return null;
+  }
+  let size: { width: number; height: number } | undefined;
+  if (designSize != null) {
+    const d = designSize as Record<string, unknown>;
+    const ok = (n: unknown) => typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= 8192;
+    if (!isPlainObject(designSize) || !ok(d.width) || !ok(d.height)) {
+      errors.push("render.designSize: width and height must be whole numbers 1..8192");
+      return null;
+    }
+    size = { width: d.width as number, height: d.height as number };
+  }
+  if (layout === "scale" && size == null) {
+    errors.push("render.designSize: a `scale` layout needs one, to lay out at");
+    return null;
+  }
+  if (bleed != null && (typeof bleed !== "number" || !Number.isFinite(bleed) || bleed < 0 || bleed > 4096)) {
+    errors.push("render.bleed: must be a number of px, 0..4096");
+    return null;
+  }
+  let bound: Record<string, string> | undefined;
+  if (bindings != null) {
+    if (!isPlainObject(bindings)) {
+      errors.push("render.bindings: must be an object of field to parameter key");
+      return null;
+    }
+    bound = {};
+    for (const [field, keyName] of Object.entries(bindings)) {
+      if (!TEXT_BINDING_FIELDS.includes(field as never)) {
+        errors.push("render.bindings: `" + field + "` is not one of " + TEXT_BINDING_FIELDS.join(", "));
+        return null;
+      }
+      if (typeof keyName !== "string" || keyName === "") {
+        errors.push("render.bindings." + field + ": must name a parameter");
+        return null;
+      }
+      bound[field] = keyName;
+    }
+  }
+  return {
+    type: "html",
+    source,
+    ...(sheets.length > 0 ? { styles: sheets } : {}),
+    ...(layout != null ? { layout: layout as "reflow" | "scale" } : {}),
+    ...(size != null ? { designSize: size } : {}),
+    ...(typeof bleed === "number" && bleed > 0 ? { bleed } : {}),
+    ...(bound != null && Object.keys(bound).length > 0 ? { bindings: bound } : {}),
+  };
+}
+
+/** The parameter type each text binding expects. */
+const BINDING_TYPES: Record<string, string[]> = {
+  text: ["text"],
+  font: ["font"],
+  color: ["color"],
+  fontSize: ["number"],
+  align: ["select", "text"],
+};
+
+/**
+ * What an HTML graphic's manifest says about its markup, checked against the
+ * markup: a text parameter with nowhere to go is an error, a parameter no
+ * stylesheet reads is a warning, and a binding has to name a parameter of the
+ * right kind.
+ */
+function crossCheckHtml(
+  render: FxHtmlRender,
+  params: PresetParamSpec[],
+  payload: RawPresetPayload,
+  errors: string[],
+  warnings: string[],
+): void {
+  // Comments stripped, or a comment that mentions `var(--x)` would count as
+  // reading it.
+  const markup = (payload.sources[render.source] ?? "").replace(/<!--[\s\S]*?-->/g, "");
+  const css = (render.styles ?? [])
+    .map((name) => payload.sources[name] ?? "")
+    .join("\n")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  // `seed` also feeds the split's `--rand`, so a split anywhere reads it.
+  const splits = /data-split\s*=/.test(markup);
+  const escaped = (key: string) => key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const param of params) {
+    if (param.type === "text") {
+      const slot = new RegExp("data-param\\s*=\\s*[\"']" + escaped(param.key) + "[\"']");
+      if (!slot.test(markup)) {
+        errors.push(
+          "parameter `" + param.key + '` is text, but no element in ' + render.source +
+            ' has data-param="' + param.key + '" to put it in',
+        );
+      }
+      continue;
+    }
+    const used = new RegExp("var\\(\\s*--" + escaped(param.key) + "(-x|-y)?\\s*[,)]");
+    if (!used.test(css) && !used.test(markup) && !(param.key === "seed" && splits)) {
+      warnings.push(
+        "parameter `" + param.key + "` is never read: no stylesheet uses var(--" + param.key + ")",
+      );
+    }
+  }
+  for (const [field, keyName] of Object.entries(render.bindings ?? {})) {
+    const param = params.find((p) => p.key === keyName);
+    if (param == null) {
+      errors.push("render.bindings." + field + ": `" + keyName + "` is not a parameter");
+    } else if (!(BINDING_TYPES[field] ?? []).includes(param.type)) {
+      errors.push(
+        "render.bindings." + field + ": `" + keyName + "` is a " + param.type +
+          ", and " + field + " needs " + (BINDING_TYPES[field] ?? []).join(" or "),
+      );
+    }
+  }
+}
+
 function validateRender(
   raw: unknown,
   kind: FxKind,
@@ -506,11 +850,25 @@ function validateRender(
     return null;
   }
 
+  if (type === "html") {
+    if (kind !== "graphic") {
+      errors.push("render.type: only a graphic may be html");
+      return null;
+    }
+    return validateHtmlRender(raw, hasShader, errors);
+  }
+
   if (type === "overlay") {
     // A transition mixes two inputs; an overlay has one source and no notion of
     // a second. Allowing it would produce a preset the compositor cannot run.
     if (kind === "transition") {
       errors.push("render.type: a transition must be a shader, not an overlay");
+      return null;
+    }
+    // A graphic is a layer with a box, and an overlay is a whole-frame
+    // composite: there is nothing for one to mean as the other.
+    if (kind === "graphic") {
+      errors.push("render.type: a graphic is a shader or html, not an overlay");
       return null;
     }
     const source = raw.source;
@@ -543,7 +901,7 @@ function validateRender(
   }
 
   if (type !== "shader") {
-    errors.push("render.type: must be `shader` or `overlay`");
+    errors.push("render.type: must be `shader`, `overlay` or `html`");
     return null;
   }
 
@@ -638,7 +996,7 @@ function validateRender(
     // A transition mixes two inputs and hands back one image; there is no
     // "previous pass output" for a second step to read, and no case that wants
     // one. Refused rather than silently ignored.
-    if (kind === "transition") {
+    if (kind !== "effect") {
       errors.push("render.passes: only an effect may declare passes");
       return null;
     }
@@ -700,9 +1058,33 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
 
   if (typeof id !== "string" || !ID_PATTERN.test(id)) {
     errors.push("id: must be a name like `com.example.rain`");
+  } else if (payload.origin === "inline") {
+    // The id is a claim about the content. Recomputed rather than trusted, so a
+    // hand-edited program cannot borrow another one's compiled shader.
+    const expected = inlinePresetId(
+      hashProgram({
+        manifest,
+        sources: payload.sources,
+        assets: payload.assets,
+      }),
+    );
+    if (id !== expected) {
+      errors.push(
+        "id: an inline program's id is the hash of its content, `" +
+          expected +
+          "`",
+      );
+    }
+  } else if (id.startsWith(INLINE_PRESET_PREFIX)) {
+    errors.push(
+      "id: `" + INLINE_PRESET_PREFIX + "` is reserved for programs carried on a clip",
+    );
+  }
+  if (payload.origin === "inline") {
+    checkInlineSizes(payload.sources, errors);
   }
   if (!KNOWN_KINDS.includes(kind as FxKind)) {
-    errors.push("kind: must be `effect`, `transition` or `lut`");
+    errors.push("kind: must be `effect`, `transition`, `graphic` or `lut`");
   }
   if (typeof name !== "string" || name.trim() === "") {
     errors.push("name: must be a non-empty string");
@@ -740,12 +1122,17 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
   }
 
   const render = validateRender(manifest.render, presetKind, payload, errors);
+  if (render != null && payload.origin === "inline") {
+    checkInlineRender(render, errors);
+  }
 
   // A LUT declares no parameters, so it reserves nothing; `reservedUniformsFor`
   // is typed on the shader kinds and has no answer for it.
+  const isHtml = render != null && render.type === "html";
   const reserved =
-    presetKind === "lut" ? [] : reservedUniformsFor(presetKind);
-  const params: FxParamSpec[] = [];
+    presetKind === "lut" || isHtml ? [] : reservedUniformsFor(presetKind);
+  const params: PresetParamSpec[] = [];
+  const warnings: string[] = [];
   const rawParams = manifest.params;
   if (rawParams != null && !Array.isArray(rawParams)) {
     errors.push("params: must be an array");
@@ -753,7 +1140,7 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
     const seenKeys = new Set<string>();
     const seenUniforms = new Set<string>();
     for (const [index, raw] of (rawParams ?? []).entries()) {
-      const param = validateParam(raw, index, reserved, errors);
+      const param = validateParam(raw, index, reserved, errors, isHtml);
       if (param == null) {
         continue;
       }
@@ -761,12 +1148,14 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
         errors.push("params: duplicate key `" + param.key + "`");
         continue;
       }
-      if (seenUniforms.has(param.uniform)) {
-        errors.push("params: duplicate uniform `" + param.uniform + "`");
-        continue;
+      if (isUniformParam(param)) {
+        if (seenUniforms.has(param.uniform)) {
+          errors.push("params: duplicate uniform `" + param.uniform + "`");
+          continue;
+        }
+        seenUniforms.add(param.uniform);
       }
       seenKeys.add(param.key);
-      seenUniforms.add(param.uniform);
       params.push(param);
     }
   }
@@ -804,7 +1193,7 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
       Object.assign(declared, declaredUniforms(sourceOf(name)));
     }
 
-    for (const param of params) {
+    for (const param of params.filter(isUniformParam)) {
       // The author declares parameter uniforms themselves — that is what keeps
       // an unmodified gl-transitions shader compiling, since the wrapper must
       // not emit a second declaration. See `glslWrap.ts`.
@@ -848,7 +1237,7 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
     // is raised anywhere. Refusing to load is much kinder than that.
     const covered = new Set<string>([
       ...reserved,
-      ...params.map((param) => param.uniform),
+      ...params.filter(isUniformParam).map((param) => param.uniform),
       ...(render.textures ?? []).map((texture) => texture.uniform),
       // A pass constant is bound by the compositor from the manifest, so a
       // uniform only a `constants` entry feeds is covered — that is the whole
@@ -868,6 +1257,10 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
           " so it would read zero at run time",
       );
     }
+  }
+
+  if (render != null && render.type === "html") {
+    crossCheckHtml(render, params, payload, errors, warnings);
   }
 
   if (errors.length > 0 || render == null) {
@@ -894,5 +1287,6 @@ export function validatePreset(payload: RawPresetPayload): ValidationResult {
       sources: payload.sources,
       assets: payload.assets,
     },
+    ...(warnings.length > 0 ? { warnings } : {}),
   };
 }

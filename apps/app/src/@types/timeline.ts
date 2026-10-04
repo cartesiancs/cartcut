@@ -107,7 +107,7 @@ export type LutRef = {
 /**
  * A clip that can carry a LUT.
  *
- * A mixin over exactly the same five element types as `Blendable`, and for the
+ * A mixin over exactly the same six element types as `Blendable`, and for the
  * same reason — a group paints nothing, so a grade on one would be a field the
  * renderer is structurally unable to honour.
  *
@@ -165,7 +165,7 @@ export type ColorAdjustments = Partial<Record<ColorAdjustmentKey, number>>;
 /**
  * A clip that can carry manual colour adjustments.
  *
- * The same five types as `Gradable`, for the same reason. Absent means
+ * The same six types as `Gradable`, for the same reason. Absent means
  * unadjusted, answered by `features/renderer/adjust.ts#adjustOf`.
  */
 type Adjustable = {
@@ -573,7 +573,7 @@ export type MaskType = {
 /**
  * A clip whose picture can be cut to a shape.
  *
- * A mixin over exactly the same five element types as `Blendable` and
+ * A mixin over exactly the same six element types as `Blendable` and
  * `Gradable`, and for the same reason: a group paints nothing, and an effect and
  * a transition are whole-frame operations rather than layers, so a mask on one
  * would be a field the renderer is structurally unable to honour.
@@ -633,6 +633,7 @@ export const FILETYPES = [
   "effect",
   "transition",
   "template",
+  "graphic",
 ] as const;
 
 type TimelineElementType = (typeof FILETYPES)[number];
@@ -1446,9 +1447,8 @@ export type TemplateFill =
  *
  * Deliberately not `Blendable`, `Gradable` or `Maskable`. A template's contents
  * are the author's; what the user may control is where it sits and how solid it
- * is, and nothing else. Leaving the three off also keeps `BLENDABLE_FILETYPES`,
- * `GRADABLE_FILETYPES` and `MASKABLE_FILETYPES` the same five they have always
- * been.
+ * is, and nothing else. Leaving the three off also keeps a template out of
+ * `BLENDABLE_FILETYPES`, `GRADABLE_FILETYPES` and `MASKABLE_FILETYPES`.
  *
  * `duration` is fixed at the template's own length —
  * `features/timeline/templateOps.ts#isDurationLocked` is the single predicate
@@ -1484,6 +1484,80 @@ export type FxParams = Record<
 >;
 
 /**
+ * The `presetId` prefix that names a program carried on the element itself.
+ *
+ * Followed by the program's 16-hex `digest64`, so two clips holding the same
+ * program share one id and therefore one compiled shader. An installed preset
+ * folder may not use the prefix: `presetValidate.ts` refuses it, so an id that
+ * starts with it can only ever mean "read `program`".
+ */
+export const INLINE_PRESET_PREFIX = "inline.";
+
+/**
+ * An installed preset's `manifest.json` minus what only a folder needs.
+ *
+ * No `id`: it is derived from the hash. `render` and `params` stay `unknown`
+ * here for the reason `FxParams` is loose: the schema lives in
+ * `features/fx/presetValidate.ts`, and this module does not know about presets.
+ */
+export type InlineManifest = {
+  schema: 1;
+  kind: "effect" | "transition" | "graphic";
+  name: string;
+  category: string;
+  render: unknown;
+  params?: unknown[];
+};
+
+/**
+ * A program written on the spot, by an agent or a user, rather than installed.
+ *
+ * The same content an installed preset folder holds, kept on the element
+ * because it is authored data, the rule `MaskType.path` states: a bare element
+ * map is what crosses IPC, the offscreen window, the clipboard and a template,
+ * and a reference into some project-level library would have to cross with it.
+ *
+ * Only `features/fx/inlineProgram.ts#coerceInlineProgram` makes one, so what
+ * is stored is already normalised and, for HTML, already sanitised.
+ */
+export type InlineProgram = {
+  /** `digest64` of the canonical text. The key every cache below uses. */
+  hash: string;
+  manifest: InlineManifest;
+  /** Relative filename to text: `main.frag`, `pass0.frag`, `index.html`, `style.css`. */
+  sources: Record<string, string>;
+  /** Name a source refers to as `asset:<name>`, to an absolute localpath. Absent when empty. */
+  assets?: Record<string, string>;
+};
+
+/**
+ * What an effect, a transition and a graphic share: a preset and its numbers.
+ *
+ * `program` is present exactly when `presetId` starts with
+ * `INLINE_PRESET_PREFIX`, and absent otherwise, key and all. When the two
+ * disagree on read, `program` wins (`features/fx/resolvePreset.ts`).
+ */
+export type ProgramBacked = {
+  /**
+   * Which preset this is. A preset that is not installed renders as a
+   * pass-through rather than an error: the element and its `params` survive
+   * the round trip, so opening a project on a machine without the preset and
+   * saving it again loses nothing.
+   */
+  presetId: string;
+  params: FxParams;
+  /** The program itself, for an `inline.` id. */
+  program?: InlineProgram;
+};
+
+/** Whether a preset id names an inline program rather than an installed folder. */
+export function isInlinePresetId(presetId: unknown): boolean {
+  return (
+    typeof presetId === "string" && presetId.startsWith(INLINE_PRESET_PREFIX)
+  );
+}
+
+/**
  * A full-frame effect: an adjustment layer.
  *
  * Applies to every pixel drawn *beneath* it — that is, to every element with a
@@ -1503,16 +1577,9 @@ export type FxParams = Record<
  * lane and the context menu all work on it for free.
  */
 export type EffectElementType = TimelinePlaced &
-  OpacityAnimatable & {
+  OpacityAnimatable &
+  ProgramBacked & {
     filetype: "effect";
-    /**
-     * Which installed preset this is. A preset that is not installed renders as
-     * a pass-through rather than an error: the element and its `params` survive
-     * the round trip, so opening a project on a machine without the preset and
-     * saving it again loses nothing.
-     */
-    presetId: string;
-    params: FxParams;
     /**
      * 0-100. The effect's overall strength.
      *
@@ -1553,10 +1620,9 @@ export type TransitionAlignment = "center" | "start" | "end";
  * the compositor and both export paths receive a bare element map with no
  * tracks to look along — the same reason `priority` exists.
  */
-export type TransitionElementType = TimelinePlaced & {
+export type TransitionElementType = TimelinePlaced &
+  ProgramBacked & {
   filetype: "transition";
-  presetId: string;
-  params: FxParams;
   /** The outgoing clip. */
   fromId: string;
   /** The incoming clip. */
@@ -1597,6 +1663,45 @@ export type AudioElementType = TimelinePlaced &
     animation?: { volumeDb?: unknown };
   };
 
+/**
+ * A layer whose picture is a program: HTML and CSS, or a GLSL generator.
+ *
+ * What the canvas text renderer cannot draw (kinetic per-letter motion, 3D,
+ * variable font axes, text on a path, vertical and right-to-left layout) is
+ * drawn here, by `renderer/graphic.ts`, through the same `renderElement` as
+ * every other clip. So a graphic moves, scales, fades, keyframes, blends,
+ * grades and masks exactly like an image, with no special case anywhere below.
+ *
+ * It draws itself, like a template, so it is `Visual`. Unlike a template its
+ * contents are the user's own, so it takes the blend, the grade, the
+ * adjustments and the mask. It is not `Decorated`: a box border and shadow are
+ * drawn around the box, which is wrong for lettering, and a card's border and
+ * shadow are the program's to draw.
+ *
+ * `clockHead` and `clockTail` let a cut or a trim leave the animation where it
+ * was. The program's clock is `clockHead + local time`, and its length is
+ * `clockHead + duration + clockTail`, so the right half of a split picks up
+ * where the left stopped and an exit animation keyed to the length stays at
+ * the end of the whole, not of each piece. Both delete their key at 0.
+ */
+export type GraphicElementType = TimelinePlaced &
+  Visual &
+  Animatable &
+  Linked &
+  Blendable &
+  Gradable &
+  Adjustable &
+  Maskable &
+  ProgramBacked & {
+    filetype: "graphic";
+    /** Shown on the bar. Survives a missing preset or an invalid program. */
+    name: string;
+    /** Program time cut off before this piece, ms. Negative after a front extend. */
+    clockHead?: number;
+    /** Program time cut off after this piece, ms. Never negative. */
+    clockTail?: number;
+  };
+
 export type TimelineElement =
   | VideoElementType
   | ImageElementType
@@ -1607,7 +1712,8 @@ export type TimelineElement =
   | GroupElementType
   | EffectElementType
   | TransitionElementType
-  | TemplateElementType;
+  | TemplateElementType
+  | GraphicElementType;
 
 /** Elements the compositor draws. Audio has no picture; a group draws nothing. */
 export type VisualTimelineElement = Exclude<
@@ -1683,6 +1789,12 @@ export function isTemplateElement(
   return element?.filetype === "template";
 }
 
+export function isGraphicElement(
+  element: TimelineElement | undefined | null,
+): element is GraphicElementType {
+  return element?.filetype === "graphic";
+}
+
 /**
  * Whether this element claims a slot on its track.
  *
@@ -1742,6 +1854,7 @@ export type AnimatableTimelineElement =
   | GroupElementType
   | EffectElementType
   | TemplateElementType
+  | GraphicElementType
   // Audio is here for one track, `volumeDb`, and its block is optional: see
   // `AudioElementType.animation`. Narrowing to this union therefore does not
   // promise an `animation` field is present, which is why nothing may write
@@ -1780,8 +1893,39 @@ export function canAnimate(
     // A template's five tracks are the whole of what a user may control on it:
     // its length, its contents and its timing all belong to the author, so
     // where it sits and how solid it is are what is left.
-    element.filetype === "template"
+    element.filetype === "template" ||
+    // The five, the mask's when masked, and one `fx:<key>` per numeric
+    // parameter, the way an effect's are.
+    element.filetype === "graphic"
   );
+}
+
+/**
+ * One `fx:<key>` track per parameter whose stored value is a finite number.
+ *
+ * Shared by the effect and the graphic, which take their parameters from a
+ * preset the same way. Answered from the element's own `params`, never from the
+ * preset registry: this module cannot read the disk, a clip whose preset is
+ * missing must still show the curves its author drew, and a project written
+ * before this feature must animate the moment it is opened.
+ *
+ * That admits a `select`, whose values are numbers too; the panel and the
+ * context menu, which do hold the registry, offer a diamond only for
+ * `type: "number"`. The asymmetry is the price of keeping this file free of the
+ * registry, and it errs towards offering rather than refusing.
+ */
+export function fxParamTracksOf(element: {
+  params?: Record<string, unknown>;
+}): AnimatableProperty[] {
+  const params = element.params ?? {};
+  const out: AnimatableProperty[] = [];
+  for (const key of Object.keys(params)) {
+    const value = params[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      out.push(`${FX_PARAM_TRACK_PREFIX}${key}`);
+    }
+  }
+  return out;
 }
 
 /**
@@ -2046,15 +2190,14 @@ export function animatableProperties(
     // context menu, which do hold the registry, offer a diamond only for
     // `type: "number"`. The asymmetry is the price of keeping this file free of
     // the registry, and it errs towards offering rather than refusing.
-    const params =
-      (element as { params?: Record<string, unknown> }).params ?? {};
-    const own: AnimatableProperty[] = [...EFFECT_ANIMATABLE_PROPERTIES];
-    for (const key of Object.keys(params)) {
-      const value = params[key];
-      if (typeof value === "number" && Number.isFinite(value)) {
-        own.push(`${FX_PARAM_TRACK_PREFIX}${key}`);
-      }
+    return [...EFFECT_ANIMATABLE_PROPERTIES, ...fxParamTracksOf(element)];
+  }
+  if (element.filetype === "graphic") {
+    const own: AnimatableProperty[] = [...OWN_ANIMATABLE_PROPERTIES];
+    if ((element as { mask?: unknown }).mask != null) {
+      own.push(...MASK_ANIMATABLE_PROPERTIES);
     }
+    own.push(...fxParamTracksOf(element));
     return own;
   }
   // An audio clip has no box, no opacity and no rotation, so its level is the

@@ -97,6 +97,52 @@ export type FxParamSpec =
   | FxPointParam;
 
 /**
+ * The parameters only an HTML graphic takes. Separate from `FxParamSpec`,
+ * because each of those binds one GLSL uniform and `GLSL_TYPE_FOR_PARAM` is a
+ * record over its types; a text has no uniform to bind.
+ */
+type HtmlParamBase = {
+  /** Stable key in `element.params`, and the CSS variable `--<key>`. */
+  key: string;
+  label: string;
+};
+
+/** Text the program shows, written into `[data-param="key"]`. */
+export type FxTextParam = HtmlParamBase & {
+  type: "text";
+  default: string;
+  /** Longest value accepted. 500 when absent, never more than 5000. */
+  maxLength?: number;
+  /** Offered as a multi-line field, and `\n` breaks the line. */
+  multiline?: boolean;
+};
+
+/**
+ * A typeface. `"default"`, `"bundled:<file in assets/fonts/google>"`, or an
+ * absolute path. CSS sees `--<key>` as a family list.
+ */
+export type FxFontParam = HtmlParamBase & {
+  type: "font";
+  default: string;
+};
+
+/** A picture the program shows: an absolute path, or `""` for none. CSS sees `--<key>` as `url(...)`. */
+export type FxImageParam = HtmlParamBase & {
+  type: "image";
+  default: string;
+};
+
+export type HtmlParamSpec = FxTextParam | FxFontParam | FxImageParam;
+
+/** Every parameter a preset can declare. */
+export type PresetParamSpec = FxParamSpec | HtmlParamSpec;
+
+/** Whether a parameter binds a GLSL uniform, which every non-HTML one does. */
+export function isUniformParam(param: PresetParamSpec): param is FxParamSpec {
+  return param.type !== "text" && param.type !== "font" && param.type !== "image";
+}
+
+/**
  * The GLSL type each parameter kind binds to.
  *
  * Used to cross-check the manifest against the shader's own declaration. A
@@ -236,7 +282,44 @@ export type FxLutRender = {
   source: string;
 };
 
-export type FxRenderSpec = FxOverlayRender | FxShaderRender | FxLutRender;
+/** The text-clip fields `apply_typography` can carry into a graphic's parameters. */
+export const TEXT_BINDING_FIELDS = ["text", "font", "color", "fontSize", "align"] as const;
+export type TextBindingField = (typeof TEXT_BINDING_FIELDS)[number];
+
+/**
+ * A graphic drawn by HTML and CSS: a body fragment, its stylesheets, and how it
+ * is laid out in the clip's box. See `features/graphic/` for everything that
+ * happens to it, and the authoring contract in the editing skill.
+ */
+export type FxHtmlRender = {
+  type: "html";
+  /** The `.html` body fragment. */
+  source: string;
+  /** `.css` files, applied in order. */
+  styles?: string[];
+  /**
+   * `reflow`: laid out at the box's own size, so resizing the box re-wraps it.
+   * `scale`: laid out at `designSize` and scaled to the box, so a keyframed
+   * size never reflows. Default `reflow`.
+   */
+  layout?: "reflow" | "scale";
+  /** Required for `scale`; also the box a new graphic takes. */
+  designSize?: { width: number; height: number };
+  /**
+   * Layout px the picture may spill past the box on every side: per-letter
+   * motion, shadows, 3D. Drawn content is clipped to the root's border box, so
+   * without this a glow is cut off at the edge.
+   */
+  bleed?: number;
+  /** Which parameter receives each field of a text clip converted into this. */
+  bindings?: Partial<Record<TextBindingField, string>>;
+};
+
+export type FxRenderSpec =
+  | FxOverlayRender
+  | FxShaderRender
+  | FxLutRender
+  | FxHtmlRender;
 
 /**
  * The kinds that carry GLSL.
@@ -245,7 +328,7 @@ export type FxRenderSpec = FxOverlayRender | FxShaderRender | FxLutRender;
  * than on the full kind union, so a LUT preset cannot be handed to a function
  * that would ask it for an entry point it does not have.
  */
-export type FxShaderKind = "effect" | "transition";
+export type FxShaderKind = "effect" | "transition" | "graphic";
 
 /**
  * Everything a preset folder can be.
@@ -310,17 +393,41 @@ export const LUT_CATEGORIES = [
   "utility",
 ] as const;
 
+/**
+ * How the graphic browser groups its presets: by what the lettering does
+ * rather than by which mechanism draws it. `background` is the GLSL
+ * generators', which fill a box rather than set type.
+ */
+export const GRAPHIC_CATEGORIES = [
+  "kinetic",
+  "stylized",
+  "distort",
+  "reveal",
+  "layout",
+  "background",
+] as const;
+
 export type LutCategory = (typeof LUT_CATEGORIES)[number];
 export type TransitionCategory = (typeof TRANSITION_CATEGORIES)[number];
 export type EffectCategory = (typeof EFFECT_CATEGORIES)[number];
-export type FxCategory = TransitionCategory | EffectCategory | LutCategory;
+export type GraphicCategory = (typeof GRAPHIC_CATEGORIES)[number];
+export type FxCategory =
+  | TransitionCategory
+  | EffectCategory
+  | LutCategory
+  | GraphicCategory;
 
 export function categoriesFor(kind: FxKind): readonly string[] {
   if (kind === "transition") {
     return TRANSITION_CATEGORIES;
   }
+  if (kind === "graphic") {
+    return GRAPHIC_CATEGORIES;
+  }
   return kind === "lut" ? LUT_CATEGORIES : EFFECT_CATEGORIES;
 }
+
+export type PresetOrigin = "builtin" | "user" | "extension" | "inline";
 
 /** A validated preset, ready to hand to the compositor. */
 export type FxPreset = {
@@ -341,9 +448,15 @@ export type FxPreset = {
   /** Absolute path to the tile image, or `null` when the preset ships none. */
   thumbnailPath: string | null;
   render: FxRenderSpec;
-  params: FxParamSpec[];
-  /** Where it came from. Built-ins and user presets are otherwise identical. */
-  origin: "builtin" | "user" | "extension";
+  params: PresetParamSpec[];
+  /**
+   * Where it came from. Built-ins and user presets are otherwise identical.
+   *
+   * `inline` is a program carried on an element rather than a folder on disk
+   * (`inlineProgram.ts`). It never enters the registry; `resolvePreset.ts`
+   * builds it from the element when it is drawn.
+   */
+  origin: PresetOrigin;
   /** Set only for an extension-contributed preset, so it can be unloaded. */
   extensionId?: string;
   /** GLSL text, keyed by the manifest's relative filename. */
@@ -362,7 +475,7 @@ export type FxPreset = {
 export type RawPresetPayload = {
   id: string;
   dir: string;
-  origin: "builtin" | "user" | "extension";
+  origin: PresetOrigin;
   /** Set only for an extension-contributed preset, so it can be unloaded. */
   extensionId?: string;
   manifestJson: string;

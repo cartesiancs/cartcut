@@ -964,10 +964,10 @@ describe("the lut kind", () => {
     expect(errors.join(" ")).toMatch(/must be one of .*log-convert/);
   });
 
-  it("names all three kinds when it does not recognise one", () => {
+  it("names every kind when it does not recognise one", () => {
     const errors = expectErrors(
       validatePreset(lutPayload(lutManifest({ kind: "colour" }))),
     );
-    expect(errors.join(" ")).toMatch(/`effect`, `transition` or `lut`/);
+    expect(errors.join(" ")).toMatch(/`effect`, `transition`, `graphic` or `lut`/);
   });
 });

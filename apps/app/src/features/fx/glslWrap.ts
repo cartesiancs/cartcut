@@ -50,7 +50,7 @@
  * the app.
  */
 
-import type { FxParamSpec } from "./presetTypes";
+import type { FxParamSpec, FxShaderKind } from "./presetTypes";
 
 /**
  * Names the host owns in a transition program.
@@ -80,12 +80,25 @@ export const RESERVED_EFFECT_UNIFORMS = [
   "_p",
 ] as const;
 
-export function reservedUniformsFor(
-  kind: "effect" | "transition",
-): readonly string[] {
-  return kind === "transition"
-    ? RESERVED_TRANSITION_UNIFORMS
-    : RESERVED_EFFECT_UNIFORMS;
+/**
+ * The same, for a graphic: a generator with no input image, only a clock and a
+ * size. `duration` is here because an exit animation needs to know where the
+ * end is, which `time` and `progress` alone cannot say once a clip is split.
+ */
+export const RESERVED_GRAPHIC_UNIFORMS = [
+  "time",
+  "progress",
+  "duration",
+  "resolution",
+  "_uv",
+  "_p",
+] as const;
+
+export function reservedUniformsFor(kind: FxShaderKind): readonly string[] {
+  if (kind === "transition") {
+    return RESERVED_TRANSITION_UNIFORMS;
+  }
+  return kind === "graphic" ? RESERVED_GRAPHIC_UNIFORMS : RESERVED_EFFECT_UNIFORMS;
 }
 
 /**
@@ -169,6 +182,27 @@ const EFFECT_EPILOGUE = [
   "}",
 ].join("\n");
 
+const GRAPHIC_PREAMBLE = [
+  "precision highp float;",
+  "",
+  "varying vec2 _uv;",
+  "// Seconds of the program's own clock, snapped to the frame grid. Carried",
+  "// across a split, so the right half continues where the left stopped.",
+  "uniform float time;",
+  "// time / duration, 0..1 over the whole program rather than over this piece.",
+  "uniform float progress;",
+  "// Seconds the whole program runs, across every piece of a split.",
+  "uniform float duration;",
+  "// The raster being drawn, in pixels.",
+  "uniform vec2 resolution;",
+].join("\n");
+
+const GRAPHIC_EPILOGUE = [
+  "void main() {",
+  "  gl_FragColor = graphic(_uv);",
+  "}",
+].join("\n");
+
 /**
  * The entry point a preset of this kind must define.
  *
@@ -176,8 +210,8 @@ const EFFECT_EPILOGUE = [
  * link error about a missing symbol rather than to anything an author can act
  * on.
  */
-export function entryPointOf(kind: "effect" | "transition"): string {
-  return kind === "transition" ? "transition" : "effect";
+export function entryPointOf(kind: FxShaderKind): string {
+  return kind;
 }
 
 /**
@@ -245,8 +279,11 @@ export function uniformTypeOf(source: string, name: string): string | null {
   return declaredUniforms(source)[name] ?? null;
 }
 
+/** The line `wrapFragmentShader` writes just above the author's source. */
+export const PRESET_SOURCE_MARKER = "// ---- preset source ----";
+
 export type WrapInput = {
-  kind: "effect" | "transition";
+  kind: FxShaderKind;
   /** The author's source, exactly as it sits on disk. */
   source: string;
   /**
@@ -277,15 +314,23 @@ export function wrapFragmentShader(input: WrapInput): string {
   }
 
   const preamble =
-    kind === "transition" ? TRANSITION_PREAMBLE : EFFECT_PREAMBLE;
+    kind === "transition"
+      ? TRANSITION_PREAMBLE
+      : kind === "graphic"
+        ? GRAPHIC_PREAMBLE
+        : EFFECT_PREAMBLE;
   const epilogue =
-    kind === "transition" ? TRANSITION_EPILOGUE : EFFECT_EPILOGUE;
+    kind === "transition"
+      ? TRANSITION_EPILOGUE
+      : kind === "graphic"
+        ? GRAPHIC_EPILOGUE
+        : EFFECT_EPILOGUE;
 
   return [
     preamble,
     ...(extra.length > 0 ? ["", extra.join("\n")] : []),
     "",
-    "// ---- preset source ----",
+    PRESET_SOURCE_MARKER,
     source.trim(),
     "// ---- end preset source ----",
     "",
@@ -294,9 +339,39 @@ export function wrapFragmentShader(input: WrapInput): string {
   ].join("\n");
 }
 
+/**
+ * The 1-based line in the author's own text that a line of the wrapped shader
+ * came from, or `null` for a line the host wrote.
+ *
+ * GL reports compile errors against what it compiled, which is the author's
+ * source with the preamble above it. An agent told "line 41" when its shader
+ * has twelve lines cannot act on that. The wrapper also trims the source, so
+ * leading blank lines the author did write are counted back in.
+ */
+export function authorLineOf(input: WrapInput, wrappedLine: number): number | null {
+  const lines = wrapFragmentShader(input).split("\n");
+  const marker = lines.indexOf(PRESET_SOURCE_MARKER);
+  if (marker < 0) {
+    return null;
+  }
+  const trimmed = input.source.trim();
+  const authorLines = trimmed === "" ? 0 : trimmed.split("\n").length;
+  // `marker` is 0-based, so the first author line is wrapped line `marker + 2`.
+  const first = marker + 2;
+  if (wrappedLine < first || wrappedLine >= first + authorLines) {
+    return null;
+  }
+  const leading = input.source.slice(
+    0,
+    input.source.length - input.source.trimStart().length,
+  );
+  const skipped = leading.split("\n").length - 1;
+  return wrappedLine - first + 1 + skipped;
+}
+
 /** The vertex shader to compile: the preset's own, or the standard quad. */
 export function vertexShaderFor(
-  kind: "effect" | "transition",
+  kind: FxShaderKind,
   presetVertex?: string,
 ): string {
   if (presetVertex != null && presetVertex.trim() !== "") {
