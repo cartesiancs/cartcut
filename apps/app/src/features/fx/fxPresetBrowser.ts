@@ -554,7 +554,9 @@ export class FxPresetBrowser extends LitElement {
       ${total === 0
         ? html`<div class="browse-empty">
             <div class="browse-empty-icon">
-              <span class="material-symbols-outlined">auto_awesome</span>
+              <span class="material-symbols-outlined"
+                >${this.kind === "graphic" ? "interests" : "auto_awesome"}</span
+              >
             </div>
             <div class="browse-empty-title">No ${this.kind} presets</div>
             <div class="browse-empty-text">

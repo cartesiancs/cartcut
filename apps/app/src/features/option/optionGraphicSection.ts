@@ -1,5 +1,10 @@
 /**
- * A graphic's own controls: its name, its preset, and the preset's parameters.
+ * A graphic's own controls: its name and its program's parameters.
+ *
+ * No preset picker. A graphic's program is as often one written for it (an
+ * inline program, from the agent) as an installed preset, so a list of presets
+ * would misdescribe half of them, and switching to an installed one is what a
+ * tile in the Fx panel's Graphics tab does, with the graphic selected.
  *
  * Writes through `timeline/graphicOps.ts` and, for a numeric parameter whose
  * `fx:` track is armed, a keyframe first, the rule `optionEffect.write` states:
@@ -18,14 +23,9 @@ import {
   type GraphicElementType,
 } from "../../@types/timeline";
 import type { TimelineDocument } from "../timeline/tracks";
-import {
-  setGraphicName,
-  setGraphicParams,
-  setGraphicPreset,
-} from "../timeline/graphicOps";
+import { setGraphicName, setGraphicParams } from "../timeline/graphicOps";
 import { addKeyframe } from "../animation/keyframeOps";
 import { projectBakeHz } from "../editor/frameRate";
-import { defaultParamsFor, presetsOfKind } from "../fx/presetRegistry";
 import { resolvePreset } from "../fx/resolvePreset";
 import { renderParamControls, type FontChoice } from "../fx/fxParamControls";
 import { bundledFonts, loadFontLibrary, systemFonts } from "../font/fontLibrary";
@@ -91,12 +91,6 @@ export class OptionGraphicSection extends LitElement {
     this.commit((doc) => setGraphicName(doc, id, name));
   };
 
-  private handlePreset = (event: Event) => {
-    const presetId = (event.target as HTMLSelectElement).value;
-    const id = this.elementId;
-    this.commit((doc) => setGraphicPreset(doc, id, presetId, defaultParamsFor(presetId)));
-  };
-
   /** A parameter write, as a keyframe too when its track is armed. */
   private paramWrite(
     key: string,
@@ -130,37 +124,8 @@ export class OptionGraphicSection extends LitElement {
     }
     const preset = resolvePreset(graphic);
     const inline = graphic.program != null;
-    const installed = presetsOfKind("graphic");
 
     return html`
-      ${section({
-        title: "Graphic",
-        grow: true,
-        actions: html`
-          <select
-            class="opt-select"
-            aria-label="graphic preset"
-            .value=${graphic.presetId}
-            @change=${this.handlePreset}
-          >
-            ${inline
-              ? html`<option value=${graphic.presetId} selected>
-                  ${graphic.program?.manifest?.name ?? "Inline"} (inline)
-                </option>`
-              : preset == null
-                ? html`<option value=${graphic.presetId} selected>
-                    ${graphic.presetId} (missing)
-                  </option>`
-                : ""}
-            ${installed.map(
-              (entry) =>
-                html`<option value=${entry.id} ?selected=${entry.id === graphic.presetId}>
-                  ${entry.name}${entry.origin === "user" ? " *" : ""}
-                </option>`,
-            )}
-          </select>
-        `,
-      })}
       ${section({
         title: "Settings",
         body: html`
@@ -179,7 +144,8 @@ export class OptionGraphicSection extends LitElement {
           ${preset == null && !inline
             ? html`<div class="opt-hint" style="margin-bottom: 12px;">
                 <span class="material-symbols-outlined opt-hint-icon">warning</span>
-                Not installed. This graphic draws nothing for now, and its settings are kept.
+                ${graphic.presetId} is not installed. This graphic draws nothing for now,
+                and its settings are kept.
               </div>`
             : ""}
           ${preset != null && preset.params.length > 0

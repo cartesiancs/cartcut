@@ -72,6 +72,9 @@ export class ControlUiFx extends LitElement {
    * keeps the names at every width, and `_browse.scss` drops the glyphs first
    * when the column is narrower than the four of them need.
    *
+   * The Graphics glyph is `interests`, a set of shapes, and not `title`: that
+   * T is the text tool's and the text row's, and a graphic is more than text.
+   *
    * The LUT glyph is `palette` and nothing called `filter_*`:
    * `lut-panel.spec.ts` reads this button's text, ligature included, and
    * refuses the word.
@@ -99,7 +102,7 @@ export class ControlUiFx extends LitElement {
         <div class="opt-tabs-row">
           ${this.tab("effect", "Effects", "auto_awesome")}
           ${this.tab("transition", "Transitions", "transition_fade")}
-          ${this.tab("graphic", "Graphics", "title")}
+          ${this.tab("graphic", "Graphics", "interests")}
           ${this.tab("lut", "LUTs", "palette")}
         </div>
       </div>
