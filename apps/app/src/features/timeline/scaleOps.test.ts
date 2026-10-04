@@ -50,9 +50,10 @@ function doc(): TimelineDocument {
 }
 
 describe("SCALABLE_FILETYPES", () => {
-  it("is exactly the seven Visual types", () => {
+  it("is exactly the eight Visual types", () => {
     expect([...SCALABLE_FILETYPES].sort()).toEqual([
       "gif",
+      "graphic",
       "group",
       "image",
       "shape",

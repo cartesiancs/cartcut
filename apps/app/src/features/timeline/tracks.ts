@@ -49,6 +49,40 @@ export type TimelineDocument = {
 
 export const SCHEMA_VERSION = 2 as const;
 
+/**
+ * The version a document holding a graphic is written as.
+ *
+ * The one exception to "a new feature does not move `SCHEMA_VERSION`": a new
+ * *filetype* is not an optional field. A build from before graphics existed
+ * loads one without complaint and then throws on every frame it paints
+ * (`renderers[filetype]` is undefined), so the honest answer for that build is
+ * to refuse the file, which a version it does not know makes it do.
+ *
+ * Written only when a graphic is present, so a project nobody has put one in
+ * saves byte-identically and stays openable by older builds. In memory every
+ * document is `SCHEMA_VERSION`; the choice is made at the two writers,
+ * `project/projectEntries.ts` and `template/templateExport.ts`, and both
+ * readers accept either.
+ */
+export const GRAPHIC_SCHEMA_VERSION = 3 as const;
+
+/** The version to write a document's elements under. */
+export function schemaVersionFor(
+  elements: Record<string, { filetype?: unknown } | null | undefined>,
+): typeof SCHEMA_VERSION | typeof GRAPHIC_SCHEMA_VERSION {
+  for (const element of Object.values(elements ?? {})) {
+    if (element?.filetype === "graphic") {
+      return GRAPHIC_SCHEMA_VERSION;
+    }
+  }
+  return SCHEMA_VERSION;
+}
+
+/** Whether this build can open a file stamped with `version`. */
+export function isReadableSchemaVersion(version: unknown): boolean {
+  return version === SCHEMA_VERSION || version === GRAPHIC_SCHEMA_VERSION;
+}
+
 const KIND_PREFIX: Record<TrackKind, string> = {
   video: "V",
   audio: "A",
@@ -80,7 +114,10 @@ export function defaultTrackKindFor(filetype: string): TrackKind {
   if (filetype === "audio") {
     return "audio";
   }
-  if (filetype === "text") {
+  // A graphic is lettering first: it lands where a title would, in front of
+  // the picture. `graphicOps.addGraphic` overrides this for a generated
+  // background, which belongs behind it.
+  if (filetype === "text" || filetype === "graphic") {
     return "text";
   }
   // Groups get rows of their own so that a group bar never competes with a real

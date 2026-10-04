@@ -60,6 +60,7 @@ describe("GRADABLE_FILETYPES", () => {
   it("is exactly the types that paint themselves as a layer", () => {
     expect([...GRADABLE_FILETYPES].sort()).toEqual([
       "gif",
+      "graphic",
       "image",
       "shape",
       "text",

@@ -31,6 +31,7 @@ import {
   type DynamicElement,
 } from "./geometry";
 import { rebaseAnimation, sliceAnimation } from "../animation/keyframes";
+import { withClockShift } from "../graphic/graphicTime";
 import {
   coerceSpeedCurve,
   curveSourceAt,
@@ -160,7 +161,7 @@ export function trimStart(
     // without rebasing slides the whole animation against the content it was
     // drawn on. Rebase only — never slice: a trim is reversible, so a keyframe
     // pushed outside the visible window has to survive being pulled back in.
-    return rebaseAnimation(
+    const trimmed = rebaseAnimation(
       {
         ...element,
         startTime: element.startTime + applied,
@@ -168,6 +169,12 @@ export function trimStart(
       },
       applied,
     );
+    // A graphic's program keeps its own clock: what the trim cut off the front
+    // is now program time before this piece, so its first frame is the one
+    // that was showing there. Every other static clip has no program clock.
+    return element.filetype === "graphic"
+      ? withClockShift(trimmed as typeof element, applied, 0)
+      : trimmed;
   }
 
   const speed = speedOf(element);
@@ -303,20 +310,28 @@ export function splitAt(
   const span = spanLength(element);
 
   if (!isDynamicElement(element)) {
-    return {
-      left: sliceAnimation({ ...element, duration: offset }, 0, offset),
-      right: rebaseAnimation(
-        sliceAnimation(
-          {
-            ...element,
-            startTime: element.startTime + offset,
-            duration: element.duration - offset,
-          },
-          offset,
-          span,
-        ),
+    const left = sliceAnimation({ ...element, duration: offset }, 0, offset);
+    const right = rebaseAnimation(
+      sliceAnimation(
+        {
+          ...element,
+          startTime: element.startTime + offset,
+          duration: element.duration - offset,
+        },
         offset,
+        span,
       ),
+      offset,
+    );
+    if (element.filetype !== "graphic") {
+      return { left, right };
+    }
+    // The two halves of a graphic play the whole's frames: the left keeps its
+    // head and owns the right's length as tail, the right gains the left's
+    // length as head. See `graphic/graphicTime.ts`.
+    return {
+      left: withClockShift(left, 0, element.duration - offset),
+      right: withClockShift(right, offset, 0),
     };
   }
 

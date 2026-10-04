@@ -56,7 +56,7 @@ const stored = (d: TimelineDocument, id: string) =>
   (d.elements[id] as TimelineElement & { adjust?: ColorAdjustments }).adjust;
 
 describe("ADJUSTABLE_FILETYPES", () => {
-  it("is exactly the types that paint themselves as a layer — the same five as a LUT", () => {
+  it("is exactly the types that paint themselves as a layer, the same six as a LUT", () => {
     expect([...ADJUSTABLE_FILETYPES].sort()).toEqual([...GRADABLE_FILETYPES].sort());
   });
 

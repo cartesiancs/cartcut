@@ -50,6 +50,7 @@ export const SCALABLE_FILETYPES = [
   "text",
   "group",
   "template",
+  "graphic",
 ] as const;
 
 const SCALABLE = new Set<string>(SCALABLE_FILETYPES);

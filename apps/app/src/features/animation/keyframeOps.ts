@@ -23,7 +23,7 @@ import {
   type TimelineElement,
 } from "../../@types/timeline";
 import { DEFAULT_INTENSITY } from "../element/effectElement";
-import { setEffectIntensity, setEffectParams } from "../timeline/effectOps";
+import { setEffectIntensity, setProgramParams } from "../timeline/effectOps";
 import {
   DEFAULT_MASK_FEATHER,
   DEFAULT_MASK_LOCATION,
@@ -1028,9 +1028,11 @@ function withStaticValue(
     case "cornerRadius":
       return setCornerRadius(doc, elementId, value);
   }
-  // `fx:<key>`. `setEffectParams` merges one key and leaves the rest alone, so
-  // this never has to read the other parameters first.
-  return setEffectParams(doc, elementId, {
+  // `fx:<key>`. `setProgramParams` merges one key and leaves the rest alone, so
+  // this never has to read the other parameters first, and it takes an effect
+  // and a graphic alike: `setEffectParams` declined a graphic, which left the
+  // stopwatch and the curve editor silently doing nothing on one.
+  return setProgramParams(doc, elementId, {
     [fxParamKeyOf(property)]: value,
   });
 }

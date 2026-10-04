@@ -42,6 +42,7 @@ export const LINKABLE_FILETYPES = [
   "text",
   "group",
   "template",
+  "graphic",
 ] as const;
 
 const LINKABLE_TYPES = new Set<string>(LINKABLE_FILETYPES);

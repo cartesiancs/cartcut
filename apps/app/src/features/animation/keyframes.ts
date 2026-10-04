@@ -1017,7 +1017,10 @@ export function emptyAnimation(filetype: string): any {
     // A template animates the five like any other box. Its contents are the
     // author's and its length is fixed, so these are the whole of what a user
     // may move on it — which is exactly the set every visual element has.
-    filetype === "template"
+    filetype === "template" ||
+    // A graphic is a box like an image. Its parameter tracks are conditional
+    // and minted on demand, as an effect's are.
+    filetype === "graphic"
   ) {
     return {
       position: vector(),
@@ -1151,8 +1154,11 @@ const CONDITIONAL_TRACKS: Array<{
   // the same transform so they do not survive the edit either.
   {
     match: isFxParamTrack,
+    // Effects and graphics both take their parameters from a preset. Leaving a
+    // graphic out here would make `normalizeAnimation` collect its curves as
+    // orphans on every load.
     present: (element, property) =>
-      element?.filetype === "effect" &&
+      (element?.filetype === "effect" || element?.filetype === "graphic") &&
       typeof element?.params?.[fxParamKeyOf(property)] === "number",
     foreign: false,
   },

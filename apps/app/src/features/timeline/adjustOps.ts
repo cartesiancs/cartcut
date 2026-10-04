@@ -3,7 +3,7 @@
  *
  * Shaped like `lutOps.ts` and `blendOps.ts`, and the same three rules apply:
  *
- *  1. **Only the five layer types carry adjustments.** Audio has no picture, a
+ *  1. **Only the six layer types carry adjustments.** Audio has no picture, a
  *     group paints nothing, an effect or a transition is a whole-frame
  *     operation. Writing the field onto one of those would put it in the saved
  *     project where nothing reads it.
@@ -36,7 +36,7 @@ import type { TimelineDocument } from "./tracks";
 /**
  * The element types that can carry colour adjustments.
  *
- * Exactly the members of the `Adjustable` mixin, which covers the same five
+ * Exactly the members of the `Adjustable` mixin, which covers the same six
  * types as `Gradable`. A value so the agent command can name them.
  */
 export const ADJUSTABLE_FILETYPES = [
@@ -45,6 +45,7 @@ export const ADJUSTABLE_FILETYPES = [
   "gif",
   "shape",
   "text",
+  "graphic",
 ] as const;
 
 const ADJUSTABLE = new Set<string>(ADJUSTABLE_FILETYPES);

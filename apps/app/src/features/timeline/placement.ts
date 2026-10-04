@@ -20,6 +20,7 @@ import {
   normalizeDocument,
   tracksOfKind,
   type TimelineDocument,
+  type TrackKind,
 } from "./tracks";
 
 /**
@@ -35,8 +36,14 @@ export function chooseTrackFor(
   startMs: number,
   newTrackId: string,
   preferredTrackId?: string,
+  /**
+   * The row kind to use instead of the filetype's default. A graphic's depends
+   * on its program, not its filetype: lettering belongs above the picture and a
+   * generated background beneath it.
+   */
+  kindOverride?: TrackKind,
 ): { doc: TimelineDocument; trackId: string } {
-  const kind = defaultTrackKindFor(element.filetype);
+  const kind = kindOverride ?? defaultTrackKindFor(element.filetype);
   const span = { start: startMs, end: startMs + spanLength(element) };
 
   // A drop names the row the user aimed at. Honour it when the kind matches
@@ -84,6 +91,7 @@ export function placeNewElement(
   startMs: number,
   newTrackId: string,
   preferredTrackId?: string,
+  kindOverride?: TrackKind,
 ): TimelineDocument {
   const start = Math.max(0, startMs);
   const placed = { ...element, startTime: start };
@@ -93,6 +101,7 @@ export function placeNewElement(
     start,
     newTrackId,
     preferredTrackId,
+    kindOverride,
   );
 
   return normalizeDocument({

@@ -308,6 +308,11 @@ export function clipLabel(element: TimelineElement): string {
   if (element.filetype === "template") {
     return (element as any).name || "Template";
   }
+  // A graphic carries its own name too, for the template's reason: it must
+  // still say what it is when its preset is missing or its program is invalid.
+  if (element.filetype === "graphic") {
+    return (element as any).name || "Graphic";
+  }
   // An effect's `localpath` is the placeholder "EFFECT" — its real name lives
   // in a preset manifest on disk, which this module must not read: `draw.ts` is
   // DOM-free and tested against a Skia canvas under `environment: "node"`.

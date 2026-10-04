@@ -24,9 +24,12 @@ import {
   isFxParamTrack,
   type EffectElementType,
   type FxParams,
+  type InlineProgram,
   type TimelineElement,
 } from "../../@types/timeline";
 import { createEffectElement } from "../element/effectElement";
+import { sameProgram } from "../fx/inlineProgram";
+import { inlinePresetId } from "../fx/programHash";
 import { placeNewElement } from "./placement";
 import { normalizeDocument, type TimelineDocument } from "./tracks";
 
@@ -46,6 +49,17 @@ export function effectOf(element: TimelineElement | undefined): {
     intensity: element.intensity,
     blend: element.blend,
   };
+}
+
+/** Whether two whole parameter sets hold the same values under the same keys. */
+export function sameParams(a: FxParams, b: FxParams): boolean {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) {
+    return false;
+  }
+  return keys.every(
+    (key) => Object.hasOwnProperty.call(b, key) && sameParamValue(a[key], b[key]),
+  );
 }
 
 /**
@@ -111,6 +125,12 @@ export function addEffect(
     intensity?: number;
     blend?: GlobalCompositeOperation;
     preferredTrackId?: string;
+    /**
+     * An inline program to carry. When present it decides the preset id, and
+     * the `presetId` argument is ignored, so a caller cannot store a program
+     * under an id that names some other content.
+     */
+    program?: InlineProgram;
   } = {},
 ): TimelineDocument {
   if (doc.elements[elementId] != null) {
@@ -121,12 +141,14 @@ export function addEffect(
   }
 
   const element = createEffectElement({
-    presetId,
+    presetId:
+      options.program != null ? inlinePresetId(options.program.hash) : presetId,
     params,
     startTime: startMs,
     duration: durationMs,
     intensity: options.intensity,
     blend: options.blend,
+    program: options.program,
   });
 
   const hasEffectTrack = doc.tracks.some((track) => track.kind === "effect");
@@ -200,10 +222,49 @@ export function setEffectPreset(
   if (effect == null || effect.presetId === presetId) {
     return doc;
   }
+  // Leaving an inline program for an installed preset drops the program, key
+  // and all: `program` is present exactly when the id is an inline one.
+  const { program: _program, ...rest } = effect;
   return writeEffect(
     doc,
     elementId,
-    withoutStaleParamTracks({ ...effect, presetId, params }, params),
+    withoutStaleParamTracks(
+      { ...(rest as EffectElementType), presetId, params },
+      params,
+    ),
+  );
+}
+
+/**
+ * Give an effect an inline program, replacing whatever preset it had.
+ *
+ * `params` is the full set, as for `setEffectPreset`: the caller starts from
+ * the program's defaults and lays any values it was given over them. Declines
+ * when the effect already carries this program with these values, so
+ * resubmitting an unchanged program costs no undo step.
+ */
+export function setEffectProgram(
+  doc: TimelineDocument,
+  elementId: string,
+  program: InlineProgram,
+  params: FxParams,
+): TimelineDocument {
+  const effect = effectAt(doc, elementId);
+  if (effect == null) {
+    return doc;
+  }
+  const presetId = inlinePresetId(program.hash);
+  if (
+    effect.presetId === presetId &&
+    sameProgram(effect.program, program) &&
+    sameParams(effect.params, params)
+  ) {
+    return doc;
+  }
+  return writeEffect(
+    doc,
+    elementId,
+    withoutStaleParamTracks({ ...effect, presetId, program, params }, params),
   );
 }
 
@@ -232,6 +293,44 @@ export function setEffectParams(
     ...effect,
     params: { ...effect.params, ...patch },
   });
+}
+
+/**
+ * Patch parameter values on any clip that takes them from a preset and can
+ * animate them: an effect or a graphic.
+ *
+ * What the keyframe write path calls for an `fx:<key>` track, which has to
+ * work on both. `setEffectParams` stays effect-only for the panel that is.
+ */
+export function setProgramParams(
+  doc: TimelineDocument,
+  elementId: string,
+  patch: FxParams,
+): TimelineDocument {
+  const element = doc.elements[elementId] as
+    | (TimelineElement & { params?: FxParams })
+    | undefined;
+  if (
+    element == null ||
+    (element.filetype !== "effect" && element.filetype !== "graphic")
+  ) {
+    return doc;
+  }
+  const params = element.params ?? {};
+  const entries = Object.entries(patch);
+  if (
+    entries.length === 0 ||
+    entries.every(([key, value]) => sameParamValue(params[key], value))
+  ) {
+    return doc;
+  }
+  return {
+    ...doc,
+    elements: {
+      ...doc.elements,
+      [elementId]: { ...element, params: { ...params, ...patch } } as TimelineElement,
+    },
+  };
 }
 
 /**

@@ -69,7 +69,7 @@ import type { TimelineDocument } from "./tracks";
  * The element types that are composited as a layer, and can therefore be cut.
  *
  * Exactly the members of the `Maskable` mixin in `@types/timeline.ts`, and the
- * same five as `GRADABLE_FILETYPES` and `BLENDABLE_FILETYPES` — the three
+ * same six as `GRADABLE_FILETYPES` and `BLENDABLE_FILETYPES`, the three
  * mixins cover the same set for the same reason. Kept as a value so the agent
  * command can name them in its error message rather than repeating the list.
  */
@@ -79,6 +79,7 @@ export const MASKABLE_FILETYPES = [
   "gif",
   "shape",
   "text",
+  "graphic",
 ] as const;
 
 const MASKABLE = new Set<string>(MASKABLE_FILETYPES);

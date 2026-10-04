@@ -15,6 +15,8 @@
  * back by identity and `withCheckpoint` records nothing.
  */
 
+import { sameProgram } from "../fx/inlineProgram";
+import { sameParams } from "./effectOps";
 import type { TimelineElement } from "../../@types/timeline";
 import {
   ADJACENCY_EPSILON_MS,
@@ -101,6 +103,25 @@ function canJoin(left: TimelineElement, right: TimelineElement): boolean {
   // halves of one cut unless they also say the same thing.
   if (left.filetype === "text" && (left as any).text !== (right as any).text) {
     return false;
+  }
+
+  // Every graphic shares the "GRAPHIC" placeholder, so the path proves nothing,
+  // the template comment above in another form. Two graphics are halves of one
+  // cut only when they run the same program with the same values and the right
+  // one's clock picks up exactly where the left one's stops.
+  if (left.filetype === "graphic" && right.filetype === "graphic") {
+    if (left.presetId !== right.presetId) {
+      return false;
+    }
+    if (!sameProgram(left.program, right.program)) {
+      return false;
+    }
+    if (!sameParams(left.params ?? {}, right.params ?? {})) {
+      return false;
+    }
+    if (!near((left.clockHead ?? 0) + left.duration, right.clockHead ?? 0)) {
+      return false;
+    }
   }
 
   if (isAnimated(left) || isAnimated(right)) {
@@ -233,6 +254,16 @@ export function mergeClips(
         0,
       ),
     } as TimelineElement;
+    // The head keeps its own `clockHead`; the tail of the joined program is
+    // whatever followed the last piece, not the first.
+    if (merged.filetype === "graphic") {
+      const last = chain[chain.length - 1].element as typeof merged;
+      const { clockTail: _tail, ...rest } = merged;
+      merged = {
+        ...rest,
+        ...((last.clockTail ?? 0) !== 0 ? { clockTail: last.clockTail } : {}),
+      } as TimelineElement;
+    }
   }
 
   const elements = { ...doc.elements, [chain[0].id]: merged };

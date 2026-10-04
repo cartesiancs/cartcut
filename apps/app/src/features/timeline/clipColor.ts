@@ -35,6 +35,7 @@ export const CLIP_PALETTE: Readonly<Record<ClipKind, string>> = {
   shape: "#db2777",
   effect: "#7c3aed",
   template: "#0891b2",
+  graphic: "#ca8a04",
   group: "#71717a",
   // Never painted as a bar (a transition is drawn as a badge on its cut), but
   // the record is total so a new filetype cannot be added without a colour.

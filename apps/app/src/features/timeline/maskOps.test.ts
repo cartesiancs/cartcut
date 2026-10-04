@@ -44,9 +44,9 @@ const TRIANGLE: MaskNode[] = [
 ];
 
 describe("isMaskable", () => {
-  it("covers the five layer-painted types and nothing else", () => {
+  it("covers the six layer-painted types and nothing else", () => {
     expect([...MASKABLE_FILETYPES].sort()).toEqual(
-      ["gif", "image", "shape", "text", "video"].sort(),
+      ["gif", "graphic", "image", "shape", "text", "video"].sort(),
     );
     expect(isMaskable(imageElement())).toBe(true);
     expect(isMaskable(shapeElement())).toBe(true);

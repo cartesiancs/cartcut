@@ -38,7 +38,7 @@ import type { TimelineDocument } from "./tracks";
  * graded.
  *
  * Exactly the members of the `Gradable` mixin in `@types/timeline.ts`, and the
- * same five as `BLENDABLE_FILETYPES` — the two mixins cover the same set for
+ * same six as `BLENDABLE_FILETYPES`, the two mixins covering the same set for
  * the same reason. Kept as a value so the agent command can name them in its
  * error message rather than repeating the list.
  */
@@ -48,6 +48,7 @@ export const GRADABLE_FILETYPES = [
   "gif",
   "shape",
   "text",
+  "graphic",
 ] as const;
 
 const GRADABLE = new Set<string>(GRADABLE_FILETYPES);

@@ -30,6 +30,9 @@ const elementUtils = {
         // (so `isDynamicElement` is right by accident) but is also not
         // "static", and a call site testing for that explicitly drops it.
         "template",
+        // A graphic's clock is `clockHead` plus local time, not a source
+        // window: static, and listed for the reason a template is.
+        "graphic",
       ],
       dynamic: ["video", "audio", "mp4", "mp3", "mov"],
     };

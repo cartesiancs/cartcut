@@ -45,10 +45,13 @@
 import {
   occupiesTrack,
   type FxParams,
+  type InlineProgram,
   type TransitionAlignment,
   type TransitionElementType,
 } from "../../@types/timeline";
-import { sameParamValue } from "./effectOps";
+import { sameProgram } from "../fx/inlineProgram";
+import { inlinePresetId } from "../fx/programHash";
+import { sameParamValue, sameParams } from "./effectOps";
 import {
   cutTimeOf,
   isAdjacent,
@@ -143,6 +146,7 @@ function buildTransition(
   startTime: number,
   duration: number,
   requestedMs: number,
+  program?: InlineProgram,
 ): TransitionElementType {
   return {
     filetype: "transition",
@@ -161,8 +165,9 @@ function buildTransition(
     // told something different from what they can see.
     location: { x: 0, y: 0 },
     timelineOptions: { color: "#ffffff" },
-    presetId,
+    presetId: program != null ? inlinePresetId(program.hash) : presetId,
     params,
+    ...(program != null ? { program } : {}),
     fromId,
     toId,
     alignment,
@@ -194,6 +199,8 @@ export function addTransition(
   requestedMs: number,
   alignment: TransitionAlignment,
   params: FxParams = {},
+  /** An inline program to carry; it decides the id, as in `effectOps.addEffect`. */
+  program?: InlineProgram,
 ): TimelineDocument {
   if (fromId === toId) {
     return doc;
@@ -235,6 +242,7 @@ export function addTransition(
     startTimeFor(cut, duration, alignment),
     duration,
     requestedMs,
+    program,
   );
 
   return normalizeDocument({
@@ -381,11 +389,44 @@ export function setTransitionPreset(
     return doc;
   }
 
+  // An installed preset carries no program; see `effectOps.setEffectPreset`.
+  const { program: _program, ...rest } = transition;
   return {
     ...doc,
     elements: {
       ...doc.elements,
-      [elementId]: { ...transition, presetId, params },
+      [elementId]: { ...(rest as TransitionElementType), presetId, params },
+    },
+  };
+}
+
+/**
+ * Give a transition an inline program. `params` is the full set; declines when
+ * nothing would change. See `effectOps.setEffectProgram`.
+ */
+export function setTransitionProgram(
+  doc: TimelineDocument,
+  elementId: string,
+  program: InlineProgram,
+  params: FxParams,
+): TimelineDocument {
+  const transition = transitionAt(doc, elementId);
+  if (transition == null) {
+    return doc;
+  }
+  const presetId = inlinePresetId(program.hash);
+  if (
+    transition.presetId === presetId &&
+    sameProgram(transition.program, program) &&
+    sameParams(transition.params, params)
+  ) {
+    return doc;
+  }
+  return {
+    ...doc,
+    elements: {
+      ...doc.elements,
+      [elementId]: { ...transition, presetId, program, params },
     },
   };
 }

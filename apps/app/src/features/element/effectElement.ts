@@ -12,7 +12,11 @@
  */
 
 import { emptyAnimation } from "../animation/keyframes";
-import type { EffectElementType, FxParams } from "../../@types/timeline";
+import type {
+  EffectElementType,
+  FxParams,
+  InlineProgram,
+} from "../../@types/timeline";
 
 /** How long an effect lands as when the user drops one with no length in mind. */
 export const DEFAULT_EFFECT_MS = 3000;
@@ -28,6 +32,8 @@ export type EffectElementOptions = {
   intensity?: number;
   /** Overlay presets only; shader presets combine in GLSL and ignore it. */
   blend?: GlobalCompositeOperation;
+  /** The program behind an `inline.` id. Absent for an installed preset. */
+  program?: InlineProgram;
 };
 
 export function createEffectElement({
@@ -37,6 +43,7 @@ export function createEffectElement({
   duration = DEFAULT_EFFECT_MS,
   intensity = DEFAULT_INTENSITY,
   blend,
+  program,
 }: EffectElementOptions): EffectElementType {
   return {
     // Both are supplied by `placeNewElement`, which picks the track and derives
@@ -55,6 +62,7 @@ export function createEffectElement({
     localpath: "EFFECT",
     presetId,
     params,
+    ...(program != null ? { program } : {}),
     intensity,
     ...(blend != null ? { blend } : {}),
     animation: emptyAnimation("effect"),

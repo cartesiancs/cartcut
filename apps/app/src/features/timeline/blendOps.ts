@@ -46,6 +46,7 @@ export const BLENDABLE_FILETYPES = [
   "gif",
   "shape",
   "text",
+  "graphic",
 ] as const;
 
 const BLENDABLE = new Set<string>(BLENDABLE_FILETYPES);
