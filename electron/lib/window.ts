@@ -24,6 +24,12 @@ const window = {
         contextIsolation: true,
         webviewTag: true,
         preload: path.join(__dirname, "..", "preload.js"),
+        // html-in-canvas, which draws HTML graphics. On this window only, not
+        // as a command-line switch: an extension's webview and the recorder's
+        // windows have no use for it. The API is a proposal, so everything
+        // that calls it is behind `features/graphic/htmlHost.ts`, which checks
+        // it is there before using it.
+        enableBlinkFeatures: "CanvasDrawElement",
       },
       indexFile: "apps/app/index.html",
       show: show,

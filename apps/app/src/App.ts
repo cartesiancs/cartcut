@@ -8,6 +8,7 @@ import "./features/demo/warningDemoEnv";
 import "./features/gpt/chatSidebar";
 import { installLutResolver } from "./features/lut/lutRegistry";
 import { installTemplateResolver } from "./features/renderer/template";
+import { installPreviewGraphicRuntime } from "./features/graphic/graphicRuntime";
 import { IS_MAC } from "./utils/platform";
 import { exportElementRenderers } from "./features/export/renderers";
 import { templateFor, refreshTemplateLibrary } from "./features/template/templateRegistry";
@@ -68,6 +69,10 @@ export class App extends LitElement {
     // moment late is a frame nobody saw — and it is what stops a template's
     // clips showing whatever their decoders happened to be holding.
     installTemplateResolver(templateFor, exportElementRenderers);
+
+    // And the graphic renderer's: the preview's generator, the registry, the
+    // latest HTML rasters. An export opens a scope of its own instead.
+    installPreviewGraphicRuntime();
 
     // Un-awaited, exactly as `loadPresets` is: a template that has not been
     // enumerated yet draws nothing, which is the contract, and the first

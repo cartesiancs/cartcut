@@ -17,6 +17,12 @@ import { renderImage } from "../renderer/image";
 import { renderShape, shapeDrawScale } from "../renderer/shape";
 import { createShapeElement } from "../element/shapeElement";
 import { renderTemplate } from "../renderer/template";
+import { renderGraphic } from "../renderer/graphic";
+import {
+  needsHtmlHost,
+  releaseGraphicsNotIn,
+  requestPreviewRasters,
+} from "../graphic/graphicPipeline";
 import { assetTimeline } from "../template/assetTimeline";
 import { renderGif } from "../renderer/gif";
 import { renderVideoWithoutWait } from "../renderer/video";
@@ -396,6 +402,7 @@ export class PreviewCanvas extends LitElement {
     text: renderText,
     shape: renderShape,
     template: renderTemplate,
+    graphic: renderGraphic,
   };
 
   constructor() {
@@ -817,6 +824,17 @@ export class PreviewCanvas extends LitElement {
     // Handles for overlay effects that no longer exist. Without this, deleting
     // an effect leaves a decoding `<video>` running for the rest of the session.
     releaseUnusedOverlays(new Set(Object.keys(this.timeline)));
+
+    // HTML graphics paint on Chromium's next `paint`, not now, so their rasters
+    // are asked for ahead of this frame and drawn when they land; until then
+    // the latest ones draw. Free for a project with no graphic: the check is a
+    // pass over the keys, and the host is never created.
+    if (needsHtmlHost(this.timeline)) {
+      requestPreviewRasters(this.timeline, this.timelineCursor, projectFps(), () =>
+        this.scheduleDraw(),
+      );
+    }
+    releaseGraphicsNotIn(this.timeline);
 
     renderTimelineAtTime(
       octx,

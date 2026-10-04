@@ -204,6 +204,14 @@ ipcMain.handle("font:getLists", fontLib.getFontList);
 ipcMain.handle("font:getLocalFontLists", fontLib.getLocalFontList);
 ipcMain.handle("font:getPresetFontLists", fontLib.getPresetFontList);
 
+// For the length of an export with HTML graphics, which are rasterised from
+// Chromium's own paint and get none from a minimised, throttled window. Applied
+// to the window that asked, and to nothing else.
+ipcMain.handle("editor:setBackgroundThrottling", (event, allowed: boolean) => {
+  event.sender.setBackgroundThrottling(allowed === true);
+  return true;
+});
+
 // Enumeration only. `presetLib` never parses a manifest and never opens a path
 // the renderer chose — see its header for why the schema lives on the far side
 // of this boundary.

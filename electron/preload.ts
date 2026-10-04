@@ -27,6 +27,15 @@ const request = {
   editing: {
     run: (command) => ipcRenderer.send("editing:command", command),
   },
+  /**
+   * Whether this window may stop painting while hidden. An export with HTML
+   * graphics turns it off for its length: they are drawn from Chromium's paint,
+   * and a minimised window with throttling on never paints.
+   */
+  editor: {
+    setBackgroundThrottling: (allowed) =>
+      ipcRenderer.invoke("editor:setBackgroundThrottling", allowed === true),
+  },
   app: {
     forceClose: () => ipcRenderer.send("app:forceClose"),
     restart: () => ipcRenderer.send("app:restart"),

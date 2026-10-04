@@ -19,6 +19,15 @@
  * delivered file. Nothing here is a second way of drawing a frame.
  */
 
+import { preloadForComposite } from "../../export/compositePrep";
+import { needsHtmlHost, prepareScopeFrame } from "../../graphic/graphicPipeline";
+import { beginExportGraphics, endExportGraphics } from "../../graphic/graphicQueue";
+import {
+  createGraphicScope,
+  hasGraphicElements,
+  withGraphicScope,
+} from "../../graphic/graphicScope";
+import { GraphicGl } from "../../renderer/graphicGl";
 import { useTimelineStore } from "../../../states/timelineStore";
 import { renderOptionStore } from "../../../states/renderOptionStore";
 import { loadedAssetStore } from "../../asset/loadedAssetStore";
@@ -158,6 +167,20 @@ registerCommands({
 
     let primed = { loaded: 0, expected: 0 };
 
+    // Templates, LUTs and fonts, as the exporter loads them. Without this a
+    // sheet showed a template as empty space and a graded clip ungraded.
+    const expanded = await preloadForComposite(timeline);
+
+    // HTML graphics are rasterised from Chromium's paint, ahead of each frame,
+    // into a scope of the sheet's own. A GLSL one draws in its generator.
+    const graphics = hasGraphicElements(expanded)
+      ? createGraphicScope("sheet:" + Date.now(), new GraphicGl({ blocking: true }), options.fps)
+      : null;
+    const html = graphics != null && needsHtmlHost(expanded);
+    if (html) {
+      beginExportGraphics();
+    }
+
     try {
       // Audio handles are not decoded: nothing here plays, and decoding them
       // costs latency for a picture that does not use them.
@@ -169,18 +192,23 @@ registerCommands({
         // The same fps the exporter passes, so a frame is addressed the same
         // way here as it is there — see `loadedAssetStore#seek`.
         await loadedAssetStore.getState().seek(timeline, timeMs, options.fps);
+        if (html && graphics != null) {
+          await prepareScopeFrame(graphics, timeline, timeMs);
+        }
 
-        renderTimelineAtTime(
-          frameCtx,
-          timeline,
-          timeMs,
-          exportElementRenderers,
-          options.backgroundColor,
-          frameWidth,
-          frameHeight,
-          undefined,
-          undefined,
-          fx,
+        withGraphicScope(graphics, () =>
+          renderTimelineAtTime(
+            frameCtx,
+            timeline,
+            timeMs,
+            exportElementRenderers,
+            options.backgroundColor,
+            frameWidth,
+            frameHeight,
+            undefined,
+            undefined,
+            fx,
+          ),
         );
 
         const column = index % columns;
@@ -211,6 +239,10 @@ registerCommands({
       }
     } finally {
       fx?.compositor?.dispose?.();
+      graphics?.gl?.dispose();
+      if (html) {
+        endExportGraphics();
+      }
     }
 
     const dataUrl = sheet.toDataURL("image/png");

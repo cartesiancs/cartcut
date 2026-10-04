@@ -5,13 +5,20 @@ import {
   renderTimelineAtTime,
   type TimelineRenderers,
 } from "../renderer/timeline";
-import { preloadLutsForDocument } from "../lut/lutRegistry";
+import { preloadForComposite } from "./compositePrep";
 import { assetTimeline } from "../template/assetTimeline";
 import { withoutHiddenClips } from "../timeline/tracks";
-import { preloadTemplatesForDocument } from "../template/templateRegistry";
 import { createExportFxRuntime } from "../renderer/fx/createRuntime";
 import { releaseOverlayScope } from "../renderer/fx/overlaySource";
 import { createVideoScope, withVideoScope } from "../asset/videoScope";
+import {
+  createGraphicScope,
+  hasGraphicElements,
+  withGraphicScope,
+} from "../graphic/graphicScope";
+import { GraphicGl } from "../renderer/graphicGl";
+import { needsHtmlHost, prepareScopeFrame } from "../graphic/graphicPipeline";
+import { beginExportGraphics, endExportGraphics } from "../graphic/graphicQueue";
 import { hasFxElements } from "../renderer/fx/planFrame";
 import { setLutBlocking } from "../renderer/lut/apply";
 import { frameCount, frameTimeMs, inFlightWindow } from "./frames";
@@ -126,7 +133,7 @@ export async function renderTimeline(
    * so a table that landed on frame three would leave frames one and two
    * ungraded in the delivered file, and nothing downstream would ever say so.
    */
-  await preloadLutsForDocument(timeline);
+  await preloadForComposite(timeline);
 
   /**
    * And every template, for exactly the same reason.
@@ -136,7 +143,6 @@ export async function renderTimeline(
    * that arrived on frame three would leave frames one and two showing nothing
    * where it sits, and nothing downstream would ever say so.
    */
-  await preloadTemplatesForDocument(timeline);
 
   /**
    * The map the decoders work from, with every template's contents flattened in.
@@ -167,6 +173,27 @@ export async function renderTimeline(
   // shared one — they are keyed by path and immutable once decoded, so nothing
   // can move one under a frame loop.
   await assetStore.loadExportScope(scope, assets);
+
+  /**
+   * The export's graphic scope: its own blocking generator, and the HTML
+   * rasters made for each frame. `null` for a project with no graphic, which
+   * then pays nothing for the feature.
+   */
+  const graphics = hasGraphicElements(assets)
+    ? createGraphicScope(scope.id, new GraphicGl({ blocking: true }), fps)
+    : null;
+
+  /**
+   * Whether frames need HTML rasters. While they do, the export holds the HTML
+   * host (the preview stops preparing, `graphicQueue.ts`), and the window is
+   * kept painting: a minimised window with background throttling on stops
+   * firing `paint` altogether, measured, and every frame would time out.
+   */
+  const html = graphics != null && needsHtmlHost(assets);
+  if (html) {
+    beginExportGraphics();
+    await setBackgroundThrottling(false);
+  }
 
   const totalFrames = frameCount(options);
 
@@ -208,6 +235,19 @@ export async function renderTimeline(
         assetStore.seekScope(scope, assets, timeInMs, fps),
       );
 
+      if (html && graphics != null) {
+        const painted = await profiler.measureAsync("graphics", () =>
+          prepareScopeFrame(graphics, timeline, timeInMs),
+        );
+        // Not shipped blank. A graphic missing from one frame of a delivered
+        // file is worse than an export that stops and says why.
+        if (!painted) {
+          throw new Error(
+            "A graphic could not be drawn: the editor window stopped painting. Keep it open and try again.",
+          );
+        }
+      }
+
       // A seek that lands after the abort would otherwise composite and ship a
       // frame into a pipe that is already being torn down.
       throwIfAborted(signal);
@@ -218,18 +258,20 @@ export async function renderTimeline(
         // It is also what covers a template's *nested* clips, which follow the
         // one renderer table `App.ts` installs globally rather than the table
         // passed here. See `withVideoScope`.
-        withVideoScope(scope, () =>
-          renderTimelineAtTime(
-            ctx,
-            timeline,
-            timeInMs,
-            elementRenderers,
-            backgroundColor,
-            width,
-            height,
-            undefined,
-            undefined,
-            fx,
+        withGraphicScope(graphics, () =>
+          withVideoScope(scope, () =>
+            renderTimelineAtTime(
+              ctx,
+              timeline,
+              timeInMs,
+              elementRenderers,
+              backgroundColor,
+              width,
+              height,
+              undefined,
+              undefined,
+              fx,
+            ),
           ),
         ),
       );
@@ -269,10 +311,29 @@ export async function renderTimeline(
     // this export's context. An export that is cancelled halfway leaks every
     // one of them without this.
     fx?.compositor.dispose();
+    // The export's own generator, for the same reason: its context and every
+    // program compiled in it belong to this export alone.
+    graphics?.gl?.dispose();
+    if (html) {
+      endExportGraphics();
+      await setBackgroundThrottling(true);
+    }
     // Restored even on the abort path: leaving it set would make every
     // subsequent preview frame stall on `gl.finish()` for no benefit.
     setLutBlocking(false);
     profiler.report();
+  }
+}
+
+/**
+ * Ask main to let this window keep painting while hidden, or to stop. A no-op
+ * where there is no bridge (the web build, a test).
+ */
+async function setBackgroundThrottling(allowed: boolean): Promise<void> {
+  try {
+    await (globalThis as any)?.electronAPI?.req?.editor?.setBackgroundThrottling?.(allowed);
+  } catch {
+    // Throttling stays as it was; the frame loop reports a paint that never came.
   }
 }
 

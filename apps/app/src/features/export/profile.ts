@@ -15,9 +15,9 @@
  * frame before it was allowed to render another. It is not the cost of moving
  * one frame, which overlaps the next frame's work and so costs no wall clock.
  */
-export type FrameStage = "seek" | "composite" | "capture" | "pipe";
+export type FrameStage = "seek" | "graphics" | "composite" | "capture" | "pipe";
 
-const STAGES: FrameStage[] = ["seek", "composite", "capture", "pipe"];
+const STAGES: FrameStage[] = ["seek", "graphics", "composite", "capture", "pipe"];
 
 export function isProfilingEnabled(): boolean {
   return Boolean(
@@ -66,6 +66,7 @@ export function createFrameProfiler(
 
   const samples: Record<FrameStage, number[]> = {
     seek: [],
+    graphics: [],
     composite: [],
     capture: [],
     pipe: [],
