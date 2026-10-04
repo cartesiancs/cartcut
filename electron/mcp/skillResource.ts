@@ -31,6 +31,17 @@ export const SKILL_URI = `skill://${SKILL_NAME}/SKILL.md`;
  */
 export const SKILL_RELATIVE_PATH = `plugins/${SKILL_NAME}/skills/${SKILL_NAME}/SKILL.md`;
 
+/**
+ * Files beside SKILL.md that it tells the model to read, served under the same
+ * prefix so `skill://cartcut-editing/<path>` names the file it names on disk.
+ * A model that reads the skill as a resource has no other way to reach them.
+ */
+export const SKILL_REFERENCES = ["references/html-typography.md"] as const;
+
+export function referenceUri(relative: string): string {
+  return `skill://${SKILL_NAME}/${relative}`;
+}
+
 /** The agents the ⚡ panel has a tab for, by their skills CLI `-a` id. */
 export type SkillAgent = "claude-code" | "codex";
 
@@ -64,8 +75,9 @@ export interface ResourceRegistrar {
 }
 
 /**
- * Register the skill as one resource, read from disk on every request so a
- * dev build serves the file as it is now rather than as it was at launch.
+ * Register the skill and its references as resources, each read from disk on
+ * every request so a dev build serves the files as they are now rather than as
+ * they were at launch.
  */
 export function registerSkillResource(
   registrar: ResourceRegistrar,
@@ -91,4 +103,25 @@ export function registerSkillResource(
       ],
     }),
   );
+  for (const relative of SKILL_REFERENCES) {
+    const uri = referenceUri(relative);
+    registrar.registerResource(
+      `${SKILL_NAME}/${relative}`,
+      uri,
+      {
+        title: `Cartcut editing skill: ${relative}`,
+        description: "A reference the editing skill points to. Read it when the skill says to.",
+        mimeType: MIME_TYPE,
+      },
+      async () => ({
+        contents: [
+          {
+            uri,
+            mimeType: MIME_TYPE,
+            text: await fsp.readFile(path.join(path.dirname(file), relative), "utf8"),
+          },
+        ],
+      }),
+    );
+  }
 }

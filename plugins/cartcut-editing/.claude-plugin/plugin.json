@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "cartcut-editing",
   "displayName": "Cartcut Editing",
-  "version": "0.5.9",
+  "version": "0.6.0",
   "description": "Edit video in the running Cartcut app: cut editing driven by a transcript, subtitles, motion, transitions and effects. Bundles the editing skill and the connection to Cartcut's local MCP bridge.",
   "author": {
     "name": "cartesiancs",

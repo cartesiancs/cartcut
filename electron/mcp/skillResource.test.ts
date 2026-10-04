@@ -12,6 +12,8 @@ import path from "path";
 import {
   SKILL_FALLBACK_INSTRUCTION,
   SKILL_NAME,
+  SKILL_REFERENCES,
+  referenceUri,
   SKILL_URI,
   registerSkillResource,
   skillAddCommand,
@@ -60,9 +62,12 @@ describe("the lines handed out", () => {
 });
 
 describe("registerSkillResource", () => {
-  it("registers one markdown resource at the skill URI", () => {
+  it("registers the skill at its URI, then each reference", () => {
     const calls = register(REPO_ROOT);
-    expect(calls).toHaveLength(1);
+    expect(calls.map((call) => call[1])).toEqual([
+      SKILL_URI,
+      ...SKILL_REFERENCES.map(referenceUri),
+    ]);
     const [name, uri, metadata] = calls[0];
     expect(name).toBe(SKILL_NAME);
     expect(uri).toBe(SKILL_URI);
@@ -79,6 +84,21 @@ describe("registerSkillResource", () => {
         text: readFileSync(skillFilePath(REPO_ROOT), "utf8"),
       },
     ]);
+  });
+
+  it("serves each reference from beside the skill, as the skill names it", async () => {
+    const skill = readFileSync(skillFilePath(REPO_ROOT), "utf8");
+    const calls = register(REPO_ROOT).slice(1);
+    for (const [index, relative] of SKILL_REFERENCES.entries()) {
+      // The skill has to point at the file, or nothing tells a model to read it.
+      expect(skill).toContain(relative);
+      const [, uri, metadata, read] = calls[index];
+      expect(metadata.mimeType).toBe("text/markdown");
+      const result = await read(new URL(uri));
+      expect(result.contents[0].text).toBe(
+        readFileSync(path.join(path.dirname(skillFilePath(REPO_ROOT)), relative), "utf8"),
+      );
+    }
   });
 
   it("rejects when the file is missing, so the comparison above reads it", async () => {

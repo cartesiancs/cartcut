@@ -1,6 +1,6 @@
 ---
 name: cartcut-editing
-description: Edit video in the running Cartcut app — cut editing driven by a transcript, subtitles, trimming and rearranging clips. Use whenever the user asks to edit, cut, trim, caption, subtitle, or restructure a video, or refers to "the timeline", "the project", or "my edit". Requires Cartcut to be open with its MCP bridge connected.
+description: Edit video in the running Cartcut app: cut editing driven by a transcript, subtitles, trimming and rearranging clips, animated titles and typography. Use whenever the user asks to edit, cut, trim, caption, subtitle, add a title, or restructure a video, or refers to "the timeline", "the project", or "my edit". Requires Cartcut to be open with its MCP bridge connected.
 ---
 
 # Editing video in Cartcut
@@ -421,8 +421,71 @@ list_effect_presets({ category: "texture" })
 add_effect({ presetId: "…", startMs, durationMs, intensity: 60 })
 ```
 
-`intensity` is static, so an effect that comes and goes is several short effect
-clips rather than a keyframed one.
+`intensity` animates: `set_animation` and `add_keyframes` with `intensity`
+fade an effect in and out on one clip, and any `number` parameter animates the
+same way as `fx:<key>`.
+
+## Typography and graphics
+
+A **graphic** is a layer drawn by a program: HTML and CSS for lettering, GLSL
+for a generated background. It is a box like an image, so moving, sizing,
+fading, keyframing, blending, grading and masking it are the tools you already
+use. Reach for one whenever a title needs more than a text clip can do: motion
+per letter or per word, an exit as well as an entrance, 3D, text on a path,
+vertical writing, gradients or pictures inside the letters, several outlines or
+a long shadow, a lower third with two lines, a counter.
+
+**Start from a preset.** `list_graphic_presets` has two dozen, grouped as
+kinetic, stylized, distort, reveal, layout and background, each with the
+parameters it takes (the text and the font among them).
+
+```
+list_graphic_presets({ category: "kinetic" })
+add_graphic({ presetId: "com.cartcut.graphic.rise-in-out", startMs: 2000,
+              params: { title: "오늘의 레시피" } })
+```
+
+Lettering lands on a text row in front of the picture and a GLSL background on
+a video row behind it. The box defaults to the preset's design size, centred.
+
+**To restyle a title that already exists**, convert it rather than deleting and
+re-adding: `apply_typography({ clipIds, presetId })` replaces each text clip in
+place, keeping its id, row, timing, box and keyframes, and carries the text,
+font, colour, size and alignment into the preset. Its result lists per clip
+what did not carry (`dropped`: runs, a reveal, outline, shadow and so on), so
+say so to the user or restyle it in the program.
+
+**Write your own when no preset fits.** Pass a `program` instead of a
+`presetId` to `add_graphic`, `set_graphic` or `apply_typography`. The contract,
+every variable the host provides, what CSS is allowed and the recipes for the
+matrix of effects is in `references/html-typography.md` beside this file (also
+served as the MCP resource `skill://cartcut-editing/references/html-typography.md`).
+Read it before writing one. The loop is:
+
+```
+check_program({ program, renderAtMs: [0, 400, 1200, 3600] })
+                     →  errors with line numbers, warnings, and a filmstrip PNG
+                     →  open the PNG and look at it, fix, check again
+add_graphic({ program, startMs, durationMs })
+get_contact_sheet()  →  see it composited with the picture
+```
+
+Look at the filmstrip every time. Typography is judged by eye, and most
+mistakes (a word wrapping where it should not, a letter clipped at the box edge,
+an exit that never plays) are invisible in the source and obvious in the strip.
+
+Three habits that save a round trip:
+
+- **Use the font parameter**, never a literal `font-family`. A face named in CSS
+  exists only on the machine that wrote it; a font parameter travels with the
+  project. `bundled:<file>` names a face every install has.
+- **Korean wraps by eojeol only with `word-break: keep-all`.** Put it on every
+  text block, and `text-wrap: balance` on titles.
+- **Give motion room.** Drawing is clipped to the box plus `bleed`, so a glow, a
+  3D flip or letters flying in need `bleed` in the manifest.
+
+`save_program_as_preset` keeps a program you wrote as an installed preset, for
+this project and every later one.
 
 ## What is not here yet
 
