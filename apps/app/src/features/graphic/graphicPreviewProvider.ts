@@ -4,9 +4,11 @@
  * The provider shape `fx/fxPreviewProvider.ts` states (synchronous `get`,
  * fire-and-forget deduped `request`), with a different renderer behind it: a
  * graphic is drawn by the real pipeline, a throwaway clip in a one-clip map
- * prepared and composited as an export composites a frame, over the same
- * sample picture the effect tiles use. A tile therefore shows the preset's
- * actual lettering, in its default font, at a moment of its own animation.
+ * prepared and composited as an export composites a frame, over plain black.
+ * A tile therefore shows the preset's actual lettering, in its default font, at
+ * a moment of its own animation. Black rather than the effect tiles' sample
+ * picture: an effect needs a picture to act on, while lettering over a busy
+ * frame is harder to read than the preset it is advertising.
  *
  * One instance id for every tile, so the host keeps a single mount for them:
  * hovering one preset re-applies that mount step after step, and moving to the
@@ -27,7 +29,6 @@ import {
 } from "../fx/fxPreviewProvider";
 import { presetById } from "../fx/presetRegistry";
 import { defaultParamsOf, type FxHtmlRender, type FxPreset } from "../fx/presetTypes";
-import { sampleFrameCanvas } from "../fx/sampleFrames";
 import { GraphicGl } from "../renderer/graphicGl";
 import { renderTimelineAtTime } from "../renderer/timeline";
 import { createTileCache } from "../timeline/strip/cache";
@@ -142,11 +143,8 @@ export function createGraphicPreviewProvider(fps = 30): FxPreviewProvider {
       return "done";
     }
     frameCtx.setTransform(1, 0, 0, 1, 0, 0);
-    frameCtx.clearRect(0, 0, FRAME_W, FRAME_H);
-    const sample = sampleFrameCanvas("a", FRAME_W, FRAME_H);
-    if (sample != null) {
-      frameCtx.drawImage(sample, 0, 0, FRAME_W, FRAME_H);
-    }
+    frameCtx.fillStyle = "#000000";
+    frameCtx.fillRect(0, 0, FRAME_W, FRAME_H);
     const active = scope;
     withGraphicScope(active, () =>
       renderTimelineAtTime(
