@@ -1,6 +1,7 @@
 import { emptyAnimation } from "../animation/keyframes";
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
+import { classMap } from "lit/directives/class-map.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import {
   ActiveStringType,
@@ -520,9 +521,20 @@ export class PreviewTopBar extends LitElement {
           </div>
 
           <div class="dropdown">
+            <!--
+              classMap, not an interpolated string: Bootstrap keeps the open
+              state as a show class on this button as well as on the menu.
+              Picking Polygon flips is-on while the menu is open, a string
+              binding rewrites the whole attribute and deletes show, and from
+              then on Bootstrap's outside click skips the menu (button not
+              open) and its toggle refuses to reopen it (menu already open),
+              so nothing closes it. classMap adds and removes is-on alone.
+            -->
             <button
               type="button"
-              class="tb-btn ${this.control.cursorType == "shape" ? "is-on" : ""}"
+              class="tb-btn ${classMap({
+                "is-on": this.control.cursorType == "shape",
+              })}"
               data-bs-toggle="dropdown"
               aria-expanded="false"
               title="Add a shape"
