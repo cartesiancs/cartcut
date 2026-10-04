@@ -26,6 +26,7 @@ import { spanEnd } from "../timeline/geometry";
 import {
   normalizeDocument,
   SCHEMA_VERSION,
+  isReadableSchemaVersion,
   type TimelineTrack,
 } from "../timeline/tracks";
 import type { TemplateManifest } from "./archive";
@@ -129,7 +130,7 @@ export async function readTemplateDocument(
   // Absent means a `.ngt` written before `project.json` existed, which is
   // version 1 — the same reading `functions/project.ts` takes.
   const schemaVersion = project?.schemaVersion ?? 1;
-  if (schemaVersion !== SCHEMA_VERSION) {
+  if (!isReadableSchemaVersion(schemaVersion)) {
     throw new Error(
       `the template was written by a different version of CartCut (${String(
         schemaVersion,

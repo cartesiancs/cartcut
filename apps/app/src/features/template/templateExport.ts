@@ -23,7 +23,7 @@ import JSZip from "jszip";
 import type { Timeline } from "../../@types/timeline";
 import { arrayBufferToBase64 } from "../../utils/base64";
 import { serializeAssetPaths } from "../project/assetsFile";
-import { SCHEMA_VERSION, type TimelineTrack } from "../timeline/tracks";
+import { schemaVersionFor, type TimelineTrack } from "../timeline/tracks";
 import { planTemplateExport } from "./exportPlan";
 
 /** The notional folder the archive is anchored on. Never created. */
@@ -134,7 +134,10 @@ export async function buildTemplateArchive(
   // `assetPaths.json`, anchored on where the `.ngt` sits inside the archive.
   // That anchoring is the whole of the format's portability.
   const ngt = new JSZip();
-  ngt.file("project.json", JSON.stringify({ schemaVersion: SCHEMA_VERSION }));
+  ngt.file(
+    "project.json",
+    JSON.stringify({ schemaVersion: schemaVersionFor(plan.elements as any) }),
+  );
   ngt.file("timeline.json", JSON.stringify(plan.elements));
   ngt.file("tracks.json", JSON.stringify(input.tracks));
   ngt.file("renderOptions.json", JSON.stringify(input.renderOptions));

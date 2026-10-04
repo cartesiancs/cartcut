@@ -31,6 +31,7 @@
 import type { Timeline } from "../../@types/timeline";
 import {
   SCHEMA_VERSION,
+  isReadableSchemaVersion,
   normalizeDocument,
   type TimelineDocument,
   type TimelineTrack,
@@ -85,7 +86,7 @@ export async function readProjectDocument(
 
   // A compatibility check, not a migrator. Saying so plainly beats opening
   // something that would look subtly wrong and export differently.
-  if (schemaVersion !== SCHEMA_VERSION) {
+  if (!isReadableSchemaVersion(schemaVersion)) {
     return {
       ok: false,
       reason: "schema",

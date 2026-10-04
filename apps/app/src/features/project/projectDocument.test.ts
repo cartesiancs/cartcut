@@ -57,16 +57,29 @@ describe("readProjectDocument", () => {
   // -------------------------------------------------------- the schema gate
   it("refuses a newer schema version", async () => {
     const result = await readProjectDocument(
-      entries({ project: '{"schemaVersion":3}' }),
+      entries({ project: '{"schemaVersion":4}' }),
       "/a/p.ngt",
       NOT_FOUND,
     );
     expect(result).toEqual({
       ok: false,
       reason: "schema",
-      found: 3,
+      found: 4,
       expected: 2,
     });
+  });
+
+  it("opens version 3, which is what a project holding a graphic is written as", async () => {
+    const result = await readProjectDocument(
+      entries({ project: '{"schemaVersion":3}' }),
+      "/a/p.ngt",
+      NOT_FOUND,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // In memory every document is the same version; only the file differs.
+      expect(result.document.schemaVersion).toBe(2);
+    }
   });
 
   it("treats a missing project.json as version 1 and refuses it", async () => {

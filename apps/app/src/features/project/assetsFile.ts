@@ -89,6 +89,7 @@ const SENTINELS = new Set([
   "TRANSITION",
   "GROUP",
   "TEMPLATE",
+  "GRAPHIC",
   "/TEXTELEMENT",
   "default",
 ]);
@@ -148,6 +149,73 @@ function parseFillKey(
     : { elementId: match[1], slotId: match[2] };
 }
 
+/**
+ * The files a graphic names below its own fields: a font or an image parameter
+ * holding an absolute path, and each of an inline program's `assets`. Keyed by
+ * a suffix on the element id, the way a template's fills are (`#param:<key>`,
+ * `#asset:<name>`), so `AssetPathsFile` keeps its shape.
+ *
+ * A parameter counts only when its value is a path to a face or a picture.
+ * This module cannot read the manifest to know which parameters are fonts, and
+ * a text parameter that happens to start with a slash must not be "relinked".
+ */
+const GRAPHIC_FILE = /\.(ttf|otf|woff2?|png|jpe?g|webp|gif|svg)$/i;
+
+function isAbsolutePathLike(value: string): boolean {
+  return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("file://");
+}
+
+export function graphicAssetRefsOf(
+  element: TimelineElement,
+): Array<{ suffix: string; value: string }> {
+  if ((element as { filetype?: string }).filetype !== "graphic") {
+    return [];
+  }
+  const out: Array<{ suffix: string; value: string }> = [];
+  const params = (element as { params?: Record<string, unknown> }).params ?? {};
+  for (const key of Object.keys(params).sort()) {
+    const value = params[key];
+    if (typeof value === "string" && isAbsolutePathLike(value) && GRAPHIC_FILE.test(value)) {
+      out.push({ suffix: "#param:" + key, value });
+    }
+  }
+  const assets = (element as { program?: { assets?: Record<string, unknown> } }).program?.assets ?? {};
+  for (const name of Object.keys(assets).sort()) {
+    const value = assets[name];
+    if (typeof value === "string" && value !== "") {
+      out.push({ suffix: "#asset:" + name, value });
+    }
+  }
+  return out;
+}
+
+/** The element with one of `graphicAssetRefsOf`'s paths replaced. */
+export function withGraphicAssetRef(
+  element: TimelineElement,
+  suffix: string,
+  value: string,
+): TimelineElement {
+  if (suffix.startsWith("#param:")) {
+    const key = suffix.slice("#param:".length);
+    const params = (element as { params?: Record<string, unknown> }).params ?? {};
+    return { ...element, params: { ...params, [key]: value } } as TimelineElement;
+  }
+  if (suffix.startsWith("#asset:")) {
+    const name = suffix.slice("#asset:".length);
+    const program = (element as { program?: { assets?: Record<string, string> } }).program;
+    if (program == null) {
+      return element;
+    }
+    return {
+      ...element,
+      program: { ...program, assets: { ...(program.assets ?? {}), [name]: value } },
+    } as TimelineElement;
+  }
+  return element;
+}
+
+const GRAPHIC_KEY = /^([^#]+)(#(?:param|asset):[\s\S]+)$/;
+
 /** Whether a field's value is something worth trying to locate on disk. */
 function isRealAssetPath(value: unknown): value is string {
   return (
@@ -173,6 +241,12 @@ function assetPathsOf(
       const value = (element as Record<string, unknown>)[field];
       if (isRealAssetPath(value)) {
         found.push({ id, field, value });
+      }
+    }
+
+    for (const ref of graphicAssetRefsOf(element)) {
+      if (isRealAssetPath(ref.value)) {
+        found.push({ id: id + ref.suffix, field: "localpath", value: ref.value });
       }
     }
 
@@ -210,6 +284,15 @@ function writeAssetPath(
   field: AssetField,
   value: string,
 ): void {
+  const graphic = GRAPHIC_KEY.exec(id);
+  if (graphic != null) {
+    const element = elements[graphic[1]];
+    if (element != null) {
+      elements[graphic[1]] = withGraphicAssetRef(element, graphic[2], value);
+    }
+    return;
+  }
+
   const fill = parseFillKey(id);
   if (fill == null) {
     elements[id] = { ...elements[id], [field]: value } as TimelineElement;

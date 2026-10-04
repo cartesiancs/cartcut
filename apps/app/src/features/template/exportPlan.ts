@@ -27,7 +27,12 @@ import {
   toFsPath,
   type PathFlavour,
 } from "../project/assetPaths";
-import { assetFieldsOf, type AssetField } from "../project/assetsFile";
+import {
+  assetFieldsOf,
+  graphicAssetRefsOf,
+  withGraphicAssetRef,
+  type AssetField,
+} from "../project/assetsFile";
 
 /** One file to copy into the archive. */
 export type StagedAsset = {
@@ -139,6 +144,29 @@ export function planTemplateExport(
   const taken = new Set<string>();
   const next: Record<string, TimelineElement> = {};
 
+  /** Stage one file once, under a name no other file has claimed. */
+  const stage = (value: string): StagedAsset => {
+    let asset = staged.get(value);
+    if (asset == null) {
+      const from = toFsPath(value, flavour);
+      let name = safeAssetName(basename(from));
+      for (let index = 2; taken.has(name.toLowerCase()); index += 1) {
+        name = withSuffix(safeAssetName(basename(from)), index);
+      }
+      taken.add(name.toLowerCase());
+      asset = {
+        from,
+        entry: `${ASSET_DIR}/${name}`,
+        localpath: mintLocalPath(
+          `${trimmed}${separator}${ASSET_DIR}${separator}${name}`,
+          shapeOf(value),
+        ),
+      };
+      staged.set(value, asset);
+    }
+    return asset;
+  };
+
   // Key order, so an archive built twice from one project is byte-identical:
   // collision suffixes depend on the order names are claimed in.
   for (const id of Object.keys(elements).sort()) {
@@ -148,6 +176,18 @@ export function planTemplateExport(
     }
 
     let rewritten: TimelineElement | null = null;
+
+    // A graphic's fonts, pictures and program assets are files the archive
+    // must carry too, or the template draws in the fallback face on the next
+    // machine. They sit below the element's fields, so they are staged here
+    // through the same `stage` and written back through `assetsFile`.
+    for (const ref of graphicAssetRefsOf(element)) {
+      if (!isRealAssetPath(ref.value)) {
+        continue;
+      }
+      const asset = stage(ref.value);
+      rewritten = withGraphicAssetRef(rewritten ?? element, ref.suffix, asset.localpath);
+    }
 
     for (const field of assetFieldsOf(element)) {
       const value = (element as Record<string, unknown>)[field];

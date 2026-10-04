@@ -77,6 +77,27 @@ describe("serializeProjectEntries", () => {
     );
   });
 
+  it("writes version 3 only while a graphic is in the project", () => {
+    const withGraphic = {
+      ...elements(),
+      g: { filetype: "graphic", localpath: "GRAPHIC" } as any,
+    };
+    const written = serializeProjectEntries({
+      elements: withGraphic,
+      tracks: TRACKS,
+      options: options(),
+      anchor: PROJECT,
+    });
+    expect(JSON.parse(written.project)).toEqual({ schemaVersion: 3 });
+    const without = serializeProjectEntries({
+      elements: elements(),
+      tracks: TRACKS,
+      options: options(),
+      anchor: PROJECT,
+    });
+    expect(JSON.parse(without.project)).toEqual({ schemaVersion: 2 });
+  });
+
   it("names the entries as the archive names them", () => {
     expect(NGT_ENTRY_NAMES).toEqual({
       project: "project.json",

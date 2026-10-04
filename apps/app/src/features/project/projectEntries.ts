@@ -40,7 +40,7 @@
 
 import type { Timeline } from "../../@types/timeline";
 import type { RenderOptions } from "../../states/renderOptionStore";
-import { SCHEMA_VERSION, type TimelineTrack } from "../timeline/tracks";
+import { schemaVersionFor, type TimelineTrack } from "../timeline/tracks";
 import { serializeAssetPaths } from "./assetsFile";
 import { serializeRenderOptions } from "./renderOptionsFile";
 
@@ -89,9 +89,11 @@ export function serializeProjectEntries(
 
   return {
     // What tells a future version which format this is. A file without it
-    // predates tracks, and load refuses on a mismatch rather than migrating —
-    // so an added *entry* or field must never move this number.
-    project: JSON.stringify({ schemaVersion: SCHEMA_VERSION }),
+    // predates tracks, and load refuses on a mismatch rather than migrating,
+    // so an added *entry* or field must never move this number. A new
+    // filetype does, and only while one is present: see
+    // `tracks.ts#GRAPHIC_SCHEMA_VERSION`.
+    project: JSON.stringify({ schemaVersion: schemaVersionFor(elements as any) }),
     timeline: JSON.stringify(elements),
     tracks: JSON.stringify(tracks),
     renderOptions: JSON.stringify(
