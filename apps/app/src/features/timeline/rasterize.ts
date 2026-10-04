@@ -120,7 +120,7 @@ export function imageTwinOf(
  * a division there would put `NaN` percentages into the document, and a mask
  * that cannot be placed is better dropped than placed wrongly.
  */
-function remapMask(text: TextElementType, box: RasterBox): MaskType | null {
+export function remapMask(text: TextElementType, box: RasterBox): MaskType | null {
   const mask = maskOf(text);
   if (mask == null) {
     return null;

@@ -5,6 +5,10 @@ import { ensureFontFace } from "../font/fontFaces";
 import { resolveTextStyle } from "../text/style";
 import { setIn } from "../../utils/immutable";
 import { rasterizeTextElements } from "../element/rasterizeText";
+import { presetsOfKind } from "../fx/presetRegistry";
+import { textToGraphic } from "../timeline/typographyOps";
+import { bundledFonts, loadFontLibrary } from "../font/fontLibrary";
+import { fontValueOfPath } from "../graphic/fontParams";
 import { affectsTextBlock, withFittedTextHeights } from "../element/textFit";
 import { DEFAULT_LINE_HEIGHT, coerceLineHeight } from "../text/metrics";
 import { applyMenuPlacement } from "../menu/menuPlacement";
@@ -1043,8 +1047,53 @@ export class OptionText extends LitElement {
       >
         Rasterize to Image
       </button>
+      ${this.typographyRow()}
     `;
   }
+
+  /** Installed HTML graphics a text clip can become, and the button that converts it. */
+  private typographyRow() {
+    const presets = presetsOfKind("graphic").filter((preset) => preset.render.type === "html");
+    if (presets.length === 0) {
+      return html``;
+    }
+    return html`
+      <div class="opt-row" style="gap: 6px; margin-top: 6px;">
+        <select class="opt-select" aria-label="typography preset" style="flex: 1; min-width: 0;">
+          ${presets.map((preset) => html`<option value=${preset.id}>${preset.name}</option>`)}
+        </select>
+        <button
+          type="button"
+          class="opt-text-btn"
+          style="height: 26px; flex: none;"
+          title="Replace this text with a typography graphic in the same place and time"
+          @click=${this.handleClickTypography}
+        >
+          Apply Typography
+        </button>
+      </div>
+    `;
+  }
+
+  handleClickTypography = async () => {
+    const select = this.querySelector<HTMLSelectElement>("select[aria-label='typography preset']");
+    const preset = presetsOfKind("graphic").find((entry) => entry.id === select?.value);
+    if (preset == null) {
+      return;
+    }
+    await loadFontLibrary();
+    const bundled = bundledFonts();
+    const ids = [...this.elementId];
+    useTimelineStore
+      .getState()
+      .withCheckpoint((doc) =>
+        textToGraphic(doc, ids, { preset }, (path) => fontValueOfPath(path, bundled)),
+      );
+    // The inspector is picked by filetype when a clip is selected and does not
+    // follow a change of filetype, so it would go on showing this text panel
+    // for what is now a graphic.
+    (document.querySelector("element-timeline-canvas") as any)?.showSideOption?.(ids[0]);
+  };
 
   /**
    * Switching fill mode writes the whole `fill` object, not just its `type`.
