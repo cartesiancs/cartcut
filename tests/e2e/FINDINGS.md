@@ -345,3 +345,37 @@ rather than a bare `Set`.
   `TransitionElementType` is at `@types/timeline.ts:433`, with a full
   `transitionOps.ts`, `transitionGeometry.ts` and an `option-transition` panel.
   The note is stale. The tool count in the same file says 36; it is 37.
+
+---
+
+## 10. html-in-canvas in this Electron (the graphic layer's gate)
+
+Measured 2026-10-04 with `tests/spikes/html-in-canvas/` against Electron 44.4.3
+(Chromium 152.0.7977.130), `webPreferences.enableBlinkFeatures:
+"CanvasDrawElement"`. Every line below is a result the harness prints; rerun it
+before relying on any of them after an Electron upgrade, because the WICG
+explainer has already moved on to a `content="drawable"` shape that this build
+does not have.
+
+| question | answer |
+|---|---|
+| API present | `layoutsubtree`, `drawElementImage` (returns a `DOMMatrix`), `requestPaint`, `paint` event with `changedElements`, `captureElementImage` |
+| Hiding the host canvas | `clip-path: inset(50%)` works. **`opacity: 0` paints every child transparent**, a canvas at `left: -10000px` is culled to nothing, and `visibility: hidden` throws "No cached paint record" |
+| Shadow root under the canvas | drawn, closed or open |
+| iframe under the canvas | **crashes the renderer** (exit code 5), sandboxed or not, direct child or wrapped, before any draw. The mount is a shadow root |
+| CSS animation, paused and seeked | drawn at the seeked time (`currentTime = 500` of a red to blue 1s ramp reads `128,0,128`) |
+| SMIL, `pauseAnimations` + `setCurrentTime` | drawn at that time |
+| Freshness | **not synchronous.** A style change is invisible to `drawElementImage` after a forced layout and inside the next `requestAnimationFrame`; it is visible after the next `paint` event and inside that event's handler |
+| Scale | replayed as vectors: drawn under `ctx.scale(4, 4)`, or with a 4x destination size, the text edges match CSS `zoom: 4` and are 7x sharper than a 1x raster upscaled. No zoom trick is needed for resolution |
+| Root CSS transform | ignored by the draw (as specified); transforms on descendants are drawn |
+| Overflow | clipped to the element's border box, so a bleed has to be padding on the root, not overflow |
+| Document `@font-face` from `file://` | applies inside the shadow root and is drawn |
+| `blob:` and `file://` images | both drawn |
+| Canvas taint | none: `getImageData` works after drawing file fonts and file images |
+| `url(#id)` (CSS filter) and `textPath href="#id"` inside the shadow root | both resolve within the shadow tree |
+| `@property` inside the shadow root's adopted sheet | **ignored** (a registered colour animates discretely). Registered at document level it interpolates (`191,0,64` at a quarter), so the host hoists it and renames the property per program |
+| Several children changed before one `requestPaint` | all fresh inside one `paint` handler, so one paint serves many graphics |
+| Cost at 1920x1080 | about 6 ms per draw plus read, about 7 ms from `requestPaint` to `paint` |
+| ElementImage on another canvas | refused ("captured from a different canvas"); `drawImage` from the host canvas works, so rasters are copied |
+| Minimized window, throttling on | no `paint`, no `requestAnimationFrame`, "No cached paint record". With `webContents.setBackgroundThrottling(false)` it paints normally while minimized |
+| Hidden window (`show: false`, throttling off) | paints normally |

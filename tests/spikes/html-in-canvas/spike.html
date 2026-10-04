@@ -1,0 +1,814 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>spike</title>
+<style>
+  body { margin: 0; background: #222; }
+</style>
+</head>
+<body>
+<script>
+const params = new URLSearchParams(location.search);
+const FONT = params.get("font") || "";
+const REPO = params.get("repo") || "";
+
+function host(w, h, css) {
+  const c = document.createElement("canvas");
+  c.setAttribute("layoutsubtree", "");
+  c.width = w;
+  c.height = h;
+  c.style.cssText =
+    `position:fixed;left:0;top:0;width:${w}px;height:${h}px;` +
+    (css ?? "clip-path:inset(50%);pointer-events:none;z-index:-1;");
+  document.body.appendChild(c);
+  return c;
+}
+
+function waitPaint(c, timeout = 1000) {
+  return new Promise((resolve) => {
+    let done = false;
+    const t0 = performance.now();
+    const timer = setTimeout(() => {
+      if (!done) { done = true; resolve({ fired: false, ms: performance.now() - t0 }); }
+    }, timeout);
+    c.addEventListener("paint", (e) => {
+      if (!done) {
+        done = true;
+        clearTimeout(timer);
+        resolve({ fired: true, ms: performance.now() - t0, changed: e.changedElements ? e.changedElements.length : null });
+      }
+    }, { once: true });
+    if (typeof c.requestPaint === "function") c.requestPaint();
+  });
+}
+
+function px(ctx, x, y) {
+  const d = ctx.getImageData(x, y, 1, 1).data;
+  return [d[0], d[1], d[2], d[3]];
+}
+
+function hash(ctx, w, h) {
+  const d = ctx.getImageData(0, 0, w, h).data;
+  let a = 0;
+  for (let i = 0; i < d.length; i += 1) a = (a * 31 + d[i]) | 0;
+  return a;
+}
+
+function inkCount(ctx, w, h) {
+  const d = ctx.getImageData(0, 0, w, h).data;
+  let ink = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > 0) ink += 1;
+  return ink;
+}
+
+async function guard(name, fn) {
+  console.log("start " + name);
+  try {
+    return await Promise.race([fn(), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000))]);
+  } catch (e) {
+    return { error: String(e && e.message ? e.message : e) };
+  }
+}
+
+function makeIframe(w, h) {
+  const f = document.createElement("iframe");
+  f.setAttribute("sandbox", "allow-same-origin");
+  f.style.cssText = `width:${w}px;height:${h}px;border:0;display:block;background:transparent;`;
+  return f;
+}
+
+async function t1_basic() {
+  const c = host(200, 200);
+  const d = document.createElement("div");
+  d.style.cssText = "width:100px;height:100px;background:rgb(255,0,0);";
+  c.appendChild(d);
+  const p = await waitPaint(c);
+  const ctx = c.getContext("2d");
+  const m = ctx.drawElementImage(d, 0, 0);
+  const out = { paint: p, px: px(ctx, 50, 50), outside: px(ctx, 150, 150), returns: m ? m.constructor.name : String(m) };
+  c.remove();
+  return out;
+}
+
+async function t2_shadow() {
+  const c = host(200, 200);
+  const d = document.createElement("div");
+  const s = d.attachShadow({ mode: "closed" });
+  const inner = document.createElement("div");
+  inner.style.cssText = "width:100px;height:100px;background:rgb(0,255,0);";
+  s.appendChild(inner);
+  c.appendChild(d);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(d, 0, 0);
+  const out = { px: px(ctx, 50, 50) };
+  c.remove();
+  return out;
+}
+
+async function t2_iframe() {
+  const c = host(200, 200);
+  const f = makeIframe(100, 100);
+  c.appendChild(f);
+  const doc = f.contentDocument;
+  const out = { docAccessible: doc != null };
+  if (doc) {
+    doc.documentElement.style.background = "transparent";
+    doc.body.style.cssText = "margin:0;background:rgb(0,0,255);";
+  }
+  await waitPaint(c);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(f, 0, 0);
+  out.px = px(ctx, 50, 50);
+  c.remove();
+  return out;
+}
+
+function animSheet(doc) {
+  const sheet = new (doc.defaultView.CSSStyleSheet)();
+  sheet.replaceSync(`
+    @keyframes k { from { background: rgb(255,0,0) } to { background: rgb(0,0,255) } }
+    .a { width:100px;height:100px; animation: k 1000ms linear both; animation-play-state: paused; }
+  `);
+  return sheet;
+}
+
+async function t2_iframe_nodraw() {
+  const c = host(200, 200);
+  const f = makeIframe(100, 100);
+  c.appendChild(f);
+  const doc = f.contentDocument;
+  if (doc) doc.body.style.cssText = "margin:0;background:rgb(0,0,255);";
+  const p1 = await waitPaint(c);
+  const p2 = await waitPaint(c);
+  c.remove();
+  return { p1, p2 };
+}
+
+async function t2_iframe_unsandboxed() {
+  const c = host(200, 200);
+  const f = document.createElement("iframe");
+  f.style.cssText = "width:100px;height:100px;border:0;display:block;";
+  c.appendChild(f);
+  const doc = f.contentDocument;
+  if (doc) doc.body.style.cssText = "margin:0;background:rgb(0,0,255);";
+  await waitPaint(c);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(f, 0, 0);
+  const out = { px: px(ctx, 50, 50) };
+  c.remove();
+  return out;
+}
+
+async function t2_iframe_in_div() {
+  const c = host(200, 200);
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "width:100px;height:100px;";
+  const f = makeIframe(100, 100);
+  wrap.appendChild(f);
+  c.appendChild(wrap);
+  const doc = f.contentDocument;
+  if (doc) doc.body.style.cssText = "margin:0;background:rgb(0,0,255);";
+  await waitPaint(c);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(wrap, 0, 0);
+  const out = { px: px(ctx, 50, 50) };
+  c.remove();
+  return out;
+}
+
+async function t3_anim_shadow() {
+  const c = host(200, 200);
+  const d = document.createElement("div");
+  const s = d.attachShadow({ mode: "open" });
+  s.adoptedStyleSheets = [animSheet(document)];
+  const a = document.createElement("div");
+  a.className = "a";
+  s.appendChild(a);
+  c.appendChild(d);
+  await waitPaint(c);
+  const anims = s.getAnimations();
+  for (const x of anims) { x.pause(); x.currentTime = 500; }
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(d, 0, 0);
+  const mid = px(ctx, 50, 50);
+  for (const x of s.getAnimations()) x.currentTime = 0;
+  await waitPaint(c);
+  ctx.clearRect(0, 0, 200, 200);
+  ctx.drawElementImage(d, 0, 0);
+  const start = px(ctx, 50, 50);
+  c.remove();
+  return { count: anims.length, mid, start };
+}
+
+async function t3_anim_iframe() {
+  const c = host(200, 200);
+  const f = makeIframe(100, 100);
+  c.appendChild(f);
+  const doc = f.contentDocument;
+  doc.body.style.margin = "0";
+  doc.adoptedStyleSheets = [animSheet(doc)];
+  const a = doc.createElement("div");
+  a.className = "a";
+  doc.body.appendChild(a);
+  await waitPaint(c);
+  const anims = doc.getAnimations();
+  for (const x of anims) { x.pause(); x.currentTime = 250; }
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(f, 0, 0);
+  const out = { count: anims.length, q: px(ctx, 50, 50) };
+  c.remove();
+  return out;
+}
+
+async function t3_smil() {
+  const c = host(200, 200);
+  const d = document.createElement("div");
+  d.style.cssText = "width:100px;height:100px;";
+  d.innerHTML = `<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" height="100" width="0" fill="rgb(255,0,255)"><animate attributeName="width" from="0" to="100" dur="1s" fill="freeze"/></rect></svg>`;
+  c.appendChild(d);
+  const svg = d.querySelector("svg");
+  svg.pauseAnimations();
+  svg.setCurrentTime(0.5);
+  await waitPaint(c);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(d, 0, 0);
+  const out = { at25: px(ctx, 25, 50), at75: px(ctx, 75, 50) };
+  c.remove();
+  return out;
+}
+
+async function t4_sync() {
+  const c = host(200, 200);
+  const d = document.createElement("div");
+  d.style.cssText = "width:100px;height:100px;background:rgb(255,0,0);";
+  c.appendChild(d);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(d, 0, 0);
+  const before = px(ctx, 50, 50);
+  d.style.background = "rgb(0,255,0)";
+  ctx.clearRect(0, 0, 200, 200);
+  ctx.drawElementImage(d, 0, 0);
+  const immediate = px(ctx, 50, 50);
+  // Force style and layout, then draw again in the same task.
+  void d.getBoundingClientRect();
+  ctx.clearRect(0, 0, 200, 200);
+  ctx.drawElementImage(d, 0, 0);
+  const afterLayout = px(ctx, 50, 50);
+  const rafColor = await new Promise((r) => requestAnimationFrame(() => {
+    ctx.clearRect(0, 0, 200, 200);
+    ctx.drawElementImage(d, 0, 0);
+    r(px(ctx, 50, 50));
+  }));
+  const p = await waitPaint(c);
+  ctx.clearRect(0, 0, 200, 200);
+  ctx.drawElementImage(d, 0, 0);
+  const afterPaint = px(ctx, 50, 50);
+  // Inside the paint handler itself.
+  d.style.background = "rgb(0,0,255)";
+  const inHandler = await new Promise((resolve) => {
+    c.addEventListener("paint", () => {
+      ctx.clearRect(0, 0, 200, 200);
+      ctx.drawElementImage(d, 0, 0);
+      resolve(px(ctx, 50, 50));
+    }, { once: true });
+    c.requestPaint();
+  });
+  c.remove();
+  return { before, immediate, afterLayout, rafColor, paint: p, afterPaint, inHandler };
+}
+
+function midRatio(ctx, w, h) {
+  const d = ctx.getImageData(0, 0, w, h).data;
+  let mid = 0, dark = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const a = d[i + 3];
+    if (a === 0) continue;
+    const l = (d[i] + d[i + 1] + d[i + 2]) / 3;
+    if (l < 40) dark += 1;
+    else if (l < 215) mid += 1;
+  }
+  return { mid, dark, ratio: dark ? +(mid / dark).toFixed(3) : null };
+}
+
+async function t5_scale() {
+  const c = host(400, 160);
+  const d = document.createElement("div");
+  d.style.cssText = "width:100px;height:40px;background:#fff;color:#000;font:bold 28px sans-serif;line-height:40px;";
+  d.textContent = "Hg";
+  c.appendChild(d);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.save();
+  ctx.scale(4, 4);
+  ctx.drawElementImage(d, 0, 0);
+  ctx.restore();
+  const scaledCtm = midRatio(ctx, 400, 160);
+  ctx.clearRect(0, 0, 400, 160);
+  ctx.drawElementImage(d, 0, 0, 400, 160);
+  const scaledDest = midRatio(ctx, 400, 160);
+  // Reference: 1x then bitmap upscale.
+  ctx.clearRect(0, 0, 400, 160);
+  ctx.drawElementImage(d, 0, 0);
+  const small = document.createElement("canvas");
+  small.width = 100; small.height = 40;
+  small.getContext("2d").drawImage(c, 0, 0, 100, 40, 0, 0, 100, 40);
+  ctx.clearRect(0, 0, 400, 160);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(small, 0, 0, 400, 160);
+  const bitmapUpscale = midRatio(ctx, 400, 160);
+  // Reference: CSS zoom on the element.
+  d.style.zoom = "4";
+  await waitPaint(c);
+  ctx.clearRect(0, 0, 400, 160);
+  ctx.drawElementImage(d, 0, 0);
+  const zoomed = midRatio(ctx, 400, 160);
+  c.remove();
+  return { scaledCtm, scaledDest, bitmapUpscale, zoomed };
+}
+
+async function t7_fonts() {
+  const out = {};
+  if (!FONT) return { skipped: "no font" };
+  const style = document.createElement("style");
+  style.textContent = `@font-face { font-family: "SpikeFont"; src: url("file://${FONT}"); }`;
+  document.head.appendChild(style);
+  await document.fonts.load('40px "SpikeFont"');
+  out.check = document.fonts.check('40px "SpikeFont"');
+  const c = host(300, 120);
+  const a = document.createElement("div");
+  a.style.cssText = 'width:300px;height:60px;font:40px "SpikeFont";color:#000;background:#fff;';
+  a.textContent = "WWWW";
+  const b = document.createElement("div");
+  b.style.cssText = 'width:300px;height:60px;font:40px serif;color:#000;background:#fff;';
+  b.textContent = "WWWW";
+  c.appendChild(a);
+  c.appendChild(b);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(a, 0, 0);
+  const ha = hash(ctx, 300, 60);
+  ctx.clearRect(0, 0, 300, 120);
+  ctx.drawElementImage(b, 0, 0);
+  const hb = hash(ctx, 300, 60);
+  out.differs = ha !== hb;
+  try { ctx.getImageData(0, 0, 1, 1); out.readable = true; } catch (e) { out.readable = String(e); }
+  c.remove();
+  return out;
+}
+
+async function t7_font_iframe() {
+  if (!FONT) return { skipped: "no font" };
+  const c = host(300, 120);
+  const f = makeIframe(300, 60);
+  c.appendChild(f);
+  const doc = f.contentDocument;
+  const st = doc.createElement("style");
+  st.textContent = `@font-face { font-family: "SpikeFontI"; src: url("file://${FONT}"); } body{margin:0;background:#fff}`;
+  doc.head.appendChild(st);
+  const t = doc.createElement("div");
+  t.style.cssText = 'font:40px "SpikeFontI";color:#000;';
+  t.textContent = "WWWW";
+  doc.body.appendChild(t);
+  let loaded = null;
+  try { await doc.fonts.load('40px "SpikeFontI"'); loaded = doc.fonts.check('40px "SpikeFontI"'); } catch (e) { loaded = String(e); }
+  await waitPaint(c);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(f, 0, 0);
+  const hi = hash(ctx, 300, 60);
+  t.style.fontFamily = "serif";
+  await waitPaint(c);
+  await waitPaint(c);
+  ctx.clearRect(0, 0, 300, 120);
+  ctx.drawElementImage(f, 0, 0);
+  const hs = hash(ctx, 300, 60);
+  c.remove();
+  return { loaded, differs: hi !== hs };
+}
+
+async function redPngBlobUrl() {
+  const k = document.createElement("canvas");
+  k.width = 50; k.height = 50;
+  const g = k.getContext("2d");
+  g.fillStyle = "rgb(255,0,0)";
+  g.fillRect(0, 0, 50, 50);
+  const blob = await new Promise((r) => k.toBlob(r, "image/png"));
+  return URL.createObjectURL(blob);
+}
+
+async function t7_images() {
+  const c = host(200, 100);
+  const d = document.createElement("div");
+  const s = d.attachShadow({ mode: "closed" });
+  const blobImg = document.createElement("img");
+  blobImg.src = await redPngBlobUrl();
+  blobImg.style.cssText = "width:50px;height:50px;display:block;position:absolute;left:0;top:0;";
+  const fileImg = document.createElement("img");
+  fileImg.src = `file://${REPO}/assets/icons/png/512x512.png`;
+  fileImg.style.cssText = "width:50px;height:50px;display:block;position:absolute;left:100px;top:0;";
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "position:relative;width:200px;height:100px;";
+  wrap.appendChild(blobImg);
+  wrap.appendChild(fileImg);
+  s.appendChild(wrap);
+  c.appendChild(d);
+  await blobImg.decode().catch(() => {});
+  await fileImg.decode().catch(() => {});
+  await waitPaint(c);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(d, 0, 0);
+  const out = {};
+  try {
+    out.blob = px(ctx, 25, 25);
+    out.fileInk = inkCount(ctx, 200, 100) - inkCountRegion(ctx, 0, 0, 100, 100);
+    out.readable = true;
+  } catch (e) {
+    out.readable = String(e);
+  }
+  c.remove();
+  return out;
+}
+
+function inkCountRegion(ctx, x, y, w, h) {
+  const d = ctx.getImageData(x, y, w, h).data;
+  let ink = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > 0) ink += 1;
+  return ink;
+}
+
+function urlRefMarkup(prefix) {
+  return `
+    <svg width="0" height="0" style="position:absolute">
+      <filter id="${prefix}f"><feFlood flood-color="rgb(0,255,0)"/><feComposite in2="SourceGraphic" operator="in"/></filter>
+    </svg>
+    <div style="width:100px;height:100px;background:rgb(255,0,0);filter:url(#${prefix}f);"></div>
+    <svg width="200" height="100" xmlns="http://www.w3.org/2000/svg" style="display:block">
+      <path id="${prefix}p" d="M10,80 Q100,0 190,80" fill="none"/>
+      <text font-size="20" fill="rgb(0,0,0)"><textPath href="#${prefix}p">along the path text</textPath></text>
+    </svg>`;
+}
+
+async function t8_urlref_shadow() {
+  const c = host(200, 200);
+  const d = document.createElement("div");
+  d.style.background = "#fff";
+  const s = d.attachShadow({ mode: "closed" });
+  const box = document.createElement("div");
+  box.innerHTML = urlRefMarkup("s");
+  s.appendChild(box);
+  c.appendChild(d);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(d, 0, 0);
+  const out = { filter: px(ctx, 50, 50), textInk: inkCountRegion(ctx, 0, 100, 200, 100) };
+  c.remove();
+  return out;
+}
+
+async function t8_urlref_iframe() {
+  const c = host(200, 200);
+  const f = makeIframe(200, 200);
+  c.appendChild(f);
+  const doc = f.contentDocument;
+  doc.body.style.margin = "0";
+  const box = doc.createElement("div");
+  box.innerHTML = urlRefMarkup("i");
+  doc.body.appendChild(box);
+  await waitPaint(c);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(f, 0, 0);
+  const out = { filter: px(ctx, 50, 50), textInk: inkCountRegion(ctx, 0, 100, 200, 100) };
+  c.remove();
+  return out;
+}
+
+function propertySheet(doc) {
+  const sheet = new (doc.defaultView.CSSStyleSheet)();
+  sheet.replaceSync(`
+    @property --c { syntax: "<color>"; inherits: false; initial-value: rgb(255,0,0); }
+    @keyframes kc { from { --c: rgb(255,0,0) } to { --c: rgb(0,0,255) } }
+    .p { width:100px;height:100px;background: var(--c); animation: kc 1000ms linear both; animation-play-state: paused; }
+  `);
+  return sheet;
+}
+
+async function t9_property_shadow() {
+  const c = host(200, 200);
+  const d = document.createElement("div");
+  const s = d.attachShadow({ mode: "open" });
+  s.adoptedStyleSheets = [propertySheet(document)];
+  const a = document.createElement("div");
+  a.className = "p";
+  s.appendChild(a);
+  c.appendChild(d);
+  await waitPaint(c);
+  for (const x of s.getAnimations()) { x.pause(); x.currentTime = 250; }
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(d, 0, 0);
+  const out = { q: px(ctx, 50, 50) };
+  c.remove();
+  return out;
+}
+
+async function t9_property_iframe() {
+  const c = host(200, 200);
+  const f = makeIframe(100, 100);
+  c.appendChild(f);
+  const doc = f.contentDocument;
+  doc.body.style.margin = "0";
+  doc.adoptedStyleSheets = [propertySheet(doc)];
+  const a = doc.createElement("div");
+  a.className = "p";
+  doc.body.appendChild(a);
+  await waitPaint(c);
+  for (const x of doc.getAnimations()) { x.pause(); x.currentTime = 250; }
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(f, 0, 0);
+  const out = { q: px(ctx, 50, 50) };
+  c.remove();
+  return out;
+}
+
+async function t10_timing() {
+  const c = host(1920, 1080);
+  const d = document.createElement("div");
+  d.style.cssText = "width:1920px;height:1080px;background:linear-gradient(45deg,#123,#f80);color:#fff;font:bold 120px sans-serif;display:flex;align-items:center;justify-content:center;";
+  d.textContent = "Typography 타이포";
+  c.appendChild(d);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  const draws = [];
+  for (let i = 0; i < 10; i += 1) {
+    const t0 = performance.now();
+    ctx.drawElementImage(d, 0, 0);
+    ctx.getImageData(0, 0, 1, 1);
+    draws.push(performance.now() - t0);
+  }
+  const paints = [];
+  for (let i = 0; i < 10; i += 1) {
+    d.style.letterSpacing = `${i}px`;
+    const p = await waitPaint(c);
+    paints.push(p.ms);
+  }
+  const avg = (xs) => +(xs.reduce((a, b) => a + b, 0) / xs.length).toFixed(2);
+  c.remove();
+  return { drawMs: avg(draws), paintMs: avg(paints) };
+}
+
+async function t12_viewport_iframe() {
+  const c = host(200, 100);
+  const f = makeIframe(200, 100);
+  c.appendChild(f);
+  const doc = f.contentDocument;
+  doc.body.style.margin = "0";
+  const a = doc.createElement("div");
+  a.style.cssText = "width:50vw;height:100vh;background:rgb(255,255,0);";
+  doc.body.appendChild(a);
+  await waitPaint(c);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(f, 0, 0);
+  const out = { at50: px(ctx, 50, 50), at150: px(ctx, 150, 50) };
+  c.remove();
+  return out;
+}
+
+async function t15_large() {
+  const c = host(3840, 2160);
+  const d = document.createElement("div");
+  d.style.cssText = "width:3840px;height:2160px;background:rgb(10,200,30);";
+  c.appendChild(d);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(d, 0, 0);
+  const out = { tl: px(ctx, 5, 5), br: px(ctx, 3835, 2155), mid: px(ctx, 1920, 1080) };
+  c.remove();
+  return out;
+}
+
+async function t16_transform_root() {
+  const c = host(200, 200);
+  const d = document.createElement("div");
+  d.style.cssText = "width:100px;height:100px;background:rgb(255,0,0);transform:translateX(50px);";
+  const inner = document.createElement("div");
+  inner.style.cssText = "width:20px;height:20px;background:rgb(0,0,255);transform:translateX(60px);";
+  d.appendChild(inner);
+  c.appendChild(d);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(d, 0, 0);
+  const out = { at10: px(ctx, 10, 50), at70: px(ctx, 70, 10), at130: px(ctx, 130, 50) };
+  c.remove();
+  return out;
+}
+
+async function t17_overflow() {
+  const c = host(300, 300);
+  const d = document.createElement("div");
+  d.style.cssText = "width:100px;height:100px;";
+  const inner = document.createElement("div");
+  inner.style.cssText = "width:50px;height:50px;background:rgb(0,0,255);transform:translate(150px,150px);box-shadow:0 0 0 10px rgb(255,0,0);";
+  d.appendChild(inner);
+  c.appendChild(d);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(d, 0, 0);
+  const a = px(ctx, 175, 175);
+  ctx.clearRect(0, 0, 300, 300);
+  d.style.padding = "0";
+  ctx.drawElementImage(d, 0, 0, 300, 300);
+  const b = px(ctx, 175 * 3, 0);
+  c.remove();
+  return { clippedToBorderBox: a, b };
+}
+
+async function t9b_property_hoisted() {
+  const doc = new CSSStyleSheet();
+  doc.replaceSync(`@property --g1-c { syntax: "<color>"; inherits: false; initial-value: rgb(255,0,0); }`);
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, doc];
+  const c = host(200, 200);
+  const d = document.createElement("div");
+  const s = d.attachShadow({ mode: "closed" });
+  const sheet = new CSSStyleSheet();
+  sheet.replaceSync(`
+    @keyframes kc { from { --g1-c: rgb(255,0,0) } to { --g1-c: rgb(0,0,255) } }
+    .p { width:100px;height:100px;background: var(--g1-c); animation: kc 1000ms linear both; animation-play-state: paused; }`);
+  s.adoptedStyleSheets = [sheet];
+  const a = document.createElement("div");
+  a.className = "p";
+  s.appendChild(a);
+  c.appendChild(d);
+  await waitPaint(c);
+  for (const x of s.getAnimations()) { x.pause(); x.currentTime = 250; }
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(d, 0, 0);
+  const out = { q: px(ctx, 50, 50) };
+  c.remove();
+  return out;
+}
+
+async function t7b_font_in_shadow() {
+  if (!FONT) return { skipped: true };
+  const style = document.createElement("style");
+  style.textContent = `@font-face { font-family: "SpikeFont2"; src: url("file://${FONT}"); }`;
+  document.head.appendChild(style);
+  await document.fonts.load('40px "SpikeFont2"');
+  const c = host(300, 60);
+  const mk = (fam) => {
+    const d = document.createElement("div");
+    const s = d.attachShadow({ mode: "closed" });
+    const t = document.createElement("div");
+    t.style.cssText = `width:300px;height:60px;font:40px ${fam};color:#000;background:#fff;`;
+    t.textContent = "WWWW";
+    s.appendChild(t);
+    return d;
+  };
+  const a = mk('"SpikeFont2"');
+  c.appendChild(a);
+  await waitPaint(c);
+  const ctx = c.getContext("2d");
+  ctx.drawElementImage(a, 0, 0);
+  const ha = hash(ctx, 300, 60);
+  a.remove();
+  const b = mk("serif");
+  c.appendChild(b);
+  await waitPaint(c);
+  ctx.clearRect(0, 0, 300, 60);
+  ctx.drawElementImage(b, 0, 0);
+  const hb = hash(ctx, 300, 60);
+  c.remove();
+  return { differs: ha !== hb };
+}
+
+async function t18_two_children_one_paint() {
+  const c = host(400, 200);
+  const els = [];
+  for (let i = 0; i < 4; i += 1) {
+    const d = document.createElement("div");
+    d.style.cssText = `width:100px;height:100px;background:rgb(${i * 60},0,0);`;
+    c.appendChild(d);
+    els.push(d);
+  }
+  await waitPaint(c);
+  for (let i = 0; i < 4; i += 1) els[i].style.background = `rgb(0,${i * 60 + 10},0)`;
+  const out = await new Promise((resolve) => {
+    c.addEventListener("paint", () => {
+      const ctx = c.getContext("2d");
+      const got = [];
+      for (let i = 0; i < 4; i += 1) {
+        ctx.clearRect(0, 0, 400, 200);
+        ctx.drawElementImage(els[i], 0, 0);
+        got.push(px(ctx, 50, 50));
+      }
+      resolve(got);
+    }, { once: true });
+    c.requestPaint();
+  });
+  c.remove();
+  return out;
+}
+
+async function t13_capture_other_canvas() {
+  const c = host(200, 200);
+  const d = document.createElement("div");
+  d.style.cssText = "width:100px;height:100px;background:rgb(255,0,0);";
+  c.appendChild(d);
+  await waitPaint(c);
+  const out = {};
+  try {
+    const img = c.captureElementImage(d);
+    out.captured = img ? img.constructor.name : String(img);
+    const other = document.createElement("canvas");
+    other.width = 200; other.height = 200;
+    const octx = other.getContext("2d");
+    try {
+      octx.drawElementImage(img, 0, 0);
+      out.otherDraw = px(octx, 50, 50);
+    } catch (e) { out.otherDraw = String(e.message || e); }
+    try { octx.drawImage(c, 0, 0); out.copyFromHost = "ok"; } catch (e) { out.copyFromHost = String(e); }
+  } catch (e) { out.error = String(e.message || e); }
+  c.remove();
+  return out;
+}
+
+async function t14_visibility_variants() {
+  const variants = {
+    opacity0: "opacity:0;pointer-events:none;z-index:-1;",
+    offscreen: "left:-10000px;pointer-events:none;",
+    visibilityHidden: "visibility:hidden;",
+    clipZero: "clip-path:inset(50%);pointer-events:none;",
+  };
+  const out = {};
+  for (const [name, css] of Object.entries(variants)) {
+    out[name] = await guard(name, async () => {
+      const c = host(100, 100, css);
+      const d = document.createElement("div");
+      d.style.cssText = "width:100px;height:100px;background:rgb(0,128,255);";
+      c.appendChild(d);
+      const p = await waitPaint(c);
+      const ctx = c.getContext("2d");
+      ctx.drawElementImage(d, 0, 0);
+      const r = { paint: p.fired, px: px(ctx, 50, 50) };
+      c.remove();
+      return r;
+    });
+  }
+  return out;
+}
+
+function features() {
+  return {
+      drawElementImage: typeof CanvasRenderingContext2D.prototype.drawElementImage,
+      requestPaint: typeof HTMLCanvasElement.prototype.requestPaint,
+      captureElementImage: typeof HTMLCanvasElement.prototype.captureElementImage,
+      layoutSubtree: "layoutSubtree" in HTMLCanvasElement.prototype,
+  };
+}
+async function runSpikeUnused() {
+  const results = {};
+  const tests = { t1_basic, t2_shadow, t2_iframe, t3_anim_shadow, t3_anim_iframe, t3_smil, t4_sync, t5_scale, t7_fonts, t7_font_iframe, t7_images, t8_urlref_shadow, t8_urlref_iframe, t9_property_shadow, t9_property_iframe, t10_timing, t12_viewport_iframe, t13_capture_other_canvas, t14_visibility_variants };
+  for (const [name, fn] of Object.entries(tests)) {
+    results[name] = await guard(name, fn);
+  }
+  return results;
+}
+
+async function paintProbe() {
+  const c = host(100, 100);
+  const d = document.createElement("div");
+  d.style.cssText = "width:100px;height:100px;background:rgb(1,2,3);";
+  c.appendChild(d);
+  const first = await waitPaint(c, 1500);
+  d.style.background = "rgb(4,5,6)";
+  const second = await waitPaint(c, 1500);
+  const raf = await new Promise((r) => {
+    const t0 = performance.now();
+    const timer = setTimeout(() => r({ fired: false }), 1500);
+    requestAnimationFrame(() => { clearTimeout(timer); r({ fired: true, ms: performance.now() - t0 }); });
+  });
+  let drawn = null;
+  try {
+    const ctx = c.getContext("2d");
+    ctx.drawElementImage(d, 0, 0);
+    drawn = px(ctx, 50, 50);
+  } catch (e) { drawn = String(e.message || e); }
+  c.remove();
+  return { visibility: document.visibilityState, first, second, raf, drawn };
+}
+</script>
+</body>
+</html>
