@@ -135,7 +135,11 @@ back to its default **deletes the key** rather than storing it. A project nobody
 has used the feature on saves byte-identically to one written before it existed.
 `blend`, `lut`, `adjust`, `mask`, `reveal`, `geometry`, `reversed`, `mirror`,
 `cornerRadius`, `replaceable` and the conditional keyframe tracks all follow
-this.
+this. **A new filetype is the one exception**, because an older build would
+throw on it mid-paint rather than ignore it: the two writers stamp
+`tracks.ts#schemaVersionFor(elements)`, which is 3 only while a `graphic`
+exists, and the readers accept 2 and 3 (`isReadableSchemaVersion`). Delete the
+last graphic and the project saves as 2 again.
 
 **`normalizeX` guards reads, `coerceX` validates writes.** The first runs on
 every draw and must never throw; the second runs once, where a value is stored,
@@ -233,6 +237,18 @@ Things that bite:
   `planFrame`, the preview hit test and the export's decoder set skip it; the
   element stays in the map so parents and links still resolve. Nothing on the
   audio path reads it, which is the design: the eye hides picture, never sound.
+- **A graphic is prepared before the composite, never inside it.** An HTML
+  graphic is laid out by Chromium (html-in-canvas, enabled on the editor window
+  only) and reaches the canvas only after a paint, so the sequence is plan
+  (`graphic/planGraphics.ts`, pure), prepare (`prepare.ts` over the
+  `HtmlRasterPort`, one host, one queue) and then the synchronous composite
+  draws the raster. An export and the contact sheet await a prepare per frame
+  into a `withGraphicScope` of their own, the `withVideoScope` rule for
+  rasters; the preview fires and forgets and draws the latest raster per clip.
+  The HTML is sanitised into a node tree (parse5) and the CSS filtered (postcss)
+  on write *and* on read, and the host builds DOM from the tree, never from a
+  string. `features/graphic/` holds all of it; `htmlHost.ts` is the only file
+  that calls the canvas API, because its shape has changed once already.
 - **`export/snapshot.ts` copies the element map and each element, one level
   deep and no further.** The document is immutable by convention, so `animation`
   (36,000 baked samples per lane) is safe to share and a deep clone would not be.
@@ -332,6 +348,10 @@ features/shape/        parametric outlines, over mask/geometry.ts unchanged
 features/lut/          .cube reading, tetrahedral sampling, atlas, 80 built-ins
 features/adjust/       15 sliders: tone bakes into a LUT, effects run a finish pass
 features/template/     a whole edit standing in for one clip (.cttpl)
+features/graphic/      layers drawn by a program: HTML typography (sanitise, split,
+                       contract, host, prepare) and the clock that survives a split;
+                       presets in assets/presets/graphics, contract in the skill's
+                       references/html-typography.md
 features/record/       the recorder's pure logic and its auto-zoom: zoomPlan (when),
                        zoomCamera (how), recordFit (where); windows in apps/overlay-record
 features/reverse/      reversed media files, made by electron/lib/reversePipeline.ts
