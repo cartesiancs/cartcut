@@ -96,6 +96,67 @@ export function defineRegistrar(server: McpServer): Registrar {
 
 // ------------------------------------------------------------ shared shapes
 
+/**
+ * A program written on the spot: an effect, a transition or a graphic that is
+ * not an installed preset.
+ *
+ * Flat rather than a discriminated union on `render.type`, per this file's
+ * header. The renderer validates the combination (`fx/inlineProgram.ts`), and
+ * says exactly which field is wrong, which a union's error would not.
+ */
+export const programField = z
+  .object({
+    kind: z.enum(["effect", "transition", "graphic"]),
+    name: z.string().min(1).max(80),
+    category: z.string().optional(),
+    render: z.object({
+      type: z.enum(["shader", "html"]),
+      fragment: z
+        .string()
+        .max(512 * 1024)
+        .optional()
+        .describe(
+          "shader: GLSL defining `vec4 effect(vec2 uv)`, `vec4 transition(vec2 uv)` or `vec4 graphic(vec2 uv)`. " +
+            "Declare a `uniform` for every parameter yourself.",
+        ),
+      passes: z
+        .array(
+          z.object({
+            fragment: z.string().max(512 * 1024),
+            constants: z.record(z.any()).optional(),
+          }),
+        )
+        .max(7)
+        .optional()
+        .describe("shader, effects only: steps run before `fragment`, which reads the last one as `source`."),
+      html: z.string().max(512 * 1024).optional().describe("html: a body fragment, no <html> or <body>."),
+      css: z.string().max(512 * 1024).optional(),
+      layout: z.enum(["reflow", "scale"]).optional(),
+      designSize: z
+        .object({
+          width: z.number().int().min(1).max(8192),
+          height: z.number().int().min(1).max(8192),
+        })
+        .optional(),
+      bleed: z.number().min(0).max(4096).optional(),
+      bindings: z.record(z.string()).optional(),
+    }),
+    params: z
+      .array(z.record(z.any()))
+      .max(32)
+      .optional()
+      .describe(
+        "Each { key, label, type, default, ... }: number (min, max, step), color (#rrggbb), bool, " +
+          "select (options), point ([x,y], min, max); text and font for html. Shader parameters also name " +
+          "their `uniform`.",
+      ),
+    assets: z
+      .record(z.string())
+      .optional()
+      .describe('File name to absolute path, e.g. {"photo.png": "/Users/me/photo.png"}. Used as asset:photo.png.'),
+  })
+  .describe("A program to carry on the clip instead of an installed preset. check_program first.");
+
 export const timeRange = z.object({
   startMs: z.number().describe("Start of the range, in timeline milliseconds."),
   endMs: z.number().describe("End of the range, exclusive."),
@@ -152,6 +213,7 @@ export const FILETYPES = [
   "transition",
   "effect",
   "template",
+  "graphic",
 ] as const;
 
 /**

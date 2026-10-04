@@ -33,6 +33,7 @@ import isDev from "electron-is-dev";
 import { app } from "electron";
 import { scanPresetRoot, type RawPresetPayload } from "./presetScan.js";
 import { planLutInstall } from "./lutInstall.js";
+import { planProgramSave } from "./programSave.js";
 
 export type { RawPresetPayload };
 
@@ -160,5 +161,34 @@ export const presetLib = {
     await fsp.writeFile(path.join(dir, "manifest.json"), plan.manifest, "utf8");
 
     return { id: plan.id, dir: dir.split(path.sep).join("/") };
+  },
+
+  /**
+   * Write an inline program out as a user preset folder.
+   *
+   * The renderer validated it under this id before handing it over
+   * (`agent/commands/program.ts#export_program`), so the folder loads on the
+   * next `loadPresets`. `programSave.ts` decides every name; this only writes.
+   * An existing folder of the same id is replaced, the rule `installLut` keeps
+   * for a re-import.
+   */
+  saveProgram: async (
+    id: string,
+    manifestJson: string,
+    sources: Record<string, string>,
+    assets: Record<string, string>,
+  ): Promise<{ id: string; dir: string }> => {
+    const plan = planProgramSave(id, manifestJson, sources, assets);
+    const root = userPresetPath();
+    const dir = path.join(root, plan.folder);
+    await fsp.rm(dir, { recursive: true, force: true });
+    await fsp.mkdir(dir, { recursive: true });
+    for (const [name, text] of Object.entries(plan.files)) {
+      await fsp.writeFile(path.join(dir, name), text, "utf8");
+    }
+    for (const [name, from] of Object.entries(plan.copies)) {
+      await fsp.copyFile(from, path.join(dir, name));
+    }
+    return { id, dir: dir.split(path.sep).join("/") };
   },
 };

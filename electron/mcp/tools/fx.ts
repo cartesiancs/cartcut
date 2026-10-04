@@ -17,6 +17,7 @@ import { requestEditor } from "../bridge";
 import {
   Z_ORDER_NOTE,
   mutating,
+  programField,
   readOnly,
   tool,
   trackIdField,
@@ -71,7 +72,7 @@ function presetRow(preset: any): any | null {
   };
 }
 
-async function listPresets(kind: "transition" | "effect") {
+export async function listPresets(kind: "transition" | "effect" | "graphic") {
   // Lazily imported for the reason `read.ts` names: `lib/preset` reaches
   // `electron-is-dev`, and registration has to stay loadable from a test.
   const { presetLib } = await import("../../lib/preset");
@@ -178,7 +179,11 @@ export function registerFxTools(define: Registrar) {
       inputSchema: {
         fromId: z.string().describe("The outgoing clip."),
         toId: z.string().describe("The incoming clip."),
-        presetId: z.string().describe("An id from list_transition_presets."),
+        presetId: z
+          .string()
+          .optional()
+          .describe("An id from list_transition_presets. Or pass `program`."),
+        program: programField.optional(),
         durationMs: z.number().min(1).optional().describe("Default 500."),
         alignment: z.enum(["center", "start", "end"]).optional(),
         params: z
@@ -201,6 +206,7 @@ export function registerFxTools(define: Registrar) {
       inputSchema: {
         elementId: z.string(),
         presetId: z.string().optional(),
+        program: programField.optional(),
         durationMs: z.number().min(1).optional(),
         alignment: z.enum(["center", "start", "end"]).optional(),
         params: z.record(z.any()).optional(),
@@ -240,7 +246,11 @@ export function registerFxTools(define: Registrar) {
         "`number`: use set_animation and add_keyframes with `intensity` or `fx:<key>`. That is how an effect " +
         "comes and goes, rather than several short clips butted together.",
       inputSchema: {
-        presetId: z.string().describe("An id from list_effect_presets."),
+        presetId: z
+          .string()
+          .optional()
+          .describe("An id from list_effect_presets. Or pass `program`."),
+        program: programField.optional(),
         startMs: z.number(),
         durationMs: z.number().min(1),
         intensity: z.number().min(0).max(100).optional().describe("Default 100."),
@@ -265,6 +275,7 @@ export function registerFxTools(define: Registrar) {
       inputSchema: {
         elementId: z.string(),
         presetId: z.string().optional(),
+        program: programField.optional(),
         intensity: z.number().min(0).max(100).optional(),
         blend: z.string().nullable().optional(),
         params: z.record(z.any()).optional(),

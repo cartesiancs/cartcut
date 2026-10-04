@@ -32,6 +32,7 @@ import {
   setEffectIntensity,
   setEffectParams,
   setEffectPreset,
+  setEffectProgram,
 } from "../../timeline/effectOps";
 import {
   addTransition,
@@ -41,6 +42,7 @@ import {
   setTransitionDuration,
   setTransitionParams,
   setTransitionPreset,
+  setTransitionProgram,
   transitionAtCut,
 } from "../../timeline/transitionOps";
 import {
@@ -53,6 +55,8 @@ import type { TimelineDocument } from "../../timeline/tracks";
 import { tracksOfKind } from "../../timeline/tracks";
 import { commit } from "../commit";
 import { currentDoc, requireElement, requireTrack } from "../context";
+import { inlineDiagnostics } from "../../fx/resolvePreset";
+import { requireProgram } from "../programInput";
 import { registerCommands } from "../registry";
 
 type Alignment = "center" | "start" | "end";
@@ -68,6 +72,43 @@ function requireTransition(doc: TimelineDocument, elementId: string) {
     );
   }
   return element;
+}
+
+/**
+ * A commit's answer, with the program's warnings beside it when there are any.
+ * A program that stored cleanly can still have markup the sanitiser removed,
+ * and the agent that wrote it should hear about that in the same reply.
+ */
+function withWarnings(result: unknown, inline: { warnings: unknown[] } | null): unknown {
+  if (inline == null || inline.warnings.length === 0 || result == null || typeof result !== "object") {
+    return result;
+  }
+  return { ...(result as Record<string, unknown>), warnings: inline.warnings };
+}
+
+/**
+ * What `get_fx` says about an inline program: enough to know it is one and
+ * whether it draws, never the source, which `get_program` pages through.
+ */
+function programSummary(element: any): Record<string, unknown> {
+  if (element?.program == null) {
+    return {};
+  }
+  const sources = element.program.sources ?? {};
+  const bytes = Object.values(sources).reduce(
+    (sum: number, text) => sum + String(text ?? "").length,
+    0,
+  );
+  const { errors } = inlineDiagnostics(element);
+  return {
+    program: {
+      hash: element.program.hash,
+      name: element.program.manifest?.name,
+      renderType: element.program.manifest?.render?.type,
+      bytes,
+      draws: errors.length === 0,
+    },
+  };
 }
 
 function requireEffect(doc: TimelineDocument, elementId: string) {
@@ -147,7 +188,8 @@ registerCommands({
   add_transition: (params: {
     fromId: string;
     toId: string;
-    presetId: string;
+    presetId?: string;
+    program?: unknown;
     durationMs?: number;
     alignment?: Alignment;
     params?: Record<string, unknown>;
@@ -156,11 +198,18 @@ registerCommands({
     requireElement(doc, params.fromId);
     requireElement(doc, params.toId);
 
-    if (!params.presetId) {
+    if (params.program != null && params.presetId) {
+      throw new Error("Pass either `presetId` or `program`, not both.");
+    }
+    if (params.program == null && !params.presetId) {
       throw new Error(
-        "add_transition needs a `presetId`. list_transition_presets has them.",
+        "add_transition needs a `presetId` (list_transition_presets has them) or a `program`.",
       );
     }
+    const inline =
+      params.program != null
+        ? requireProgram(params.program, "transition", params.params)
+        : null;
     const existing = transitionAtCut(doc, params.fromId, params.toId);
     if (existing != null) {
       throw new Error(
@@ -169,36 +218,47 @@ registerCommands({
     }
 
     const elementId = uuidv4();
-    return commit(
+    return withWarnings(commit(
       (d: TimelineDocument) =>
         addTransition(
           d,
           elementId,
           params.fromId,
           params.toId,
-          params.presetId,
+          params.presetId ?? "",
           params.durationMs ?? DEFAULT_TRANSITION_MS,
           params.alignment ?? "center",
-          (params.params ?? {}) as any,
+          (inline?.params ?? params.params ?? {}) as any,
+          inline?.program,
         ),
       "Those two clips are not adjacent on one track, or there is no room for a transition between them. " +
         "list_cuts reports both.",
-    );
+    ), inline);
   },
 
   set_transition: (params: {
     elementId: string;
     presetId?: string;
+    program?: unknown;
     durationMs?: number;
     alignment?: Alignment;
     params?: Record<string, unknown>;
   }) => {
     const doc = currentDoc();
     requireTransition(doc, params.elementId);
+    if (params.program != null && params.presetId != null) {
+      throw new Error("Pass either `presetId` or `program`, not both.");
+    }
+    const inline =
+      params.program != null
+        ? requireProgram(params.program, "transition", params.params)
+        : null;
 
-    return commit((d: TimelineDocument) => {
+    return withWarnings(commit((d: TimelineDocument) => {
       let next = d;
-      if (params.presetId != null) {
+      if (inline != null) {
+        next = setTransitionProgram(next, params.elementId, inline.program, inline.params);
+      } else if (params.presetId != null) {
         next = setTransitionPreset(
           next,
           params.elementId,
@@ -218,7 +278,7 @@ registerCommands({
         next = setTransitionAlignment(next, params.elementId, params.alignment);
       }
       return next;
-    }, "Nothing about that transition changed.");
+    }, "Nothing about that transition changed."), inline);
   },
 
   remove_transition: (params: { elementId: string }) => {
@@ -239,7 +299,8 @@ registerCommands({
    * the bottom of the stack would composite under every clip and touch nothing.
    */
   add_effect: (params: {
-    presetId: string;
+    presetId?: string;
+    program?: unknown;
     startMs: number;
     durationMs: number;
     intensity?: number;
@@ -247,11 +308,18 @@ registerCommands({
     trackId?: string;
   }) => {
     const doc = currentDoc();
-    if (!params.presetId) {
+    if (params.program != null && params.presetId) {
+      throw new Error("Pass either `presetId` or `program`, not both.");
+    }
+    if (params.program == null && !params.presetId) {
       throw new Error(
-        "add_effect needs a `presetId`. list_effect_presets has them.",
+        "add_effect needs a `presetId` (list_effect_presets has them) or a `program`.",
       );
     }
+    const inline =
+      params.program != null
+        ? requireProgram(params.program, "effect", params.params)
+        : null;
     if (!(params.durationMs > 0)) {
       throw new Error("add_effect needs a positive `durationMs`.");
     }
@@ -267,7 +335,7 @@ registerCommands({
     const elementId = uuidv4();
     const newTrackId = uuidv4();
 
-    return commit((d: TimelineDocument) => {
+    return withWarnings(commit((d: TimelineDocument) => {
       // The first effect track goes at index 0 explicitly rather than through
       // the placement fallback, because "applies to everything" is what an
       // adjustment layer is for and the user narrows it by dragging it down.
@@ -279,34 +347,45 @@ registerCommands({
       return addEffect(
         withTrack,
         elementId,
-        params.presetId,
+        params.presetId ?? "",
         Math.max(0, params.startMs),
         params.durationMs,
         uuidv4(),
-        (params.params ?? {}) as any,
+        (inline?.params ?? params.params ?? {}) as any,
         {
           intensity: params.intensity,
           preferredTrackId:
             params.trackId ??
             (tracksOfKind(withTrack, "effect")[0]?.id as string | undefined),
+          program: inline?.program,
         },
       );
-    }, "The effect could not be placed — another one may already cover that moment on every effect row.");
+    }, "The effect could not be placed: another one may already cover that moment on every effect row."), inline);
   },
 
   set_effect: (params: {
     elementId: string;
     presetId?: string;
+    program?: unknown;
     intensity?: number;
     blend?: string | null;
     params?: Record<string, unknown>;
   }) => {
     const doc = currentDoc();
     requireEffect(doc, params.elementId);
+    if (params.program != null && params.presetId != null) {
+      throw new Error("Pass either `presetId` or `program`, not both.");
+    }
+    const inline =
+      params.program != null
+        ? requireProgram(params.program, "effect", params.params)
+        : null;
 
-    return commit((d: TimelineDocument) => {
+    return withWarnings(commit((d: TimelineDocument) => {
       let next = d;
-      if (params.presetId != null) {
+      if (inline != null) {
+        next = setEffectProgram(next, params.elementId, inline.program, inline.params);
+      } else if (params.presetId != null) {
         next = setEffectPreset(
           next,
           params.elementId,
@@ -323,7 +402,7 @@ registerCommands({
         next = setEffectBlend(next, params.elementId, params.blend as any);
       }
       return next;
-    }, "Nothing about that effect changed.");
+    }, "Nothing about that effect changed."), inline);
   },
 
   /** One transition or effect in full, since `list_clips` cannot describe them. */
@@ -337,6 +416,7 @@ registerCommands({
         id: params.elementId,
         type: "transition",
         presetId: element.presetId,
+        ...programSummary(element),
         params: element.params ?? {},
         fromId: element.fromId,
         toId: element.toId,
@@ -362,6 +442,7 @@ registerCommands({
         id: params.elementId,
         type: "effect",
         presetId: effect?.presetId,
+        ...programSummary(element),
         params: effect?.params ?? {},
         intensity: effect?.intensity,
         blend: element.blend ?? null,

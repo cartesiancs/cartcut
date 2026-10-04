@@ -125,6 +125,38 @@ export type ClipRow = Record<string, unknown> & {
 };
 
 /**
+ * An inline program as one short line of facts, never its source.
+ *
+ * A program can hold a megabyte of GLSL or HTML, and a `list_clips` page of
+ * twenty such clips would blow the output cap many times over. `get_program`
+ * pages through the source when an agent actually wants it.
+ */
+export function programRow(
+  program: unknown,
+): { hash: string; name?: string; renderType?: string; bytes: number } | null {
+  if (program == null || typeof program !== "object") {
+    return null;
+  }
+  const p = program as {
+    hash?: unknown;
+    manifest?: { name?: unknown; render?: { type?: unknown } };
+    sources?: Record<string, unknown>;
+  };
+  let bytes = 0;
+  for (const text of Object.values(p.sources ?? {})) {
+    bytes += typeof text === "string" ? text.length : 0;
+  }
+  return {
+    hash: typeof p.hash === "string" ? p.hash : "",
+    ...(typeof p.manifest?.name === "string" ? { name: p.manifest.name } : {}),
+    ...(typeof p.manifest?.render?.type === "string"
+      ? { renderType: p.manifest.render.type }
+      : {}),
+    bytes,
+  };
+}
+
+/**
  * One clip as a compact row.
  *
  * `id` is passed in rather than read from `element.key`, and that is not
@@ -281,11 +313,19 @@ export function clipRow(
       row.presetId = (element as any).presetId;
       row.fromId = (element as any).fromId;
       row.toId = (element as any).toId;
+      const program = programRow((element as any).program);
+      if (program != null) {
+        row.program = program;
+      }
       break;
     }
     case "effect": {
       row.presetId = (element as any).presetId;
       row.intensity = (element as any).intensity;
+      const program = programRow((element as any).program);
+      if (program != null) {
+        row.program = program;
+      }
       break;
     }
     case "video": {
@@ -316,6 +356,17 @@ export function clipRow(
     // the 25k output cap on a single clip, the same reason a LUT's 4,913 nodes
     // are reported as a preset id. The slots are `<option-template>`'s
     // business; an agent addresses a template as one clip, which is what it is.
+    // A graphic's name, its preset, and its program as facts: the source can
+    // run to a megabyte, and `get_program` pages through it on request.
+    case "graphic": {
+      row.name = (element as any).name;
+      row.presetId = (element as any).presetId;
+      const program = programRow((element as any).program);
+      if (program != null) {
+        row.program = program;
+      }
+      break;
+    }
     case "template": {
       row.name = (element as any).name;
       row.templateId = (element as any).templateId;
@@ -386,6 +437,22 @@ export function clipDetail(
     const stored = (element as { ext?: Record<string, unknown> }).ext;
     if (stored != null && Object.prototype.hasOwnProperty.call(stored, options.extOwner)) {
       detail.ext = stored[options.extOwner];
+    }
+  }
+
+  if (element.filetype === "graphic") {
+    // The values, with text ones cut short: a `text` parameter may hold a
+    // paragraph. The clock is reported only when a cut moved it.
+    const params: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(element.params ?? {})) {
+      params[key] = typeof value === "string" ? truncate(value, TEXT_PREVIEW_CHARS) : value;
+    }
+    detail.params = params;
+    if (element.clockHead != null) {
+      detail.clockHeadMs = element.clockHead;
+    }
+    if (element.clockTail != null) {
+      detail.clockTailMs = element.clockTail;
     }
   }
 

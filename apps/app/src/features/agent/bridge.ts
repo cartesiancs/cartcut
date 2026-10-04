@@ -40,6 +40,8 @@ import "./commands/framing";
 import "./commands/groups";
 import "./commands/contactSheet";
 import "./commands/fx";
+import "./commands/program";
+import "./commands/graphic";
 import "./commands/plan";
 
 let installed = false;

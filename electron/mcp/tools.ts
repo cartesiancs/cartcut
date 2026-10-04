@@ -44,6 +44,8 @@ import { registerAnimationTools } from "./tools/animation";
 import { registerRevealTools } from "./tools/reveal";
 import { registerFramingTools } from "./tools/framing";
 import { registerFxTools } from "./tools/fx";
+import { registerProgramTools } from "./tools/program";
+import { registerGraphicTools } from "./tools/graphic";
 import { registerLutTools } from "./tools/lut";
 import { registerAdjustTools } from "./tools/adjust";
 import { registerMaskTools } from "./tools/mask";
@@ -64,6 +66,8 @@ export function registerToolsWith(define: Registrar) {
   registerRevealTools(define);
   registerFramingTools(define);
   registerFxTools(define);
+  registerProgramTools(define);
+  registerGraphicTools(define);
   registerLutTools(define);
   registerAdjustTools(define);
   registerMaskTools(define);

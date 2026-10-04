@@ -77,6 +77,9 @@ const request = {
     userDirectory: () => ipcRenderer.invoke("preset:userDirectory"),
     installLut: (name, extension, bytes) =>
       ipcRenderer.invoke("preset:installLut", name, extension, bytes),
+    /** An inline program, already validated, written out as a user preset. */
+    saveProgram: (id, manifestJson, sources, assets) =>
+      ipcRenderer.invoke("preset:saveProgram", id, manifestJson, sources, assets),
   },
   /**
    * Templates. Enumeration and removal only.

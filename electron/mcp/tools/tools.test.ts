@@ -94,6 +94,15 @@ const EXPECTED = [
   "add_effect",
   "set_effect",
   "get_fx",
+  // programs written on the spot
+  "check_program",
+  "get_program",
+  "save_program_as_preset",
+  // graphics
+  "list_graphic_presets",
+  "add_graphic",
+  "apply_typography",
+  "set_graphic",
   // colour filters
   "list_luts",
   "set_lut",

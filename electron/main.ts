@@ -222,6 +222,16 @@ ipcMain.handle(
   (_event, name: string, extension: string, bytes: Uint8Array) =>
     presetLib.installLut(name, extension, bytes),
 );
+ipcMain.handle(
+  "preset:saveProgram",
+  (
+    _event,
+    id: string,
+    manifestJson: string,
+    sources: Record<string, string>,
+    assets: Record<string, string>,
+  ) => presetLib.saveProgram(id, manifestJson, sources, assets),
+);
 
 // Enumeration and one delete. Installing a template is the renderer's job:
 // a `.cttpl` is a zip, and the renderer owns the app's only zip library and
