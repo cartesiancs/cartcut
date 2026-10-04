@@ -97,11 +97,35 @@ export function ensureFontFace(entry: FontEntry): void {
   // without one, because the engine reads the file's own `fvar` axis and does
   // not need to be told. Declaring a range that changes nothing would be a
   // second, silent source of truth about what a face covers.
-  style.insertAdjacentHTML(
-    "beforeend",
-    `@font-face { font-family: "${entry.name}"; src: url("file://${entry.path}"); }`,
+  //
+  // A text node, not `insertAdjacentHTML`, and both strings escaped. The name
+  // and the path used to be spliced into markup as they were, which was safe
+  // while only the font picker supplied them; a graphic's font parameter can
+  // come from an agent or a downloaded preset, and a `"` in it would end the
+  // string and write whatever followed into the editor's global stylesheet.
+  style.appendChild(
+    document.createTextNode(
+      `@font-face { font-family: ${cssQuoted(entry.name)}; src: url(${cssQuoted(
+        "file://" + entry.path,
+      )}); }`,
+    ),
   );
   registered.add(entry.name);
+}
+
+/**
+ * A CSS string literal. Backslash and quote escaped; line breaks, which cannot
+ * appear in a CSS string at all, replaced. Exported for the tests.
+ */
+export function cssQuoted(text: string): string {
+  return (
+    '"' +
+    String(text)
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"')
+      .replace(/[\n\r\f]/g, " ") +
+    '"'
+  );
 }
 
 /** Families this module has injected. Exported for tests. */

@@ -1,3 +1,4 @@
+import postcss from "postcss";
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_FONT,
@@ -64,15 +65,15 @@ describe("registerDocumentFonts", () => {
    * whatever it did. Four members is the whole surface, which is small enough
    * to fake honestly rather than to mock.
    */
-  function withFakeDocument<T>(run: () => T): T {
-    const rules: string[] = [];
+  function withFakeDocument<T>(run: () => T, rules: string[] = []): T {
     const style = {
       id: "",
-      insertAdjacentHTML: (_where: string, html: string) => rules.push(html),
+      appendChild: (node: { text: string }) => rules.push(node.text),
     };
     const fake = {
       querySelector: () => style,
       createElement: () => style,
+      createTextNode: (text: string) => ({ text }),
       head: { appendChild: () => undefined },
     };
     const had = "document" in globalThis;
@@ -123,6 +124,31 @@ describe("registerDocumentFonts", () => {
         }),
       ),
     ).not.toThrow();
+  });
+
+  it("cannot be made to write outside its own rule", () => {
+    // A font parameter can arrive from an agent or a downloaded preset. A quote
+    // in the name or the path must stay inside its CSS string, or whatever
+    // followed it would land in the editor's global stylesheet.
+    const rules: string[] = [];
+    withFakeDocument(
+      () =>
+        registerDocumentFonts({
+          a: { filetype: "text", fontpath: '/fonts/Evil"} body{display:none} x{".ttf' },
+        }),
+      rules,
+    );
+    expect(rules).toHaveLength(1);
+    // Parsed the way a browser would: one @font-face and nothing after it,
+    // with the braces and the selector still inside the family string.
+    const root = postcss.parse(rules[0]);
+    expect(root.nodes).toHaveLength(1);
+    const face = root.nodes[0] as postcss.AtRule;
+    expect(face.name).toBe("font-face");
+    const family = face.nodes?.find(
+      (node) => node.type === "decl" && node.prop === "font-family",
+    ) as postcss.Declaration;
+    expect(family.value.startsWith('"Evil\\"} body{display:none} x{\\""')).toBe(true);
   });
 
   it("still registers a clip that carries no runs at all", () => {
