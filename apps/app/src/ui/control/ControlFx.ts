@@ -1,8 +1,8 @@
 /**
- * The "Fx" sidebar tab: effect, transition and LUT presets, in one place.
+ * The "Fx" sidebar tab: effect, transition, graphic and LUT presets, in one place.
  *
- * One tab with an internal toggle rather than three sidebar entries. The
- * sidebar is a 2.5rem column that already carries six icons, and all three
+ * One tab with an internal toggle rather than four sidebar entries. The
+ * sidebar is a 2.5rem column that already carries six icons, and all four
  * halves are the same act — picking a preset out of a grid — so splitting them
  * would cost a slot each to save a click. `control-ui-filter` established the
  * pattern of switching panels inside one tab; this follows it, with the
@@ -29,7 +29,7 @@ import { customElement, state } from "lit/decorators.js";
 import "../../features/fx/fxPresetBrowser";
 import "../../features/lut/lutBrowser";
 
-type FxPanel = "effect" | "transition" | "lut";
+type FxPanel = "effect" | "transition" | "graphic" | "lut";
 
 @customElement("control-ui-fx")
 export class ControlUiFx extends LitElement {
@@ -51,7 +51,7 @@ export class ControlUiFx extends LitElement {
   }
 
   /**
-   * Show one of the three grids, from outside.
+   * Show one of the grids, from outside.
    *
    * The inspector's LUT section offers a `+` that has to land the user on the
    * grid, and the sidebar pill alone only opens this tab: without this it would
@@ -66,10 +66,11 @@ export class ControlUiFx extends LitElement {
    * One cell of the inspector's own tab track (`.opt-tabs` in `_option.scss`),
    * so the sidebar and the inspector switch panes with the same control.
    *
-   * Three equal shares that never clip: the column is about 430px at its stock
+   * Four equal shares that never clip: the column is about 430px at its stock
    * width and `overflow-x` is hidden on the pane, so a button that does not
    * shrink is cut off the right edge and cannot be clicked. `opt-tabs-few`
-   * keeps the names at every width.
+   * keeps the names at every width, and `_browse.scss` drops the glyphs first
+   * when the column is narrower than the four of them need.
    *
    * The LUT glyph is `palette` and nothing called `filter_*`:
    * `lut-panel.spec.ts` reads this button's text, ligature included, and
@@ -98,6 +99,7 @@ export class ControlUiFx extends LitElement {
         <div class="opt-tabs-row">
           ${this.tab("effect", "Effects", "auto_awesome")}
           ${this.tab("transition", "Transitions", "transition_fade")}
+          ${this.tab("graphic", "Graphics", "title")}
           ${this.tab("lut", "LUTs", "palette")}
         </div>
       </div>
@@ -114,6 +116,9 @@ export class ControlUiFx extends LitElement {
         </div>
         <div class=${this.activePanel === "transition" ? "" : "d-none"}>
           <fx-preset-browser kind="transition"></fx-preset-browser>
+        </div>
+        <div class=${this.activePanel === "graphic" ? "" : "d-none"}>
+          <fx-preset-browser kind="graphic"></fx-preset-browser>
         </div>
         <div class=${this.activePanel === "lut" ? "" : "d-none"}>
           <lut-browser></lut-browser>

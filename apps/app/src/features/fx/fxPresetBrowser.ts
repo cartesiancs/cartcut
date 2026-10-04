@@ -1,10 +1,11 @@
 /**
- * The preset tile grid, shared by both kinds.
+ * The preset tile grid, shared by the three kinds.
  *
- * One component with a `kind` property rather than two nearly identical ones:
- * an effect preset and a transition preset differ in what they attach to, not
- * in how they are browsed, and the tile, the thumbnail fallback and the
- * built-in/user split are all the same work.
+ * One component with a `kind` property rather than three nearly identical ones:
+ * an effect, a transition and a graphic preset differ in what they attach to,
+ * not in how they are browsed, and the tile, the thumbnail fallback and the
+ * built-in/user split are all the same work. Only the tile renderer differs: a
+ * graphic is drawn by `graphic/graphicPreviewProvider.ts`.
  *
  * Clicking a tile applies the preset to the current selection when that makes
  * sense, and otherwise says why it does not — a tile that silently does nothing
@@ -28,6 +29,13 @@ import {
 } from "./presetRegistry";
 import { categoriesFor } from "./presetTypes";
 import { addEffect, setEffectPreset } from "../timeline/effectOps";
+import { addGraphic, setGraphicPreset } from "../timeline/graphicOps";
+import { textToGraphic } from "../timeline/typographyOps";
+import { newGraphicOptions } from "../graphic/graphicPlacement";
+import { createGraphicPreviewProvider } from "../graphic/graphicPreviewProvider";
+import { fontValueOfPath } from "../graphic/fontParams";
+import { bundledFonts, loadFontLibrary } from "../font/fontLibrary";
+import { renderOptionStore } from "../../states/renderOptionStore";
 import {
   addTransition,
   cutPointsOn,
@@ -55,6 +63,9 @@ import {
  */
 const previews = createFxPreviewProvider();
 
+/** Graphic tiles, drawn by the graphic pipeline rather than the fx compositor. */
+const graphicPreviews = createGraphicPreviewProvider();
+
 /**
  * Headings for the category enum.
  *
@@ -77,6 +88,11 @@ const CATEGORY_LABELS: Record<string, string> = {
   blur: "Blur",
   texture: "Texture",
   stylize: "Stylise",
+  kinetic: "Kinetic",
+  stylized: "Stylised",
+  reveal: "Reveal",
+  layout: "Layout",
+  background: "Background",
 };
 
 function toast(message: string) {
@@ -89,7 +105,11 @@ function toast(message: string) {
 @customElement("fx-preset-browser")
 export class FxPresetBrowser extends LitElement {
   @property({ type: String })
-  kind: "effect" | "transition" = "effect";
+  kind: "effect" | "transition" | "graphic" = "effect";
+
+  private get previews() {
+    return this.kind === "graphic" ? graphicPreviews : previews;
+  }
 
   /** The tile under the pointer, or `null`. Only this one animates. */
   private hoveredId: string | null = null;
@@ -110,6 +130,7 @@ export class FxPresetBrowser extends LitElement {
       useTimelineStore.subscribe(() => this.requestUpdate()),
       // A frame landing repaints the tiles that were waiting for it.
       previews.onReady(() => this.paintTiles()),
+      graphicPreviews.onReady(() => this.paintTiles()),
       subscribePresets(() => this.requestUpdate()),
     );
 
@@ -256,9 +277,55 @@ export class FxPresetBrowser extends LitElement {
     selectionStore.getState().setIds([id]);
   }
 
+  /**
+   * A graphic tile: selected text clips become it when it is lettering, a
+   * selected graphic switches to it, and otherwise it lands at the playhead.
+   */
+  private async applyGraphic(preset: FxPreset) {
+    const store = useTimelineStore.getState();
+    const ids = selectionStore.getState().ids;
+    const selected = ids.map((id) => store.timeline[id]).filter((element) => element != null);
+
+    if (
+      preset.render.type === "html" &&
+      selected.length > 0 &&
+      selected.every((element) => element.filetype === "text")
+    ) {
+      await loadFontLibrary();
+      const bundled = bundledFonts();
+      useTimelineStore
+        .getState()
+        .withCheckpoint((doc) =>
+          textToGraphic(doc, ids, { preset }, (path) => fontValueOfPath(path, bundled)),
+        );
+      // The inspector does not follow a change of filetype on its own.
+      (document.querySelector("element-timeline-canvas") as any)?.showSideOption?.(ids[0]);
+      return;
+    }
+
+    if (selected.length === 1 && selected[0].filetype === "graphic") {
+      store.withCheckpoint((doc) =>
+        setGraphicPreset(doc, ids[0], preset.id, defaultParamsFor(preset.id)),
+      );
+      return;
+    }
+
+    const size = renderOptionStore.getState().options?.previewSize;
+    const project = { w: size?.w ?? 1920, h: size?.h ?? 1080 };
+    const id = uuidv4();
+    store.withCheckpoint((doc) =>
+      addGraphic(doc, id, uuidv4(), newGraphicOptions(preset, store.cursor, project)),
+    );
+    if (useTimelineStore.getState().timeline[id] != null) {
+      selectionStore.getState().setIds([id]);
+    }
+  }
+
   private handleClick(preset: FxPreset) {
     if (this.kind === "effect") {
       this.applyEffect(preset);
+    } else if (this.kind === "graphic") {
+      void this.applyGraphic(preset);
     } else {
       this.applyTransition(preset);
     }
@@ -333,13 +400,13 @@ export class FxPresetBrowser extends LitElement {
       }
       const step = presetId === this.hoveredId ? this.hoverStep : RESTING_STEP;
       const key = previewKey(presetId, step);
-      const frame = previews.get(key);
+      const frame = this.previews.get(key);
       const ctx = canvas.getContext("2d");
       if (ctx == null) {
         continue;
       }
       if (frame == null) {
-        previews.request({ key, presetId, step } as never);
+        this.previews.request({ key, presetId, step } as never);
         continue;
       }
       ctx.clearRect(0, 0, PREVIEW_W, PREVIEW_H);
@@ -399,8 +466,8 @@ export class FxPresetBrowser extends LitElement {
       for (let ahead = 1; ahead <= 3; ahead++) {
         const step = (this.hoverStep + ahead) % PREVIEW_STEPS;
         const key = previewKey(this.hoveredId, step);
-        if (previews.get(key) == null) {
-          previews.request({ key, presetId: this.hoveredId, step } as never);
+        if (this.previews.get(key) == null) {
+          this.previews.request({ key, presetId: this.hoveredId, step } as never);
         }
       }
       this.hoverHandle = requestAnimationFrame(tick);

@@ -481,14 +481,28 @@ switch-showtype {
 
 /*
  * The other way round from the inspector's crowded bar: below the width where
- * a glyph and "Transitions" both fit (about 264px, measured), the glyphs go and
- * the names stay. Three names fit a column far narrower than three glyphs and
- * names, and a word is what tells Effects from LUTs; the inspector's icon-only
- * fallback would leave three pictures to decode.
+ * four glyphs and names fit (about 350px, measured with "Transitions" the
+ * widest), the glyphs go and the names stay. The names alone fit down to about
+ * 274px. A word is what tells Effects from LUTs; the inspector's icon-only
+ * fallback would leave four pictures to decode.
  */
-@container (max-width: 280px) {
+@container (max-width: 350px) {
   .browse-tabs .opt-tab > .material-symbols-outlined {
     display: none;
+  }
+}
+
+/*
+ * Narrower still, four names would each be cut to a few letters, which tells
+ * nothing apart; the glyphs come back and the names move to the tooltip.
+ */
+@container (max-width: 273px) {
+  .browse-tabs.opt-tabs-few .opt-tab > .opt-tab-label {
+    display: none;
+  }
+  .browse-tabs.opt-tabs-few .opt-tab > .material-symbols-outlined {
+    display: inline-block;
+    font-size: 16px;
   }
 }
 
