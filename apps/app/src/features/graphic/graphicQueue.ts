@@ -1,18 +1,22 @@
 /**
- * One line for every caller of the HTML host.
+ * One line for every caller of an HTML host.
  *
- * The host's DOM is shared, and a prepare is not atomic: it applies state,
- * waits for a paint, then reads the paint back. An export runs while the
- * preview goes on repainting (the export button has no modal), so without this
- * the preview could apply its frame between an export's apply and its read,
- * and the delivered file would carry the preview's frame.
+ * Each caller prepares on a host of its own (`graphicPipeline.ts`), so no
+ * caller can redraw a canvas another one is showing; this queue is not what
+ * keeps their rasters apart. It keeps the preview, an export and a contact
+ * sheet to one prepare at a time (the preset tiles run beside it, so a tile
+ * waiting on a font cannot stall playback), and while an export or a contact
+ * sheet holds it the preview does not prepare at all, so the frame loop is not
+ * competing with the preview for paints.
  *
- * So every prepare runs one at a time, and while an export holds the host the
- * preview does not queue at all: it keeps showing the rasters it has.
+ * A preview request made while held is not lost: the latest one is replayed
+ * when the last hold ends. Dropped, a graphic scrubbed to during an export
+ * kept its old raster until something else happened to repaint the preview.
  */
 
 let chain: Promise<unknown> = Promise.resolve();
 let exportsHolding = 0;
+let deferred: (() => void) | null = null;
 
 /** Run `task` after every task queued before it. */
 export function serialize<T>(task: () => Promise<T>): Promise<T> {
@@ -27,9 +31,26 @@ export function beginExportGraphics(): void {
 
 export function endExportGraphics(): void {
   exportsHolding = Math.max(0, exportsHolding - 1);
+  if (exportsHolding === 0 && deferred != null) {
+    const retry = deferred;
+    deferred = null;
+    // After the caller's own cleanup, never inside it.
+    queueMicrotask(() => {
+      try {
+        retry();
+      } catch (error) {
+        console.warn("graphic: deferred preview request failed", error);
+      }
+    });
+  }
 }
 
 /** Whether the preview may queue a prepare now. */
 export function previewMayPrepare(): boolean {
   return exportsHolding === 0;
+}
+
+/** Run `retry` once the last hold ends. Only the latest one is kept. */
+export function whenPreviewMayPrepare(retry: () => void): void {
+  deferred = retry;
 }

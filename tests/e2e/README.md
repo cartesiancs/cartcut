@@ -147,6 +147,7 @@ harness/
   reference.ts         re-rendering a frame the way the export renders it
   audio.ts             silence, RMS envelope, loudness
   artifacts.ts         PNG writer, threshold-banded heat map, side-by-sides
+  graphicProbe.ts      which moment each HTML graphic raster the preview drew holds
 scenario/
   kitchenSink.ts       the project itself
   sampling.ts          which frames get looked at, declared as anchors
@@ -159,6 +160,8 @@ specs/
                        intensity, and a LUT installed by hand
   lut-panel.spec.ts    the LUT tab paints its tiles when it is opened
   seek-diagnosis.spec.ts  seek fidelity, with no encoder in the way
+  graphic-preview.spec.ts  HTML graphics in the live preview, under a seeded
+                       run of play, seek, scrub, contact sheets, edits, export
   stress.spec.ts       the run
 ```
 

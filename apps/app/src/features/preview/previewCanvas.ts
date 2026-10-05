@@ -827,11 +827,16 @@ export class PreviewCanvas extends LitElement {
 
     // HTML graphics paint on Chromium's next `paint`, not now, so their rasters
     // are asked for ahead of this frame and drawn when they land; until then
-    // the latest ones draw. Free for a project with no graphic: the check is a
-    // pass over the keys, and the host is never created.
+    // the latest ones draw. The ones about to appear are asked for too, or
+    // their first frame has nothing to draw. Free for a project with no
+    // graphic: the check is a pass over the keys, and the host is never created.
     if (needsHtmlHost(this.timeline)) {
-      requestPreviewRasters(this.timeline, this.timelineCursor, projectFps(), () =>
-        this.scheduleDraw(),
+      requestPreviewRasters(
+        this.timeline,
+        this.timelineCursor,
+        projectFps(),
+        () => this.scheduleDraw(),
+        this.timelineControl.isPlay,
       );
     }
     releaseGraphicsNotIn(this.timeline);

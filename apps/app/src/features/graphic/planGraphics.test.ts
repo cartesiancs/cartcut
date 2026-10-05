@@ -4,7 +4,15 @@ import { createGraphicElement } from "../element/graphicElement";
 import { coerceInlineProgram, toRawPayload } from "../fx/inlineProgram";
 import type { FxPreset } from "../fx/presetTypes";
 import { validatePreset } from "../fx/presetValidate";
-import { planGraphics, quantizeScale, type PlanInput } from "./planGraphics";
+import {
+  LOOKAHEAD_MS,
+  graphicInstanceIds,
+  hasHtmlGraphics,
+  planGraphics,
+  planLookahead,
+  quantizeScale,
+  type PlanInput,
+} from "./planGraphics";
 
 function htmlPreset(css: string): { program: any; preset: FxPreset } {
   const result = coerceInlineProgram({
@@ -119,6 +127,98 @@ describe("planGraphics", () => {
     const g = graphic({ program: shader.program });
     const jobs = planGraphics(input({ g }, 1500, { presetOf: () => ({ ...ANIMATED.preset, render: { type: "shader", source: "main.frag" } }) as FxPreset }));
     expect(jobs).toEqual([]);
+  });
+});
+
+/** A stand-in for `templateCompositionAt`: one inner graphic over the template's whole span. */
+function expandOne(inner: GraphicElementType): PlanInput["expandTemplate"] {
+  return (id, el, cursor) => ({
+    elements: { [id + "::inner"]: inner },
+    cursor: Math.min(Math.max(cursor - el.startTime, 0), el.duration),
+  });
+}
+
+function templateAt(startTime: number): any {
+  return { filetype: "template", startTime, duration: 2000, trackId: "t", priority: 1, width: 10, height: 10, location: { x: 0, y: 0 } };
+}
+
+describe("planLookahead", () => {
+  const ahead = (elements: Timeline, cursor: number, over: Partial<PlanInput> = {}) => {
+    const plan = input(elements, cursor, over);
+    return planLookahead(plan, planGraphics(plan));
+  };
+
+  it("plans a graphic about to appear at its own first frame", () => {
+    const jobs = ahead({ next: graphic(ANIMATED, { startTime: 1100 }) }, 1000);
+    expect(jobs.map((j) => j.instanceId)).toEqual(["next"]);
+    expect(jobs[0].time.tMs).toBe(0);
+    expect(jobs[0].key).toBe(planGraphics(input({ next: graphic(ANIMATED, { startTime: 1100 }) }, 1100))[0].key);
+  });
+
+  it("keys it the same on every draw until it appears, so it is made once", () => {
+    const elements = { next: graphic(ANIMATED, { startTime: 1100 }) };
+    const keys = [1000, 1010, 1040, 1070, 1099].map((cursor) => ahead(elements, cursor)[0].key);
+    expect(new Set(keys).size).toBe(1);
+  });
+
+  it("starts a split's right half at its clock head, not at zero", () => {
+    const right = graphic(ANIMATED, { startTime: 1100, clockHead: 700 } as any);
+    expect(ahead({ right }, 1000)[0].time.tMs).toBe(700);
+  });
+
+  it("leaves out what is already on screen, what is past the horizon and a hidden row", () => {
+    const elements: Timeline = {
+      on: graphic(ANIMATED, { startTime: 900 }),
+      far: graphic(ANIMATED, { startTime: 1000 + LOOKAHEAD_MS + 100 }),
+      hidden: graphic(ANIMATED, { startTime: 1100, trackHidden: true } as any),
+    };
+    expect(ahead(elements, 1000)).toEqual([]);
+  });
+
+  it("finds the exact first frame at a high frame rate, where the grid is sampled sparsely", () => {
+    // 240 fps: 48 frames in the horizon, sampled every 4; the clip starts on frame 2 of a step.
+    const startTime = (243 * 1000) / 240;
+    const jobs = ahead({ next: graphic(ANIMATED, { startTime }) }, 1000, { fps: 240 });
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].time.tMs).toBe(0);
+  });
+
+  it("plans a template's graphic under its namespaced id when the template is about to appear", () => {
+    const jobs = ahead({ tpl: templateAt(1100) }, 1000, { expandTemplate: expandOne(graphic(ANIMATED, { startTime: 0 })) });
+    expect(jobs.map((j) => j.instanceId)).toEqual(["tpl::inner"]);
+    expect(jobs[0].time.tMs).toBe(0);
+  });
+
+  it("finds a clip a transition draws before its own span reaches the window", () => {
+    const elements: Timeline = {
+      a: graphic(ANIMATED, { startTime: 500, duration: 1000 }),
+      b: graphic(ANIMATED, { startTime: 1500, duration: 1000 }),
+    };
+    expect(ahead(elements, 1250)).toEqual([]);
+    const crossed = { ...elements, cross: { filetype: "transition", fromId: "a", toId: "b", startTime: 1300, duration: 400 } as any };
+    const jobs = ahead(crossed, 1250);
+    expect(jobs.map((j) => j.instanceId)).toEqual(["b"]);
+    expect(jobs[0].time.tMs).toBe(0);
+  });
+
+  it("plans nothing for a cursor that does not move", () => {
+    expect(planLookahead(input({ next: graphic(ANIMATED, { startTime: 1100 }) }, 1000), [], 0)).toEqual([]);
+  });
+});
+
+describe("graphicInstanceIds and hasHtmlGraphics", () => {
+  it("include a graphic inside a template under the id it is drawn with", () => {
+    const elements: Timeline = { top: graphic(ANIMATED), tpl: templateAt(5000) };
+    const expand = expandOne(graphic(ANIMATED, { startTime: 0 }));
+    expect([...graphicInstanceIds(elements, expand)].sort()).toEqual(["top", "tpl::inner"]);
+    expect([...graphicInstanceIds(elements)]).toEqual(["top"]);
+  });
+
+  it("finds an HTML graphic that only a template holds", () => {
+    const presetOf = input({}, 0).presetOf;
+    const elements: Timeline = { tpl: templateAt(5000) };
+    expect(hasHtmlGraphics(elements, presetOf)).toBe(false);
+    expect(hasHtmlGraphics(elements, presetOf, expandOne(graphic(ANIMATED, { startTime: 0 })))).toBe(true);
   });
 });
 

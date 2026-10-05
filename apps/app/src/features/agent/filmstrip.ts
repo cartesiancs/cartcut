@@ -14,8 +14,7 @@ import { createGraphicElement, DEFAULT_GRAPHIC_MS } from "../element/graphicElem
 import { exportElementRenderers } from "../export/renderers";
 import { preloadForComposite } from "../export/compositePrep";
 import { defaultParamsOf, type FxHtmlRender, type FxPreset } from "../fx/presetTypes";
-import { prepareScopeFrame } from "../graphic/graphicPipeline";
-import { sharedHtmlHost } from "../graphic/htmlHost";
+import { prepareScopeFrame, releaseScopeGraphics } from "../graphic/graphicPipeline";
 import { beginExportGraphics, endExportGraphics } from "../graphic/graphicQueue";
 import { createGraphicScope, withGraphicScope } from "../graphic/graphicScope";
 import { GraphicGl } from "../renderer/graphicGl";
@@ -121,10 +120,10 @@ export async function renderFilmstrip(
     }
   } finally {
     scope.gl?.dispose();
+    // The throwaway clip's DOM goes with its scope's host; it is in no
+    // document to be released by the preview's sweep.
+    releaseScopeGraphics(scope);
     if (html) {
-      // The throwaway clip's DOM goes with it; it is in no document to be
-      // released by the preview's sweep.
-      sharedHtmlHost().unmount("filmstrip");
       endExportGraphics();
     }
   }

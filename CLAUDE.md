@@ -241,10 +241,15 @@ Things that bite:
   graphic is laid out by Chromium (html-in-canvas, enabled on the editor window
   only) and reaches the canvas only after a paint, so the sequence is plan
   (`graphic/planGraphics.ts`, pure), prepare (`prepare.ts` over the
-  `HtmlRasterPort`, one host, one queue) and then the synchronous composite
-  draws the raster. An export and the contact sheet await a prepare per frame
-  into a `withGraphicScope` of their own, the `withVideoScope` rule for
-  rasters; the preview fires and forgets and draws the latest raster per clip.
+  `HtmlRasterPort`, one queue) and then the synchronous composite draws the
+  raster. An export and the contact sheet await a prepare per frame into a
+  `withGraphicScope` of their own, the `withVideoScope` rule for rasters; the
+  preview fires and forgets and draws the latest raster per clip
+  (`previewSession.ts`, which also prepares the clips about to appear while
+  playing). **A host belongs to one caller**: a raster is the mount's own
+  canvas, so a second caller on the preview's host redraws what the preview
+  shows while its key still says current. Anything keyed per clip uses
+  `graphicInstanceIds`, which includes a template's graphics as `outerId::key`.
   The HTML is sanitised into a node tree (parse5) and the CSS filtered (postcss)
   on write *and* on read, and the host builds DOM from the tree, never from a
   string. `features/graphic/` holds all of it; `htmlHost.ts` is the only file

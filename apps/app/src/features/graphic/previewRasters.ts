@@ -8,13 +8,20 @@
  * the prepare step can skip a clip whose raster is already current, and a
  * static graphic is rasterised once and then left alone.
  *
+ * A raster stored with a `null` key is drawable but not current: its paint
+ * never came, so what it holds is not known to be the frame it was made for,
+ * and the next request makes it again. An animated raster is only right near
+ * the moment it was made, so during playback it is dropped once its clip is
+ * off screen (`keepAnimated`): drawn on the clip's next appearance, it was the
+ * outro of the previous pass at the start of the next.
+ *
  * Bounded: a clip that leaves the document is dropped by `retain`, and the map
  * never holds more than `CAPACITY` clips whatever happens.
  */
 
 export const CAPACITY = 64;
 
-type Entry = { key: string; raster: CanvasImageSource };
+type Entry = { key: string | null; raster: CanvasImageSource; static: boolean };
 
 export class PreviewRasters {
   private entries = new Map<string, Entry>();
@@ -28,9 +35,9 @@ export class PreviewRasters {
     return this.entries.get(elementId)?.key ?? null;
   }
 
-  put(elementId: string, key: string, raster: CanvasImageSource): void {
+  put(elementId: string, key: string | null, raster: CanvasImageSource, isStatic = false): void {
     this.entries.delete(elementId);
-    this.entries.set(elementId, { key, raster });
+    this.entries.set(elementId, { key, raster, static: isStatic });
     while (this.entries.size > CAPACITY) {
       const oldest = this.entries.keys().next().value as string;
       this.entries.delete(oldest);
@@ -58,6 +65,15 @@ export class PreviewRasters {
     for (const id of [...this.scales.keys()]) {
       if (!live.has(id)) {
         this.scales.delete(id);
+      }
+    }
+  }
+
+  /** Drop every animated raster whose clip is not in `onScreen`; static ones stay. */
+  keepAnimated(onScreen: ReadonlySet<string>): void {
+    for (const [id, entry] of [...this.entries]) {
+      if (!entry.static && !onScreen.has(id)) {
+        this.entries.delete(id);
       }
     }
   }

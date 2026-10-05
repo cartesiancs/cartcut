@@ -20,7 +20,11 @@
  */
 
 import { preloadForComposite } from "../../export/compositePrep";
-import { needsHtmlHost, prepareScopeFrame } from "../../graphic/graphicPipeline";
+import {
+  needsHtmlHost,
+  prepareScopeFrame,
+  releaseScopeGraphics,
+} from "../../graphic/graphicPipeline";
 import { beginExportGraphics, endExportGraphics } from "../../graphic/graphicQueue";
 import {
   createGraphicScope,
@@ -240,6 +244,9 @@ registerCommands({
     } finally {
       fx?.compositor?.dispose?.();
       graphics?.gl?.dispose();
+      if (graphics != null) {
+        releaseScopeGraphics(graphics);
+      }
       if (html) {
         endExportGraphics();
       }

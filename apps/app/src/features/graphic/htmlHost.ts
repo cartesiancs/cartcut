@@ -216,6 +216,12 @@ function measureLines(shadow: ShadowRoot): void {
 }
 
 function waitPaint(canvas: HTMLCanvasElement): Promise<boolean> {
+  // A mount released since it was applied is out of the document and never
+  // paints; waiting for it held every other graphic in the prepare for the
+  // whole timeout.
+  if (!canvas.isConnected) {
+    return Promise.resolve(false);
+  }
   return new Promise((resolve) => {
     let done = false;
     const finish = (ok: boolean) => {
@@ -423,13 +429,17 @@ export class HtmlHost implements HtmlRasterPort {
     // Faces that were not usable before this settle. Every apply lists its
     // fonts, so "any font listed" would refit every fitted graphic every frame.
     const fresh = fonts.filter((font) => !this.usableFonts.has(font.name));
-    if (fonts.length > 0) {
-      for (const font of fonts) {
-        ensureFontFace(font);
-      }
+    for (const font of fonts) {
+      ensureFontFace(font);
+    }
+    // Only for a face not yet usable. `document.fonts.ready` waits for every
+    // face loading anywhere in the editor, so waiting on it for faces already
+    // in hand stalled every frame of a playing graphic while an unrelated font
+    // loaded (a preset tile's, a text clip's), up to the timeout.
+    if (fresh.length > 0) {
       await withTimeout(
         Promise.all(
-          fonts.map((font) =>
+          fresh.map((font) =>
             document.fonts.load(`16px ${cssQuoted(font.name)}`).catch(() => []),
           ),
         ),
@@ -535,12 +545,19 @@ export class HtmlHost implements HtmlRasterPort {
   }
 }
 
-let shared: HtmlHost | null = null;
+let preview: HtmlHost | null = null;
 
-/** The one host for this document, made on first use so a project without graphics never has one. */
-export function sharedHtmlHost(): HtmlHost {
-  if (shared == null) {
-    shared = new HtmlHost();
+/**
+ * The preview's host, made on first use so a project without graphics never
+ * has one. Nothing else prepares on it: `rasterize` hands back the mount's own
+ * canvas and the preview keeps drawing that canvas, so an export or a contact
+ * sheet rasterising the same clip here redrew what the preview showed while
+ * the preview's key still called it current. They each make a host of their
+ * own (`graphicPipeline.ts#prepareScopeFrame`).
+ */
+export function previewHtmlHost(): HtmlHost {
+  if (preview == null) {
+    preview = new HtmlHost();
   }
-  return shared;
+  return preview;
 }

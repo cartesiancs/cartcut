@@ -17,7 +17,11 @@ import {
   withGraphicScope,
 } from "../graphic/graphicScope";
 import { GraphicGl } from "../renderer/graphicGl";
-import { needsHtmlHost, prepareScopeFrame } from "../graphic/graphicPipeline";
+import {
+  needsHtmlHost,
+  prepareScopeFrame,
+  releaseScopeGraphics,
+} from "../graphic/graphicPipeline";
 import { beginExportGraphics, endExportGraphics } from "../graphic/graphicQueue";
 import { hasFxElements } from "../renderer/fx/planFrame";
 import { setLutBlocking } from "../renderer/lut/apply";
@@ -314,6 +318,10 @@ export async function renderTimeline(
     // The export's own generator, for the same reason: its context and every
     // program compiled in it belong to this export alone.
     graphics?.gl?.dispose();
+    // And its HTML host, whose mounts are canvases in the editor's document.
+    if (graphics != null) {
+      releaseScopeGraphics(graphics);
+    }
     if (html) {
       endExportGraphics();
       await setBackgroundThrottling(true);

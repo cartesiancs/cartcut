@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { ApplyState, HtmlRasterPort, MountSpec } from "./htmlRasterPort";
 import type { GraphicJob } from "./planGraphics";
 import { prepareGraphics, type RasterSink } from "./prepare";
-import { beginExportGraphics, endExportGraphics, previewMayPrepare, serialize } from "./graphicQueue";
+import {
+  beginExportGraphics,
+  endExportGraphics,
+  previewMayPrepare,
+  serialize,
+  whenPreviewMayPrepare,
+} from "./graphicQueue";
 
 /** A host that records the order of calls, the contract `prepare` keeps. */
 function fakePort(painted = true) {
@@ -52,8 +58,8 @@ const spec: MountSpec = {
   programHash: "abc",
 };
 
-function sink(): RasterSink & { keys: Map<string, string> } {
-  const keys = new Map<string, string>();
+function sink(): RasterSink & { keys: Map<string, string | null> } {
+  const keys = new Map<string, string | null>();
   return { keys, keyOf: (id) => keys.get(id) ?? null, put: (id, key) => void keys.set(id, key) };
 }
 
@@ -89,10 +95,13 @@ describe("prepareGraphics", () => {
     expect(result).toEqual({ drawn: 0, current: 1, painted: true });
   });
 
-  it("reports a paint that never came", async () => {
+  it("reports a paint that never came, and files that raster as not current", async () => {
     const { port } = fakePort(false);
-    const result = await prepareGraphics({ port, mountOf: () => ({ spec, removed: [] }), fontsOf: () => [] }, [job("a", "k")], sink());
+    const s = sink();
+    const result = await prepareGraphics({ port, mountOf: () => ({ spec, removed: [] }), fontsOf: () => [] }, [job("a", "k")], s);
     expect(result.painted).toBe(false);
+    expect(s.keys.has("a")).toBe(true);
+    expect(s.keyOf("a")).toBeNull();
   });
 
   it("does nothing where html-in-canvas is not available", async () => {
@@ -118,6 +127,24 @@ describe("graphicQueue", () => {
     await expect(slow).rejects.toThrow("boom");
     await fast;
     expect(order).toEqual(["first", "second"]);
+  });
+
+  it("replays the latest preview request once the last hold ends, and only once", async () => {
+    const ran: string[] = [];
+    beginExportGraphics();
+    beginExportGraphics();
+    whenPreviewMayPrepare(() => ran.push("first"));
+    whenPreviewMayPrepare(() => ran.push("latest"));
+    endExportGraphics();
+    await Promise.resolve();
+    expect(ran).toEqual([]);
+    endExportGraphics();
+    await Promise.resolve();
+    expect(ran).toEqual(["latest"]);
+    beginExportGraphics();
+    endExportGraphics();
+    await Promise.resolve();
+    expect(ran).toEqual(["latest"]);
   });
 
   it("stops the preview preparing while an export holds the host", () => {

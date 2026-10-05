@@ -10,10 +10,10 @@
  * picture: an effect needs a picture to act on, while lettering over a busy
  * frame is harder to read than the preset it is advertising.
  *
- * One instance id for every tile, so the host keeps a single mount for them:
- * hovering one preset re-applies that mount step after step, and moving to the
- * next replaces it. Renders run one at a time and stand aside while an export
- * holds the host.
+ * One instance id for every tile, so the tiles' host (their scope's own, apart
+ * from the preview's) keeps a single mount for them: hovering one preset
+ * re-applies that mount step after step, and moving to the next replaces it.
+ * Renders run one at a time and stand aside while an export holds the queue.
  */
 
 import type { Timeline } from "../../@types/timeline";
@@ -32,7 +32,7 @@ import { defaultParamsOf, type FxHtmlRender, type FxPreset } from "../fx/presetT
 import { GraphicGl } from "../renderer/graphicGl";
 import { renderTimelineAtTime } from "../renderer/timeline";
 import { createTileCache } from "../timeline/strip/cache";
-import { prepareScopeFrame } from "./graphicPipeline";
+import { prepareScopeFrame, releaseScopeGraphics } from "./graphicPipeline";
 import { previewMayPrepare } from "./graphicQueue";
 import { createGraphicScope, withGraphicScope, type GraphicScope } from "./graphicScope";
 
@@ -132,7 +132,9 @@ export function createGraphicPreviewProvider(fps = 30): FxPreviewProvider {
     const t = Math.min(DEFAULT_GRAPHIC_MS - 1, Math.round(progressForStep(request.step) * DEFAULT_GRAPHIC_MS));
 
     await preloadForComposite(timeline);
-    if (html && !(await prepareScopeFrame(scope, timeline, t))) {
+    // Beside the queue: the tiles have a host of their own, and a tile waiting
+    // on a font must not hold up a playing preview.
+    if (html && !(await prepareScopeFrame(scope, timeline, t, { queued: false }))) {
       // The window did not paint (minimised): try again when asked again.
       return "later";
     }
@@ -247,6 +249,9 @@ export function createGraphicPreviewProvider(fps = 30): FxPreviewProvider {
       queued.clear();
       cache.clear();
       scope?.gl?.dispose();
+      if (scope != null) {
+        releaseScopeGraphics(scope);
+      }
       scope = null;
       frame = null;
       target = null;

@@ -6,9 +6,17 @@
  * composite draws what was prepared):
  *
  *  - the preview, fire and forget: it asks for this frame's rasters and
- *    repaints when they land, drawing the latest ones meanwhile;
+ *    repaints when they land, drawing the latest ones meanwhile
+ *    (`previewSession.ts`);
  *  - an export and the contact sheet, awaited per frame, into a scope of
  *    their own so the composite draws exactly this frame's rasters.
+ *
+ * **Every caller prepares on a host of its own.** A raster is the host mount's
+ * own canvas, and the preview keeps drawing it; on a shared host an export or a
+ * contact sheet redrew it at their own moment and scale while the preview's key
+ * still called it current, and the paused preview showed the wrong frame (often
+ * an empty outro) until the playhead moved. A scope's host is made on its first
+ * prepare and must be released with `releaseScopeGraphics`.
  *
  * Everything that decides anything is in the pure modules beside this; this
  * file only supplies them with the app.
@@ -23,12 +31,20 @@ import { templateCompositionAt } from "../renderer/template";
 import { fileUrlOf } from "./fileUrl";
 import { cssFamilyOf, fontEntryFor } from "./fontParams";
 import type { GraphicScope } from "./graphicScope";
-import { previewMayPrepare, serialize } from "./graphicQueue";
-import { sharedHtmlHost } from "./htmlHost";
+import { previewMayPrepare, serialize, whenPreviewMayPrepare } from "./graphicQueue";
+import { HtmlHost, previewHtmlHost } from "./htmlHost";
+import type { HtmlRasterPort } from "./htmlRasterPort";
 import { mountSpecOf } from "./mountSpec";
-import { planGraphics, type GraphicJob, type PlanInput } from "./planGraphics";
+import {
+  graphicInstanceIds,
+  hasHtmlGraphics,
+  planGraphics,
+  planLookahead,
+  type PlanInput,
+} from "./planGraphics";
 import { prepareGraphics, type PrepareDeps } from "./prepare";
 import { previewRasters } from "./previewRasters";
+import { PreviewRasterSession } from "./previewSession";
 
 /** Bumped whenever a font finishes loading, so a raster drawn in the fallback face is redrawn. */
 let fontGeneration = 0;
@@ -82,47 +98,60 @@ function planInput(
   };
 }
 
-const deps: PrepareDeps = {
-  port: sharedHtmlHost(),
-  mountOf: (job) => mountSpecOf(job.preset),
-  fontsOf: (job) => {
-    const out: FontEntry[] = [];
-    for (const param of job.preset.params) {
-      if (param.type !== "font") {
-        continue;
-      }
-      const stored = job.element.params?.[param.key];
-      const entry = fontOf(job.element, typeof stored === "string" ? stored : param.default);
-      if (entry.name !== DEFAULT_FONT.name) {
-        out.push(entry);
-      }
-    }
-    return out;
-  },
-};
+function depsFor(port: HtmlRasterPort): PrepareDeps {
+  return { port, mountOf, fontsOf };
+}
 
-/** Whether this document has anything for the host to do. */
-export function needsHtmlHost(elements: Timeline): boolean {
-  for (const element of Object.values(elements)) {
-    if (element?.filetype === "graphic") {
-      const preset = resolvePreset(element as GraphicElementType);
-      if (preset?.render.type === "html") {
-        return true;
-      }
+const mountOf: PrepareDeps["mountOf"] = (job) => mountSpecOf(job.preset);
+
+const fontsOf: PrepareDeps["fontsOf"] = (job) => {
+  const out: FontEntry[] = [];
+  for (const param of job.preset.params) {
+    if (param.type !== "font") {
+      continue;
+    }
+    const stored = job.element.params?.[param.key];
+    const entry = fontOf(job.element, typeof stored === "string" ? stored : param.default);
+    if (entry.name !== DEFAULT_FONT.name) {
+      out.push(entry);
     }
   }
-  return false;
+  return out;
+};
+
+/** Whether this document has anything for the host to do, inside a template included. */
+export function needsHtmlHost(elements: Timeline): boolean {
+  return hasHtmlGraphics(elements, (element) => resolvePreset(element), templateCompositionAt);
+}
+
+const previewDeps = depsFor(previewHtmlHost());
+
+/** Each scope's own host, made on its first prepare. */
+const scopeHosts = new WeakMap<GraphicScope, HtmlHost>();
+
+function hostOf(scope: GraphicScope): HtmlHost {
+  let host = scopeHosts.get(scope);
+  if (host == null) {
+    host = new HtmlHost();
+    scopeHosts.set(scope, host);
+  }
+  return host;
 }
 
 /**
  * One frame's rasters, into `scope`, awaited. For an export and the contact
  * sheet. Returns `false` when the host could not paint (a minimised window with
  * throttling on), which an export must report rather than ship blank graphics.
+ *
+ * `queued: false` runs it beside the queue rather than in it, for the preset
+ * tiles: a tile waiting on its own font's first load held the queue, and a
+ * playing preview's prepares stood behind it for the whole wait.
  */
 export async function prepareScopeFrame(
   scope: GraphicScope,
   elements: Timeline,
   timeInMs: number,
+  { queued = true }: { queued?: boolean } = {},
 ): Promise<boolean> {
   await loadFontLibrary();
   const jobs = planGraphics(planInput(elements, timeInMs, scope.fps, () => 1));
@@ -130,87 +159,67 @@ export async function prepareScopeFrame(
   if (jobs.length === 0) {
     return true;
   }
-  const keys = new Map<string, string>();
-  const result = await serialize(() =>
+  const keys = new Map<string, string | null>();
+  const deps = depsFor(hostOf(scope));
+  const prepare = () =>
     prepareGraphics(deps, jobs, {
       keyOf: (id) => keys.get(id) ?? null,
       put: (id, key, raster) => {
         keys.set(id, key);
         scope.rasters.set(id, raster);
       },
-    }),
-  );
+    });
+  const result = await (queued ? serialize(prepare) : prepare());
   return result.painted;
 }
 
-let previewBusy = false;
-let previewAgain: (() => void) | null = null;
+/**
+ * Unmount everything `scope` mounted. Every caller of `prepareScopeFrame` calls
+ * this when it is done: the mounts are canvases in the document, so a scope
+ * dropped without it leaves them there.
+ */
+export function releaseScopeGraphics(scope: GraphicScope): void {
+  const host = scopeHosts.get(scope);
+  if (host != null) {
+    host.release(new Set());
+    scopeHosts.delete(scope);
+  }
+}
+
+const session = new PreviewRasterSession(
+  {
+    plan: (request, scaleOf) => {
+      const input = planInput(request.elements, request.cursor, request.fps, scaleOf);
+      const current = planGraphics(input);
+      return { current, ahead: planLookahead(input, current) };
+    },
+    prepare: (jobs, sink) =>
+      loadFontLibrary().then(() => serialize(() => prepareGraphics(previewDeps, jobs, sink))),
+    mayPrepare: previewMayPrepare,
+    whenMayPrepare: whenPreviewMayPrepare,
+    releaseMounts: (live) => previewHtmlHost().release(live),
+    warn: (message, error) => console.warn(message, error),
+  },
+  previewRasters,
+);
 
 /**
  * Ask for the preview's rasters at a cursor. Never waits: the preview draws
  * the latest rasters it has, and `onReady` is called (to repaint) when new ones
- * land. Calls while one is running are folded into one more run after it.
+ * land. The graphics about to appear are prepared too, so their first frame
+ * is ready when the playhead reaches them.
  */
 export function requestPreviewRasters(
   elements: Timeline,
   cursor: number,
   fps: number,
   onReady: () => void,
+  playing = false,
 ): void {
-  if (!previewMayPrepare()) {
-    return;
-  }
-  const run = () => {
-    const jobs: GraphicJob[] = planGraphics(
-      planInput(elements, cursor, fps, (id) => previewRasters.scaleOf(id)),
-    );
-    if (jobs.every((job) => previewRasters.keyOf(job.instanceId) === job.key)) {
-      return null;
-    }
-    return jobs;
-  };
-  if (previewBusy) {
-    previewAgain = () => requestPreviewRasters(elements, cursor, fps, onReady);
-    return;
-  }
-  const jobs = run();
-  if (jobs == null) {
-    return;
-  }
-  previewBusy = true;
-  void loadFontLibrary()
-    .then(() =>
-      serialize(() =>
-        prepareGraphics(deps, jobs, {
-          keyOf: (id) => previewRasters.keyOf(id),
-          put: (id, key, raster) => previewRasters.put(id, key, raster),
-        }),
-      ),
-    )
-    .then((result) => {
-      if (result.drawn > 0) {
-        onReady();
-      }
-    })
-    .catch((error) => console.warn("graphic: preview prepare failed", error))
-    .finally(() => {
-      previewBusy = false;
-      const again = previewAgain;
-      previewAgain = null;
-      again?.();
-    });
+  session.request({ elements, cursor, fps, playing }, onReady);
 }
 
-/** Unmount every graphic no longer in the document. */
+/** Forget and unmount every graphic no longer in the document, template contents included. */
 export function releaseGraphicsNotIn(elements: Timeline): void {
-  const live = new Set<string>();
-  for (const [id, element] of Object.entries(elements)) {
-    if (element?.filetype === "graphic") {
-      live.add(id);
-    }
-  }
-  previewRasters.retain(live);
-  if (live.size === 0) {
-    sharedHtmlHost().release(live);
-  }
+  session.retain(graphicInstanceIds(elements, templateCompositionAt));
 }

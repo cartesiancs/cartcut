@@ -55,7 +55,11 @@ export interface HtmlRasterPort {
    * a paint did not come in time (a minimised, throttled window).
    */
   settle(): Promise<boolean>;
-  /** Draw an instance's current paint at a size. The returned canvas is reused. */
+  /**
+   * Draw an instance's current paint at a size. The returned canvas is the
+   * mount's own and is redrawn by the next `rasterize` of that instance, so a
+   * caller that keeps it must be the only caller of this host.
+   */
   rasterize(instanceId: string, width: number, height: number): CanvasImageSource | null;
   /** Unmount every instance not in `live`. */
   release(live: ReadonlySet<string>): void;
