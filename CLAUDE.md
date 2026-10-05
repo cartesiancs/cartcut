@@ -355,6 +355,8 @@ features/graphic/      layers drawn by a program: HTML typography (sanitise, spl
 features/record/       the recorder's pure logic and its auto-zoom: zoomPlan (when),
                        zoomCamera (how), recordFit (where); windows in apps/overlay-record
 features/reverse/      reversed media files, made by electron/lib/reversePipeline.ts
+features/prompter/     the teleprompter window: a script, then a scroll paced in
+                       lines per second by a session over ports
 features/speed/        the ramp's graph editor; the curve is timeline/speedCurve.ts
 features/update/       the update card; main's half is electron/lib/updateSession.ts
 features/mediaInfo/    Show Info: labels and layout here; the ffprobe call and its

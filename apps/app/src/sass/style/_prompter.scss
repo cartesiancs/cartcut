@@ -1,0 +1,264 @@
+@import "../var";
+
+// The Prompter window: a script page and a prompter page, each a body over a
+// 2rem bar.
+//
+// The vocabulary is the asset browser's and the option column's: bare
+// elements over the `$opt-*` tokens, never Bootstrap's `.btn` or
+// `.form-control`, which `devent-designsystem.css` restyles into a 0.7rem-padded
+// pill and a light `#f2f4f5` field. This file reads `$opt-*` without importing
+// `_option.scss`, as `_browse.scss` does, so it has to stay below `style/option`
+// in `style.scss`.
+//
+// The bar takes `.auto-track-bar`'s numbers, which are `<preview-bottom-bar>`'s,
+// so the window's bottom edge lines up with the preview's beside it and does
+// not move when the page changes.
+
+// The host is already a 100% block (`.app-window-pane > *` in `_window.scss`);
+// this is the column inside it.
+.prompter-panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+.prompter-body {
+  flex: 1 1 auto;
+  // Without this a flex item refuses to shrink below its content, and a long
+  // script pushes the bar out of the window.
+  min-height: 0;
+  display: flex;
+  padding: 10px;
+}
+
+// `textarea.opt-textarea`'s field, at a size for writing a page rather than a
+// caption. It fills the body and scrolls itself, so there is no resize grip to
+// fight the window's own splitter.
+textarea.prompter-input {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid $opt-line;
+  border-radius: 7px;
+  background-color: $opt-field;
+  color: $opt-text;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  box-shadow: none;
+  transition: border-color 140ms ease-out;
+}
+
+textarea.prompter-input:hover {
+  border-color: $opt-line-strong;
+}
+
+textarea.prompter-input:focus {
+  border-color: #4a5158;
+  color: $opt-bright;
+}
+
+textarea.prompter-input::placeholder {
+  color: #666d75;
+}
+
+.prompter-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  height: 2rem;
+  padding: 0 0.4rem;
+  border-top: 0.05rem solid $background-border-color;
+  background-color: $background-color;
+}
+
+.prompter-bar.is-split {
+  justify-content: space-between;
+}
+
+// `.auto-track-btn`'s numbers, under a name of this panel's own.
+.prompter-btn {
+  appearance: none;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px 0 7px;
+  margin: 0;
+  border: 1px solid $opt-line-strong;
+  border-radius: 7px;
+  background-color: $opt-raised;
+  color: $opt-text;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    border-color 140ms ease-out,
+    color 140ms ease-out,
+    opacity 140ms ease-out;
+}
+
+// The glyph after the label rather than before it, so the padding mirrors.
+.prompter-btn.is-trailing {
+  padding: 0 7px 0 10px;
+}
+
+// Two classes, for the reason `_asset.scss` gives: `material-symbols/outlined`
+// is imported after this file and its single-class rule would win.
+.prompter-btn > .material-symbols-outlined {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.prompter-btn:hover:not(:disabled) {
+  background-color: #343b42;
+  color: $opt-bright;
+}
+
+.prompter-btn.is-primary {
+  border-color: $opt-bright;
+  background-color: $opt-bright;
+  color: #111315;
+}
+
+.prompter-btn.is-primary:hover:not(:disabled) {
+  border-color: #ffffff;
+  background-color: #ffffff;
+  color: #111315;
+}
+
+.prompter-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.prompter-btn:focus-visible {
+  outline: 1px solid #5a6067;
+  outline-offset: 1px;
+}
+
+.prompter-speed {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+// A fixed width, so the slower and faster buttons stay under the pointer while
+// the readout goes from `0.9x` to `1.0x`.
+.prompter-speed-value {
+  min-width: 2.6em;
+  text-align: center;
+}
+
+// The stage. A size container, so the type can be sized to the window's width
+// (`cqi`) and the reading line placed at a fraction of its height (`cqh`).
+// The background is `.auto-track-stage`'s, the preview canvas's own.
+.prompter-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  container-type: size;
+  background-color: #101112;
+  cursor: pointer;
+}
+
+// The fade lives here and not on the text: a mask on a transformed element
+// moves with it, so the faded band would scroll away with the words. Read
+// lines dim on the way past the reading line at 35%, and upcoming ones arrive
+// out of the bottom edge rather than being cut by it.
+.prompter-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.35) 18%,
+    #000000 31%,
+    #000000 82%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.35) 18%,
+    #000000 31%,
+    #000000 82%,
+    transparent 100%
+  );
+}
+
+// The script. Moved only by the transform `prompterSession` writes.
+//
+// The padding is what makes `maxOffset` mean "finished". 0.675em is half of
+// the 1.35 line, so the first line's centre starts on the reading line at 35%,
+// and the bottom pad is the rest of the stage plus that half line, which puts
+// the text's full height at stage + script: scrolled to the end, the last line
+// sits one line above the reading line, read.
+.prompter-text {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: calc(35cqh - 0.675em) 1.75rem calc(65cqh + 0.675em);
+  color: $opt-bright;
+  font-size: clamp(1.75rem, 8cqi, 4.5rem);
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  will-change: transform;
+}
+
+// The reading line. Two classes for the glyph size, as above.
+.prompter-mark.material-symbols-outlined {
+  position: absolute;
+  top: 35%;
+  left: 4px;
+  transform: translateY(-50%);
+  color: $opt-label;
+  font-size: 20px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+// Shown only while paused or at the end. The type is `.auto-track-overlay`'s;
+// the plate is there because, unlike that overlay, this one sits over text.
+.prompter-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px 4px 7px;
+  border: 1px solid $opt-line;
+  border-radius: 7px;
+  background-color: rgba(17, 19, 21, 0.9);
+  color: $opt-label;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.prompter-hint > .material-symbols-outlined {
+  font-size: 14px;
+  line-height: 1;
+}

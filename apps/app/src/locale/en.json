@@ -178,7 +178,8 @@
   },
   "window": {
     "automatic_caption": "Automatic Caption",
-    "text_to_speech": "Text to Speech"
+    "text_to_speech": "Text to Speech",
+    "prompter": "Prompter"
   },
   "update": {
     "available": "A new version is available. Download it?",

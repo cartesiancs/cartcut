@@ -75,6 +75,24 @@ export class ControlText extends LitElement {
     });
   }
 
+  /**
+   * Open the Prompter as a window docked beside the preview.
+   *
+   * A window for the reason captioning and Text to Speech are one: a script is
+   * read while recording, and a panel that replaced the preview would hide the
+   * take.
+   */
+  _handleClickPrompter() {
+    windowStore.getState().open({
+      id: "prompter",
+      hostId: "preview",
+      placement: { mode: "docked", side: "right", sizePct: DEFAULT_DOCK_PCT },
+      // The type bottoms out at 1.75rem, so at 280px a line holds eight Korean
+      // syllables between its 1.75rem margins. Narrower reads a word at a time.
+      minSize: { width: 280, height: 240 },
+    });
+  }
+
   private toast(message: string) {
     (document.querySelector("toast-box") as any)?.showToast({
       message,
@@ -201,6 +219,17 @@ export class ControlText extends LitElement {
             record_voice_over
           </span>
           <b class="align-self-center text-light text-center">Text to Speech</b>
+        </div>
+
+        <div
+          class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
+          aria-event="prompter"
+          @click=${() => this._handleClickPrompter()}
+        >
+          <span class="material-symbols-outlined icon-lg align-self-center">
+            speaker_notes
+          </span>
+          <b class="align-self-center text-light text-center">Prompter</b>
         </div>
 
         <div

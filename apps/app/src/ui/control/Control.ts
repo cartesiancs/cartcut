@@ -14,6 +14,7 @@ import "../../features/record/screenRecord";
 import "../../features/record/audioRecord";
 import "../../features/track/autoTrackPanel";
 import "../../features/tts/ttsPanel";
+import "../../features/prompter/prompterPanel";
 import "../../features/window/windowHost";
 import "../../features/extension/viewPanel";
 import "../../features/extension/inspectorSections";
@@ -376,6 +377,11 @@ export class Control extends LitElement {
         id: "textToSpeech",
         label: this.lc.t("window.text_to_speech") || "Text to Speech",
         content: html`<tts-panel></tts-panel>`,
+      },
+      {
+        id: "prompter",
+        label: this.lc.t("window.prompter") || "Prompter",
+        content: html`<prompter-panel></prompter-panel>`,
       },
       {
         id: "automaticCaption",
