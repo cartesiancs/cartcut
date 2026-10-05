@@ -19,7 +19,12 @@
  *    of its own time;
  *  - once things settle, the preview shows every visible graphic at exactly
  *    its frame;
+ *  - a sentinel visible only while a no-fill animation runs shows exactly then,
+ *    on every pass, judged by its pixels (a seek that could not reach a
+ *    finished animation left graphics blank on every replay);
  *  - a contact sheet leaves no host canvas behind.
+ *
+ * Every window is muted and hidden for the whole run.
  *
  * `CARTCUT_E2E_GRAPHIC_SEEDS=1,2,3` and `CARTCUT_E2E_GRAPHIC_OPS=80` widen it.
  * With the lookahead and the template sweep taken out of `graphicPipeline.ts`,
@@ -35,12 +40,15 @@ import { test, expect } from "../harness/test";
 import { agent } from "../harness/agent";
 import { runExport } from "../harness/export";
 import {
+  SENTINEL_PROGRAM,
   discardFrames,
   frameMs,
   installGraphicProbe,
   judgePlayback,
   judgeSettled,
   probeHealth,
+  quietWindows,
+  registerSentinel,
   registerTemplate,
   type GraphicFailure,
 } from "../harness/graphicProbe";
@@ -91,6 +99,7 @@ for (const seed of SEEDS) {
     const R = rng(seed);
     const ev = <T>(fn: string) => page.evaluate(fn) as Promise<T>;
 
+    await quietWindows(session);
     await installGraphicProbe(page);
     const FRAME = await frameMs(page);
 
@@ -117,6 +126,19 @@ for (const seed of SEEDS) {
     }
     await agent(session, "split_clip", { elementId: ids["rise-in-out"], atMs: [1500] });
 
+    // Crossed forwards and then seeked back over and over by the steps below.
+    const sentinel = await agent<any>(session, "add_graphic", {
+      program: SENTINEL_PROGRAM,
+      startMs: 1200,
+      durationMs: 1000,
+      x: 1640,
+      y: 40,
+      width: 240,
+      height: 240,
+    });
+    const sentinelId: string = sentinel.created[0];
+    await registerSentinel(page, sentinelId);
+
     await session.answerOpenDialog([templateFile]);
     const templateId = await ev<string>(`(async () => {
       document.querySelector('[data-bs-target="#nav-template"]').click();
@@ -134,9 +156,10 @@ for (const seed of SEEDS) {
     })()`);
     await registerTemplate(page, templateId, { key: innerKey, start: 0, duration: 2000 });
 
+    // The sentinel is left out: it has no text to edit, and its window is the oracle.
     const graphicIds = () =>
       ev<Array<{ id: string; start: number; dur: number }>>(
-        `Object.entries(window.CARTCUT.useTimelineStore.getState().timeline).filter(([, e]) => e.filetype === "graphic").map(([id, e]) => ({ id, start: e.startTime, dur: e.duration }))`,
+        `Object.entries(window.CARTCUT.useTimelineStore.getState().timeline).filter(([id, e]) => e.filetype === "graphic" && id !== ${JSON.stringify(sentinelId)}).map(([id, e]) => ({ id, start: e.startTime, dur: e.duration }))`,
       );
     const setCursor = (ms: number) => ev(`window.CARTCUT.useTimelineStore.getState().setCursor(${ms})`);
     const hostCount = () => ev<number>(`document.querySelectorAll("canvas[data-graphic-host]").length`);
@@ -173,6 +196,7 @@ for (const seed of SEEDS) {
       if (i === exportAt) {
         const outcome = await runExport(session, { destination: path.join(artifactDir, "export.mp4") });
         expect(outcome.status).toBe("finished");
+        await quietWindows(session);
         record("export", { ms: outcome.elapsedMs }, await judgeSettled(page));
         continue;
       }
@@ -259,5 +283,8 @@ for (const seed of SEEDS) {
     expect(failures.slice(0, 20)).toEqual([]);
     expect(health.drawElementImageThrows).toBe(0);
     expect(health.paintsNeverCame).toBe(0);
+    // The sentinel was judged on both sides of its window, or it proved nothing.
+    expect(health.sentinelChecks.inside).toBeGreaterThan(0);
+    expect(health.sentinelChecks.outside).toBeGreaterThan(0);
   });
 }

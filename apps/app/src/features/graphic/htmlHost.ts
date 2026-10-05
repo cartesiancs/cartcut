@@ -19,6 +19,10 @@
  *    box is clipped, so a glow past the box needs the box to be bigger.
  *  - **A change is drawable only after the next `paint` event.** So `apply`
  *    mutates, `settle` waits for the paint, and `rasterize` draws afterwards.
+ *  - **A seek goes through every animation the mount has had**, not through
+ *    `getAnimations()` alone, which stops listing an animation that finished
+ *    with no fill. Seeked past its end once, it could never be seeked back, and
+ *    whatever it showed stayed hidden on every replay (`seekAnimations.ts`).
  *
  * Nothing from the program runs here. The DOM is built node by node from the
  * sanitiser's tree with `createElementNS` and `setAttribute`, never from a
@@ -31,6 +35,7 @@ import type { ApplyState, HtmlRasterPort, MountSpec } from "./htmlRasterPort";
 import type { SafeNode } from "./sanitizeHtml";
 import { fillTextSlots, parseSplit, splitTree, wantsLines } from "./split";
 import { fitMaxOf, fitModeOf, fitScale } from "./fit";
+import { seekAnimations } from "./seekAnimations";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const HTML_NS = "http://www.w3.org/1999/xhtml";
@@ -75,6 +80,11 @@ type Mount = {
   used: number;
   /** What the last `data-fit` answer was measured for; a change refits. */
   fitKey: string;
+  /**
+   * Every animation this mount has had, so a seek back reaches the ones
+   * `getAnimations()` stopped listing when they finished (`seekAnimations.ts`).
+   */
+  animations: Set<Animation>;
   pendingFitKey: string;
 };
 
@@ -290,6 +300,7 @@ export class HtmlHost implements HtmlRasterPort {
       used: 0,
       fitKey: "",
       pendingFitKey: "",
+      animations: new Set(),
     };
   }
 
@@ -403,10 +414,7 @@ export class HtmlHost implements HtmlRasterPort {
   /** Every CSS animation and SMIL clock in the graphic, set to its time. */
   private seek(mount: Mount): void {
     try {
-      for (const animation of mount.shadow.getAnimations()) {
-        animation.pause();
-        animation.currentTime = mount.timeMs;
-      }
+      seekAnimations(mount.animations, mount.shadow.getAnimations(), mount.timeMs);
     } catch {
       // A detached root has no animations to seek.
     }
