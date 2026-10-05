@@ -64,6 +64,7 @@ import "./features/tutorial/tutorialCoachmark";
 import "./features/update/updatePrompt";
 import "./features/subtitle/importDialog";
 import "./features/mediaInfo/mediaInfoDialog";
+import "./features/note/noteCard";
 import "./features/record/processDialog";
 
 

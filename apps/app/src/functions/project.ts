@@ -8,7 +8,9 @@ import {
 import {
   TIMELINE_VIEW_ENTRY,
   parseTimelineViewEntry,
+  parseTimelineViewNotes,
 } from "../features/project/timelineView";
+import { noteStore } from "../states/noteStore";
 import { rendererModal } from "../utils/modal";
 import { uiStore } from "../states/uiStore";
 import { renderOptionStore } from "../states/renderOptionStore";
@@ -196,15 +198,15 @@ const project = {
     // Before the document too, and replaced whole even when the file has none,
     // so the first paint already has this project's rows at their heights and
     // nothing from the previously open project is left behind. Also before
-    // `markProjectSaved`, whose baseline digest includes these heights.
+    // `markProjectSaved`, whose baseline digest includes these heights. The
+    // notes ride in the same entry and are replaced for the same reasons.
+    const trackIds = read.document.tracks.map((track) => track.id);
     trackHeightStore
       .getState()
-      .replace(
-        parseTimelineViewEntry(
-          extras.timelineView ?? null,
-          read.document.tracks.map((track) => track.id),
-        ),
-      );
+      .replace(parseTimelineViewEntry(extras.timelineView ?? null, trackIds));
+    noteStore
+      .getState()
+      .replace(parseTimelineViewNotes(extras.timelineView ?? null, trackIds));
 
     // Read against a *fresh* project's settings, so a field the file predates
     // falls back to the app's default rather than to whatever the previously

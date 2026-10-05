@@ -260,10 +260,11 @@ by `functions/project.ts`: `project.json`, `timeline.json`, `tracks.json`,
 `renderOptions.json`, `assetPaths.json`. Two optional entries ride beside them
 and are absent when empty, so neither moves `SCHEMA_VERSION`: `extensions.json`
 (see Extensions) and `timelineView.json`, the height of every resized timeline
-row. Row heights are view state (`timeline/trackHeights.ts`): keyed by track id
-in `trackHeightStore`, never in `TimelineDocument`, so they are saved and make
-the project dirty but are never undone, and the caption lock does not stop a
-resize. Anything asking where a row is goes through `layout.ts#rowStack`.
+row and the timeline notes (`noteStore`, same rules). Row heights are view state
+(`timeline/trackHeights.ts`): keyed by track id in `trackHeightStore`, never in
+`TimelineDocument`, so they are saved and make the project dirty but are never
+undone, and the caption lock does not stop a resize. Anything asking where a row
+is goes through `layout.ts#rowStack`.
 
 > **The in-memory `TimelineDocument` is always absolute.** A relative path
 > exists only inside the archive.
@@ -357,6 +358,8 @@ features/record/       the recorder's pure logic and its auto-zoom: zoomPlan (wh
 features/reverse/      reversed media files, made by electron/lib/reversePipeline.ts
 features/prompter/     the teleprompter window: a script, then a scroll paced in
                        lines per second by a session over ports
+features/note/         timeline notes: a pin drawn by the canvas, a card in the DOM,
+                       pinned to a time and a track, outside the document and undo
 features/speed/        the ramp's graph editor; the curve is timeline/speedCurve.ts
 features/update/       the update card; main's half is electron/lib/updateSession.ts
 features/mediaInfo/    Show Info: labels and layout here; the ffprobe call and its

@@ -31,6 +31,7 @@ import {
 import { v4 as uuidv4 } from "uuid";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { useTimelineStore } from "../../states/timelineStore";
+import { noteStore } from "../../states/noteStore";
 import { exportStore } from "../../states/exportStore";
 import { backgroundTaskStore } from "../../states/backgroundTaskStore";
 import { count as perfCount } from "../debug/frameStats";
@@ -316,10 +317,23 @@ export function installAutosave(): () => void {
     live.noteChange();
   });
 
+  // Timeline notes ride in the same entry as the heights. Gated on `notes`
+  // only: opening and closing a note's card moves `open`, which is not saved.
+  let lastNotes = noteStore.getState().notes;
+  const offNotes = noteStore.subscribe((state) => {
+    if (state.notes === lastNotes) {
+      return;
+    }
+    lastNotes = state.notes;
+    perfCount("autosave.noteChange");
+    live.noteChange();
+  });
+
   return () => {
     offTimeline();
     offOptions();
     offHeights();
+    offNotes();
     live.stop();
     session = null;
   };

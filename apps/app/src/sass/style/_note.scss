@@ -1,0 +1,75 @@
+// The timeline note's card (`features/note/noteCard.ts`).
+//
+// Dressed like the context menu it is opened from: the same solid #25262b,
+// with no backdrop blur for the reason `_dropdown.scss` gives about menus over
+// the timeline canvas. The field is `textarea.opt-textarea` and the delete
+// button `.opt-icon-btn`, so both read as the inspector's own.
+
+.note-card {
+  -webkit-app-region: no-drag;
+  box-sizing: border-box;
+  width: 240px;
+  padding: 8px 10px 10px;
+  border-radius: 10px;
+  background-color: #25262b;
+  box-shadow: 0 0.5rem 1rem rgb(0 0 0 / 25%);
+  color: #dedede;
+  font-size: 12px;
+}
+
+.note-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 22px;
+  margin-bottom: 6px;
+}
+
+.note-card-time {
+  color: #8b9096;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.note-card-field {
+  position: relative;
+}
+
+// Grows with what is typed, from one line to a scroll.
+textarea.opt-textarea.note-card-input {
+  field-sizing: content;
+  min-height: 32px;
+  max-height: 160px;
+  margin-bottom: 0;
+  padding-right: 32px;
+  resize: none;
+}
+
+.note-card-send {
+  appearance: none;
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background-color: #3d7eff;
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 140ms ease-out;
+
+  > .material-symbols-outlined {
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+}

@@ -31,6 +31,7 @@ import {
   serializeTimelineViewEntry,
 } from "../features/project/timelineView";
 import type { TimelineTrack } from "../features/timeline/tracks";
+import { noteStore } from "./noteStore";
 
 export type LiveTrackHeight = { trackId: string; px: number };
 
@@ -140,13 +141,14 @@ export function effectiveTrackHeights(
   return memoEffective;
 }
 
-/** The `.ngt` entry, or `null` when every row is at the default. */
+/** The `.ngt` entry, or `null` when every row is at the default and no note is kept. */
 export function timelineViewEntryText(
   tracks: readonly Pick<TimelineTrack, "id">[],
 ): string | null {
   return serializeTimelineViewEntry(
     trackHeightStore.getState().heights,
     tracks.map((track) => track.id),
+    noteStore.getState().notes,
   );
 }
 

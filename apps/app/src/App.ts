@@ -155,6 +155,7 @@ export class App extends LitElement {
         <modal-list-ui></modal-list-ui>
 
         <div id="menuRightClick"></div>
+        <timeline-note-card></timeline-note-card>
         <style id="fontStyles" ref="fontStyles"></style>
 
         <toast-box></toast-box>

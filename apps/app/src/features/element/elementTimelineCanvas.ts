@@ -196,6 +196,15 @@ import { canShowMediaInfo, openMediaInfo } from "../mediaInfo/mediaInfoSession";
 import { targetForElement } from "../mediaInfo/mediaInfoView";
 import { timelineTouchMode } from "../mobile/timelineTouch";
 import type { SurfaceMode } from "../mobile/touchGesture";
+import { noteStore } from "../../states/noteStore";
+import {
+  drawNotePins,
+  noteAnchorAt,
+  notePinAt,
+  placeNotePins,
+  type NoteAnchor,
+  type NotePin,
+} from "../note/notePins";
 
 /** What a click on a bare cut reaches for first. */
 const DEFAULT_TRANSITION_PRESET = "com.cartcut.cross-dissolve";
@@ -355,6 +364,20 @@ export class elementTimelineCanvas extends LitElement {
    * of what is selected, and nothing outside this component should see it.
    */
   targetIdDuringRightClick: string[] = [];
+
+  /**
+   * Where "Add a note" puts its pin, taken when the context menu opened, and
+   * the pointer's viewport position there for the card. Null when the canvas
+   * has no rows.
+   */
+  private noteDuringRightClick: {
+    anchor: NoteAnchor;
+    x: number;
+    y: number;
+  } | null = null;
+
+  /** The note pins the last paint placed, for the hit tests. */
+  private notePins: NotePin[] = [];
 
   private dragState: DragState = idleDrag;
   /** The document as it stood when the drag began. */
@@ -636,6 +659,11 @@ export class elementTimelineCanvas extends LitElement {
       this.drawCanvas();
     });
 
+    // Note pins are drawn, and so is which one has its card open.
+    noteStore.subscribe(() => {
+      this.drawCanvas();
+    });
+
     return this;
   }
 
@@ -768,6 +796,17 @@ export class elementTimelineCanvas extends LitElement {
           ? { ids: this.lift.ids, insetPx: liftInset }
           : null,
     });
+
+    // Above the clips and the playhead, below the gesture transients.
+    const notes = noteStore.getState();
+    this.notePins = placeNotePins(
+      notes.notes,
+      this.layout,
+      this.timelineRange,
+      this.timelineScroll,
+      { w: width, h: height },
+    );
+    drawNotePins(ctx, this.notePins, notes.open?.id ?? null);
 
     // The pulse runs on the paint loop itself: one more frame while it lasts,
     // and nothing scheduled once it is over.
@@ -1879,6 +1918,11 @@ export class elementTimelineCanvas extends LitElement {
       return;
     }
 
+    if (notePinAt(this.notePins, e.offsetX, e.offsetY) != null) {
+      this.style.cursor = "pointer";
+      return;
+    }
+
     const hit = hitTest(
       this.layout,
       e.offsetX,
@@ -1927,6 +1971,19 @@ export class elementTimelineCanvas extends LitElement {
   }
 
   _handleMouseDown(e) {
+    // A pin sits on top of whatever clip is under it, so a press on one opens
+    // the note and goes no further: it neither selects nor drags the clip.
+    const noteId =
+      e.button === 0 ? notePinAt(this.notePins, e.offsetX, e.offsetY) : null;
+    if (noteId != null) {
+      // The card focuses its field as soon as it renders, which is before this
+      // press's default action runs; left alone, that action moves focus off
+      // the field again and the first keystroke goes to the timeline.
+      e.preventDefault();
+      noteStore.getState().openAt(noteId, e.clientX, e.clientY);
+      return;
+    }
+
     this.timelineState.setCursorType("pointer");
 
     const hit = hitTest(
@@ -2154,6 +2211,15 @@ export class elementTimelineCanvas extends LitElement {
 
   _handleContextmenu(e) {
     this.targetIdDuringRightClick = [...this.targetId];
+    const anchor = noteAnchorAt(
+      this.layout,
+      e.offsetX,
+      e.offsetY,
+      this.timelineRange,
+      this.timelineScroll,
+    );
+    this.noteDuringRightClick =
+      anchor == null ? null : { anchor, x: e.clientX, y: e.clientY };
 
     // The menu is split, delete, merge, group, detach and the rest: every item
     // on it would decline. An affordance that could only decline is not
@@ -2722,6 +2788,31 @@ export class elementTimelineCanvas extends LitElement {
     void runContributedCommand(extId, commandId);
   }
 
+  private noteMenuTemplate(): string {
+    if (this.noteDuringRightClick == null) {
+      return "";
+    }
+    return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').addNoteHere()" item-name="Add a note" item-icon="add_comment"> </menu-dropdown-item>`;
+  }
+
+  /**
+   * Pin an empty note where the context menu was opened and open its card.
+   *
+   * Public because the dropdown's rows are an HTML string. The note is empty
+   * until the card keeps some text, and an empty note is never saved, so
+   * opening one and walking away leaves the project as it was.
+   */
+  public addNoteHere(): void {
+    const target = this.noteDuringRightClick;
+    if (target == null) {
+      return;
+    }
+    const id = uuidv4();
+    const notes = noteStore.getState();
+    notes.add({ id, ...target.anchor, text: "" });
+    notes.openAt(id, target.x, target.y);
+  }
+
   showMenuDropdown({ x, y }) {
     document.querySelector("#menuRightClick").innerHTML = `
         <menu-dropdown-body top="${y}" left="${x}">
@@ -2733,6 +2824,7 @@ export class elementTimelineCanvas extends LitElement {
           ${this.groupMenuTemplate()}
           ${this.replaceableMenuTemplate()}
           ${this.extensionMenuTemplate()}
+          ${this.noteMenuTemplate()}
           <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').removeSeletedElements()" item-name="Remove" item-icon="delete"> </menu-dropdown-item>
           <menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').rippleDeleteSelected()" item-name="Remove and close gap" item-icon="delete_sweep"> </menu-dropdown-item>
         </menu-dropdown-body>`;

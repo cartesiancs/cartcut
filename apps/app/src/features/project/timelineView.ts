@@ -1,6 +1,7 @@
 /**
- * The `.ngt` entry that keeps how the timeline is laid out: today, the height
- * of every row someone has resized.
+ * The `.ngt` entry that keeps how the timeline is laid out: the height of every
+ * row someone has resized, and the notes pinned to the rows
+ * (`features/note/notes.ts`). Either key is left out when it has nothing in it.
  *
  * Not part of `TimelineDocument`, for the reason `trackHeights.ts` gives: it is
  * view state, so it stays out of the undo history. It is saved with the project
@@ -10,8 +11,8 @@
  * with every row at the default.
  *
  * `null` from the serializer means "write no entry at all", and that is what a
- * project with every row at the default produces, so it stays byte-identical to
- * one saved before rows could be resized.
+ * project with every row at the default and no notes produces, so it stays
+ * byte-identical to one saved before rows could be resized.
  *
  * Parsing fails closed, the way every read guard here does: a truncated or
  * hand-edited entry costs the user their row heights, never the project.
@@ -23,6 +24,7 @@ import {
   heightsFor,
   type TrackHeights,
 } from "../timeline/trackHeights";
+import { parseNotes, savedNotes, type TimelineNote } from "../note/notes";
 
 export const TIMELINE_VIEW_ENTRY = "timelineView.json";
 
@@ -35,18 +37,34 @@ export const TIMELINE_VIEW_ENTRY_VERSION = 1;
  * Only rows in `trackIds` are written, and keys are sorted, so the same heights
  * always produce the same bytes: `projectDigest.ts` hashes this text, and an
  * order that followed insertion would make an unchanged project read as edited.
+ * Notes keep the order they were made in, each rebuilt with its keys in one
+ * order for the same reason.
  */
 export function serializeTimelineViewEntry(
   heights: TrackHeights,
   trackIds: Iterable<string>,
+  notes: readonly TimelineNote[] = [],
 ): string | null {
-  const saved = heightsFor(heights, trackIds);
-  if (Object.keys(saved).length === 0) {
+  const ids = [...trackIds];
+  const saved = heightsFor(heights, ids);
+  const kept = savedNotes(notes, ids);
+  const hasHeights = Object.keys(saved).length > 0;
+  if (!hasHeights && kept.length === 0) {
     return null;
   }
   return JSON.stringify({
     v: TIMELINE_VIEW_ENTRY_VERSION,
-    trackHeights: saved,
+    ...(hasHeights ? { trackHeights: saved } : {}),
+    ...(kept.length > 0
+      ? {
+          notes: kept.map(({ id, trackId, atMs, text }) => ({
+            id,
+            trackId,
+            atMs,
+            text,
+          })),
+        }
+      : {}),
   });
 }
 
@@ -62,23 +80,7 @@ export function parseTimelineViewEntry(
   text: string | null | undefined,
   trackIds: Iterable<string>,
 ): TrackHeights {
-  if (typeof text !== "string" || text.trim() === "") {
-    return {};
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return {};
-  }
-  if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return {};
-  }
-  const envelope = parsed as { v?: unknown; trackHeights?: unknown };
-  if (envelope.v !== TIMELINE_VIEW_ENTRY_VERSION) {
-    return {};
-  }
-  const stored = envelope.trackHeights;
+  const stored = readEnvelope(text)?.trackHeights;
   if (stored == null || typeof stored !== "object" || Array.isArray(stored)) {
     return {};
   }
@@ -95,4 +97,32 @@ export function parseTimelineViewEntry(
     }
   }
   return heightsFor(Object.fromEntries(entries), known);
+}
+
+/** The notes an entry holds, for the tracks the project actually has. */
+export function parseTimelineViewNotes(
+  text: string | null | undefined,
+  trackIds: Iterable<string>,
+): TimelineNote[] {
+  return parseNotes(readEnvelope(text)?.notes, trackIds);
+}
+
+/** A version 1 envelope, or `null` for anything else. */
+function readEnvelope(
+  text: string | null | undefined,
+): { trackHeights?: unknown; notes?: unknown } | null {
+  if (typeof text !== "string" || text.trim() === "") {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const envelope = parsed as { v?: unknown; trackHeights?: unknown; notes?: unknown };
+  return envelope.v === TIMELINE_VIEW_ENTRY_VERSION ? envelope : null;
 }

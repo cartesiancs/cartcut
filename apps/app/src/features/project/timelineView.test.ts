@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   TIMELINE_VIEW_ENTRY_VERSION,
   parseTimelineViewEntry,
+  parseTimelineViewNotes,
   serializeTimelineViewEntry,
 } from "./timelineView";
 import {
@@ -95,5 +96,81 @@ describe("parseTimelineViewEntry", () => {
     const parsed = parseTimelineViewEntry(text, ["__proto__"]);
     expect(Object.prototype.hasOwnProperty.call(parsed, "__proto__")).toBe(true);
     expect(Object.getPrototypeOf(parsed)).toBe(Object.prototype);
+  });
+});
+
+describe("notes in the timelineView entry", () => {
+  const note = (id: string, trackId = "v1", text = "fix the cut") => ({
+    id,
+    trackId,
+    atMs: 1500,
+    text,
+  });
+
+  it("writes the same bytes as before for a project with heights and no notes", () => {
+    expect(serializeTimelineViewEntry({ v2: 90 }, IDS, [])).toBe(
+      '{"v":1,"trackHeights":{"v2":90}}',
+    );
+  });
+
+  it("writes notes alone without an empty heights key", () => {
+    const text = serializeTimelineViewEntry({}, IDS, [note("a")]);
+    expect(JSON.parse(text!)).toEqual({
+      v: TIMELINE_VIEW_ENTRY_VERSION,
+      notes: [note("a")],
+    });
+  });
+
+  it("writes nothing for empty notes and notes on missing tracks", () => {
+    expect(
+      serializeTimelineViewEntry({}, IDS, [note("a", "v1", ""), note("b", "gone")]),
+    ).toBeNull();
+  });
+
+  it("writes the same bytes whatever order a note's keys were built in", () => {
+    const shuffled = { text: "fix the cut", atMs: 1500, trackId: "v1", id: "a" };
+    expect(serializeTimelineViewEntry({}, IDS, [shuffled])).toBe(
+      serializeTimelineViewEntry({}, IDS, [note("a")]),
+    );
+  });
+
+  it("round-trips notes in the order they were made, beside the heights", () => {
+    const notes = [note("b", "a1"), note("a", "v2")];
+    const text = serializeTimelineViewEntry({ v1: 60 }, IDS, notes);
+    expect(parseTimelineViewNotes(text, IDS)).toEqual(notes);
+    expect(parseTimelineViewEntry(text, IDS)).toEqual({ v1: 60 });
+  });
+
+  it("drops malformed notes one at a time and never costs the heights", () => {
+    const text = JSON.stringify({
+      v: TIMELINE_VIEW_ENTRY_VERSION,
+      trackHeights: { v1: 60 },
+      notes: [
+        note("ok"),
+        note("ok"),
+        { ...note("blank"), text: "   " },
+        { ...note("t"), atMs: "1500" },
+        { ...note("nan"), atMs: null },
+        note("gone", "gone"),
+        { trackId: "v1", atMs: 0, text: "no id" },
+        null,
+        "note",
+      ],
+    });
+    expect(parseTimelineViewNotes(text, IDS)).toEqual([note("ok")]);
+    expect(parseTimelineViewEntry(text, IDS)).toEqual({ v1: 60 });
+  });
+
+  it("reads no notes from anything that is not a version 1 envelope", () => {
+    for (const bad of [
+      null,
+      "",
+      "{",
+      JSON.stringify({ notes: [note("a")] }),
+      JSON.stringify({ v: 2, notes: [note("a")] }),
+      JSON.stringify({ v: 1, notes: { a: note("a") } }),
+    ]) {
+      expect(parseTimelineViewNotes(bad, IDS)).toEqual([]);
+    }
   });
 });
