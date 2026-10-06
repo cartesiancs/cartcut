@@ -8,18 +8,14 @@ CartCut
 The finest AI video editor
 </p>
 
-![plot](./.github/screenshotv5.webp)
+![plot](./.github/screenshotv6.webp)
 
 <p align='center'>
-
 <a href="https://cartesiancs.com/cartcut"><img alt="Download for macOS" src="https://img.shields.io/badge/Download_for-macOS-000000?style=for-the-badge&logo=apple&logoColor=white" /></a>
 &nbsp;
 <a href="#"><img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/cartesiancs/cartcut?style=for-the-badge" /></a>
 &nbsp;
-<a href="#"><img alt="GitHub Repo stars" src="https://img.shields.io/github/license/cartesiancs/cartcut?style=for-the-badge" /></a>
-&nbsp;
 <img alt="GitHub Release" src="https://img.shields.io/github/v/release/cartesiancs/cartcut?style=for-the-badge">
-
 </p>
 
 #
@@ -65,6 +61,16 @@ You can check out a limited demo of the website at the [following link](https://
 - Draw shape
 - Effects and Transitions
 - and more...
+
+## Made with Cartcut
+
+<div align="center">
+
+|                            Kinetic typography                            |                            Launch video                            |
+| :----------------------------------------------------------------------: | :----------------------------------------------------------------: |
+| <img src=".github/result/r1.gif" alt="Kinetic typography" width="420" /> | <img src=".github/result/r2.gif" alt="Launch video" width="420" /> |
+
+</div>
 
 ## Editing with Claude Code
 
