@@ -1,11 +1,11 @@
 /*
  * ------------------------------------------------ the preview column's bars
  *
- * The controls inside `<preview-top-bar>` and the tabs on a docked window's
- * title bar beside it. The bar itself (2rem, `$background-color`, a 0.05rem
- * rule) stays where it is, in the component's inline style and in
- * `_window.scss`: the title bar, the bottom bar and an e2e pixel check all
- * measure against those numbers.
+ * The controls inside `<preview-top-bar>` and `<preview-bottom-bar>`, and the
+ * tabs on a docked window's title bar beside them. The bar itself (2rem,
+ * `$background-color`, a 0.05rem rule) stays where it is, in the component's
+ * inline style and in `_window.scss`: the title bar, the bottom bar and an e2e
+ * pixel check all measure against those numbers.
  *
  * The same family as `_browse.scss` and `_option.scss`, at the bar's size: a
  * control is 24px tall where the sidebar's are 30, with the same palette, the
@@ -158,6 +158,19 @@ $tb-hover: #1f2327;
   color: $opt-bright;
 }
 
+/*
+ * Framed at rest, the sidebar's `.browse-btn` at bar height. For a button that
+ * stands alone at one end of a bar: without a group around it, a bare glyph
+ * reads as a label rather than as something to press.
+ */
+.tb-btn.is-framed {
+  border-color: $opt-line;
+}
+
+.tb-btn.is-framed:hover:not(.is-on) {
+  border-color: $opt-line-strong;
+}
+
 .tb-btn:focus-visible,
 .tb-seg-item:focus-visible,
 .tb-zoom > button:focus-visible {
@@ -279,6 +292,60 @@ $tb-hover: #1f2327;
   color: $opt-text;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The bottom bar's level meter, which is also the preview's mute: a speaker
+ * glyph and six blocks in the well `.tb-seg` uses, so it reads as a readout
+ * that can be pressed rather than as a button that happens to light up. Muted
+ * changes the glyph and nothing else.
+ */
+.tb-level {
+  appearance: none;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: $tb-h;
+  padding: 0 7px 0 5px;
+  margin: 0;
+  border: 1px solid $opt-line;
+  border-radius: $tb-radius;
+  background-color: #121416;
+  color: $opt-label;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    border-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+/* Two classes, for the reason `_asset.scss` gives. */
+.tb-level > .material-symbols-outlined {
+  font-size: 15px;
+  line-height: 1;
+}
+
+/*
+ * Blocks taller than they are wide, so six of them in a row read as blocks and
+ * not as a striped bar. A fixed size: a segmented meter cannot give width up to
+ * a narrow column, because the blocks are the scale.
+ */
+.tb-level > .tb-level-meter {
+  display: block;
+  width: 36px;
+  height: 10px;
+}
+
+.tb-level:hover {
+  border-color: $opt-line-strong;
+  background-color: $tb-hover;
+  color: $opt-bright;
+}
+
+.tb-level:focus-visible {
+  outline: 1px solid #5a6067;
+  outline-offset: 1px;
 }
 
 /*

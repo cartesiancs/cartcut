@@ -10,6 +10,7 @@ import {
   renderOptionStore,
 } from "../../states/renderOptionStore";
 import { playbackPreviewStore } from "../../states/playbackPreviewStore";
+import { previewMuteStore } from "../../states/previewMuteStore";
 import { sharedAudioPeakProvider } from "../timeline/strip/audioPeaks";
 import {
   audiblePathsAt,
@@ -26,25 +27,27 @@ import {
 } from "./meterBallistics";
 
 /**
- * The strip under the preview: what is being heard, and a way to watch.
+ * The strip under the preview: what is being heard, a way to stop hearing it,
+ * and a way to watch.
  *
- * The mirror of `preview-top-bar` — same 2rem height, same light DOM, same
- * inline `<style>` in `render()`, same Bootstrap vocabulary — so the preview
+ * The mirror of `preview-top-bar` (same 2rem height, same light DOM, same
+ * inline `<style>` in `render()`, same `_toolbar.scss` controls) so the preview
  * column reads as one thing bracketed top and bottom rather than as a canvas
  * with two unrelated toolbars stuck to it.
  *
  * **Almost nothing lives here.** The level is `timeline/audioLevel.ts`, the
  * ballistics are `meterBallistics.ts`, the mode transition is
- * `playbackPreview.ts`; all three are pure and have suites. What is left is a
- * store subscription, a `requestAnimationFrame` loop and a canvas — which is
- * the most that can be left, because this repo has no DOM test environment
+ * `playbackPreview.ts`, the mute is `outputMute.ts`; all four are pure and
+ * have suites. What is left is a store subscription, a `requestAnimationFrame`
+ * loop and a canvas, which is the most that can be left: this repo has no DOM
+ * test environment
  * (`vitest.config.ts` is `environment: "node"`, and nothing installs jsdom), so
  * logic left in a Lit component is logic that cannot be tested at all.
  * `features/asset/assetHover.ts` states the same rule at greater length.
  */
 
 /**
- * Segments, bottom to top, and what each one is worth.
+ * Segments, left to right, and what each one is worth.
  *
  * A segmented meter quantises the scale, and the quantisation is the feature: a
  * continuous bar invites reading a position, which a peak meter cannot support,
@@ -52,7 +55,7 @@ import {
  * measurement is good for.
  *
  * Six over the 60 dB scale is 10 dB a block, and the colours sit where a
- * hardware meter puts them: the top block is the one you are not meant to
+ * hardware meter puts them: the last block is the one you are not meant to
  * reach.
  */
 const SEGMENTS = 6;
@@ -95,6 +98,9 @@ export class PreviewBottomBar extends LitElement {
   isPlaybackPreview =
     playbackPreviewStore.getInitialState().state.active;
 
+  @property()
+  muted = previewMuteStore.getInitialState().muted;
+
   @query("#previewMeterCanvas")
   private canvas!: HTMLCanvasElement | null;
 
@@ -123,6 +129,13 @@ export class PreviewBottomBar extends LitElement {
     playbackPreviewStore.subscribe((state) => {
       this.isPlaybackPreview = state.state.active;
       this.requestUpdate();
+    });
+
+    previewMuteStore.subscribe((state) => {
+      this.muted = state.muted;
+      // So a meter that was showing signal falls the moment the sound stops,
+      // rather than freezing lit until the next cursor tick.
+      this.wakeMeter();
     });
 
     return this;
@@ -165,6 +178,10 @@ export class PreviewBottomBar extends LitElement {
     previewViewportStore.getState().setViewport(viewport);
   }
 
+  private _handleClickMute() {
+    previewMuteStore.getState().toggle();
+  }
+
   /** Start the meter loop if it is not already running. */
   private wakeMeter() {
     if (this.meterHandle !== 0) {
@@ -180,7 +197,8 @@ export class PreviewBottomBar extends LitElement {
    * because that is what is actually leaving the speakers: `intentFor` gives a
    * handle `playing: isPlaying && inWindow`, so a scrub moves the playhead over
    * a clip without sounding it. A meter that lit up under a silent scrub would
-   * be reporting on the document rather than on the output.
+   * be reporting on the document rather than on the output. Muted counts as
+   * not playing for the same reason.
    *
    * The loop stops itself once the bar has finished falling. An exponential
    * decay never reaches zero, so `isMoving`'s floor is what keeps a stopped
@@ -192,7 +210,7 @@ export class PreviewBottomBar extends LitElement {
     const now = performance.now();
     let target = 0;
 
-    if (this.isPlay) {
+    if (this.isPlay && !this.muted) {
       // Ask for whatever is not decoded yet. Without this the meter would only
       // know about files the *timeline* happened to have drawn, so a project
       // scrolled away from the playhead would meter as silence.
@@ -267,26 +285,31 @@ export class PreviewBottomBar extends LitElement {
     const hold = meterFractionOf(amplitudeToDb(this.meter.hold));
 
     // The block the peak marker sits in. A segmented meter has nowhere to put a
-    // line between blocks, so the marker *is* a block — lit on its own above the
+    // line between blocks, so the marker *is* a block, lit on its own past the
     // signal, which is the hardware idiom and needs no extra colour.
     const holdIndex =
       hold > 0 ? Math.min(SEGMENTS - 1, Math.floor(hold * SEGMENTS)) : -1;
 
-    // Both edges of each cell are rounded off the *device* height, and the gap
-    // is then cut out of the cell. Rounding a cell height and stepping by it
-    // instead accumulates the error into the gaps, which is the visible half:
-    // six blocks differing by a pixel reads as six blocks, while one gap of 1px
-    // among 2px gaps reads as a mistake.
+    // The gaps are whole device pixels and only the cells absorb the rounding.
+    // A cell's right edge and the next one's left edge are rounded from two
+    // values exactly `gap` apart, and rounding keeps a whole-number difference,
+    // so every gap comes out `gap` wide and the cells differ by at most a
+    // pixel: six blocks differing by a pixel reads as six blocks, while one gap
+    // of 1px among 2px gaps reads as a mistake.
     const gap = Math.max(1, Math.round(dpr));
+    const cell = (width - gap * (SEGMENTS - 1)) / SEGMENTS;
+    const radius = Math.max(1, Math.round(dpr));
 
     for (let i = 0; i < SEGMENTS; i++) {
-      // i counts from the bottom, the direction the meter fills.
-      const top = Math.round((height * (SEGMENTS - 1 - i)) / SEGMENTS);
-      const bottom = Math.round((height * (SEGMENTS - i)) / SEGMENTS);
+      // i counts from the left, the direction the meter fills.
+      const left = Math.round(i * (cell + gap));
+      const right = Math.round(i * (cell + gap) + cell);
       const lit = level * SEGMENTS > i || i === holdIndex;
 
       ctx.fillStyle = lit ? SEGMENT_COLORS[i] : SEGMENT_DARK;
-      ctx.fillRect(0, top, width, Math.max(1, bottom - top - gap));
+      ctx.beginPath();
+      ctx.roundRect(left, 0, Math.max(1, right - left), height, radius);
+      ctx.fill();
     }
   }
 
@@ -305,38 +328,35 @@ export class PreviewBottomBar extends LitElement {
           border-top: 0.05rem #3a3f44 solid;
           padding: 0 0.4rem;
         }
-
-        /* A fixed size, unlike the bar it replaces: a segmented meter cannot be
-           given up to a narrow column the way a continuous one could, because
-           the blocks are the scale. It is small enough that there is nothing to
-           reclaim anyway. */
-        .preview-meter {
-          flex: 0 0 auto;
-          /* Narrow enough that the blocks read as blocks. Wider and six of them
-             stacked in a 2rem bar are six lines. */
-          width: 1.1rem;
-          height: 1.5rem;
-          display: block;
-        }
-
-        .preview-bottom-tools {
-          flex: 0 0 auto;
-          display: flex;
-          flex-direction: row;
-          align-items: center;
-          gap: 0.5rem;
-        }
       </style>
 
       <div class="preview-bottom-bar bg-darker">
         <!--
-          No label and no dB read-out. This is a comparison at a glance — is
-          there signal, is it clipping — and a number beside it invites reading
+          No label and no dB read-out. This is a comparison at a glance (is
+          there signal, is it clipping) and a number beside it invites reading
           a peak meter as a loudness measurement, which it is not.
-        -->
-        <canvas id="previewMeterCanvas" class="preview-meter"></canvas>
 
-        <div class="preview-bottom-tools">
+          The meter is the mute because it is where the sound is: a speaker
+          glyph somewhere else on the bar would be a second place to look for
+          one fact. data-keeps-selection, because muting is not a reason to
+          lose the clip being worked on.
+        -->
+        <button
+          type="button"
+          class="tb-level"
+          title=${this.muted ? "Unmute preview" : "Mute preview"}
+          aria-label=${this.muted ? "Unmute preview" : "Mute preview"}
+          aria-pressed=${this.muted ? "true" : "false"}
+          data-keeps-selection
+          @click=${this._handleClickMute}
+        >
+          <span class="material-symbols-outlined"
+            >${this.muted ? "volume_off" : "volume_up"}</span
+          >
+          <canvas id="previewMeterCanvas" class="tb-level-meter"></canvas>
+        </button>
+
+        <div class="tb-group">
           <!--
             The only way out of the playback preview, which is why the bar is
             excluded from that mode's pointer-events block in style.scss. A
@@ -344,14 +364,14 @@ export class PreviewBottomBar extends LitElement {
             exit; the screen recorder's drawing mode learned this the hard way.
           -->
           <button
+            type="button"
             @click=${this._handleClickPlaybackPreview}
-            class="btn btn-xxs ${this.isPlaybackPreview
-              ? "btn-primary"
-              : "btn-default"} text-light m-0"
+            class="tb-btn is-framed ${this.isPlaybackPreview ? "is-on" : ""}"
             title="Playback preview"
-            aria-pressed="${this.isPlaybackPreview}"
+            aria-label="Playback preview"
+            aria-pressed=${this.isPlaybackPreview ? "true" : "false"}
           >
-            <span class="material-symbols-outlined icon-xs"> slideshow </span>
+            <span class="material-symbols-outlined">slideshow</span>
           </button>
         </div>
       </div>

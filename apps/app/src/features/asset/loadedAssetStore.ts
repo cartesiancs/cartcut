@@ -24,6 +24,8 @@ import {
   type SeekRequest,
 } from "../timeline/playback";
 import { gainSink, releaseGain } from "./audioGraph";
+import { mutedSink } from "../preview/outputMute";
+import { previewMuteStore } from "../../states/previewMuteStore";
 import { runAssetBatch, type AssetLoadTask } from "./assetBatch";
 import {
   activeVideoScope,
@@ -612,8 +614,9 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
       get()._lastSeekRequests,
       // The preview is the one caller that can play a clip above unity. Every
       // other caller of `syncPlayback` takes the default sink and writes
-      // `handle.volume` exactly as it always did.
-      gainSink,
+      // `handle.volume` exactly as it always did. The bottom bar's mute sits
+      // on top of it, here and nowhere else, so export never hears of it.
+      mutedSink(gainSink, previewMuteStore.getState().muted),
       fps,
     );
 
