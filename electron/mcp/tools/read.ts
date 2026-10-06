@@ -224,6 +224,9 @@ export function registerReadTools(define: Registrar) {
         rows: sheet.rows,
         width: sheet.width,
         height: sheet.height,
+        // What the sheet is missing, if anything: dropped here, an agent read a
+        // sheet with no graphics or no picture as the edit's own fault.
+        ...(typeof sheet.warning === "string" ? { warning: sheet.warning } : {}),
       };
     }),
   );

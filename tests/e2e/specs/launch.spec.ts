@@ -53,8 +53,10 @@ test("the editor comes up with its bundle evaluated and isolated from the user's
   // Every filetype an export knows how to draw. `template` is one of them: it
   // composites its own document into a layer and blits it, so it fits
   // `ElementRenderFunction` like any other clip — see `export/renderers.ts`.
+  // So is `graphic`: its raster is prepared ahead of the frame and drawn here.
   expect(bridge.rendererFiletypes).toEqual([
     "gif",
+    "graphic",
     "image",
     "shape",
     "template",

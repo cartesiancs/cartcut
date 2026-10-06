@@ -95,13 +95,15 @@ describe("prepareGraphics", () => {
     expect(result).toEqual({ drawn: 0, current: 1, painted: true });
   });
 
-  it("reports a paint that never came, and files that raster as not current", async () => {
-    const { port } = fakePort(false);
+  it("rasterises and files nothing from a paint that never came", async () => {
+    const { port, calls } = fakePort(false);
     const s = sink();
+    s.keys.set("a", "old");
     const result = await prepareGraphics({ port, mountOf: () => ({ spec, removed: [] }), fontsOf: () => [] }, [job("a", "k")], s);
-    expect(result.painted).toBe(false);
-    expect(s.keys.has("a")).toBe(true);
-    expect(s.keyOf("a")).toBeNull();
+    expect(result).toEqual({ drawn: 0, current: 0, painted: false });
+    expect(calls.some((c) => c.startsWith("rasterize"))).toBe(false);
+    // Left as it was, so the job is still stale and the next request redoes it.
+    expect(s.keyOf("a")).toBe("old");
   });
 
   it("does nothing where html-in-canvas is not available", async () => {

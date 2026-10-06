@@ -22,6 +22,7 @@ import {
   prepareScopeFrame,
   releaseScopeGraphics,
 } from "../graphic/graphicPipeline";
+import { paintHold } from "../graphic/paintHold";
 import { beginExportGraphics, endExportGraphics } from "../graphic/graphicQueue";
 import { hasFxElements } from "../renderer/fx/planFrame";
 import { setLutBlocking } from "../renderer/lut/apply";
@@ -194,9 +195,9 @@ export async function renderTimeline(
    * firing `paint` altogether, measured, and every frame would time out.
    */
   const html = graphics != null && needsHtmlHost(assets);
+  const releasePainting = html ? await paintHold.hold() : null;
   if (html) {
     beginExportGraphics();
-    await setBackgroundThrottling(false);
   }
 
   const totalFrames = frameCount(options);
@@ -324,24 +325,12 @@ export async function renderTimeline(
     }
     if (html) {
       endExportGraphics();
-      await setBackgroundThrottling(true);
     }
+    await releasePainting?.();
     // Restored even on the abort path: leaving it set would make every
     // subsequent preview frame stall on `gl.finish()` for no benefit.
     setLutBlocking(false);
     profiler.report();
-  }
-}
-
-/**
- * Ask main to let this window keep painting while hidden, or to stop. A no-op
- * where there is no bridge (the web build, a test).
- */
-async function setBackgroundThrottling(allowed: boolean): Promise<void> {
-  try {
-    await (globalThis as any)?.electronAPI?.req?.editor?.setBackgroundThrottling?.(allowed);
-  } catch {
-    // Throttling stays as it was; the frame loop reports a paint that never came.
   }
 }
 

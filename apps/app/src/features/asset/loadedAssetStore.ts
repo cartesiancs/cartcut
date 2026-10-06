@@ -31,6 +31,10 @@ import {
   type VideoScope,
 } from "./videoScope";
 import { SCHEMA_VERSION, type TimelineTrack } from "../timeline/tracks";
+import { SEEK_DEADLINE_MS, seekAndWait } from "./seekWait";
+
+/** A scope's own handles (an export's, a contact sheet's): only a decoder that failed can stall one. */
+const SCOPE_SEEK_DEADLINE_MS = 30_000;
 
 type GifMetadata = {
   imageData: ImageData;
@@ -572,6 +576,9 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
       timeline,
       time,
       fps,
+      // A scope's own handles, which nothing else releases: only a decoder
+      // that failed can stall here, so it gets far longer than the shared ones.
+      SCOPE_SEEK_DEADLINE_MS,
     );
   },
 
@@ -713,6 +720,7 @@ async function seekHandles(
   timeline: Timeline,
   time: number,
   fps: number,
+  deadlineMs: number = SEEK_DEADLINE_MS,
 ): Promise<void> {
   const metas = Object.values(videos).filter((meta) => {
     const element = timeline[meta.elementId];
@@ -728,8 +736,7 @@ async function seekHandles(
 
   await Promise.all(
     metas.map(
-      (meta) =>
-        new Promise<void>((resolve) => {
+      (meta) => {
           const element = timeline[meta.elementId] as VideoElementType;
           const video = meta.object;
           // Deliberately NOT clamped to the trim window. Inside a transition
@@ -772,16 +779,15 @@ async function seekHandles(
           // a stale entry would suppress the next placement.
           lastSeekRequests.set(meta.elementId, want);
 
-          // Assigning the position it already holds fires no `seeked`, so
-          // waiting for one would stall the export's frame loop forever.
-          if (Math.abs(video.currentTime - want) < 1e-3) {
-            resolve();
-            return;
-          }
-
-          video.addEventListener("seeked", () => resolve(), { once: true });
-          video.currentTime = want;
-        }),
+          // Never forever: a shared handle released mid-seek (its clip
+          // deleted, or dropped by the preview's decoder window) fires no
+          // `seeked` at all.
+          return seekAndWait(video, want, { deadlineMs }).then((outcome) => {
+            if (outcome === "timeout") {
+              console.warn(`[seek] ${meta.elementId} did not land on ${want.toFixed(3)}s within ${deadlineMs}ms`);
+            }
+          });
+      },
     ),
   );
 }

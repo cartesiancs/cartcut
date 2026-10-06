@@ -28,9 +28,10 @@ const request = {
     run: (command) => ipcRenderer.send("editing:command", command),
   },
   /**
-   * Whether this window may stop painting while hidden. An export with HTML
-   * graphics turns it off for its length: they are drawn from Chromium's paint,
-   * and a minimised window with throttling on never paints.
+   * Whether this window may stop painting while hidden. An export, a contact
+   * sheet or a filmstrip with HTML graphics turns it off for its length: they
+   * are drawn from Chromium's paint, and a minimised window with throttling on
+   * never paints. `true` ends that and restores the window's own setting.
    */
   editor: {
     setBackgroundThrottling: (allowed) =>

@@ -13,10 +13,9 @@
  * delivered. That is the part worth having. A filmstrip pulled out of the
  * source with ffmpeg would show the footage; this shows the edit.
  *
- * The recipe — `loadEntireTimeline`, then `seek` then `renderTimelineAtTime`
- * per instant — is the one `export/renderTimeline.ts` uses and that
- * `tests/e2e/harness/reference.ts` already proves renders identically to the
- * delivered file. Nothing here is a second way of drawing a frame.
+ * The recipe (decode into a video scope of its own, then `seekScope` then
+ * `renderTimelineAtTime` per instant) is the one `export/renderTimeline.ts`
+ * uses. Nothing here is a second way of drawing a frame.
  */
 
 import { preloadForComposite } from "../../export/compositePrep";
@@ -26,6 +25,8 @@ import {
   releaseScopeGraphics,
 } from "../../graphic/graphicPipeline";
 import { beginExportGraphics, endExportGraphics } from "../../graphic/graphicQueue";
+import { paintHold } from "../../graphic/paintHold";
+import { sheetWarning } from "./sheetWarning";
 import {
   createGraphicScope,
   hasGraphicElements,
@@ -35,6 +36,9 @@ import { GraphicGl } from "../../renderer/graphicGl";
 import { useTimelineStore } from "../../../states/timelineStore";
 import { renderOptionStore } from "../../../states/renderOptionStore";
 import { loadedAssetStore } from "../../asset/loadedAssetStore";
+import { createVideoScope, withVideoScope, type VideoScope } from "../../asset/videoScope";
+import { releaseOverlayScope } from "../../renderer/fx/overlaySource";
+import { sheetAssets } from "./sheetAssets";
 import { renderTimelineAtTime } from "../../renderer/timeline";
 import { exportElementRenderers } from "../../export/renderers";
 import { createExportFxRuntime } from "../../renderer/fx/createRuntime";
@@ -64,37 +68,26 @@ const LABEL_HEIGHT = 22;
 const PRIME_TIMEOUT_MS = 30_000;
 
 /**
- * Load the timeline and wait until every video handle actually exists.
+ * Decode, into the sheet's own scope, every video it will draw, and wait until
+ * each handle actually exists.
  *
- * `loadEntireTimeline` resolves before the decode has necessarily landed, and
- * the failure that produces is the nastiest kind: a frame rendered without one
- * of its clips **does not look broken**. It looks like a black frame with the
- * titles still on it, or like the edit drew something extra — and an agent
- * reading that image will confidently act on a picture that was never real.
- *
- * `tests/e2e/harness/reference.ts` learned this the same way and guards it the
- * same way; the note there records that it cost a round of chasing the wrong
- * cause. Waiting a few hundred milliseconds is the cheapest part of this whole
- * operation, and the shortfall is reported rather than swallowed so a caller is
- * never told a sheet is complete when it is not.
+ * A frame rendered without one of its clips **does not look broken**. It looks
+ * like a black frame with the titles still on it, and an agent reading that
+ * image will confidently act on a picture that was never real. So the load is
+ * retried until every handle is there or the time runs out, and a shortfall is
+ * reported rather than swallowed.
  */
-async function primeVideo(
-  timeline: ReturnType<typeof useTimelineStore.getState>["timeline"],
+async function primeScope(
+  scope: VideoScope,
+  assets: ReturnType<typeof useTimelineStore.getState>["timeline"],
+  expected: number,
 ): Promise<{ loaded: number; expected: number }> {
-  const expected = Object.values<any>(timeline).filter(
-    (element) => element.filetype === "video",
-  ).length;
-
   const deadline = Date.now() + PRIME_TIMEOUT_MS;
   let loaded = 0;
 
   do {
-    await loadedAssetStore.getState().loadEntireTimeline(timeline, {
-      audio: false,
-    });
-    loaded = Object.keys(
-      loadedAssetStore.getState()._loadedElementVideo ?? {},
-    ).length;
+    await loadedAssetStore.getState().loadExportScope(scope, assets);
+    loaded = Object.keys(scope.videos).length;
     if (loaded >= expected) {
       break;
     }
@@ -162,9 +155,15 @@ registerCommands({
       throw new Error("Could not create a canvas to draw the contact sheet on.");
     }
 
+    // The sheet's own decoders, as the export has. On the preview's, every
+    // repaint (a graphic's raster landing is one) put the handles back at the
+    // playhead between this sheet's seek and its draw.
+    const scope = createVideoScope("sheet:" + Date.now());
+
     // Only when the document has one: building a runtime allocates a canvas and
-    // a WebGL context, and most projects need neither.
-    const fx = hasFxElements(timeline) ? createExportFxRuntime(options.fps) : null;
+    // a WebGL context, and most projects need neither. Its overlay videos are
+    // the scope's too.
+    const fx = hasFxElements(timeline) ? createExportFxRuntime(options.fps, scope.id) : null;
 
     sheetCtx.fillStyle = "#101010";
     sheetCtx.fillRect(0, 0, sheet.width, sheet.height);
@@ -178,40 +177,54 @@ registerCommands({
     // HTML graphics are rasterised from Chromium's paint, ahead of each frame,
     // into a scope of the sheet's own. A GLSL one draws in its generator.
     const graphics = hasGraphicElements(expanded)
-      ? createGraphicScope("sheet:" + Date.now(), new GraphicGl({ blocking: true }), options.fps)
+      ? createGraphicScope(scope.id, new GraphicGl({ blocking: true }), options.fps)
       : null;
     const html = graphics != null && needsHtmlHost(expanded);
-    if (html) {
-      beginExportGraphics();
-    }
+    // Painting, as an export does: an agent calls this while the editor sits
+    // behind its terminal, where a throttled window paints nothing and every
+    // graphic came out missing from the sheet.
+    const releasePainting = html ? await paintHold.hold() : null;
+    let graphicsPainted = true;
 
     try {
-      // Audio handles are not decoded: nothing here plays, and decoding them
-      // costs latency for a picture that does not use them.
-      primed = await primeVideo(timeline);
+      // Expanded, so a template's own clips are decoded, and only the videos
+      // these instants show. Audio handles are not decoded: nothing here plays.
+      const needed = sheetAssets(expanded, times);
+      primed = await primeScope(scope, needed.assets, needed.videos);
 
       for (let index = 0; index < times.length; index++) {
         const timeMs = times[index];
 
         // The same fps the exporter passes, so a frame is addressed the same
-        // way here as it is there — see `loadedAssetStore#seek`.
-        await loadedAssetStore.getState().seek(timeline, timeMs, options.fps);
+        // way here as it is there. See `loadedAssetStore#seek`.
+        await loadedAssetStore.getState().seekScope(scope, expanded, timeMs, options.fps);
         if (html && graphics != null) {
-          await prepareScopeFrame(graphics, timeline, timeMs);
+          // The preview stands aside for this frame's prepare and no longer:
+          // held across the whole sheet, a video seek that never landed kept
+          // the preview from preparing any graphic for the rest of the session.
+          beginExportGraphics();
+          try {
+            graphicsPainted = (await prepareScopeFrame(graphics, timeline, timeMs)) && graphicsPainted;
+          } finally {
+            endExportGraphics();
+          }
         }
 
+        // Synchronous, so neither scope can leak past this call.
         withGraphicScope(graphics, () =>
-          renderTimelineAtTime(
-            frameCtx,
-            timeline,
-            timeMs,
-            exportElementRenderers,
-            options.backgroundColor,
-            frameWidth,
-            frameHeight,
-            undefined,
-            undefined,
-            fx,
+          withVideoScope(scope, () =>
+            renderTimelineAtTime(
+              frameCtx,
+              timeline,
+              timeMs,
+              exportElementRenderers,
+              options.backgroundColor,
+              frameWidth,
+              frameHeight,
+              undefined,
+              undefined,
+              fx,
+            ),
           ),
         );
 
@@ -242,14 +255,15 @@ registerCommands({
         sheetCtx.strokeRect(x + 0.5, y + 0.5, tileWidth - 1, tileHeight - 1);
       }
     } finally {
+      // Every decoder this sheet opened. Nothing else can reach them.
+      loadedAssetStore.getState().releaseVideoScope(scope);
+      releaseOverlayScope(scope.id);
       fx?.compositor?.dispose?.();
       graphics?.gl?.dispose();
       if (graphics != null) {
         releaseScopeGraphics(graphics);
       }
-      if (html) {
-        endExportGraphics();
-      }
+      await releasePainting?.();
     }
 
     const dataUrl = sheet.toDataURL("image/png");
@@ -267,13 +281,7 @@ registerCommands({
       height: sheet.height,
       // Only when something is missing, so the ordinary result stays small —
       // and so a caller cannot read a complete sheet as an incomplete one.
-      ...(primed.loaded < primed.expected
-        ? {
-            warning:
-              `Only ${primed.loaded} of ${primed.expected} videos had decoded in time, so some frames may ` +
-              `be missing their picture. Ask again — the decode continues in the background.`,
-          }
-        : {}),
+      ...sheetWarning(primed, graphicsPainted),
     };
   },
 });

@@ -22,7 +22,9 @@
  *  - a sentinel visible only while a no-fill animation runs shows exactly then,
  *    on every pass, judged by its pixels (a seek that could not reach a
  *    finished animation left graphics blank on every replay);
- *  - a contact sheet leaves no host canvas behind.
+ *  - a contact sheet leaves no host canvas behind;
+ *  - a contact sheet racing a delete of the video it is seeking still
+ *    answers, and the preview goes on drawing every graphic after it.
  *
  * Every window is muted and hidden for the whole run.
  *
@@ -190,6 +192,48 @@ for (const seed of SEEDS) {
 
     await setCursor(0);
     record("start", {}, await judgeSettled(page));
+
+    // Not here: an agent's contact sheet while the editor sits behind another
+    // window, where a throttled window paints nothing. Playwright's Electron
+    // loader starts the app with `--disable-renderer-backgrounding` and
+    // `--disable-backgrounding-occluded-windows`, so no window under this
+    // harness ever stops painting and the case would pass whatever the code
+    // did. `graphic/paintHold.test.ts` and `electron/lib/throttlingHold.test.ts`
+    // hold the rule.
+
+    // Parallel tool calls: a contact sheet in flight while another call
+    // deletes the video it is drawing. On the preview's shared handles the
+    // delete released one mid-seek, no `seeked` ever came, the sheet never
+    // answered, and its hold on the graphics queue kept the preview from
+    // preparing a graphic for the rest of the session. Swept over delays, and
+    // the races where the delete really finished inside the sheet are counted,
+    // or the sweep proved nothing.
+    const videoId = await ev<string>(
+      `Object.entries(window.CARTCUT.useTimelineStore.getState().timeline).find(([, e]) => e.filetype === "video")[0]`,
+    );
+    let deletesInsideSheet = 0;
+    for (let delayMs = 0; delayMs <= 96; delayMs += 4) {
+      let deletedAt = Infinity;
+      const [answer] = await Promise.all([
+        agent(session, "render_contact_sheet", { atMs: [1000, 4000, 7000, 9000] }, 30_000).then(
+          () => ({ text: "answered", at: Date.now() }),
+          (error: Error) => ({ text: error.message, at: Date.now() }),
+        ),
+        new Promise((r) => setTimeout(r, delayMs))
+          .then(() => agent(session, "delete_clips", { elementIds: [videoId] }))
+          .then(() => (deletedAt = Date.now())),
+      ]);
+      if (deletedAt < answer.at) deletesInsideSheet += 1;
+      await agent(session, "undo", {});
+      record("sheet-race", { delayMs, answer: answer.text }, await judgeSettled(page));
+      expect.soft(answer.text, `a contact sheet racing a delete ${delayMs}ms later answers`).toBe("answered");
+      // One that never answers holds the queue for good; the rest would only repeat it.
+      if (answer.text !== "answered") break;
+    }
+    // Counted only when the sweep ran to the end; a sheet that never answered has already failed it.
+    if (log.filter((step) => step.name === "sheet-race").length === 25) {
+      expect(deletesInsideSheet, "deletes that finished while the sheet was still drawing").toBeGreaterThan(5);
+    }
 
     const exportAt = R.int(Math.floor(OPS / 3), Math.floor((2 * OPS) / 3));
     for (let i = 0; i < OPS; i++) {

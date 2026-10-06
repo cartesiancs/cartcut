@@ -16,6 +16,7 @@ import { preloadForComposite } from "../export/compositePrep";
 import { defaultParamsOf, type FxHtmlRender, type FxPreset } from "../fx/presetTypes";
 import { prepareScopeFrame, releaseScopeGraphics } from "../graphic/graphicPipeline";
 import { beginExportGraphics, endExportGraphics } from "../graphic/graphicQueue";
+import { paintHold } from "../graphic/paintHold";
 import { createGraphicScope, withGraphicScope } from "../graphic/graphicScope";
 import { GraphicGl } from "../renderer/graphicGl";
 import { renderTimelineAtTime } from "../renderer/timeline";
@@ -73,6 +74,8 @@ export async function renderFilmstrip(
 
   const scope = createGraphicScope("filmstrip:" + Date.now(), new GraphicGl({ blocking: true }), fps);
   const html = preset.render.type === "html";
+  // Painting, as an export does, for the same reason the contact sheet does.
+  const releasePainting = html ? await paintHold.hold() : null;
   if (html) {
     beginExportGraphics();
   }
@@ -126,6 +129,7 @@ export async function renderFilmstrip(
     if (html) {
       endExportGraphics();
     }
+    await releasePainting?.();
   }
 
   const dataUrl = strip.toDataURL("image/png");

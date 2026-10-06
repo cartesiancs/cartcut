@@ -19,9 +19,9 @@
  *    left for a clip that is gone.
  *
  * And each property is shown to be measured: switching off the fix it relies
- * on (lookahead, template ids in the sweep, the replay after an export, the
- * null key for a paint that never came and the retry after it, releasing only
- * between prepares) makes the same simulation fail.
+ * on (lookahead, template ids in the sweep, the replay after an export,
+ * rasterising nothing from a paint that never came and the retry after it,
+ * releasing only between prepares) makes the same simulation fail.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -174,7 +174,10 @@ class FakeHost implements HtmlRasterPort {
   midPrepareReleases = 0;
   paintOk = () => true;
 
-  constructor(private readonly latency: () => number) {}
+  constructor(
+    private readonly latency: () => number,
+    private readonly lies = false,
+  ) {}
 
   get waiting(): number {
     return this.queue.length;
@@ -211,8 +214,11 @@ class FakeHost implements HtmlRasterPort {
               const mount = this.mounts.get(id);
               if (mount != null) mount.painted = mount.applied;
             }
+          } else if (!this.lies) {
+            // The prepare ends here with nothing rasterised.
+            for (const id of touched) this.inFlight.delete(id);
           }
-          resolve(ok && touched.every((id) => this.mounts.has(id)));
+          resolve((ok || this.lies) && touched.every((id) => this.mounts.has(id)));
         },
       });
     });
@@ -282,7 +288,8 @@ type SimOptions = {
   lookaheadWhilePaused?: boolean;
   sweepTemplates?: boolean;
   replayAfterHold?: boolean;
-  nullKeyWhenUnpainted?: boolean;
+  /** A host that answers "painted" when its paint never came, as one that skipped the check would. */
+  hostLiesAboutPaint?: boolean;
   releaseOnlyBetweenPrepares?: boolean;
   /** Scales every random event's rate. */
   churn?: number;
@@ -310,13 +317,13 @@ async function simulate(options: SimOptions): Promise<SimResult> {
     lookaheadWhilePaused: true,
     sweepTemplates: true,
     replayAfterHold: true,
-    nullKeyWhenUnpainted: true,
+    hostLiesAboutPaint: false,
     releaseOnlyBetweenPrepares: true,
     churn: 1,
     ...options,
   };
   const R = mulberry32(o.seed);
-  const host = new FakeHost(() => R.int(0, o.latencyMax));
+  const host = new FakeHost(() => R.int(0, o.latencyMax), o.hostLiesAboutPaint);
   const rasters = new PreviewRasters();
   let frame = 0;
   let failUntil = -1;
@@ -332,11 +339,7 @@ async function simulate(options: SimOptions): Promise<SimResult> {
       },
       prepare: (jobs, sink) =>
         serialize(() =>
-          prepareGraphics({ port: host, mountOf: () => ({ spec: SPEC, removed: [] }) as any, fontsOf: () => [] }, jobs, {
-            keyOf: sink.keyOf,
-            put: (id, key, raster) =>
-              sink.put(id, o.nullKeyWhenUnpainted ? key : (jobs.find((j) => j.instanceId === id)?.key ?? key), raster),
-          }),
+          prepareGraphics({ port: host, mountOf: () => ({ spec: SPEC, removed: [] }) as any, fontsOf: () => [] }, jobs, sink),
         ),
       mayPrepare: previewMayPrepare,
       whenMayPrepare: o.replayAfterHold ? whenPreviewMayPrepare : () => undefined,
@@ -647,8 +650,8 @@ describe("the simulation measures what it claims", () => {
     expect(await failing({ replayAfterHold: false }, (r) => r.settled)).toBeGreaterThan(0);
   }, 60_000);
 
-  it("keeps a stale paint for good when an unpainted raster is filed as current", async () => {
-    expect(await failing({ nullKeyWhenUnpainted: false }, (r) => r.settled)).toBeGreaterThan(0);
+  it("keeps a stale paint for good when a paint that never came is taken as painted", async () => {
+    expect(await failing({ hostLiesAboutPaint: true }, (r) => r.settled)).toBeGreaterThan(0);
   }, 60_000);
 
   it("leaves a clip missing when a failed first paint is never asked for again", async () => {

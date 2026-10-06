@@ -45,8 +45,9 @@ export const SENTINEL_WINDOW = { from: 200, to: 600 };
 
 /**
  * Mute every window and take it off screen, still painting. A verification run
- * must not play sound or flash windows at whoever is at the machine; an export
- * restores throttling when it ends, so call this again after one.
+ * must not play sound or flash windows at whoever is at the machine. An export,
+ * a contact sheet and a filmstrip each hand back the throttling they found, so
+ * this holds for the run; calling it again is harmless.
  */
 export async function quietWindows(session: AppSession): Promise<void> {
   await session.app.evaluate(({ app, BrowserWindow, webContents }) => {

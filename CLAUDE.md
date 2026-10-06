@@ -230,7 +230,10 @@ Things that bite:
   composite, so editing during a render cannot tear a handle out from under the
   frame loop. This is only safe because every renderer is synchronous; the moment
   one gains an `await` the scope leaks into whatever runs next. No fallback to
-  the shared map inside a scope.
+  the shared map inside a scope. **So does a contact sheet**, decoding only the
+  clips its instants show (`sheetAssets.ts`): it awaits a graphic's paint
+  between its seek and its draw, and on the shared handles every preview
+  repaint in that gap put the video back at the playhead.
 - **A hidden track reaches the renderer as a derived `trackHidden` on each of
   its clips**, written by `tracks.ts#derivePriorities` exactly as `priority`
   is, because no render path below the store sees `tracks`. The paint loop,
@@ -250,6 +253,14 @@ Things that bite:
   canvas, so a second caller on the preview's host redraws what the preview
   shows while its key still says current. Anything keyed per clip uses
   `graphicInstanceIds`, which includes a template's graphics as `outerId::key`.
+  **No paint, no raster**: a window behind another one with throttling on
+  paints nothing, so an export, a contact sheet and a filmstrip hold it
+  painting (`paintHold.ts`, counted; main hands back the window's own
+  setting), and a prepare whose paint never came files nothing. A contact
+  sheet holds the queue one frame at a time, and every wait on a video seek
+  ends (`asset/seekWait.ts`): an edit that releases a handle mid-seek fires no
+  `seeked`, and a sheet that never answered kept the preview from preparing a
+  graphic for the rest of the session.
   The HTML is sanitised into a node tree (parse5) and the CSS filtered (postcss)
   on write *and* on read, and the host builds DOM from the tree, never from a
   string. `features/graphic/` holds all of it; `htmlHost.ts` is the only file

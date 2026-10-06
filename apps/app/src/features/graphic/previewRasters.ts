@@ -8,9 +8,8 @@
  * the prepare step can skip a clip whose raster is already current, and a
  * static graphic is rasterised once and then left alone.
  *
- * A raster stored with a `null` key is drawable but not current: its paint
- * never came, so what it holds is not known to be the frame it was made for,
- * and the next request makes it again. An animated raster is only right near
+ * A raster stored with a `null` key is drawable but never current, so the next
+ * request makes it again. An animated raster is only right near
  * the moment it was made, so during playback it is dropped once its clip is
  * off screen (`keepAnimated`): drawn on the clip's next appearance, it was the
  * outro of the previous pass at the start of the next.

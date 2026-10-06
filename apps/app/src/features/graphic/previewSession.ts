@@ -20,8 +20,9 @@
  *    that is late draws nothing for a frame instead. Paused, rasters are kept:
  *    a scrub back into a clip is better served by the moment it left than by
  *    nothing.
- *  - **A raster whose paint never came is not current** (`prepare.ts`), and
- *    the preview is asked to repaint, so it is made again once paints resume.
+ *  - **Nothing is rasterised from a paint that never came** (`prepare.ts`):
+ *    every raster stays as it was, and the preview is asked to repaint, so the
+ *    prepare runs again once the window paints.
  *  - **The host's mounts are released only between prepares.** A mount
  *    removed while a prepare waits for its paint never paints, and the wait
  *    runs out its timeout.

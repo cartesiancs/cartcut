@@ -153,10 +153,12 @@ export function createExportFxRuntime(
   /**
    * The overlay scope this export owns, matching its `VideoScope.id`.
    *
-   * Defaults to the preview's, which is right for the single-frame callers —
-   * the contact sheet, the template thumbnail and the e2e reference render.
-   * They draw one frame of the *live* document and want the handles everyone
-   * else has; only a running frame loop needs a set nobody can take from it.
+   * Defaults to the preview's, which is right for the single-frame callers,
+   * the template thumbnail and the e2e reference render: they draw one frame
+   * of the *live* document and want the handles everyone else has. A frame
+   * loop needs a set nobody can take from it, and the contact sheet is one:
+   * it awaits a graphic's paint between its seek and its draw, and the
+   * preview repainted in that gap.
    */
   scope: string = "",
 ): FxRuntime | null {

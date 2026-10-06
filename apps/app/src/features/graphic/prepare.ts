@@ -23,12 +23,7 @@ import type { BuiltMount } from "./mountSpec";
 
 export type RasterSink = {
   keyOf: (instanceId: string) => string | null;
-  /**
-   * `key` is `null` when the paint never came: the raster is the best there
-   * is, but not known to be the frame it was made for, so it must not read as
-   * current. Filed under its key, a raster drawn from a stale paint (a window
-   * that stopped painting) was never redrawn until the clip itself changed.
-   */
+  /** Called only for a raster drawn from the paint this prepare asked for. */
   put: (instanceId: string, key: string | null, raster: CanvasImageSource) => void;
 };
 
@@ -90,11 +85,19 @@ export async function prepareGraphics(
   }
 
   const painted = await port.settle();
+  if (!painted) {
+    // Nothing is rasterised from a paint that never came (a window behind
+    // another, or minimised). It would draw an older paint, or clear the very
+    // canvas the preview is showing and then fail; filed under the new key,
+    // that stale raster read as current for good. Every raster and its key
+    // stay as they were, so the next request makes them again.
+    return { drawn: 0, current, painted: false };
+  }
   let drawn = 0;
   for (const { job } of stale) {
     const raster = port.rasterize(job.instanceId, job.raster.width, job.raster.height);
     if (raster != null) {
-      sink.put(job.instanceId, painted ? job.key : null, raster);
+      sink.put(job.instanceId, job.key, raster);
       drawn += 1;
     }
   }

@@ -64,6 +64,7 @@ import { initAutosave, onAutosaveChange, setMenuOpen } from "./lib/autosave.js";
 import { installMenu } from "./lib/menu.js";
 import { startMcpServer, stopMcpServer } from "./mcp/server.js";
 import { hotReloadEnabled, watchRendererBundle } from "./lib/devReload.js";
+import { createThrottlingHold } from "./lib/throttlingHold.js";
 import Store from "electron-store";
 
 const store = new Store();
@@ -204,11 +205,13 @@ ipcMain.handle("font:getLists", fontLib.getFontList);
 ipcMain.handle("font:getLocalFontLists", fontLib.getLocalFontList);
 ipcMain.handle("font:getPresetFontLists", fontLib.getPresetFontList);
 
-// For the length of an export with HTML graphics, which are rasterised from
-// Chromium's own paint and get none from a minimised, throttled window. Applied
-// to the window that asked, and to nothing else.
+// For the length of an export, a contact sheet or a filmstrip with HTML
+// graphics, which are rasterised from Chromium's own paint and get none from a
+// minimised, throttled window. Applied to the window that asked, and to nothing
+// else; `true` ends the hold and restores that window's own setting.
+const throttlingHold = createThrottlingHold();
 ipcMain.handle("editor:setBackgroundThrottling", (event, allowed: boolean) => {
-  event.sender.setBackgroundThrottling(allowed === true);
+  throttlingHold(event.sender, allowed === true);
   return true;
 });
 
