@@ -47,7 +47,7 @@
 
 import type { Timeline, TimelineElement } from "../../@types/timeline";
 import { isDynamicElement, spanOf, timelineTimeAt } from "../timeline/geometry";
-import { snapMsToFrame } from "../timeline/frames";
+import { frameDurationMs, snapMsToFrame } from "../timeline/frames";
 import {
   applyPoint,
   createMemo,
@@ -150,4 +150,46 @@ export function trackableSpan(
   element: TimelineElement,
 ): { start: number; end: number } {
   return spanOf(element);
+}
+
+/**
+ * Where the null made from a tracked path ends on the timeline, exclusive.
+ *
+ * Where the picture the last sample was measured on stops being shown, which
+ * is the source's next frame and so one sample spacing on: a project frame for
+ * footage at or above the project's rate, two for 30fps footage in a 60fps
+ * project. Never less than one project frame, which is all a single sample
+ * has to go on. Ending on the last sample itself would leave its keyframe on
+ * the bar's open end. Snapped to the frame grid, because the sum of two
+ * snapped times is not one (`12966.67 + 33.33` is `12999.999999999998`), then
+ * clamped to the clip, so tracking a whole clip gives a bar exactly as long as
+ * the clip. `null` for an empty path.
+ */
+export function trackedEndMs(
+  path: readonly PathSample[],
+  element: TimelineElement,
+  fps: number,
+): number | null {
+  const times = path
+    .map((sample) => sample.tMs)
+    .filter((tMs) => Number.isFinite(tMs))
+    .sort((a, b) => a - b);
+  if (times.length === 0) {
+    return null;
+  }
+
+  const lastMs = times[times.length - 1];
+  let heldMs = frameDurationMs(fps);
+  for (let i = times.length - 2; i >= 0; i--) {
+    if (times[i] < lastMs) {
+      heldMs = Math.max(heldMs, lastMs - times[i]);
+      break;
+    }
+  }
+
+  const span = spanOf(element);
+  return Math.max(
+    lastMs,
+    Math.min(span.end, snapMsToFrame(lastMs + heldMs, fps)),
+  );
 }

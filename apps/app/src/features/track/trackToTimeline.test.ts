@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Timeline } from "../../@types/timeline";
 import { bakeTrack } from "../animation/keyframes";
+import { frameToMs } from "../timeline/frames";
 import { keys, textElement, videoElement } from "../renderer/testing";
-import { canvasToFramePoint, toProjectPath } from "./trackToTimeline";
+import {
+  canvasToFramePoint,
+  toProjectPath,
+  trackedEndMs,
+} from "./trackToTimeline";
 import type { TrackSample } from "./tracker";
 
 const FRAME = { frameWidth: 200, frameHeight: 100 };
@@ -171,5 +176,61 @@ describe("canvasToFramePoint", () => {
         { width: 100, height: 100 },
       ),
     ).toEqual({ x: 0, y: 0 });
+  });
+});
+
+describe("trackedEndMs", () => {
+  // On the timeline from 3000 to 7000, so a clip placed late is the default.
+  const clip = videoElement({ startTime: 3000, duration: 4000 });
+  const at = (...times: number[]) => times.map((tMs) => ({ tMs, x: 0, y: 0 }));
+  /** A sample on every one of `count` frames of `stepMs`, from `fromMs`. */
+  const frames = (fromMs: number, stepMs: number, count: number) =>
+    at(...Array.from({ length: count }, (_, i) => fromMs + i * stepMs));
+
+  it("ends where the last sample's frame stops", () => {
+    expect(trackedEndMs(frames(3000, 20, 51), clip, 50)).toBeCloseTo(4020, 6);
+  });
+
+  it("holds slower footage's last frame for as long as it is shown", () => {
+    // 30fps footage in a 60fps project: each picture is up for two project
+    // frames, and a bar one project frame past it would stop half way.
+    const end = trackedEndMs(frames(3000, 1000 / 30, 31), clip, 60) as number;
+
+    expect(end).toBeCloseTo(4000 + 1000 / 30, 6);
+  });
+
+  it("ends exactly on the clip's end when the whole clip was tracked", () => {
+    expect(trackedEndMs(frames(3000, 1000 / 30, 120), clip, 60)).toBe(7000);
+    expect(trackedEndMs(frames(3000, 20, 200), clip, 50)).toBe(7000);
+  });
+
+  it("lands on the grid rather than a rounding error short of it", () => {
+    // The last two frames of 30fps footage ending at 13000 in a 60fps
+    // project, snapped as `toProjectPath` snaps them. Added up they come to
+    // 2e-12 short of the clip's end, a bar that stops before the clip does.
+    const late = videoElement({ startTime: 7000, duration: 6000 });
+    const path = at(frameToMs(776, 60), frameToMs(778, 60));
+
+    expect(trackedEndMs(path, late, 60)).toBe(13000);
+  });
+
+  it("never runs past the clip, whose last frame may be short", () => {
+    const offGrid = videoElement({ startTime: 3000, duration: 3990 });
+
+    expect(trackedEndMs(frames(6940, 20, 3), offGrid, 50)).toBe(6990);
+  });
+
+  it("gives a lone sample one project frame", () => {
+    expect(trackedEndMs(at(5000), clip, 50)).toBe(5020);
+    expect(trackedEndMs(at(5000, 5000), clip, 50)).toBe(5020);
+  });
+
+  it("reads the latest samples, not the last in the list", () => {
+    expect(trackedEndMs(at(5000, 3000, 4980), clip, 50)).toBe(5020);
+  });
+
+  it("answers null for a path with nothing in it", () => {
+    expect(trackedEndMs([], clip, 50)).toBeNull();
+    expect(trackedEndMs(at(NaN), clip, 50)).toBeNull();
   });
 });

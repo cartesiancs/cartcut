@@ -12,25 +12,30 @@
  *
  * ## Three things this has to get right
  *
- * **The null starts at 0, not at the clip.** `localSampleAt` falls back to the
- * element's *static* value for any cursor before its `startTime`, so a null
- * seated at the clip's start would have its own keyframes quietly ignored
- * everywhere to the left of it — the same trap `create_null` documents. Seating
- * it at 0 also collapses a conversion: keyframe times are stored relative to
- * the element's start, so with a start of 0 the stored time *is* the timeline
- * time.
+ * **The bar covers what was tracked, and nothing reads it differently for
+ * that.** The null starts on the first sample and ends where the caller says,
+ * the end of the last tracked frame. Keyframe times are stored relative to the
+ * element's `startTime`, so every sample is shifted back by the first one. Two
+ * facts keep the transform identical at every cursor to a null seated at 0
+ * with the curve on absolute times: before `startTime`, `localSampleAt` reads
+ * the static `location`, and that is seated on the first keyframe's value,
+ * which is what the curve itself holds before its first keyframe; and nothing
+ * reads a group's end (`renderer/timeline.ts`: its span does not gate its
+ * children), so past the bar the curve holds its last value as before. A null
+ * seated at 0 and given the project's length had a bar that started at 0 and
+ * stopped wherever the project's duration said, short of a clip placed later.
  *
  * **`location` is the pivot's top-left, not its centre.** `localMatrixOf`
  * rotates and scales about `w/2, h/2`, so the tracked point has to be written
- * as `point − size/2`. Getting this wrong is invisible until somebody rotates
+ * as `point - size/2`. Getting this wrong is invisible until somebody rotates
  * the null or parents something to it with an offset, and then everything
  * swings about a corner.
  *
- * **The null's `duration` gates nothing.** `renderer/timeline.ts` says a
- * group's span does not gate its children, so the bar's length is only how much
- * there is to aim at when setting a keyframe by hand later. It is given the
- * project's length rather than the clip's for that reason: a user extending the
- * track by hand should not first have to lengthen the bar.
+ * **The static location is read off the built curve.** Not off the first
+ * sample in the caller's order: `positionTrackFrom` sorts, drops what is not
+ * finite and keeps the later of two samples at one instant, and the static
+ * value has to equal the first keyframe exactly or a child parented to the null
+ * jumps on the frame the bar begins.
  */
 
 import type { GroupElementType } from "../../@types/timeline";
@@ -52,9 +57,13 @@ export type TrackNullParams = {
   color?: string;
   /** One side of the pivot square. */
   size?: number;
-  /** How long the bar is. Usually the project's length, in ms. */
-  durationMs?: number;
-  /** `bakeRateFor(fps)` — the caller reads the store, the op does not. */
+  /**
+   * Where the bar ends, exclusive, in timeline ms: the end of the last tracked
+   * frame (`trackToTimeline.ts#trackedEndMs`). Absent, or short of the last
+   * sample, the bar ends on the last sample, so no keyframe is ever past it.
+   */
+  endMs?: number;
+  /** `bakeRateFor(fps)`: the caller reads the store, the op does not. */
   bakeHz: number;
 };
 
@@ -67,13 +76,33 @@ export function createTrackNull(
       ? (params.size as number)
       : NULL_PIVOT_SIZE;
 
+  const usable = params.samples.filter(
+    (sample) =>
+      Number.isFinite(sample.tMs) &&
+      Number.isFinite(sample.x) &&
+      Number.isFinite(sample.y),
+  );
+  if (usable.length === 0) {
+    return doc;
+  }
+
+  let firstMs = Infinity;
+  let lastMs = -Infinity;
+  for (const sample of usable) {
+    firstMs = Math.min(firstMs, sample.tMs);
+    lastMs = Math.max(lastMs, sample.tMs);
+  }
+  // `placeNewElement` clamps a start to 0, and the keyframes have to be
+  // relative to the start it actually writes.
+  const startMs = Math.max(0, firstMs);
+
   // The samples describe where the *feature* is; the element's `location` is
   // the top-left of the pivot box around it. Shifting here rather than in the
-  // panel keeps the two halves of the same convention — this offset and
-  // `createNullElement`'s `center` — next to each other.
+  // panel keeps the two halves of the same convention, this offset and
+  // `createNullElement`'s `center`, next to each other.
   const half = size / 2;
-  const located: PathSample[] = params.samples.map((sample) => ({
-    tMs: sample.tMs,
+  const located: PathSample[] = usable.map((sample) => ({
+    tMs: sample.tMs - startMs,
     x: sample.x - half,
     y: sample.y - half,
   }));
@@ -83,23 +112,20 @@ export function createTrackNull(
     return doc;
   }
 
-  const first = params.samples.find((sample) =>
-    Number.isFinite(sample.x) && Number.isFinite(sample.y),
-  );
-  if (first == null) {
-    return doc;
-  }
+  const endMs =
+    Number.isFinite(params.endMs) && (params.endMs as number) > lastMs
+      ? (params.endMs as number)
+      : lastMs;
 
   const element = createNullElement({
     name: params.name ?? "Track",
     color: params.color,
     size,
-    // Where the null sits when the position track is off — the same place its
-    // first keyframe puts it, so switching the stopwatch off does not teleport
-    // whatever is parented to it.
-    center: { x: first.x, y: first.y },
-    startTime: 0,
-    duration: params.durationMs,
+    // Where the null sits before its bar, and when the position track is off:
+    // the first keyframe's value, so neither moves whatever is parented to it.
+    center: { x: position.x[0].p[1] + half, y: position.y[0].p[1] + half },
+    startTime: startMs,
+    duration: endMs - startMs,
   });
 
   const withTrack: GroupElementType = {
@@ -107,5 +133,11 @@ export function createTrackNull(
     animation: { ...element.animation, position },
   };
 
-  return placeNewElement(doc, params.nullId, withTrack, 0, params.newTrackId);
+  return placeNewElement(
+    doc,
+    params.nullId,
+    withTrack,
+    startMs,
+    params.newTrackId,
+  );
 }

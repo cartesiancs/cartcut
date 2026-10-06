@@ -71,7 +71,7 @@ import {
   type StageSize,
 } from "./stageView";
 import { joinRun, keptBy, positionAt } from "./trackPath";
-import { toProjectPath } from "./trackToTimeline";
+import { toProjectPath, trackedEndMs } from "./trackToTimeline";
 import { createTrackNull } from "./trackNullOp";
 import {
   finishTracker,
@@ -874,7 +874,7 @@ export class AutoTrackPanel extends LitElement {
       return;
     }
 
-    const { fps, duration } = renderOptionStore.getState().options;
+    const { fps } = renderOptionStore.getState().options;
     const path = toProjectPath(this.path, {
       elements: useTimelineStore.getState().timeline,
       clipId: this.clipId as string,
@@ -890,8 +890,7 @@ export class AutoTrackPanel extends LitElement {
         samples: simplifyPath(path),
         nullId,
         newTrackId: uuidv4(),
-        // `renderOption.duration` is in seconds.
-        durationMs: duration * 1000,
+        endMs: trackedEndMs(path, element, fps) ?? undefined,
         bakeHz: bakeRateFor(fps),
       }),
     );
