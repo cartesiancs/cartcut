@@ -303,13 +303,6 @@ function composeFrame(take: Take) {
       dest.height,
     );
     ctx.restore();
-
-    ctx.save();
-    bubblePath(ctx, dest, radius);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
-    ctx.lineWidth = Math.max(2, Math.round(take.size.height * 0.0025));
-    ctx.stroke();
-    ctx.restore();
   };
 }
 
