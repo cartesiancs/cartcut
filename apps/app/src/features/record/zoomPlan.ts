@@ -99,10 +99,16 @@ export const RESTING_VIEW: ZoomView = { progress: 0, zoom: 1, u: 0.5, v: 0.5 };
  * disagree.
  *
  * The minimum is never below 1: see `ZoomSegment.zoom`.
+ *
+ * The maximum is the depth nearly every move gets: a click or a dwell has a box
+ * far smaller than the frame, so `depthFor` wants more than the range allows. And
+ * the viewer compares it with the resting pose, not with `cover`: a 16:10 capture
+ * in a 16:9 frame rests at about 0.82 cover, so a maximum of 2 read as a 2.4x
+ * push and lost the context around the click. 1.5 is about 1.8x.
  */
 const STRENGTH_RANGES: Record<ZoomStrength, { min: number; max: number }> = {
   off: { min: 1, max: 1 },
-  on: { min: 1.25, max: 2.0 },
+  on: { min: 1.1, max: 1.5 },
 };
 
 export function zoomRangeFor(strength: ZoomStrength): {
