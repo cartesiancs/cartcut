@@ -11,16 +11,32 @@
  * returns the *inside* of a wrapper leaves the wrapper, and therefore those
  * attributes, where the suites can still see them.
  *
- * The look lives in `sass/style/_option.scss`. Two pieces are class-only and
+ * The look lives in `sass/style/_option.scss`. Four pieces are class-only and
  * have no helper here on purpose:
  *
  * - **a segmented control**: `<div class="opt-seg">` around
  *   `<button class="opt-seg-item">`, one of them `is-on`. Every caller's cells
  *   carry different attributes (`data-shape-kind`, `aria-event`), and a helper
  *   that took an attribute bag would be longer than the markup it replaced.
+ * - **a tile grid**: `<div class="opt-tiles">` around
+ *   `<button class="opt-tile">`, a glyph over a word. For choices that need
+ *   both and are too many for one segmented row: the crop's aspects. Same
+ *   reason as the segmented control.
+ * - **a button row**: `<div class="opt-actions">` around `textButton`s, which
+ *   then share the row's width. Apply and Cancel, or one Edit.
  * - **a card with no body**: `<div class="opt-section">` around `sectionHead`
  *   alone, which is what a section whose whole content is one control looks
  *   like.
+ *
+ * Two kinds of section, told apart by the glyph on the head:
+ *
+ * - **the eye**, for a feature that is switched on and off and keeps its
+ *   settings while it is off: Border, Shadow, Corners, the speed ramp.
+ * - **`+` and `×`**, for a property that has a default the clip sits at until
+ *   somebody changes it: Blend, Speed, Orientation, Crop, LUT, Filter. The
+ *   section is its head alone at the default; `+` opens it, and `×` puts the
+ *   default back and folds it shut. `addButton` and `removeButton` are that
+ *   pair, so every one of those heads says the same thing in the same place.
  */
 
 import { html, nothing, type TemplateResult } from "lit";
@@ -45,7 +61,8 @@ export interface SectionHeadSpec {
   actions?: Renderable;
   /**
    * Whether the actions take the head's spare width instead of sitting at its
-   * end. For a section whose whole content is one field, such as Blend.
+   * end. For a section whose whole content is one field that always has a
+   * value worth showing, such as Parent.
    */
   grow?: boolean;
 }
@@ -121,6 +138,35 @@ export function iconButton(spec: IconButtonSpec): TemplateResult {
 }
 
 /**
+ * The head's `+`, on a section whose property is still at its default.
+ *
+ * What it does is the caller's: most open the section and write nothing, so
+ * looking at Blend's modes does not cost an undo step; Crop starts its tool,
+ * since a crop is chosen on the canvas and an open card with nothing to do
+ * would be a click for nothing.
+ */
+export function addButton(
+  title: string,
+  onClick: () => void,
+  event?: string,
+): TemplateResult {
+  return iconButton({ icon: "add", title, event, onClick });
+}
+
+/**
+ * The head's `×`, the pair of `addButton`: put the default back and fold the
+ * section shut. One undo step when there was something to undo, none when the
+ * section was only open.
+ */
+export function removeButton(
+  title: string,
+  onClick: () => void,
+  event?: string,
+): TemplateResult {
+  return iconButton({ icon: "close", title, event, onClick });
+}
+
+/**
  * The show/hide toggle a section that is always present carries instead of `+`.
  *
  * `open` is where the user is looking rather than anything about the clip, so
@@ -144,22 +190,29 @@ export function eyeButton(
 export interface TextButtonSpec {
   label: string;
   title?: string;
+  /** A Material Symbols ligature drawn before the word. */
+  icon?: string;
+  /** Drawn raised, for the one button in a row that finishes something. */
+  primary?: boolean;
   disabled?: boolean;
   event?: string;
   onClick: () => void;
 }
 
-/** A word at the icon button's height: Reset, Remove. */
+/** A word at the icon button's height: Reset, Remove, Apply. */
 export function textButton(spec: TextButtonSpec): TemplateResult {
   return html`
     <button
       type="button"
-      class="opt-text-btn"
+      class="opt-text-btn ${spec.primary === true ? "is-primary" : ""}"
       title=${spec.title ?? spec.label}
       aria-event=${spec.event ?? nothing}
       ?disabled=${spec.disabled === true}
       @click=${spec.onClick}
     >
+      ${spec.icon == null
+        ? nothing
+        : html`<span class="material-symbols-outlined">${spec.icon}</span>`}
       ${spec.label}
     </button>
   `;

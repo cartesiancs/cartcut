@@ -73,8 +73,8 @@ export class AudioVolume extends LitElement {
 
   render() {
     // The whole section is one value, so it is one line: the name at the head's
-    // start, the field and its stopwatch at the end. The same shape Blend,
-    // Parent and Speed take.
+    // start, the field and its stopwatch at the end. The same shape Parent
+    // takes.
     return section({
       title: this.lc.t("setting.volume"),
       actions: html`

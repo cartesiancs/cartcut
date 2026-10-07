@@ -1,36 +1,57 @@
 /**
  * Mirror, flip and reverse, in the option panel's Media tab.
  *
- * One row of toggles, shared by the video and image panels, for the reason
+ * One section, shared by the video and image panels, for the reason
  * `controlBlendMode.ts` gives for being one component. Self-gating like
  * `clip-speed`: a panel may mount it for any clip, and it shows what that clip
- * can take — nothing for a type that cannot be mirrored, no Reverse for an
+ * can take: nothing for a type that cannot be mirrored, no Reverse for an
  * image.
  *
- * Every button calls the same function as the timeline's context menu
+ * A `+` section, like Blend and Speed. A clip the right way round and playing
+ * forwards shows the name and the `+`; the toggles appear once it is pressed,
+ * or whenever one of them is on. `×` turns all three off as one undo
+ * step (`timeline/orientationOps.ts`) and cancels a reversal still running, so
+ * after it the clip is exactly as it was imported.
+ *
+ * The mirrors call the same function as the timeline's context menu
  * (`actions.mirrorClips`, `reverseSession.reverseClips`/`unreverseClips`), so
  * the two surfaces cannot disagree about what a click does.
  *
- * The Reverse button has three states because the operation takes time:
- * "Reverse" to start, disabled with the percentage while the tray shows it
- * running, and pressed-in "Reversed" once it has landed — which un-reverses,
- * instantly, on the next click.
+ * Two rows in the body. The mirrors share one segmented row, as Bold and
+ * Italic do in the text panel: two independent switches, either or both on.
+ * Reverse has a row to itself, for two reasons: it is about time rather than
+ * the picture, and it takes minutes, so it has to report "Reversing 45%" in
+ * words. A third tile beside the mirrors was tried and measured: at the stock
+ * 148px column it wrapped to a row of its own anyway, half the width.
+ *
+ * The Reverse row has four states because the operation takes time: offered,
+ * waiting in the queue, running with its percentage, and pressed in once it
+ * has landed, which un-reverses, instantly, on the next click.
  */
 
-import { LitElement, html } from "lit";
+import { LitElement, PropertyValues, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import type { TimelineElement } from "../../@types/timeline";
 import { useTimelineStore } from "../../states/timelineStore";
-import { backgroundTaskStore, taskFor } from "../../states/backgroundTaskStore";
+import {
+  backgroundTaskStore,
+  taskFor,
+  type BackgroundTask,
+} from "../../states/backgroundTaskStore";
 import { isMirrorable, mirrorOf } from "../timeline/mirrorOps";
 import { isReversed, isReversible } from "../timeline/reverseOps";
+import {
+  isReoriented,
+  resetClipOrientation,
+} from "../timeline/orientationOps";
 import { mirrorClips } from "../editor/actions";
+import { refusesEdit } from "../editor/timelineLock";
 import {
   canReverseHere,
   reverseClips,
   unreverseClips,
 } from "../reverse/reverseSession";
-import { iconButton, section, textButton } from "./optionKit";
+import { addButton, removeButton, section } from "./optionKit";
 
 @customElement("clip-orientation")
 export class ClipOrientationControl extends LitElement {
@@ -67,94 +88,174 @@ export class ClipOrientationControl extends LitElement {
     return useTimelineStore.getState().timeline[this.elementId];
   }
 
+  /**
+   * Whether `+` has opened the section on a clip with nothing set. Component
+   * state, for the reason `controlBlendMode.ts` gives for its own.
+   */
+  private opened = false;
+
+  willUpdate(changed: PropertyValues<this>) {
+    if (changed.has("elementId")) {
+      this.opened = false;
+    }
+  }
+
+  /** The reversal running or queued for this clip, if any. */
+  private get task(): BackgroundTask | undefined {
+    return taskFor("reverse", this.elementId);
+  }
+
   render() {
     const element = this.element;
     if (!isMirrorable(element)) {
       return html``;
     }
+
+    // A reversal in flight counts as set: folding the section while the
+    // percentage is still climbing would hide the one place it is reported.
+    if (!isReoriented(element) && this.task == null && !this.opened) {
+      return section({
+        title: "Orientation",
+        actions: addButton(
+          "Mirror, flip or reverse this clip",
+          this.handleOpen,
+          "orientation_add",
+        ),
+      });
+    }
+
     const { h, v } = mirrorOf(element);
     const id = this.elementId;
 
-    // The two mirrors sit in the head, as the mask's invert and pen do: they
-    // are instant acts on the whole clip rather than values to set. Reverse
-    // does not join them, because it is the one here that takes minutes and has
-    // to report progress in words.
     return section({
       title: "Orientation",
-      actions: html`
-        ${iconButton({
-          icon: "swap_horiz",
-          title: "Mirror the picture left to right",
-          on: h,
-          event: "mirror_h",
-          onClick: () => mirrorClips([id], "h"),
-        })}
-        ${iconButton({
-          icon: "swap_vert",
-          title: "Flip the picture top to bottom",
-          on: v,
-          event: "mirror_v",
-          onClick: () => mirrorClips([id], "v"),
-        })}
+      actions: removeButton(
+        "Back to the original orientation",
+        this.handleRemove,
+        "orientation_reset",
+      ),
+      body: html`
+        <div class="opt-field">
+          <div class="opt-seg" role="group" aria-label="Mirror">
+            <button
+              type="button"
+              class="opt-seg-item ${h ? "is-on" : ""}"
+              aria-pressed=${h ? "true" : "false"}
+              aria-event="mirror_h"
+              title="Mirror the picture left to right"
+              @click=${() => mirrorClips([id], "h")}
+            >
+              <span class="material-symbols-outlined">swap_horiz</span>
+              Mirror
+            </button>
+            <button
+              type="button"
+              class="opt-seg-item ${v ? "is-on" : ""}"
+              aria-pressed=${v ? "true" : "false"}
+              aria-event="mirror_v"
+              title="Flip the picture top to bottom"
+              @click=${() => mirrorClips([id], "v")}
+            >
+              <span class="material-symbols-outlined">swap_vert</span>
+              Flip
+            </button>
+          </div>
+        </div>
+        ${element.filetype === "video" && canReverseHere()
+          ? this.reverseRow(element)
+          : ""}
       `,
-      body:
-        element.filetype === "video" && canReverseHere()
-          ? this.reverseButton(element)
-          : undefined,
     });
   }
 
   /**
-   * Reverse, as the section's one body row.
+   * Reverse, as the body's second row: one full-width cell.
    *
-   * Four states in one button, which is why it is a word rather than a glyph:
-   * queued, running with a percentage, already reversed, and offered. The
-   * running one is the reason this is not an icon in the head beside the
-   * mirrors, where there is no room for "Reversing 45%".
+   * While the file is being made the cell is disabled but drawn at full
+   * strength, since the progress is the thing worth reading. A clip that cannot
+   * be reversed (no valid trim) gets no row rather than one that does nothing.
    */
-  private reverseButton(element: TimelineElement) {
+  private reverseRow(element: TimelineElement) {
     const id = this.elementId;
-    const task = taskFor("reverse", id);
+    const task = this.task;
 
+    let cell;
     if (task != null) {
-      const label =
-        task.stage === "queued"
-          ? "Waiting"
-          : task.fraction == null
-            ? "Reversing"
-            : `Reversing ${Math.floor(task.fraction * 100)}%`;
-      return html`<div class="opt-row">
-        <span class="opt-label">${label}</span>
-      </div>`;
-    }
-
-    if (isReversed(element)) {
-      return html`<div class="opt-seg" role="group" aria-label="Playback direction">
-        <button
-          type="button"
-          class="opt-seg-item is-on"
-          aria-pressed="true"
-          aria-event="reverse"
-          title="Play forwards again"
-          @click=${() => unreverseClips([id])}
+      const queued = task.stage === "queued";
+      const label = queued
+        ? "Waiting"
+        : task.fraction == null
+          ? "Reversing"
+          : `Reversing ${Math.floor(task.fraction * 100)}%`;
+      cell = html`<button
+        type="button"
+        class="opt-seg-item is-busy"
+        aria-event="reverse"
+        title=${label}
+        disabled
+      >
+        <span class="material-symbols-outlined"
+          >${queued ? "hourglass_empty" : "fast_rewind"}</span
         >
-          <span class="material-symbols-outlined">fast_rewind</span>
-          Reversed
-        </button>
-      </div>`;
+        ${label}
+      </button>`;
+    } else if (isReversed(element)) {
+      cell = html`<button
+        type="button"
+        class="opt-seg-item is-on"
+        aria-pressed="true"
+        aria-event="reverse"
+        title="Play forwards again"
+        @click=${() => unreverseClips([id])}
+      >
+        <span class="material-symbols-outlined">fast_rewind</span>
+        Reversed
+      </button>`;
+    } else if (isReversible(element)) {
+      cell = html`<button
+        type="button"
+        class="opt-seg-item"
+        aria-pressed="false"
+        aria-event="reverse"
+        title="Play this clip backwards"
+        @click=${() => reverseClips([id])}
+      >
+        <span class="material-symbols-outlined">fast_rewind</span>
+        Reverse
+      </button>`;
+    } else {
+      return "";
     }
 
-    if (!isReversible(element)) {
-      return undefined;
-    }
-
-    return html`<div class="opt-row">
-      ${textButton({
-        label: "Reverse",
-        title: "Play this clip backwards",
-        event: "reverse",
-        onClick: () => reverseClips([id]),
-      })}
+    return html`<div class="opt-field">
+      <div class="opt-seg" role="group" aria-label="Playback direction">
+        ${cell}
+      </div>
     </div>`;
   }
+
+  private handleOpen = () => {
+    this.opened = true;
+    this.requestUpdate();
+  };
+
+  /**
+   * Everything off, and the section shut.
+   *
+   * A reversal still being made is cancelled first, or it would land a minute
+   * later and turn the section back on by itself. The tray's own cancel is the
+   * same call. Then one undo step for whatever was set, which
+   * `resetClipOrientation` declines by identity when nothing was.
+   */
+  private handleRemove = () => {
+    this.opened = false;
+    const id = this.elementId;
+    this.task?.cancel?.();
+    if (!refusesEdit()) {
+      useTimelineStore
+        .getState()
+        .withCheckpoint((doc) => resetClipOrientation(doc, id));
+    }
+    this.requestUpdate();
+  };
 }

@@ -88,7 +88,7 @@ $opt-field-gap: 12px;
 
 /*
  * A control that takes the head's spare width rather than sitting at its end:
- * Blend's dropdown, and anything else whose whole section is one field.
+ * Parent's dropdown, and anything else whose whole section is one field.
  */
 .opt-head-actions.opt-head-grow {
   flex: 1 1 auto;
@@ -303,14 +303,133 @@ $opt-field-gap: 12px;
     color 140ms ease-out;
 }
 
+.opt-text-btn > .material-symbols-outlined {
+  font-size: 14px;
+  line-height: 1;
+}
+
 .opt-text-btn:hover:not(:disabled) {
   background-color: #22262b;
   color: $opt-text;
 }
 
+/* The one button in a row that finishes something: Apply beside Cancel. */
+.opt-text-btn.is-primary {
+  border-color: $opt-line-strong;
+  background-color: $opt-raised;
+  color: $opt-bright;
+}
+
+.opt-text-btn.is-primary:hover:not(:disabled) {
+  background-color: #343b42;
+  color: $opt-bright;
+}
+
 .opt-text-btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/*
+ * Buttons that share a row's width in a section body: Cancel and Apply, or a
+ * lone Edit. Full width so they read as the body's verbs rather than as one
+ * more control squeezed into a corner.
+ */
+.opt-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.opt-actions > .opt-text-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: center;
+  height: 24px;
+}
+
+/* ------------------------------------------------------------------ tiles */
+
+/*
+ * Choices that each need a picture and a word, more of them than fit one
+ * segmented row: the crop's aspects. The glyph sits over the word so a cell
+ * stays narrow enough for several to share the column.
+ *
+ * A grid rather than the wrapping flex line the aspects used to be, which gave
+ * every row a different set of widths. 36px is measured: the stock 148px column
+ * leaves the body 127px, and a 40px floor fitted two columns there instead of
+ * three.
+ */
+.opt-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  gap: 4px;
+}
+
+/* A word longer than a ratio's, which one cell would cut to "Ori...". */
+.opt-tile.opt-tile-wide {
+  grid-column: span 2;
+}
+
+.opt-tile {
+  appearance: none;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 6px 4px 5px;
+  margin: 0;
+  border: 1px solid $opt-line;
+  border-radius: 7px;
+  background-color: #16191c;
+  color: $opt-label;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out,
+    border-color 140ms ease-out;
+}
+
+.opt-tile > .material-symbols-outlined {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.opt-tile > .opt-tile-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.opt-tile:hover:not(:disabled) {
+  background-color: #1f2327;
+  color: $opt-text;
+}
+
+.opt-tile.is-on {
+  border-color: $opt-line-strong;
+  background-color: $opt-raised;
+  color: $opt-bright;
+}
+
+.opt-tile:disabled {
+  cursor: default;
+}
+
+.opt-tile:focus-visible {
+  outline: 1px solid #5a6067;
+  outline-offset: 1px;
+}
+
+/* A box drawn in a preset's own proportions, in place of a glyph. */
+.opt-tile > .opt-tile-shape {
+  display: block;
+  border: 1px solid currentColor;
+  border-radius: 1px;
 }
 
 /* ------------------------------------------------------------- segmented */
@@ -372,6 +491,12 @@ $opt-field-gap: 12px;
 .opt-seg-item:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* Running rather than unavailable: the progress it shows is worth reading. */
+.opt-seg-item.is-busy:disabled {
+  opacity: 1;
+  cursor: progress;
 }
 
 /* ---------------------------------------------------------------- fields */

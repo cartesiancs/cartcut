@@ -1,5 +1,5 @@
 /**
- * The playback-rate dropdown, shared by the video and audio option panels.
+ * The Speed section, shared by the video and audio option panels.
  *
  * One component rather than the same row inlined twice, for the reason
  * `controlAudioVolume.ts` gives — and mounted in both panels because *both*
@@ -21,9 +21,14 @@
  * pinned by `speedOps.test.ts`, "never declines for a collision". That is what
  * spares this panel a disabled state, a "no room" hint, and a ripple toggle to
  * explain them.
+ *
+ * **A `+` section**, like Blend: a clip at 1x with no ramp shows the name and
+ * the `+`, and the rates appear once it is pressed. Opening writes nothing,
+ * since the list opens on 1x; `×` sets 1x back, which flattens a ramp too, and
+ * folds the section shut.
  */
 
-import { LitElement, html } from "lit";
+import { LitElement, PropertyValues, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { useTimelineStore } from "../../states/timelineStore";
 import { LocaleController } from "../../controllers/locale";
@@ -37,7 +42,7 @@ import {
   SPEED_PRESETS,
 } from "../timeline/speedOps";
 import { speedCurveOf } from "../timeline/speedCurve";
-import { section } from "./optionKit";
+import { addButton, removeButton, section } from "./optionKit";
 
 @customElement("clip-speed")
 export class ClipSpeedControl extends LitElement {
@@ -76,6 +81,18 @@ export class ClipSpeedControl extends LitElement {
     return useTimelineStore.getState().timeline[this.elementId];
   }
 
+  /**
+   * Whether `+` has opened the section on a clip still at 1x. Component state,
+   * for the reason `controlBlendMode.ts` gives for its own.
+   */
+  private opened = false;
+
+  willUpdate(changed: PropertyValues<this>) {
+    if (changed.has("elementId")) {
+      this.opened = false;
+    }
+  }
+
   render() {
     const element = this.element;
     // Self-gating, like `option-lut-section`: a panel may mount this without
@@ -95,12 +112,23 @@ export class ClipSpeedControl extends LitElement {
     // nobody chose, and a live one rendered as "0.4009824491765815x".
     const ramped = speedCurveOf(element) != null;
 
-    // A section whose whole content is one control, so the dropdown sits in the
-    // head and takes its spare width: the shape Blend and Parent already have.
+    if (!ramped && speed === 1 && !this.opened) {
+      return section({
+        title: this.lc.t("setting.speed"),
+        actions: addButton(
+          "Change how fast this clip plays",
+          this.handleOpen,
+          "clip_speed_add",
+        ),
+      });
+    }
+
+    // The list takes the body's whole width, as Blend's does: the section's
+    // name says what it picks, and "Ramp (0.40x)" needs the room.
     return section({
       title: this.lc.t("setting.speed"),
-      grow: true,
-      actions: html`
+      actions: removeButton("Back to 1x", this.handleRemove, "clip_speed_reset"),
+      body: html`
         <select
           class="opt-select"
           aria-label="clip speed"
@@ -168,7 +196,30 @@ export class ClipSpeedControl extends LitElement {
    * is not a rate at all: `coerceSpeed` answers null for it and nothing
    * happens, which is the decline this handler already had.
    */
-  private handleChange(event: Event) {
+  private handleOpen = () => {
+    this.opened = true;
+    this.requestUpdate();
+  };
+
+  /**
+   * 1x again, as one undo step, and the section shut.
+   *
+   * Through the same op and the same ripple as a pick from the list, so `×` is
+   * exactly "choose 1x": it flattens a ramp, and it declines by identity for a
+   * clip that was only opened, which records nothing.
+   */
+  private handleRemove = () => {
+    this.opened = false;
+    const elementId = this.elementId;
+    useTimelineStore
+      .getState()
+      .withCheckpoint((doc) =>
+        setClipSpeed(doc, elementId, 1, { ripple: true }),
+      );
+    this.requestUpdate();
+  };
+
+  private handleChange = (event: Event) => {
     const speed = coerceSpeed((event.target as HTMLSelectElement).value);
     if (speed == null) {
       return;
@@ -182,5 +233,5 @@ export class ClipSpeedControl extends LitElement {
       );
 
     this.requestUpdate();
-  }
+  };
 }
