@@ -86,7 +86,8 @@
     "speed_ramp_ease_in": "서서히 가속",
     "speed_ramp_ease_out": "서서히 감속",
     "speed_ramp_option": "곡선",
-    "speed_ramp_preset": "프리셋 적용"
+    "speed_ramp_preset": "프리셋 적용",
+    "speed_ramp_average": "평균"
   },
   "modal": {
     "change_language": "언어 변경",

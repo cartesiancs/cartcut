@@ -23,9 +23,37 @@
  * explain them.
  *
  * **A `+` section**, like Blend: a clip at 1x with no ramp shows the name and
- * the `+`, and the rates appear once it is pressed. Opening writes nothing,
- * since the list opens on 1x; `×` sets 1x back, which flattens a ramp too, and
- * folds the section shut.
+ * the `+`, and the body appears once it is pressed. Opening writes nothing,
+ * since it opens on Constant at 1x; `×` sets 1x back, which flattens a ramp
+ * too, and folds the section shut.
+ *
+ * ## Constant or Ramp: one section, two modes
+ *
+ * The body leads with a switch between the two ways a clip can have a rate,
+ * and shows the editor for the one chosen: the rate list, or the ramp's graph
+ * (`controlSpeedCurve.ts`, mounted only while Ramp is chosen). They were two
+ * sections, and picking a rate in the upper one silently flattened whatever
+ * the lower one had drawn; as two modes of one property that is just what
+ * switching mode means.
+ *
+ * **Choosing Ramp arms it and writes nothing.** The graph opens as the flat
+ * line the clip is already playing, and `coerceSpeedCurve` answers `null` for a
+ * flat curve, so `setClipSpeedCurve` declines and the clip neither resizes nor
+ * ripples its lane until a point actually moves. A switch that seeded a real
+ * ramp would change how the clip plays as the price of looking at it.
+ *
+ * The armed flag is component state, never a field on the element: it would be
+ * UI state in the project file, and an armed-but-flat ramp would save a key for
+ * nothing. It **latches** whenever the clip is seen carrying a ramp, so
+ * dragging the last bend out of a curve (which deletes it) leaves the graph
+ * under the pointer instead of switching the section to Constant mid-drag, and
+ * a ramp the agent adds while the panel is open switches it to Ramp. Only the
+ * Constant cell, `×` and moving to another clip clear it.
+ *
+ * **Choosing Constant removes the ramp and keeps its mean**, so the clip keeps
+ * its length and its neighbours stay put; the rate list then shows that mean,
+ * and a pick from it is the next edit. No confirm: the graph showed what was
+ * there, and undo is one keystroke.
  */
 
 import { LitElement, PropertyValues, html } from "lit";
@@ -38,11 +66,13 @@ import {
   isSpeedAdjustable,
   formatSpeedOption,
   setClipSpeed,
+  setClipSpeedCurve,
   speedOptionsFor,
-  SPEED_PRESETS,
 } from "../timeline/speedOps";
 import { speedCurveOf } from "../timeline/speedCurve";
+import { isRampArmed } from "../speed/curveGraph";
 import { addButton, removeButton, section } from "./optionKit";
+import "./controlSpeedCurve";
 
 @customElement("clip-speed")
 export class ClipSpeedControl extends LitElement {
@@ -87,9 +117,17 @@ export class ClipSpeedControl extends LitElement {
    */
   private opened = false;
 
+  /** Whether Ramp is chosen. Latched; see the header. */
+  private rampArmed = false;
+
   willUpdate(changed: PropertyValues<this>) {
     if (changed.has("elementId")) {
       this.opened = false;
+      this.rampArmed = false;
+    }
+    // After the reset, so a clip arriving with a ramp opens on Ramp.
+    if (speedCurveOf(this.element) != null) {
+      this.rampArmed = true;
     }
   }
 
@@ -102,17 +140,10 @@ export class ClipSpeedControl extends LitElement {
     }
 
     const speed = speedOf(element);
-    // On a ramped clip `speedOf` is the *mean* rate, and showing it as a plain
-    // pick would read as a lie: the clip never plays at that rate for a whole
-    // frame. The entry names the ramp and reports the mean as what it is.
-    //
-    // It also takes the mean out of the list. `speedOptionsFor` splices a rate
-    // that is not a preset into the menu, which is right for a clip the agent
-    // set to 1.7x and wrong here: the mean of a ramp is an arbitrary float
-    // nobody chose, and a live one rendered as "0.4009824491765815x".
     const ramped = speedCurveOf(element) != null;
+    const ramp = isRampArmed(ramped, this.rampArmed);
 
-    if (!ramped && speed === 1 && !this.opened) {
+    if (!ramp && speed === 1 && !this.opened) {
       return section({
         title: this.lc.t("setting.speed"),
         actions: addButton(
@@ -123,32 +154,83 @@ export class ClipSpeedControl extends LitElement {
       });
     }
 
-    // The list takes the body's whole width, as Blend's does: the section's
-    // name says what it picks, and "Ramp (0.40x)" needs the room.
     return section({
       title: this.lc.t("setting.speed"),
       actions: removeButton("Back to 1x", this.handleRemove, "clip_speed_reset"),
       body: html`
-        <select
-          class="opt-select"
-          aria-label="clip speed"
-          aria-event="clip_speed"
-          @change=${this.handleChange}
-        >
-          ${ramped
-            ? html`<option value="ramp">
-                ${this.lc.t("setting.speed_ramp_option")} (${speed.toFixed(2)}x)
-              </option>`
-            : ``}
-          ${(ramped ? SPEED_PRESETS : speedOptionsFor(speed)).map(
-            (option) =>
-              html`<option value=${String(option)}>
-                ${formatSpeedOption(option)}x
-              </option>`,
-          )}
-        </select>
+        <div class="opt-field">
+          <div class="opt-seg" role="group" aria-label="Speed mode">
+            <button
+              type="button"
+              class="opt-seg-item ${ramp ? "" : "is-on"}"
+              aria-pressed=${ramp ? "false" : "true"}
+              aria-event="speed_constant"
+              title="One rate for the whole clip"
+              @click=${this.handleConstant}
+            >
+              ${this.lc.t("setting.speed_ramp_constant")}
+            </button>
+            <button
+              type="button"
+              class="opt-seg-item ${ramp ? "is-on" : ""}"
+              aria-pressed=${ramp ? "true" : "false"}
+              aria-event="speed_ramp_toggle"
+              title="A rate that changes across the clip"
+              @click=${this.handleRamp}
+            >
+              ${this.lc.t("setting.speed_ramp_option")}
+            </button>
+          </div>
+        </div>
+        <div class="opt-field">
+          ${ramp ? this.rampEditor(speed) : this.rateList(speed)}
+        </div>
       `,
     });
+  }
+
+  /**
+   * The rates, full width. A rate that is not a preset (one the agent set, or
+   * the mean a ramp left behind) is spliced in by `speedOptionsFor` so the list
+   * can show it.
+   */
+  private rateList(speed: number) {
+    return html`
+      <select
+        class="opt-select"
+        aria-label="clip speed"
+        aria-event="clip_speed"
+        @change=${this.handleChange}
+      >
+        ${speedOptionsFor(speed).map(
+          (option) =>
+            html`<option value=${String(option)}>
+              ${formatSpeedOption(option)}x
+            </option>`,
+        )}
+      </select>
+    `;
+  }
+
+  /**
+   * The ramp's mean, then its graph.
+   *
+   * The mean is what the rate list used to report as "Ramp (0.40x)": the one
+   * number that says how much the ramp changed the clip's length. Rounded to
+   * two places, because the live value is an arbitrary float nobody chose and
+   * once rendered as "0.4009824491765815x".
+   */
+  private rampEditor(speed: number) {
+    return html`
+      <div class="opt-row" style="margin-bottom: 8px;">
+        <span class="opt-label">${this.lc.t("setting.speed_ramp_average")}</span>
+        <span class="opt-value">${formatSpeedOption(speed)}x</span>
+      </div>
+      <clip-speed-curve
+        .elementId=${this.elementId}
+        .isShow=${this.isShow}
+      ></clip-speed-curve>
+    `;
   }
 
   /**
@@ -170,8 +252,7 @@ export class ClipSpeedControl extends LitElement {
     if (select == null || !isSpeedAdjustable(element)) {
       return;
     }
-    select.value =
-      speedCurveOf(element) != null ? "ramp" : String(speedOf(element));
+    select.value = String(speedOf(element));
   }
 
   /**
@@ -188,16 +269,39 @@ export class ClipSpeedControl extends LitElement {
    * setting under which every listed rate is reachable. It is lane-local, the
    * same rule `rippleDelete` follows: a clip on another track never moves.
    *
-   * **Picking a rate flattens a speed ramp**, which `setClipSpeed` does and
-   * documents. Destructive and deliberate: this control states one rate for the
-   * whole clip, and a rate riding on top of a curve would be a third meaning
-   * for `speed`. The graph sits directly below showing what is about to go, and
-   * undo is one keystroke, so there is no confirm. Re-picking the "Ramp" entry
-   * is not a rate at all: `coerceSpeed` answers null for it and nothing
-   * happens, which is the decline this handler already had.
+   * `setClipSpeed` flattens a speed ramp, and documents it, but from this
+   * panel the list never meets one: it is only shown on Constant, and the
+   * ramp is gone by the time Constant is chosen. The flattening is for the
+   * agent's `set_clip_speed`, which has no mode to switch.
    */
   private handleOpen = () => {
     this.opened = true;
+    this.requestUpdate();
+  };
+
+  /** Arm the ramp. Writes nothing; see the header. */
+  private handleRamp = () => {
+    this.rampArmed = true;
+    this.requestUpdate();
+  };
+
+  /**
+   * Back to one rate: the ramp removed, its mean kept.
+   *
+   * The flag is cleared *before* the commit and the latch reads the document
+   * *after* it, so a refused edit (the caption lock) leaves the curve in place
+   * and the next render puts the section straight back on Ramp, which is the
+   * truth. On a clip that was only armed the op declines and nothing is
+   * recorded.
+   */
+  private handleConstant = () => {
+    this.rampArmed = false;
+    const elementId = this.elementId;
+    useTimelineStore
+      .getState()
+      .withCheckpoint((doc) =>
+        setClipSpeedCurve(doc, elementId, null, { ripple: true }),
+      );
     this.requestUpdate();
   };
 
@@ -210,6 +314,7 @@ export class ClipSpeedControl extends LitElement {
    */
   private handleRemove = () => {
     this.opened = false;
+    this.rampArmed = false;
     const elementId = this.elementId;
     useTimelineStore
       .getState()

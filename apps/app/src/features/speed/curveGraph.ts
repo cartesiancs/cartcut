@@ -268,17 +268,17 @@ export function seedCurveFor(
 }
 
 /**
- * Whether the ramp section is open for editing.
+ * Whether the Speed section is on Ramp.
  *
  * A clip that carries a ramp always reads as on, so selecting it shows what it
- * is doing. On top of that the panel holds a local flag, which is what the
- * toggle writes and which is deliberately **not** stored on the element: a flag
+ * is doing. On top of that the panel holds a local flag, which is what the Ramp
+ * switch writes and which is deliberately **not** stored on the element: a flag
  * whose only job is to say "the graph is open" would be UI state in the project
  * file, and an armed-but-flat ramp would save a key for nothing.
  *
  * The local flag is also what keeps the graph from vanishing under the pointer.
  * Dragging a ramp back to flat deletes the curve, so an `on` derived from the
- * document alone would close the section mid-drag.
+ * document alone would switch the section to Constant mid-drag.
  */
 export function isRampArmed(hasCurve: boolean, locallyArmed: boolean): boolean {
   return hasCurve || locallyArmed;

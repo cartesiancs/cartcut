@@ -86,7 +86,8 @@
     "speed_ramp_ease_in": "Ease in",
     "speed_ramp_ease_out": "Ease out",
     "speed_ramp_option": "Ramp",
-    "speed_ramp_preset": "Apply a preset"
+    "speed_ramp_preset": "Apply a preset",
+    "speed_ramp_average": "Average"
   },
   "modal": {
     "change_language": "Change Language",

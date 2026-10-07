@@ -3,7 +3,6 @@ import { customElement, property } from "lit/decorators.js";
 import { useTimelineStore } from "../../states/timelineStore";
 import "./controlAudioVolume";
 import "./controlClipSpeed";
-import "./controlSpeedCurve";
 
 /**
  * The side panel for an audio clip.
@@ -59,13 +58,6 @@ export class OptionAudio extends LitElement {
         .elementId=${this.elementId}
         .isShow=${this.isShow}
       ></clip-speed>
-
-      <!-- Directly under the rate, because the two edit the same property and
-           picking a rate above flattens whatever is drawn here. -->
-      <clip-speed-curve
-        .elementId=${this.elementId}
-        .isShow=${this.isShow}
-      ></clip-speed-curve>
     `;
   }
 

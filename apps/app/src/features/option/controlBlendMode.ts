@@ -65,7 +65,7 @@ export class BlendModeControl extends LitElement {
    * Whether `+` has opened the section on a clip still at Normal.
    *
    * Component state and never the document, for the reason
-   * `controlSpeedCurve.ts` gives for its own flag: an open section with nothing
+   * `controlClipSpeed.ts` gives for its ramp flag: an open section with nothing
    * picked is where the user is looking, and saving it would put a key in the
    * project for nothing. Dropped when the panel moves to another clip, or the
    * next clip would show open for no reason.

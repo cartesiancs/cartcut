@@ -21,7 +21,6 @@ import type { FilterInput } from "../renderer/filter/params";
 import "./controlAudioVolume";
 import "./controlBlendMode";
 import "./controlClipSpeed";
-import "./controlSpeedCurve";
 import "./controlClipOrientation";
 import "./controlClipCrop";
 import "./controlClipCorners";
@@ -229,19 +228,13 @@ export class OptionVideo extends LitElement {
       <!--
         Between the level and the appearance rows, because speed is the one
         property here that reaches both halves of the clip: it resizes the
-        picture on the timeline and retimes the sound with it.
+        picture on the timeline and retimes the sound with it. The ramp is
+        inside it, as its second mode.
       -->
       <clip-speed
         .elementId=${this.elementId}
         .isShow=${this.isShow}
       ></clip-speed>
-
-      <!-- Directly under the rate, because the two edit the same property and
-           picking a rate above flattens whatever is drawn here. -->
-      <clip-speed-curve
-        .elementId=${this.elementId}
-        .isShow=${this.isShow}
-      ></clip-speed-curve>
 
       <!-- Beside speed: reverse is the other thing here that changes how the
            footage plays rather than how it looks. -->

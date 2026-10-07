@@ -30,8 +30,8 @@
  * `set_text_reveal`'s `animate*` arguments; until this card it was reachable
  * from MCP alone. Its rules are in `revealAnimatorFields.ts`, node-tested.
  *
- * The eye arms the card and **writes nothing**, the rule `controlSpeedCurve`
- * states: an animator whose every field is inert is not stored, so arming shows
+ * The eye arms the card and **writes nothing**, the rule `controlClipSpeed`
+ * states for the speed ramp: an animator whose every field is inert is not stored, so arming shows
  * the inert values and the first edit is what creates it. Every edit re-arms,
  * so dragging the last movement back to inert deletes the animator without
  * closing the card under the pointer. Overlap and Easing are dimmed until
