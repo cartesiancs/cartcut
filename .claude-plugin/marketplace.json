@@ -11,7 +11,7 @@
       "name": "cartcut-editing",
       "source": "./plugins/cartcut-editing",
       "description": "Edit video in the running Cartcut app: cut editing driven by a transcript, subtitles, motion, transitions and effects. Bundles the editing skill and the connection to Cartcut's local MCP bridge.",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "author": {
         "name": "cartesiancs"
       },

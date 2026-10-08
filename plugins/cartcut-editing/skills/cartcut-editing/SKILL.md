@@ -22,12 +22,19 @@ step, and a user who dislikes the result should get back to where they were
 with one Cmd+Z, not fifty.
 
 **Your edits share the user's undo history.** `undo` takes back the last edit
-whoever made it. If you overshoot, undo — do not try to reconstruct the
+whoever made it. If you overshoot, undo. Do not try to reconstruct the
 previous state by hand, because you will get it subtly wrong.
 
 **Clips are addressed by id.** Get ids from `list_clips`. They change when you
 cut: a split produces a new clip with a new id, and the tool result tells you
 which. Re-read rather than assuming an id survived.
+
+**On-screen text has no em-dash, no full stop and no subheading.** That covers
+every title, caption, lower third and graphic you put in the project, whatever
+language it is in. A title is one line of words with nothing under it. The
+rules and how to apply them to transcript text are under
+[Writing text for the screen](#writing-text-for-the-screen); read them before
+the first word you put on screen.
 
 ## Editing a whole video
 
@@ -56,15 +63,15 @@ reject.
 
 ### The style profile is where the numbers live
 
-`get_edit_brief` returns a profile — cut padding, minimum shot length, how
+`get_edit_brief` returns a profile: cut padding, minimum shot length, how
 often to push in and how hard, which transitions this style uses, how many
 words a caption line holds. **Use its numbers rather than inventing your own**,
 because that is what makes an edit read as one piece instead of a series of
 separate decisions.
 
 It is chosen from what the material is, and it tells you why. If the reason
-sounds wrong for what the user wants, say so and offer one of `otherStyles` —
-that is a one-sentence conversation, not a reason to guess.
+sounds wrong for what the user wants, say so and offer one of `otherStyles`
+in a sentence rather than guessing.
 
 Profiles are files. A user who wants their own taste writes one and drops it in
 their styles folder; nothing about the grammar below is fixed in code.
@@ -83,13 +90,13 @@ These hold whatever style is in play:
 4. **One idea per moment.** Do not put a transition on a cut where a clip is
    already moving, and do not stack an effect on a punch-in. Something moving is
    enough.
-5. **A move needs a reason.** Tie it to what the audio or the words mark —
+5. **A move needs a reason.** Tie it to what the audio or the words mark;
    the profile's `onEmphasis` says whether to. Evenly spaced punch-ins read as a
    tic.
 6. **Cut to `beats`, never to bpm arithmetic**, and only when
    `tempo.confidence` is high.
 7. **Look before you say you are done.** `get_contact_sheet` at the cuts and at
-   anything you added. You will find things you cannot predict — a caption on a
+   anything you added. You will find things you cannot predict: a caption on a
    face, a cut on a blink, a title against a white frame.
 8. **Say what you did, in seconds.** "Removed 14 ranges, 22s from a 4m10s clip,
    and put a push-in on the three moments he raises his voice."
@@ -114,8 +121,8 @@ Premiere. A clip's layer **is** its track. There is no per-clip "bring to
 front", and `update_clip` will refuse `priority`.
 
 So titles and captions belong on a text track above the video, and that is
-where `add_text` and `add_subtitles` put them. When they cannot — a project
-that already has a text track sitting under the picture — the result carries a
+where `add_text` and `add_subtitles` put them. When they cannot (a project
+that already has a text track sitting under the picture), the result carries a
 `warning` naming what is stacked over the text, and the fix is one call:
 
 ```
@@ -124,13 +131,13 @@ move_track({ trackId: "…", toIndex: 0 })
 
 The same rule is what makes `add_shape` usable as a lower-third bar. The bar
 has to be behind the words and in front of the picture, which means a row
-between the two — not a property on the bar.
+between the two.
 
 ## Look at what you made
 
 `get_contact_sheet` renders frames of the **composed timeline** into one PNG
 grid and gives you its path. Read that file and you are looking at the picture
-the export would deliver — titles, shapes, filters, effects and all, drawn by
+the export would deliver (titles, shapes, filters, effects and all), drawn by
 the exporter's own renderer rather than pulled out of the source.
 
 ```
@@ -140,15 +147,15 @@ get_contact_sheet({ startMs: 0, endMs: 30000, count: 9 })
 
 Use it when the answer depends on what is actually on screen:
 
-- after adding a title — is it legible against what is behind it, and is it
+- after adding a title: is it legible against what is behind it, and is it
   covering the speaker's face?
-- at a cut — did it land on a black frame or a blink?
-- after keyframing a move — does the move look like what you meant?
+- at a cut: did it land on a black frame or a blink?
+- after keyframing a move: does the move look like what you meant?
 - before telling the user you are done.
 
 Every tile carries its own timestamp, so what you see is directly actionable.
 Each frame costs a video seek, so ask about the stretch you care about rather
-than the whole project — and if the result carries a `warning`, some footage had
+than the whole project. If the result carries a `warning`, some footage had
 not finished decoding and those tiles are not to be trusted.
 
 ## Cut editing from speech
@@ -157,7 +164,7 @@ This is the main workflow. The judgement is yours; the tools just carry it out.
 
 1. `get_transcript` on the clip. Timings come back already mapped to the
    timeline, so you can use them directly.
-2. Decide what to remove. Read the words — long pauses, filler ("um", "uh",
+2. Decide what to remove. Read the words for long pauses, filler ("um", "uh",
    "like"), false starts, repeated takes where the speaker restarts a sentence,
    tangents the user asked you to drop.
 3. **One** `remove_ranges` call with all of it.
@@ -172,7 +179,7 @@ remove_ranges({
 
 Ranges are read against the clip as it is *now*, so you do not have to shift
 later ranges to account for earlier cuts. `ripple: true` (the default) closes
-the gaps, which is what makes speech play continuously — turn it off only when
+the gaps, which is what makes speech play continuously; turn it off only when
 the user wants the timing preserved.
 
 Two judgement calls worth making deliberately:
@@ -183,7 +190,7 @@ Two judgement calls worth making deliberately:
 - **Do not cut a pause to nothing.** A conversation with every gap removed
   sounds frantic. Trim long pauses down rather than deleting them.
 
-For word-level precision, `get_transcript` with `granularity: "word"` — but it
+For word-level precision, `get_transcript` with `granularity: "word"`, but it
 is much larger, so scope it with `startMs`/`endMs`.
 
 Entries may also carry two things worth acting on:
@@ -208,9 +215,9 @@ recording sounds like, and the two disagree more often than you would think:
 
 - **Dead air the words cannot show you.** A gap between two sentences is in the
   transcript; the eight seconds of room tone before the speaker starts, the
-  breath held mid-take, the silence after the last word — those are only in the
+  breath held mid-take and the silence after the last word are only in the
   signal. Cutting them is most of what makes an edit feel tight.
-- **Where the hits are.** `onsets` are percussive attacks — over music the
+- **Where the hits are.** `onsets` are percussive attacks: over music the
   subdivisions, over speech consonants and desk knocks. They are finer than the
   beat, so they are what you snap an exact cut to.
 - **Where the beats are.** `beats` is a measured list, not a grid computed from
@@ -218,7 +225,7 @@ recording sounds like, and the two disagree more often than you would think:
   yourself: a grid extrapolated from a rate accumulates error and walks off the
   music, and a drifting grid is worse than none because it still looks
   deliberate. `beats` comes back empty when there is no pulse worth following,
-  and empty is the honest answer — speech has no beat.
+  and empty is the honest answer, because speech has no beat.
 
 Use `beats` to decide the *spacing* of cuts and `onsets` to place each one
 exactly.
@@ -226,17 +233,18 @@ exactly.
 All of it comes back on the timeline, so it pairs straight with `remove_ranges`
 and `split_clip`. It is cached per file, so ask early and ask freely.
 
-## Subtitles
+## Captions
 
-`get_transcript` gives timeline-time segments. Feed them straight to
-`add_subtitles` — one call, all lines:
+`get_transcript` gives timeline-time segments. Take the full stops and dashes
+out of their text (see [Writing text for the screen](#writing-text-for-the-screen)),
+then feed them to `add_subtitles` in one call, all lines:
 
 ```
 add_subtitles({ items: [ {text: "…", startMs: 0, durationMs: 2400}, … ] })
 ```
 
 They land on a single text track. If the result's `tracks` shows more than one,
-some of your captions overlap in time — check the timings.
+some of your captions overlap in time; check the timings.
 
 Styling defaults to a lower third sized from the project's own resolution, so a
 vertical video gets captions in the right place without being told. Pass
@@ -246,24 +254,55 @@ Use `add_text` for a single title, `add_subtitles` for anything plural.
 
 ## Writing text for the screen
 
-**A title takes no full stop.** "Chapter one", not "Chapter one." — a terminal
-period on a title, a lower third, a name super or a chapter card reads as a
-typo to anyone who watches video, and it is the clearest tell that a title was
-written by something that thinks in prose. Keep a question mark or an
-exclamation mark where the line genuinely asks or exclaims, and keep
-punctuation *inside* a multi-clause line. Drop only the final period.
+These rules hold for every word a viewer reads: titles, captions, lower thirds,
+chapter cards, the text of a text clip, every text parameter of a graphic, and
+the default text of a program you write. They hold in Korean, English and every
+other language, and wherever the words came from. You never add any of these
+yourself; words the user dictates for the screen go on exactly as they wrote
+them.
 
-This bites hardest when the title is lifted from the transcript, because
-`get_transcript` returns punctuated sentences: "So this is the part that
+**No em-dash, ever.** Not `—`, and nothing standing in for one: no `–`, no
+spaced hyphen ` - `, no `--`. A dash on screen means the line is carrying two
+thoughts. Make it two captions, or keep the half that matters and drop the
+other.
+
+**No full stop, ever.** Not at the end of a line, not between two sentences,
+and no ellipsis (`...` or `…`) in its place. A period on screen reads as a typo
+to anyone who watches video, and it is the clearest tell that the text was
+written by something that thinks in prose. A decimal point or a domain inside a
+word (`3.5`, `cartcut.com`) belongs to the word and stays. Keep `?` and `!`
+only where the line really asks or exclaims.
+
+**No subheading.** A title is one line of words and nothing else. Nothing goes
+under it and nothing goes over it: no tagline, no explanatory second line, no
+kicker or eyebrow, no "Episode 1", no date, no credit, no small print. A second
+phrase hung off the title by a colon or a bar is the same thing on one line:
+"Seoul: the city that never sleeps" should be "Seoul". Do not reach for a
+second text clip, a second graphic or a second text parameter to hold one. A
+lower third is a name alone unless the user gave you the role to put under it.
+
+**Captions follow the same rules.** `get_transcript` returns punctuated
+sentences, so its text arrives with full stops and sometimes dashes, and goes
+on screen only once they are out:
+
+- take the full stop off the end of every segment
+- where a segment still holds two sentences, split it at the boundary into two
+  captions, timed from `granularity: "word"`
+- where the recogniser wrote a dash, split there or drop it
+- keep every other word as spoken
+
+A title lifted from the transcript is the same: "So this is the part that
 matters." becomes a title only once the period comes off.
 
-**Captions are the opposite.** A subtitle transcribes speech and keeps the
-sentence's own punctuation, full stop included. That is broadcast practice, and
-it is what a viewer reads sentence boundaries from. Pass `add_subtitles` the
-words as spoken.
+Keep titles short. A screen title that needs a comma usually wants a shorter
+phrase.
 
-Keep titles short. A screen title that needs a comma usually wants to be two
-lines, or a shorter phrase.
+**Read it back before it goes in.** Before any call that writes words
+(`add_text`, `add_subtitles`, `apply_edit_plan`, `update_clip`, `add_graphic`,
+`set_graphic`, `apply_typography`), look through every string for `—`, `–`,
+` - `, `.` and `…`, and for a second line under a title. Then look at the
+contact sheet, because a preset's sample text you did not overwrite shows up
+there and nowhere in your own call.
 
 ## Motion that reads as deliberate
 
@@ -272,8 +311,8 @@ none, a keyframe gets handles that leave and arrive at zero velocity. That is
 the gentlest curve there is, and applied to everything it is the single biggest
 reason agent-made motion drifts instead of landing.
 
-An easing shapes the segment *leaving* the entry it is written on — the same
-reading as CSS — so the last entry's is ignored.
+An easing shapes the segment *leaving* the entry it is written on (the same
+reading as CSS), so the last entry's is ignored.
 
 | Want | Use |
 |---|---|
@@ -284,10 +323,9 @@ reading as CSS — so the last entry's is ignored.
 | The CSS defaults | `ease_in`, `ease_out`, `ease_in_out` |
 | Anything else | `[x1, y1, x2, y2]` control points |
 
-A bounce is not one curve — it reverses direction several times, which a single
-cubic cannot. Author it as several keyframes.
+A bounce reverses direction several times, which a single cubic cannot. Author it as several keyframes.
 
-**Scale is in tenths** — 10 is unscaled, 12 is 120%.
+**Scale is in tenths**: 10 is unscaled, 12 is 120%.
 
 ### Reach for a preset first
 
@@ -306,7 +344,7 @@ one undo step:
 | Opacity in or out | `fade_in`, `fade_out` |
 
 **Leave `durationMs` off unless you mean it.** Each preset carries the length it
-was designed around, and they differ by more than an order of magnitude — a
+was designed around, and they differ by more than an order of magnitude: a
 punch is 180ms, a drift is four seconds. A punch stretched to a second is not a
 punch.
 
@@ -336,8 +374,8 @@ and `add_keyframes` both refuse the property until then.
 ### Zooming towards something
 
 Scale animates about the clip's **centre**, so a zoom always converges on the
-middle. To punch in on a face at the left of frame, pass `focus` — a point in
-the clip's own box, 0–100 per axis — and the preset pushes the picture the other
+middle. To punch in on a face at the left of frame, pass `focus`, a point in
+the clip's own box from 0 to 100 per axis, and the preset pushes the picture the other
 way as it grows so that point stays put. `{x: 50, y: 50}` is the centre and
 changes nothing. Hand-authored keyframes get no such help: there you have to
 counter-animate `position` yourself.
@@ -360,14 +398,14 @@ counter-animate `position` yourself.
 | Change text, colour, position, size, opacity | `update_clip` |
 | Show the user what you did | `select_clips`, then `set_playhead` |
 
-Timing is deliberately not writable through `update_clip` — `startTime`,
+Timing is deliberately not writable through `update_clip`. `startTime`,
 `duration` and `trim` are coupled, and writing one without the others produces
 a clip that previews correctly and exports wrong. Use `trim_clip` and
 `move_clips`.
 
 ## Confirm before large destruction
 
-Cutting a few seconds out of a clip is ordinary work — just do it. But say what
+Cutting a few seconds out of a clip is ordinary work; just do it. But say what
 you are about to do, and wait, when the edit is:
 
 - most of a clip, or a whole clip
@@ -379,13 +417,13 @@ Report what you actually removed afterwards, in seconds, so they can judge it:
 
 ## When things do not work
 
-- **Tools are missing entirely** — Cartcut is not running, or the bridge is
+- **Tools are missing entirely**: Cartcut is not running, or the bridge is
   off. Ask the user to open it. The ⚡ icon at the bottom right of the window
   reports whether the bridge is up, and carries the connection details.
-- **"editor window is not available"** — the app is starting up, or was closed.
-- **`get_transcript` fails** — transcription needs either a local
+- **"editor window is not available"**: the app is starting up, or was closed.
+- **`get_transcript` fails**: transcription needs either a local
   speech-to-text server or an OpenAI API key, both set in that same panel.
-- **An edit returns `ok: false`** — it was declined, not failed, and nothing
+- **An edit returns `ok: false`**: it was declined, not failed, and nothing
   changed. The `reason` says what was in the way, usually a neighbouring clip
   or times that miss the clip entirely.
 
@@ -393,7 +431,7 @@ Report what you actually removed afterwards, in seconds, so they can judge it:
 
 Both are real, both export, and both are yours.
 
-**A transition sits on a cut**, not on a clip — it mixes two rendered frames,
+**A transition sits on a cut**, not on a clip: it mixes two rendered frames,
 so it needs the outgoing and incoming clip. `list_cuts` finds them:
 
 ```
@@ -404,13 +442,13 @@ add_transition({ fromId, toId, presetId: "…" })
 
 Neither clip moves or is trimmed. The frames the mix needs are the ones already
 in the files either side of the trim, and where the source runs out the clip
-holds its last frame — `realFootageMs` from `list_cuts` says how much would be
+holds its last frame; `realFootageMs` from `list_cuts` says how much would be
 real. A short dissolve that freezes slightly is normal; trim the clips if you
 want it all real.
 
 Reach for a cross-dissolve when the cut should be invisible, and for `whip-pan`,
 `cross-zoom`, `glitch` or `flash` when it should be felt. Do not stack one on
-top of a punch-in — the clip is already moving.
+top of a punch-in, where the clip is already moving.
 
 **An effect applies to everything painted beneath it.** It gets its own row,
 and where that row sits *is* the control: the first one lands at the very top,
@@ -433,7 +471,7 @@ fading, keyframing, blending, grading and masking it are the tools you already
 use. Reach for one whenever a title needs more than a text clip can do: motion
 per letter or per word, an exit as well as an entrance, 3D, text on a path,
 vertical writing, gradients or pictures inside the letters, several outlines or
-a long shadow, a lower third with two lines, a counter.
+a long shadow, a counter.
 
 **Start from a preset.** `list_graphic_presets` has two dozen, grouped as
 kinetic, stylized, distort, reveal, layout and background, each with the
@@ -448,6 +486,17 @@ add_graphic({ presetId: "com.cartcut.graphic.rise-in-out", startMs: 2000,
 Lettering lands on a text row in front of the picture and a GLSL background on
 a video row behind it. The box defaults to the preset's design size, centred.
 
+**A title graphic shows the title and nothing under it.** Every parameter you
+leave out keeps its default, and several presets ship a second line of sample
+text: `lower-third-card`'s `role` ("Director of Photography"), `quote-card`'s
+`author`, `ruby-title`'s `kicker` over the title and `counter`'s `label` under
+the figure. Pass `""` for each of those, and for any other text parameter in
+`list_graphic_presets` that draws a line of its own beside the title, unless the
+user gave you its words. A ruby `reading` glosses the title itself and stays.
+The defaults come back the same way through `apply_typography`, which fills
+only the parameters its `bindings` name, and through `set_graphic` when it swaps
+the preset, which resets every parameter.
+
 **To restyle a title that already exists**, convert it rather than deleting and
 re-adding: `apply_typography({ clipIds, presetId })` replaces each text clip in
 place, keeping its id, row, timing, box and keyframes, and carries the text,
@@ -460,7 +509,8 @@ say so to the user or restyle it in the program.
 every variable the host provides, what CSS is allowed and the recipes for the
 matrix of effects is in `references/html-typography.md` beside this file (also
 served as the MCP resource `skill://cartcut-editing/references/html-typography.md`).
-Read it before writing one. The loop is:
+Read it before writing one. A title program has one text parameter and one
+element showing it, with no second line anywhere in its markup. The loop is:
 
 ```
 check_program({ program, renderAtMs: [0, 400, 1200, 3600] })

@@ -56,7 +56,9 @@ export function registerGraphicTools(define: Registrar) {
         "HTML/CSS or GLSL; check_program first). The box defaults to the program's design size, or the frame, " +
         "centred. Lettering lands on a text row in front of the picture, a GLSL background on a video row. " +
         Z_ORDER_NOTE +
-        " Numeric parameters animate as `fx:<key>` with set_animation and add_keyframes.",
+        " Numeric parameters animate as `fx:<key>` with set_animation and add_keyframes." +
+        " A title graphic shows the title alone: pass \"\" for a preset's other text parameters (a lower " +
+        "third's `role`, a quote's `author`, a `kicker`, a `label`), or their sample text appears under it.",
       inputSchema: {
         presetId: z.string().optional(),
         program: programField.optional(),

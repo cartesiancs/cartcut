@@ -47,6 +47,12 @@ blank.
   with no binding is reported as dropped.
 - Sources are at most 512 KB each and 1 MB together.
 
+**One line of words.** A title program has one text parameter and one element
+that shows it: no kicker over the title, and no subheading, credit or date under
+it, in the markup or as a parameter. Its default text and every value you pass
+carry no em-dash and no full stop, the rules `SKILL.md` gives for everything on
+screen.
+
 ## Parameters
 
 | type | value | in CSS |

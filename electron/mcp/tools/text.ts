@@ -25,8 +25,8 @@ export function registerTextTools(define: Registrar) {
         "them across one track each. " +
         "Times are timeline milliseconds; pass `sourceElementId` if they came from a clip's own source timing " +
         "and they will be converted for you (get_transcript already returns timeline times, so it does not need it). " +
-        "Caption lines keep the punctuation of the speech they transcribe, full stop included — the opposite of " +
-        "a title's convention, and what a viewer reads sentence boundaries from. " +
+        "Caption lines carry no full stop and no em-dash: get_transcript's sentences arrive punctuated, so " +
+        "take the period off the end of each, and split a line that still holds two sentences into two. " +
         "They land on a text track in front of the picture; a `warning` in the result means some of them do not.",
       inputSchema: {
         items: z
@@ -55,10 +55,10 @@ export function registerTextTools(define: Registrar) {
       title: "Add one text clip",
       description:
         "A single title, lower third or chapter card. For more than one line, use add_subtitles. " +
-        "**A title takes no terminal full stop** — a period at the end of an on-screen title reads as a " +
-        "typo, and transcript text pasted straight in brings one along. Keep ? and !, and keep punctuation " +
-        "inside a multi-clause line; drop only the final period. Captions transcribing speech are the " +
-        "exception and keep theirs — those go through add_subtitles. " +
+        "**On-screen text carries no full stop and no em-dash**: a period on a title reads as a typo, and " +
+        "transcript text pasted straight in brings one along. Keep ? and ! where the line asks or exclaims. " +
+        "**A title is one line**: no subheading, tagline or credit under it, whether as a second clip or " +
+        "after a colon. " +
         "The clip lands on a text track in front of the picture; if the result carries a `warning`, " +
         "something is stacked over it. " +
         Z_ORDER_NOTE,

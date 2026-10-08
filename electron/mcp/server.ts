@@ -152,10 +152,11 @@ function readBody(req: http.IncomingMessage): Promise<unknown> {
 /**
  * What the client is told once, on connect.
  *
- * Invariants only — the things that are true of every call and that an agent
+ * Invariants only: the things that are true of every call and that an agent
  * gets wrong silently rather than loudly. Layering is here because getting it
- * wrong produces a caption nobody can see and no error at all, and the title
- * convention because a full stop on a title is a defect no tool can refuse.
+ * wrong produces a caption nobody can see and no error at all, and the
+ * on-screen text rules because a full stop, an em-dash or a subheading under a
+ * title is a defect no tool can refuse.
  *
  * Not a substitute for the tool descriptions: not every client surfaces this
  * field, and a tool is read on its own. It is reinforcement, so it stays short.
@@ -168,7 +169,7 @@ const INSTRUCTIONS = [
   "Times are timeline milliseconds, absolute from the start of the project. Never seconds, frames or timecode.",
   "Layering is track order, never a clip property: index 0 is the top row and the front of the composite. A title or caption has to sit on a track above the picture to be seen, and move_track is how that changes.",
   "One call with many items is one undo step; N calls are N. Batch.",
-  "On-screen titles take no terminal full stop. Captions transcribing speech keep their punctuation.",
+  "On-screen text (titles, captions, graphics) carries no full stop and no em-dash, and a title is one line with no subheading under it.",
   "Start with get_project_overview and list_clips rather than guessing ids.",
   SKILL_FALLBACK_INSTRUCTION,
 ].join("\n");
