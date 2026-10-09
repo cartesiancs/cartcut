@@ -590,69 +590,76 @@ export class ElementTimelineLeftOption extends LitElement {
     // capture of a resize in progress) stays with its track when rows are
     // added, removed or reordered, rather than being handed to whichever track
     // now sits at that position.
-    const rows = repeat(ordered, (track) => track.id, (track) => {
-      const hidden = isTrackHidden(track);
-      const height = trackHeightOf(heights, track.id);
-      return html`
-        <div
-          class="track-header ${hidden ? "is-hidden" : ""}"
-          style="height: ${height}px; margin-bottom: ${TRACK_GAP}px;
+    const rows = repeat(
+      ordered,
+      (track) => track.id,
+      (track) => {
+        const hidden = isTrackHidden(track);
+        const height = trackHeightOf(heights, track.id);
+        return html`
+          <div
+            class="track-header ${hidden ? "is-hidden" : ""}"
+            style="height: ${height}px; margin-bottom: ${TRACK_GAP}px;
                  background-color: ${defaultColors.row};"
-        >
-          <!-- The controls keep a default row's band, so a tall row has them
+          >
+            <!-- The controls keep a default row's band, so a tall row has them
                at its top beside the clip's label rather than floating in the
                middle, and a default row lays out exactly as it always has. -->
-          <div
-            class="track-header-band"
-            style="height: ${Math.min(height, TRACK_HEIGHT)}px;"
-          >
-            <span
-              class="material-symbols-outlined track-icon"
-              title=${TRACK_KIND_TITLE[track.kind] ?? "Track"}
-              >${TRACK_KIND_ICON[track.kind] ?? "layers"}</span
+            <div
+              class="track-header-band"
+              style="height: ${Math.min(height, TRACK_HEIGHT)}px;"
             >
-            <div class="track-actions">
-              ${this.renderEye(track.id, track.kind, hidden, locked)}
-              ${locked
-                ? html`<span
-                    class="material-symbols-outlined track-lock"
-                    title="Locked while the caption panel is open"
-                    >lock</span
-                  >`
-                : html`<button
-                    type="button"
-                    class="opt-icon-btn track-menu ${this.openMenu?.trackId ===
-                    track.id
-                      ? "is-on"
-                      : ""}"
-                    title="Track options"
-                    aria-haspopup="menu"
-                    aria-expanded=${this.openMenu?.trackId === track.id}
-                    @click=${(e: MouseEvent) => this.toggleMenu(track.id, e)}
-                  >
-                    <span class="material-symbols-outlined">more_vert</span>
-                  </button>`}
+              <span
+                class="material-symbols-outlined track-icon"
+                title=${TRACK_KIND_TITLE[track.kind] ?? "Track"}
+                >${TRACK_KIND_ICON[track.kind] ?? "layers"}</span
+              >
+              <div class="track-actions">
+                ${this.renderEye(track.id, track.kind, hidden, locked)}
+                ${locked
+                  ? html`<span
+                      class="material-symbols-outlined track-lock"
+                      title="Locked while the caption panel is open"
+                      >lock</span
+                    >`
+                  : html`<button
+                      type="button"
+                      class="opt-icon-btn track-menu ${this.openMenu
+                        ?.trackId === track.id
+                        ? "is-on"
+                        : ""}"
+                      title="Track options"
+                      aria-haspopup="menu"
+                      aria-expanded=${this.openMenu?.trackId === track.id}
+                      @click=${(e: MouseEvent) => this.toggleMenu(track.id, e)}
+                    >
+                      <span class="material-symbols-outlined">more_vert</span>
+                    </button>`}
+              </div>
             </div>
-          </div>
-          <!-- Offered while the timeline is locked too: a row's height is
+            <!-- Offered while the timeline is locked too: a row's height is
                view state, and the caption session never rewrites it. -->
-          <div
-            class="track-resize-grip ${this.resizingTrackId === track.id
-              ? "is-dragging"
-              : ""}"
-            role="separator"
-            aria-orientation="horizontal"
-            aria-label="Resize track"
-            data-keeps-selection
-            @pointerdown=${(e: PointerEvent) =>
-              this.onGripPointerDown(track.id, e)}
-            @mousedown=${(e: MouseEvent) => e.preventDefault()}
-            @dblclick=${() =>
-              this.rowResize.dispatch({ type: "dblclick", trackId: track.id })}
-          ></div>
-        </div>
-      `;
-    });
+            <div
+              class="track-resize-grip ${this.resizingTrackId === track.id
+                ? "is-dragging"
+                : ""}"
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="Resize track"
+              data-keeps-selection
+              @pointerdown=${(e: PointerEvent) =>
+                this.onGripPointerDown(track.id, e)}
+              @mousedown=${(e: MouseEvent) => e.preventDefault()}
+              @dblclick=${() =>
+                this.rowResize.dispatch({
+                  type: "dblclick",
+                  trackId: track.id,
+                })}
+            ></div>
+          </div>
+        `;
+      },
+    );
 
     const menu = this.renderMenu(ordered);
 
@@ -739,7 +746,11 @@ export class ElementTimelineLeftOption extends LitElement {
           background-color: rgba(255, 255, 255, 0.04);
           font-size: 15px;
           line-height: 1;
-          font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+          font-variation-settings:
+            "FILL" 0,
+            "wght" 400,
+            "GRAD" 0,
+            "opsz" 20;
         }
 
         /* The eye and the menu, pushed to the end together. .opt-icon-btn
@@ -779,7 +790,11 @@ export class ElementTimelineLeftOption extends LitElement {
           color: #7f878f;
           font-size: 15px;
           line-height: 1;
-          font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+          font-variation-settings:
+            "FILL" 0,
+            "wght" 400,
+            "GRAD" 0,
+            "opsz" 20;
           cursor: default;
         }
 
@@ -797,6 +812,23 @@ export class ElementTimelineLeftOption extends LitElement {
           opacity: 0.4;
           pointer-events: none;
         }
+
+        /* No tracks: the column is hatched over below the ruler strip. Pinned
+           to the column rather than the scrolled layer, so the wheel cannot
+           carry it away. */
+        .track-empty-hatch {
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-image: repeating-linear-gradient(
+            -45deg,
+            rgba(255, 255, 255, 0.06) 0,
+            rgba(255, 255, 255, 0.06) 1px,
+            transparent 1px,
+            transparent 7px
+          );
+        }
       </style>
       <div
         style="width: ${width}px;position: absolute; height: 100%; overflow: hidden;"
@@ -804,15 +836,20 @@ export class ElementTimelineLeftOption extends LitElement {
         @wheel=${this._handleWheel}
       >
         <div
-          style="position: relative; top: -${
-            this.timelineOptions.canvasVerticalScroll
-          }px;"
+          style="position: relative; top: -${this.timelineOptions
+            .canvasVerticalScroll}px;"
         >
           <!-- Matches the canvas's own reserved strip so the headers line up
                with the rows they name. -->
-          <div style="height: ${RULER_OFFSET}px;"></div>
+          <div style="height: ${RULER_OFFSET - 8}px;"></div>
           ${rows}
         </div>
+        ${ordered.length === 0
+          ? html`<div
+              class="track-empty-hatch"
+              style="top: ${RULER_OFFSET - 8}px;"
+            ></div>`
+          : null}
       </div>
       <div
         class="split-col-bar"
