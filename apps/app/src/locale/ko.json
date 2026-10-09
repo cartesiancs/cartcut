@@ -4,12 +4,13 @@
     "start": "랜더링 시작"
   },
   "setting": {
+    "settings_title": "설정",
+    "section_cloud": "클라우드",
+    "close": "닫기",
     "cloud_content": "클라우드 콘텐츠",
-    "cloud_content_desc": "클라우드의 무료 이펙트, 트랜지션, 그래픽, 템플릿, 미디어를 함께 보여줍니다. 끄면 이 컴퓨터에 있는 것만 사용합니다.",
     "cloud_url": "서버 주소",
-    "cloud_url_desc": "비워 두면 기본 서버를 사용합니다.",
-    "cloud_url_invalid": "? 와 # 가 없는 http 또는 https 주소를 입력하세요.",
-    "cloud_url_reset": "기본 서버로 되돌리기",
+    "cloud_url_invalid": "잘못된 주소",
+    "cloud_url_reset": "기본값으로",
     "cloud_assets": "클라우드 에셋",
     "local_assets": "로컬 파일",
     "cloud_search": "클라우드 에셋 검색",

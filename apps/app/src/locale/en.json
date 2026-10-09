@@ -4,12 +4,13 @@
     "start": "render start"
   },
   "setting": {
+    "settings_title": "Settings",
+    "section_cloud": "Cloud",
+    "close": "Close",
     "cloud_content": "Cloud content",
-    "cloud_content_desc": "Free effects, transitions, graphics, templates and media from the cloud. Turn it off to use only what is on this computer.",
     "cloud_url": "Server URL",
-    "cloud_url_desc": "Leave empty to use the default server.",
-    "cloud_url_invalid": "Enter an http or https address with no ? or #.",
-    "cloud_url_reset": "Use the default server",
+    "cloud_url_invalid": "Invalid URL",
+    "cloud_url_reset": "Reset",
     "cloud_assets": "Cloud assets",
     "local_assets": "Local files",
     "cloud_search": "Search cloud assets",

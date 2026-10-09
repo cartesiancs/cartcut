@@ -116,6 +116,7 @@ export class App extends LitElement {
     return html`
       <div class="top-bar ${IS_MAC ? "top-bar-mac" : "top-bar-pc"}">
         <b>${this.topBarTitle}</b>
+        <settings-button></settings-button>
         <export-button></export-button>
       </div>
     `;
@@ -166,6 +167,7 @@ export class App extends LitElement {
         <toast-box></toast-box>
         <subtitle-import-dialog></subtitle-import-dialog>
         <media-info-dialog></media-info-dialog>
+        <settings-dialog></settings-dialog>
         <!-- Over the other dialogs and under the toasts: a toast about the take has
              to stay readable while this is up. -->
         <recording-process-dialog></recording-process-dialog>

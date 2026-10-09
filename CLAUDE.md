@@ -384,6 +384,8 @@ features/speed/        the ramp's graph editor; the curve is timeline/speedCurve
 features/update/       the update card; main's half is electron/lib/updateSession.ts
 features/cloud/        cloud content: store, merge rule, badge, the asset view; main's
                        half is electron/lib/cloud/, the server is server/
+features/settings/     the settings dialog behind the gear beside Export: sections
+                       down the left, cloud first; labels only, no prose
 features/mediaInfo/    Show Info: labels and layout here; the ffprobe call and its
                        parse are main's, electron/lib/mediaInfo*.ts
 features/motion/       a damped spring as a CSS linear(): the tour, the tile hover
