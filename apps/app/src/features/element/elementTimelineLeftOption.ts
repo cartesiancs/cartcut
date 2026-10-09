@@ -841,7 +841,7 @@ export class ElementTimelineLeftOption extends LitElement {
         >
           <!-- Matches the canvas's own reserved strip so the headers line up
                with the rows they name. -->
-          <div style="height: ${RULER_OFFSET - 8}px;"></div>
+          <div style="height: ${RULER_OFFSET}px;"></div>
           ${rows}
         </div>
         ${ordered.length === 0
