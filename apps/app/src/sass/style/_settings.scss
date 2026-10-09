@@ -18,7 +18,10 @@ settings-button {
   -webkit-app-region: no-drag;
 }
 
-// A circle beside the Export pill: the same border, fill and height.
+// A bare glyph beside the Export pill, the pill's height: no border, no
+// fill, and no focus ring, which would otherwise draw round it every time the
+// dialog closes and hands focus back. Hover and keyboard focus both show as
+// the same soft fill.
 .settings-trigger {
   -webkit-app-region: no-drag;
   appearance: none;
@@ -29,17 +32,22 @@ settings-button {
   height: 20px;
   padding: 0;
   margin: 0;
-  border: 1px solid #3a3f44;
+  border: none;
   border-radius: 999px;
-  background-color: #1c1f23;
-  color: #dedede;
+  outline: none;
+  background-color: transparent;
+  color: #c3c9cf;
   cursor: pointer;
-  transition: background-color 140ms ease-out;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
 }
 
 .settings-trigger:hover,
+.settings-trigger:focus-visible,
 .settings-trigger[aria-expanded="true"] {
   background-color: #2b2f36;
+  color: #f1f3f5;
 }
 
 .settings-trigger > .settings-trigger-icon {
@@ -443,7 +451,6 @@ settings-button {
   font-size: 11px;
 }
 
-.settings-trigger:focus-visible,
 .settings-nav-item:focus-visible,
 .settings-close:focus-visible,
 .settings-field-btn:focus-visible,
