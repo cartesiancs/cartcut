@@ -109,41 +109,41 @@ export class UpdatePromptElement extends LitElement {
 
     return html`
       <div
-        class="update-prompt bg-dark text-light border border-secondary rounded shadow p-3"
+        class="update-prompt"
         role="status"
         aria-live="polite"
         data-keeps-selection
       >
-        <div class="d-flex align-items-start gap-2">
+        <div class="update-prompt-head">
           <span class="material-symbols-outlined update-prompt-icon"
             >download</span
           >
-          <div class="flex-grow-1 small" title=${detail}>
-            <div class="fw-semibold">${this.lc.t(prompt.messageKey)}</div>
-            <div class="text-secondary">CartCut v${view.version}</div>
+          <div class="update-prompt-text" title=${detail}>
+            <div class="update-prompt-title">
+              ${this.lc.t(prompt.messageKey)}
+            </div>
+            <div class="update-prompt-version">CartCut v${view.version}</div>
           </div>
           <button
             type="button"
-            class="btn btn-sm btn-link text-light p-0 lh-1"
+            class="update-prompt-close"
             title=${this.lc.t("update.close")}
             aria-label=${this.lc.t("update.close")}
             @click=${this.dismiss}
           >
-            <span class="material-symbols-outlined update-prompt-icon"
-              >close</span
-            >
+            <span class="material-symbols-outlined">close</span>
           </button>
         </div>
         ${this.bar(prompt)}
-        <div class="d-flex justify-content-end align-items-center gap-2 mt-2">
+        <div class="update-prompt-foot">
           ${typeof prompt.progress === "number" && prompt.action == null
-            ? html`<span class="small text-secondary"
+            ? html`<span class="update-prompt-percent"
                 >${prompt.progress}%</span
               >`
             : nothing}
           <button
             type="button"
-            class="btn btn-sm btn-primary"
+            class="update-prompt-action"
             ?disabled=${prompt.action == null}
             @click=${this.act}
           >
@@ -160,17 +160,17 @@ export class UpdatePromptElement extends LitElement {
     }
     const known = prompt.progress !== "indeterminate";
     const percent = known ? (prompt.progress as number) : 100;
+    // The indeterminate segment's width is the stylesheet's, so it is not
+    // written here.
     return html`
-      <div class="progress mt-2" style="height: 4px;">
+      <div class="update-prompt-track ${known ? "" : "is-indeterminate"}">
         <div
-          class="progress-bar ${known
-            ? ""
-            : "progress-bar-striped progress-bar-animated"}"
+          class="update-prompt-fill"
           role="progressbar"
           aria-valuenow=${known ? percent : nothing}
           aria-valuemin="0"
           aria-valuemax="100"
-          style="width: ${percent}%;"
+          style=${known ? `width: ${percent}%;` : ""}
         ></div>
       </div>
     `;

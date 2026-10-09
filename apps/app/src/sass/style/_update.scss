@@ -4,6 +4,13 @@
 // holds the MCP and help icons. The same layer as `<background-tasks>`,
 // which sits bottom-left, and below the onboarding scrim (9500), so a first
 // run's tour is never covered by it.
+//
+// A dark card in the side panels' greys (`$opt-*`, from `_option.scss`,
+// imported first), with the white primary button the asset and template
+// panels already use. No `.btn` anywhere in it: both stylesheets pin that
+// class's padding `!important`, so a small button cannot be sized on it.
+// Every icon rule is two classes deep, because `material-symbols/outlined`
+// is imported after this file and its 24px would win a single class.
 update-prompt {
   display: block;
 }
@@ -13,10 +20,177 @@ update-prompt {
   right: 1rem;
   bottom: 2.5rem;
   z-index: 1080;
-  width: 300px;
+  width: 320px;
   max-width: calc(100vw - 2rem);
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background-color: $opt-card;
+  color: $opt-bright;
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.45),
+    0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
-.update-prompt-icon {
-  font-size: 18px;
+.update-prompt-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.update-prompt .update-prompt-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid $opt-line;
+  border-radius: 8px;
+  background-color: $opt-field;
+  color: $opt-text;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.update-prompt-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.update-prompt-title {
+  color: $opt-bright;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.update-prompt-version {
+  margin-top: 2px;
+  color: $opt-label;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.update-prompt-close {
+  appearance: none;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: 2px -4px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background-color: transparent;
+  color: $opt-label;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.update-prompt-close > .material-symbols-outlined {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.update-prompt-close:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+  color: $opt-bright;
+}
+
+// ------------------------------------------------------------------ the bar
+
+.update-prompt-track {
+  position: relative;
+  height: 4px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.update-prompt-fill {
+  height: 100%;
+  border-radius: inherit;
+  background-color: $opt-bright;
+  transition: width 200ms ease-out;
+}
+
+// While Squirrel checks the download and reports nothing: a segment that
+// travels, where Bootstrap's bar was striped.
+.update-prompt-track.is-indeterminate > .update-prompt-fill {
+  width: 40%;
+  animation: update-prompt-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes update-prompt-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+// --------------------------------------------------------------- the action
+
+.update-prompt-foot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.update-prompt-percent {
+  color: $opt-label;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.update-prompt-action {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 12px;
+  margin: 0;
+  border: 0;
+  border-radius: 8px;
+  background-color: $opt-bright;
+  color: $opt-card;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    opacity 140ms ease-out;
+}
+
+.update-prompt-action:hover:not(:disabled) {
+  background-color: #d9dde1;
+}
+
+.update-prompt-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.update-prompt-action:focus-visible,
+.update-prompt-close:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.35);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-prompt-track.is-indeterminate > .update-prompt-fill {
+    animation-duration: 3s;
+  }
 }
