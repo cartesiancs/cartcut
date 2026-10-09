@@ -215,14 +215,6 @@ export class ControlSetting extends LitElement {
     beginInputScrub(e, spec);
   }
 
-  _handleClickChangeLang() {
-    if (this.lc.value == "ko") {
-      this.lc.changeLanguage("en");
-    } else {
-      this.lc.changeLanguage("ko");
-    }
-  }
-
   /**
    * Forgets the tour and the tutorial and puts the tour back on screen.
    *
@@ -812,15 +804,16 @@ export class ControlSetting extends LitElement {
   }
 
   /**
-   * The two modal buttons, the tour reset and the version, below both panes.
+   * The shortcuts button, the tour reset and the version, below both panes.
+   * The language moved to the settings dialog (`features/settings/`).
    *
    * Not in either tab because they belong to neither. Save and Load used to sit
    * here too; they are File → Save Project (⌘S) and Open Project (⌘O), and a
    * second copy of a menu command is the thing that goes stale.
    *
-   * The reset carries its label rather than joining the icon row above it: the
-   * other two are conventional glyphs, and nothing about an icon says which of
-   * the app's several things it would put back.
+   * The reset carries its label rather than sitting beside the keyboard icon:
+   * that is a conventional glyph, and nothing about an icon says which of the
+   * app's several things a reset would put back.
    */
   private renderCommonSection() {
     return html`
@@ -831,15 +824,6 @@ export class ControlSetting extends LitElement {
         data-bs-target="#shortKey"
       >
         <span class="material-symbols-outlined"> keyboard </span>
-      </button>
-
-      <button
-        type="button"
-        class="btn btn-sm btn-default text-light mt-1"
-        data-bs-toggle="modal"
-        data-bs-target="#changeLang"
-      >
-        <span class="material-symbols-outlined"> language </span>
       </button>
 
       <!-- <button

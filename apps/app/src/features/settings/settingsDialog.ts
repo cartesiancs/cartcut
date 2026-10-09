@@ -6,8 +6,9 @@
  * comes up white), light DOM, every handler an arrow property, keys caught in
  * the capture phase on `window`, and focus handed back on close. Added here: a
  * Tab trap (`automatic-caption/src/clipPicker.ts`), typing passed through so
- * copy and paste still work in the address field, and a sidebar of sections,
- * of which the cloud is the first.
+ * copy and paste still work in the address field, and a sidebar of sections:
+ * General (the language, which used to be a Bootstrap modal of its own) and
+ * the cloud.
  *
  * Words are kept to labels. A row says what it controls in a word or two, and
  * the only sentence anywhere is an error.
@@ -18,6 +19,7 @@ import { customElement, state } from "lit/decorators.js";
 
 import { LocaleController } from "../../controllers/locale";
 import { isTypingEvent } from "../../utils/typingTarget";
+import { isProjectDirty } from "../project/projectDirty";
 import {
   cloudStore,
   setCloudEnabled,
@@ -26,10 +28,19 @@ import {
 } from "../cloud/cloudStore";
 import { criticalDamping, springDurationMs, springEasing, type Spring } from "../motion/spring";
 
-type Section = "cloud";
+type Section = "general" | "cloud";
 
 const SECTIONS: ReadonlyArray<{ id: Section; icon: string; label: string }> = [
+  { id: "general", icon: "tune", label: "setting.section_general" },
   { id: "cloud", icon: "cloud", label: "setting.section_cloud" },
+];
+
+type Language = "en" | "ko";
+
+/** Each in its own language, so someone who cannot read the other can find theirs. */
+const LANGUAGES: ReadonlyArray<{ id: Language; label: string }> = [
+  { id: "en", label: "English" },
+  { id: "ko", label: "한국어" },
 ];
 
 /**
@@ -56,7 +67,18 @@ function prefersReducedMotion(): boolean {
 export class SettingsDialog extends LitElement {
   @state() private isOpen = false;
   @state() private leaving = false;
-  @state() private section: Section = "cloud";
+  @state() private section: Section = "general";
+  /**
+   * The language picked here, which takes effect at the next launch. `null`
+   * until the dialog first opens, then whatever was last picked.
+   *
+   * Written to the store directly rather than through `lc.changeLanguage`,
+   * which would switch this dialog alone and leave the rest of the app in the
+   * old language: every `LocaleController` reads `LANG` once, when it
+   * connects. `this.lc.value` therefore stays the language the app is running
+   * in, and the two differ exactly while a restart is owed.
+   */
+  @state() private language: Language | null = null;
   /** Whether main refused the last address typed into the server field. */
   @state() private urlError = false;
 
@@ -86,6 +108,7 @@ export class SettingsDialog extends LitElement {
     this.isOpen = true;
     this.leaving = false;
     this.urlError = false;
+    this.language ??= this.lc.value;
 
     // The panel itself takes focus, not its first control: a ring around a
     // nav item nobody pressed is noise, and the next Tab lands on that item.
@@ -233,6 +256,69 @@ export class SettingsDialog extends LitElement {
     input?.focus();
   };
 
+  private onPickLanguage = (language: Language): void => {
+    this.language = language;
+    void window.electronAPI?.req?.store?.set("LANG", language);
+  };
+
+  /**
+   * `app:restart` exits without the unsaved-project guard, so the question is
+   * asked here, and only when there is something to lose: the update card's
+   * rule and its wording (`updatePrompt.ts`).
+   */
+  private onRestart = (): void => {
+    if (isProjectDirty() && !window.confirm(this.lc.t("update.unsaved_confirm"))) {
+      return;
+    }
+    window.electronAPI?.req?.app?.restart?.();
+  };
+
+  private generalSection() {
+    const t = (key: string) => this.lc.t(key);
+    const chosen = this.language ?? this.lc.value;
+    const owed = chosen !== this.lc.value;
+
+    return html`
+      <div class="settings-group">
+        <div class="settings-row">
+          <span class="settings-label" id="settings-language-label">
+            ${t("setting.language")}
+          </span>
+          <div class="settings-row-control is-end">
+            <div
+              class="settings-seg"
+              role="radiogroup"
+              aria-labelledby="settings-language-label"
+            >
+              ${LANGUAGES.map(
+                (language) => html`
+                  <button
+                    type="button"
+                    role="radio"
+                    class="settings-seg-item ${language.id === chosen ? "is-on" : ""}"
+                    aria-checked=${language.id === chosen ? "true" : "false"}
+                    lang=${language.id}
+                    @click=${() => this.onPickLanguage(language.id)}
+                  >
+                    ${language.label}
+                  </button>
+                `,
+              )}
+            </div>
+            ${owed
+              ? html`<div class="settings-note">
+                  <span>${t("setting.restart_to_apply")}</span>
+                  <button type="button" class="settings-text-btn" @click=${this.onRestart}>
+                    ${t("setting.restart")}
+                  </button>
+                </div>`
+              : nothing}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   private cloudSection() {
     const cloud = cloudStore.getState();
     // No bridge on the web build: the rows stay, so the dialog does not change
@@ -351,7 +437,9 @@ export class SettingsDialog extends LitElement {
                 <span class="material-symbols-outlined">close</span>
               </button>
             </div>
-            <div class="settings-main-body">${this.cloudSection()}</div>
+            <div class="settings-main-body">
+              ${current.id === "general" ? this.generalSection() : this.cloudSection()}
+            </div>
           </div>
         </div>
       </div>

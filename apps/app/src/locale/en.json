@@ -4,6 +4,10 @@
     "start": "render start"
   },
   "setting": {
+    "section_general": "General",
+    "language": "Language",
+    "restart_to_apply": "Restart to apply",
+    "restart": "Restart",
     "settings_title": "Settings",
     "section_cloud": "Cloud",
     "close": "Close",
@@ -106,14 +110,6 @@
     "speed_ramp_option": "Ramp",
     "speed_ramp_preset": "Apply a preset",
     "speed_ramp_average": "Average"
-  },
-  "modal": {
-    "change_language": "Change Language",
-    "change_language_description": "If you change the language, you will have to restart the app.",
-    "needs_to_restart": " Needs to Restart",
-    "needs_to_restart_description": "WARNING: You may lose unsaved tasks.",
-    "restart": "Restart",
-    "close": "Close"
   },
   "onboarding": {
     "welcome_subtitle": "welcome to cartcut. a powerful video editor.",

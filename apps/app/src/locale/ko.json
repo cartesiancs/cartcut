@@ -4,6 +4,10 @@
     "start": "랜더링 시작"
   },
   "setting": {
+    "section_general": "일반",
+    "language": "언어",
+    "restart_to_apply": "재시작 후 적용",
+    "restart": "재시작",
     "settings_title": "설정",
     "section_cloud": "클라우드",
     "close": "닫기",
@@ -106,14 +110,6 @@
     "speed_ramp_option": "곡선",
     "speed_ramp_preset": "프리셋 적용",
     "speed_ramp_average": "평균"
-  },
-  "modal": {
-    "change_language": "언어 변경",
-    "change_language_description": "언어를 변경하시면 앱을 재시작해야 합니다.",
-    "needs_to_restart": "재시작 필요",
-    "needs_to_restart_description": "경고: 저장되지 않은 작업물은 사라질 수 있습니다. 프로젝트를 저장했는지 확인해주세요.",
-    "restart": "재시작",
-    "close": "닫기"
   },
   "onboarding": {
     "welcome_subtitle": "강력한 영상 편집기, 카트컷에 오신 것을 환영합니다.",

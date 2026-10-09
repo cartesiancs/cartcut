@@ -252,6 +252,74 @@ settings-button {
   gap: 4px;
 }
 
+// A control that keeps its own width, at the right of its row.
+.settings-row-control.is-end {
+  align-items: flex-end;
+}
+
+// `.opt-tabs`, the inspector's segmented control, at a row's 30px.
+.settings-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid $opt-line;
+  border-radius: 9px;
+  background-color: #121416;
+}
+
+.settings-seg-item {
+  appearance: none;
+  height: 24px;
+  padding: 0 12px;
+  margin: 0;
+  border: none;
+  border-radius: 7px;
+  background-color: transparent;
+  color: $opt-label;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.settings-seg-item:hover {
+  color: $opt-text;
+}
+
+.settings-seg-item.is-on {
+  background-color: $opt-raised;
+  color: $opt-bright;
+}
+
+// A short note under a control, with the one action it asks for.
+.settings-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: $opt-label;
+  font-size: 11px;
+}
+
+.settings-text-btn {
+  appearance: none;
+  height: 24px;
+  padding: 0 10px;
+  margin: 0;
+  border: 1px solid $opt-line-strong;
+  border-radius: 7px;
+  background-color: $opt-raised;
+  color: $opt-bright;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 140ms ease-out;
+}
+
+.settings-text-btn:hover {
+  background-color: #343b42;
+}
+
 // `.ext-switch`'s colours at the size a dialog row wants.
 .settings-switch {
   appearance: none;
@@ -379,6 +447,8 @@ settings-button {
 .settings-nav-item:focus-visible,
 .settings-close:focus-visible,
 .settings-field-btn:focus-visible,
+.settings-seg-item:focus-visible,
+.settings-text-btn:focus-visible,
 .settings-switch:focus-visible {
   outline: 1px solid #5a6067;
   outline-offset: 1px;

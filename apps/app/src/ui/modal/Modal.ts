@@ -95,18 +95,6 @@ export class ModalList extends LitElement {
     window.electronAPI.req.app.forceClose();
   }
 
-  _handleClickChangeLang(lang) {
-    this.lc.changeLanguage(lang);
-    const needsToRestartModal = new bootstrap.Modal("#NeedsToRestart", {
-      keyboard: false,
-    });
-    needsToRestartModal.show();
-  }
-
-  _handleClickRestart() {
-    window.electronAPI.req.app.restart();
-  }
-
   render() {
     return html`
       <dds-modal
@@ -272,88 +260,6 @@ export class ModalList extends LitElement {
             <div class="modal-body">
               <h5 class="modal-title text-white font-weight-lg">Shortcut</h5>
               <div class="mb-3">${this.shortcutTable()}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div
-        class="modal fade"
-        id="changeLang"
-        data-bs-keyboard="false"
-        tabindex="-1"
-      >
-        <div class="modal-dialog modal-dialog-centered">
-          <div class="modal-content bg-dark">
-            <div class="modal-body">
-              <h5 class="modal-title text-white font-weight-lg">
-                ${this.lc.t("modal.change_language")}
-              </h5>
-
-              <b class="text-secondary"
-                ><i class="fas fa-info-circle"></i> ${this.lc.t(
-                  "modal.change_language_description",
-                )}
-              </b>
-              <div class="mt-3">
-                <div class="flex row mb-3">
-                  <button
-                    class="btn btn-sm btn-default text-light mt-1"
-                    @click=${() => this._handleClickChangeLang("en")}
-                  >
-                    English
-                  </button>
-
-                  <button
-                    class="btn btn-sm btn-default text-light mt-1"
-                    @click=${() => this._handleClickChangeLang("ko")}
-                  >
-                    한국어
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div
-        class="modal fade"
-        id="NeedsToRestart"
-        data-bs-keyboard="false"
-        data-bs-backdrop="static"
-        tabindex="-1"
-      >
-        <div class="modal-dialog modal-dialog-centered modal-lg">
-          <div class="modal-content bg-dark">
-            <div class="modal-body">
-              <h5 class="modal-title text-white font-weight-lg">
-                ${this.lc.t("modal.needs_to_restart")}
-              </h5>
-
-              <b class="text-danger"
-                ><i class="fas fa-info-circle"></i> ${this.lc.t(
-                  "modal.needs_to_restart_description",
-                )}
-              </b>
-              <div class="mt-3">
-                <div class="flex row mb-3 gap-2">
-                  <button
-                    type="button"
-                    class="col btn btn-secondary"
-                    data-bs-dismiss="modal"
-                  >
-                    ${this.lc.t("modal.close")}
-                  </button>
-                  <button
-                    type="button"
-                    @click=${this._handleClickRestart}
-                    class="col btn btn-danger"
-                  >
-                    ${this.lc.t("modal.restart")}
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         </div>
