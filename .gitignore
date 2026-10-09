@@ -8,6 +8,7 @@
 /apps/app/dist
 .DS_Store
 /even-terminal-*.log
+/server/target
 .claude/settings.local.json
 
 # E2E: downloaded/derived media fixtures and per-run diagnostic artifacts.

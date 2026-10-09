@@ -13,7 +13,9 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { app, net, utilityProcess, type UtilityProcess } from "electron";
+import { app, utilityProcess, type UtilityProcess } from "electron";
+
+import { netFetch } from "../netFetch";
 
 import { MODEL_TOTAL_BYTES, isVoiceId } from "./ttsManifest";
 import {
@@ -25,7 +27,6 @@ import {
 import {
   downloadModel,
   type DownloadProgress,
-  type DownloadResponse,
 } from "./ttsDownload";
 import { seedFor, speechKey } from "./ttsCacheKey";
 import { coerceLang } from "./ttsText";
@@ -97,53 +98,13 @@ export function coerceRequest(raw: {
   };
 }
 
-async function* streamOf(
-  body: ReadableStream<Uint8Array>,
-): AsyncIterable<Uint8Array> {
-  const reader = body.getReader();
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) {
-        return;
-      }
-      if (value != null) {
-        yield value;
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-async function* noChunks(): AsyncIterable<Uint8Array> {}
-
-/**
- * Electron's fetch, narrowed to the download port.
- *
- * `net.fetch` rather than the global one because it honours the system proxy,
- * and a user behind a corporate proxy is exactly the user for whom a 400MB
- * download otherwise fails with nothing useful said.
- */
-async function electronFetch(
-  url: string,
-  signal?: AbortSignal,
-): Promise<DownloadResponse> {
-  const response = await net.fetch(url, { signal });
-  return {
-    ok: response.ok,
-    status: response.status,
-    chunks: response.body == null ? noChunks() : streamOf(response.body),
-  };
-}
-
 export function installModel(
   onProgress?: (progress: DownloadProgress) => void,
   signal?: AbortSignal,
 ): Promise<{ downloaded: string[] }> {
   return downloadModel({
     userDataDir: userData(),
-    fetch: electronFetch,
+    fetch: netFetch,
     onProgress,
     signal,
   });

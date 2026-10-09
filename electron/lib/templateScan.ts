@@ -31,7 +31,7 @@ import * as fsp from "fs/promises";
  * came from, and `templateLib.remove` has to refuse an extension's folder the
  * way it already refuses a built-in.
  */
-export type TemplateOrigin = "builtin" | "user" | "extension";
+export type TemplateOrigin = "builtin" | "user" | "extension" | "cloud";
 
 /** What makes a folder a template. Must match `features/template/archive.ts`. */
 export const TEMPLATE_DOCUMENT = "template.ngt";

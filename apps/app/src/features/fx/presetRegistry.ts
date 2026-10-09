@@ -41,6 +41,15 @@ let failures: Array<{ id: string; dir: string; errors: string[] }> = [];
 let loaded = false;
 
 /**
+ * Which `loadPresets` call is the latest. Two in flight (a cloud download
+ * finishing while an extension reloads) resolve in either order, and the
+ * older read must not replace the newer one's map.
+ */
+let generation = 0;
+/** The latest call's promise, which an overtaken call waits on instead. */
+let latest: Promise<void> = Promise.resolve();
+
+/**
  * Notified when the set of installed presets changes.
  *
  * The registry is module state, not a store, and that is fine for everything
@@ -97,7 +106,18 @@ function presetBridge(): any {
  * compositor renders every effect as a pass-through — visibly wrong, but not a
  * crash mid-export.
  */
-export async function loadPresets(): Promise<void> {
+export function loadPresets(): Promise<void> {
+  const mine = ++generation;
+  // An overtaken call resolves when the newest one has applied, so whoever
+  // awaited it (an install about to look its preset up) sees the result.
+  const settled: Promise<void> = readAndApply(mine).then(() =>
+    mine === generation ? undefined : latest,
+  );
+  latest = settled;
+  return settled;
+}
+
+async function readAndApply(mine: number): Promise<void> {
   const nextPresets = new Map<string, FxPreset>();
   const nextFailures: typeof failures = [];
 
@@ -108,6 +128,9 @@ export async function loadPresets(): Promise<void> {
   } catch (error) {
     console.error("preset: could not enumerate presets", error);
     payloads = [];
+  }
+  if (mine !== generation) {
+    return;
   }
 
   for (const payload of payloads) {
@@ -158,8 +181,22 @@ export function presetsLoaded(): boolean {
   return loaded;
 }
 
+/**
+ * Display order: built-ins, extensions, the user's own, then downloaded cloud
+ * presets. Cloud is last on purpose and must stay last: the panel shows local
+ * before cloud, and `presetsOfKind("transition")[0]` is the default transition.
+ */
 function originRank(origin: FxPreset["origin"]): number {
-  return origin === "builtin" ? 0 : origin === "extension" ? 1 : 2;
+  switch (origin) {
+    case "builtin":
+      return 0;
+    case "extension":
+      return 1;
+    case "cloud":
+      return 3;
+    default:
+      return 2;
+  }
 }
 
 /** The preset with this id, or `null` when it is not installed. */

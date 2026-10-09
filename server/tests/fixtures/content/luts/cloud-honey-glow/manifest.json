@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "id": "com.cartcut.cloud.lut.honey-glow",
+  "kind": "lut",
+  "name": "Honey Glow",
+  "category": "warm",
+  "author": "Cartcut",
+  "version": "1.0.0",
+  "render": {
+    "type": "lut",
+    "source": "lut.cube"
+  }
+}

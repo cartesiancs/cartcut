@@ -34,6 +34,7 @@ import { app } from "electron";
 import { scanPresetRoot, type RawPresetPayload } from "./presetScan.js";
 import { planLutInstall } from "./lutInstall.js";
 import { planProgramSave } from "./programSave.js";
+import { cloudPresetRoot } from "./cloud/cloudPaths.js";
 
 export type { RawPresetPayload };
 
@@ -120,7 +121,11 @@ export const presetLib = {
     }
 
     const user = await scanPresetRoot(userPresetPath(), "user");
-    return { presets: [...builtin, ...extension, ...user] };
+
+    // Downloaded cloud presets last, so under first-wins a cloud folder can
+    // never shadow a preset the user already had from anywhere else.
+    const cloud = await scanPresetRoot(cloudPresetRoot(app.getPath("userData")), "cloud");
+    return { presets: [...builtin, ...extension, ...user, ...cloud] };
   },
 
   /** The folder to reveal when the user asks where to put presets. */

@@ -49,7 +49,7 @@ export type InstalledTemplate = {
    * reason `presetScan.ts` gives about presets: the browser shows where a
    * template came from, and only a user's own may be deleted from here.
    */
-  origin: "builtin" | "user" | "extension";
+  origin: "builtin" | "user" | "extension" | "cloud";
   /** Set only for `"extension"`, so a row can name the extension that brought it. */
   extensionId?: string;
   /** The folder, absolute, POSIX-separated. */
@@ -71,7 +71,8 @@ export type TemplateListing = InstalledTemplate & {
 type Entry =
   | { state: "loading" }
   | { state: "ready"; data: TemplateData }
-  | { state: "failed"; message: string };
+  // `missing` marks "no such template", the one failure an install can cure.
+  | { state: "failed"; message: string; missing?: true };
 
 const entries = new Map<string, Entry>();
 let library: TemplateListing[] = [];
@@ -116,8 +117,11 @@ export function setTemplateLibrary(next: readonly InstalledTemplate[]): void {
   });
 
   const live = new Set(library.map((entry) => entry.id));
-  for (const id of [...entries.keys()]) {
-    if (!live.has(id)) {
+  for (const [id, entry] of [...entries]) {
+    // And a "not installed" for one that now is, or a project opened before
+    // its cloud template was downloaded draws nothing until a restart.
+    const cured = entry.state === "failed" && entry.missing === true;
+    if (!live.has(id) || cured) {
       entries.delete(id);
     }
   }
@@ -165,6 +169,7 @@ export async function loadTemplate(
     entries.set(templateId, {
       state: "failed",
       message: "no template with that id is installed",
+      missing: true,
     });
     return null;
   }

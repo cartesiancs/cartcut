@@ -24,6 +24,7 @@ import { selectionStore } from "../../states/selectionStore";
 import {
   defaultParamsFor,
   loadPresets,
+  presetById,
   presetsOfKind,
   type FxPreset,
 } from "./presetRegistry";
@@ -53,6 +54,11 @@ import {
   createFxPreviewProvider,
   previewKey,
 } from "./fxPreviewProvider";
+import { cloudItemsOf, ensureCatalog, subscribeCloudListing } from "../cloud/cloudStore";
+import { cloudItemMatches, fxTileCategory, mergeFxTiles, type FxTile } from "../cloud/cloudMerge";
+import { createClickOrder, downloadThenApply } from "../cloud/cloudApply";
+import type { CloudItem } from "../cloud/cloudTypes";
+import "../cloud/cloudBadge";
 
 /**
  * One renderer for both browsers.
@@ -117,6 +123,14 @@ export class FxPresetBrowser extends LitElement {
   private hoverHandle = 0;
   /** Unsubscribes gathered at mount, run on teardown. */
   private teardown: Array<() => void> = [];
+  /** Which click is the latest, so a slow download cannot apply over a newer one. */
+  private clicks = createClickOrder();
+  /**
+   * Whether this grid has been on screen. The catalog is asked for only from
+   * then on: every grid is mounted hidden at launch, and asking before would
+   * call the API on every start.
+   */
+  private seen = false;
 
   createRenderRoot() {
     // The grid reflects what is selected — a transition tile applies to the
@@ -132,6 +146,7 @@ export class FxPresetBrowser extends LitElement {
       previews.onReady(() => this.paintTiles()),
       graphicPreviews.onReady(() => this.paintTiles()),
       subscribePresets(() => this.requestUpdate()),
+      subscribeCloudListing(() => this.requestUpdate()),
     );
 
     // Or the timeline canvas's document-level mousedown clears the selection
@@ -156,6 +171,8 @@ export class FxPresetBrowser extends LitElement {
     // happened to re-render it. `lutBrowser` carries the same observer.
     const visibility = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
+        this.seen = true;
+        ensureCatalog(this.kind);
         this.paintTiles();
       }
     });
@@ -175,6 +192,11 @@ export class FxPresetBrowser extends LitElement {
   updated() {
     // Tiles are re-created whenever the list changes, so they start blank.
     this.paintTiles();
+    // A no-op unless the catalog is missing or stale: the setting just came
+    // back on, the connection just came back, ten minutes went by.
+    if (this.seen && !this.isHidden()) {
+      ensureCatalog(this.kind);
+    }
   }
 
   // ------------------------------------------------------------------ apply
@@ -322,6 +344,31 @@ export class FxPresetBrowser extends LitElement {
   }
 
   private handleClick(preset: FxPreset) {
+    this.clicks.next();
+    this.applyPreset(preset);
+  }
+
+  /**
+   * A cloud tile: download it, then exactly what its local tile would do.
+   * Applied only if no other tile in this grid was clicked meanwhile.
+   */
+  private handleCloudClick(item: CloudItem) {
+    const token = this.clicks.next();
+    void downloadThenApply(this.clicks, token, this.kind, item.id, item.name, {
+      reload: () => loadPresets(),
+      apply: () => {
+        const preset = presetById(item.id);
+        if (preset == null) {
+          // Downloaded and then refused by `presetValidate.ts`, which logs why.
+          toast(`${item.name} was downloaded but could not be loaded.`);
+          return;
+        }
+        this.applyPreset(preset);
+      },
+    });
+  }
+
+  private applyPreset(preset: FxPreset) {
     if (this.kind === "effect") {
       this.applyEffect(preset);
     } else if (this.kind === "graphic") {
@@ -376,6 +423,46 @@ export class FxPresetBrowser extends LitElement {
         <span class="asset-name">${preset.name}</span>
       </div>
     `;
+  }
+
+  /**
+   * A cloud item not yet downloaded. A still image where a local tile has a
+   * live frame, because nothing can be rendered without the shader sources,
+   * and the cloud badge where nothing else sits. Not draggable: a drop needs
+   * an installed preset, and there is none until the click.
+   */
+  private cloudTile(item: CloudItem) {
+    return html`
+      <div
+        class="asset asset-tile"
+        draggable="false"
+        data-cloud=${item.id}
+        title=${item.author != null ? `${item.name} (${item.author})` : item.name}
+        @click=${() => this.handleCloudClick(item)}
+      >
+        <div class="asset-thumb">
+          ${item.thumbnailUrl == null
+            ? ""
+            : html`<img
+                class="asset-thumb-img"
+                src=${item.thumbnailUrl}
+                alt=""
+                decoding="async"
+                draggable="false"
+              />`}
+          <cloud-badge
+            class="asset-thumb-cloud"
+            kind=${this.kind}
+            item-id=${item.id}
+          ></cloud-badge>
+        </div>
+        <span class="asset-name">${item.name}</span>
+      </div>
+    `;
+  }
+
+  private tileFor(tile: FxTile) {
+    return tile.type === "preset" ? this.tile(tile.preset) : this.cloudTile(tile.item);
   }
 
   // ---------------------------------------------------------------- previews
@@ -517,23 +604,28 @@ export class FxPresetBrowser extends LitElement {
   }
 
   render() {
-    const matching = presetsOfKind(this.kind).filter((preset) =>
-      this.matchesQuery(preset),
+    // Local first, then cloud by name whether downloaded or not, inside every
+    // section: `cloudMerge.ts` states the rule. `presetsOfKind` has already
+    // put built-ins ahead of user presets, and filtering preserves it.
+    const all = mergeFxTiles(presetsOfKind(this.kind), cloudItemsOf(this.kind));
+    const matching = all.filter((tile) =>
+      tile.type === "preset"
+        ? this.matchesQuery(tile.preset)
+        : cloudItemMatches(tile.item, this.query, CATEGORY_LABELS[tile.item.category ?? ""] ?? ""),
     );
 
     // Enum order, not alphabetical: the categories are arranged from the ones
     // people reach for most to the ones they reach for rarely, and sorting the
-    // headings by name would throw that away. `presetsOfKind` has already put
-    // built-ins ahead of user presets, and filtering preserves it, so within a
-    // section that ordering still holds.
+    // headings by name would throw that away. A cloud item in a category this
+    // build does not know has no section, exactly as a local one would not.
     const sections = categoriesFor(this.kind)
       .map((category) => ({
         category,
-        presets: matching.filter((preset) => preset.category === category),
+        tiles: matching.filter((tile) => fxTileCategory(tile) === category),
       }))
-      .filter((section) => section.presets.length > 0);
+      .filter((section) => section.tiles.length > 0);
 
-    const total = presetsOfKind(this.kind).length;
+    const total = all.length;
 
     return html`
       <div class="browse-bar">
@@ -581,11 +673,11 @@ export class FxPresetBrowser extends LitElement {
                       ${CATEGORY_LABELS[section.category] ?? section.category}
                     </span>
                     <span class="browse-section-count">
-                      ${section.presets.length}
+                      ${section.tiles.length}
                     </span>
                   </div>
                   <div class="asset-grid browse-grid">
-                    ${section.presets.map((preset) => this.tile(preset))}
+                    ${section.tiles.map((tile) => this.tileFor(tile))}
                   </div>
                 </section>
               `,

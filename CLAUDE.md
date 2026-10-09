@@ -37,6 +37,10 @@ functions directly, and why the recorder tray crosses the boundary as data.
 under `apps/` and `packages/` that *do* have one are standalone Vite apps with
 their own lockfiles. This is not an npm workspace.
 
+`server/` is the **Rust cloud content server** (`cargo test` there), not
+`electron/server/`, the Express server the app runs for the self-hosted web
+build. It has its own `Cargo.lock`, and `package.json` excludes it from the asar.
+
 `plugins/cartcut-editing/` is **published to users**, through the marketplace
 declared at `.claude-plugin/marketplace.json`. Its skill is the one the app's
 users get; it is no longer under `.claude/`, so editing it changes what ships.
@@ -378,6 +382,8 @@ features/note/         timeline notes: a pin drawn by the canvas, a card in the 
                        pinned to a time and a track, outside the document and undo
 features/speed/        the ramp's graph editor; the curve is timeline/speedCurve.ts
 features/update/       the update card; main's half is electron/lib/updateSession.ts
+features/cloud/        cloud content: store, merge rule, badge, the asset view; main's
+                       half is electron/lib/cloud/, the server is server/
 features/mediaInfo/    Show Info: labels and layout here; the ffprobe call and its
                        parse are main's, electron/lib/mediaInfo*.ts
 features/motion/       a damped spring as a CSS linear(): the tour, the tile hover
@@ -652,6 +658,34 @@ shipped ones. A release is `npm publish` then `mcp-publisher publish`, in that
 order: the registry checks the published package's `mcpName`. The version
 appears three times across `package.json` and `server.json`, and a registry
 version can never be republished.
+
+## Cloud content
+
+Free effects, transitions, graphics, LUTs, templates and media come from
+`server/` and are **downloaded before use**. A downloaded item is an ordinary
+installed folder: `preset:list` and `template:list` scan `userData/cloud/` as a
+fourth root with origin `"cloud"`, so the validator, the registries and the
+renderer have no cloud path of their own. Four rules carry it:
+
+- **Main is the gate and owns every URL and path.** `cloudSession.ts` answers
+  without a request when `cloud_api_enabled` is `false` (absent means on) or
+  `net.isOnline()` says no; the renderer names an item by kind and id only. The
+  switch goes through `cloud:setEnabled`, never `store:set`, so main can abort.
+  The server is Settings' `cloud_api_url`, else `CARTCUT_CLOUD_URL`, else
+  `config.json`'s `cloudApiUrl`, in every build; changing it drops the catalogs.
+- **Cloud is always last.** Scanned last, so first-wins never lets it shadow a
+  local preset; ranked last by `originRank`, so `presetsOfKind("transition")[0]`
+  stays a built-in. Within a section, downloaded and undownloaded cloud items
+  sort together by name (`cloudMerge.ts`), so a tile does not move on install.
+- **Staging is outside every scanned root**, because the preset scanner reads
+  any folder holding a `manifest.json`.
+- **A "not installed" answer must be forgettable.** `lutRegistry`,
+  `templateRegistry` and both preview providers cache failures for good; the
+  one that means "no such id" is tagged and dropped when the registry changes,
+  or a project opened before its download draws nothing until a restart.
+
+The server serves only files its startup scan indexed, looked up by
+`(kind, id, path)`, never by joining the request onto the content folder.
 
 ## Testing
 

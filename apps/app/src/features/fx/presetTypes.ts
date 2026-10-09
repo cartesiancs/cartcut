@@ -427,7 +427,7 @@ export function categoriesFor(kind: FxKind): readonly string[] {
   return kind === "lut" ? LUT_CATEGORIES : EFFECT_CATEGORIES;
 }
 
-export type PresetOrigin = "builtin" | "user" | "extension" | "inline";
+export type PresetOrigin = "builtin" | "user" | "extension" | "cloud" | "inline";
 
 /** A validated preset, ready to hand to the compositor. */
 export type FxPreset = {

@@ -54,6 +54,7 @@ import { ipcProxy } from "./ipc/ipcProxy.js";
 import { ipcReverse } from "./ipc/ipcReverse.js";
 import { ipcTranscribe } from "./ipc/ipcTranscribe.js";
 import { ipcTts } from "./ipc/ipcTts.js";
+import { ipcCloud } from "./ipc/ipcCloud.js";
 import { ipcAnalyze } from "./ipc/ipcAnalyze.js";
 import { runServer } from "./webServer.js";
 import { ipcSelfhosted } from "./ipc/ipcSelfhosted.js";
@@ -244,6 +245,17 @@ ipcMain.handle("template:userDirectory", templateLib.userDirectory);
 ipcMain.handle("template:remove", (_event, id: string) =>
   templateLib.remove(id),
 );
+
+// Cloud content. Every handler that would touch the network checks the setting
+// and `net.isOnline()` first and answers without a request when either says
+// no. The renderer names items by kind and id; main owns every URL and path.
+ipcMain.handle("cloud:status", ipcCloud.status);
+ipcMain.handle("cloud:setEnabled", ipcCloud.setEnabled);
+ipcMain.handle("cloud:setUrl", ipcCloud.setUrl);
+ipcMain.handle("cloud:catalog", ipcCloud.catalog);
+ipcMain.handle("cloud:download", ipcCloud.download);
+ipcMain.handle("cloud:cancel", ipcCloud.cancel);
+ipcMain.handle("cloud:installedAssets", ipcCloud.installedAssets);
 
 ipcMain.handle("desktopCapturer:getSources", ipcDesktopCapturer.getSources);
 

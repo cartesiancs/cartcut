@@ -12,6 +12,7 @@ import { installPreviewGraphicRuntime } from "./features/graphic/graphicRuntime"
 import { IS_MAC } from "./utils/platform";
 import { exportElementRenderers } from "./features/export/renderers";
 import { templateFor, refreshTemplateLibrary } from "./features/template/templateRegistry";
+import { startCloud } from "./features/cloud/cloudStore";
 import { MOBILE_LAYOUT } from "./features/mobile/install";
 import "./features/mobile/mobileShell";
 
@@ -78,6 +79,10 @@ export class App extends LitElement {
     // enumerated yet draws nothing, which is the contract, and the first
     // repaint after the list lands picks it up.
     void refreshTemplateLibrary();
+
+    // The cloud's setting and the connection events only. No catalog is asked
+    // for here: each browser asks the first time it is on screen.
+    void startCloud();
 
     return this;
   }

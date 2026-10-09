@@ -1,0 +1,17 @@
+[package]
+name = "cartcut-cloud"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Serves Cartcut's free cloud content: effects, transitions, graphics, LUTs, templates and media."
+
+[dependencies]
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "fs", "io-util", "time", "signal"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }

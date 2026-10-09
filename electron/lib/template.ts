@@ -24,6 +24,7 @@ import * as fsp from "fs/promises";
 import isDev from "electron-is-dev";
 import { app } from "electron";
 import { scanTemplateRoot, type RawTemplatePayload } from "./templateScan.js";
+import { cloudTemplateRoot } from "./cloud/cloudPaths.js";
 
 export type { RawTemplatePayload };
 
@@ -82,7 +83,12 @@ export const templateLib = {
     }
 
     const user = await scanTemplateRoot(userTemplatePath(), "user");
-    return { templates: [...builtin, ...extension, ...user] };
+
+    // Downloaded cloud templates last, for `preset.ts`'s reason: first-wins
+    // then keeps every template the user already had. `remove` below never
+    // reaches this folder; it is the cloud panel's, not the user's.
+    const cloud = await scanTemplateRoot(cloudTemplateRoot(app.getPath("userData")), "cloud");
+    return { templates: [...builtin, ...extension, ...user, ...cloud] };
   },
 
   /** The folder to reveal, and the one the renderer extracts into. */

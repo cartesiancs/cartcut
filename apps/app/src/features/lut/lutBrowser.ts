@@ -33,6 +33,7 @@ import { LUT_PRESET_MIME } from "../asset/dropIntent";
 import { DEFAULT_EFFECT_MS } from "../element/effectElement";
 import {
   loadPresets,
+  presetById,
   presetsOfKind,
   subscribePresets,
   type FxPreset,
@@ -48,6 +49,11 @@ import {
   LUT_PREVIEW_W,
   createLutPreviewProvider,
 } from "./lutPreviewProvider";
+import { cloudItemsOf, ensureCatalog, subscribeCloudListing } from "../cloud/cloudStore";
+import { cloudItemMatches, fxTileCategory, mergeFxTiles, type FxTile } from "../cloud/cloudMerge";
+import { createClickOrder, downloadThenApply } from "../cloud/cloudApply";
+import type { CloudItem } from "../cloud/cloudTypes";
+import "../cloud/cloudBadge";
 
 /**
  * One provider for the panel.
@@ -84,6 +90,10 @@ export class LutBrowser extends LitElement {
   private query = "";
   private teardown: Array<() => void> = [];
   private visibility: IntersectionObserver | null = null;
+  /** Which click is the latest, so a slow download cannot apply over a newer one. */
+  private clicks = createClickOrder();
+  /** Whether this grid has been on screen; the catalog is asked for only from then. */
+  private seen = false;
 
   createRenderRoot() {
     this.teardown.push(
@@ -91,6 +101,7 @@ export class LutBrowser extends LitElement {
       useTimelineStore.subscribe(() => this.requestUpdate()),
       previews.onReady(() => this.paintTiles()),
       subscribePresets(() => this.requestUpdate()),
+      subscribeCloudListing(() => this.requestUpdate()),
     );
 
     // Or the timeline canvas's document-level mousedown clears the selection
@@ -123,6 +134,8 @@ export class LutBrowser extends LitElement {
     this.visibility = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
+          this.seen = true;
+          ensureCatalog("lut");
           this.paintTiles();
         }
       },
@@ -143,6 +156,9 @@ export class LutBrowser extends LitElement {
 
   updated() {
     this.paintTiles();
+    if (this.seen && !this.isHidden()) {
+      ensureCatalog("lut");
+    }
   }
 
   private isHidden(): boolean {
@@ -263,6 +279,22 @@ export class LutBrowser extends LitElement {
       .withCheckpoint((doc) => setClipLutMany(doc, ids, null));
   }
 
+  /** A cloud LUT: download it, then what its local tile's click would do. */
+  private handleCloudClick(item: CloudItem): void {
+    const token = this.clicks.next();
+    void downloadThenApply(this.clicks, token, "lut", item.id, item.name, {
+      reload: () => loadPresets(),
+      apply: () => {
+        const preset = presetById(item.id);
+        if (preset == null) {
+          toast(`${item.name} was downloaded but could not be loaded.`);
+          return;
+        }
+        this.apply(preset);
+      },
+    });
+  }
+
   private handleDragStart(event: DragEvent, preset: FxPreset): void {
     event.dataTransfer?.setData(LUT_PRESET_MIME, preset.id);
     if (event.dataTransfer != null) {
@@ -331,7 +363,10 @@ export class LutBrowser extends LitElement {
         class="asset asset-tile ${active ? "is-on" : ""}"
         draggable="true"
         title=${preset.name}
-        @click=${() => this.apply(preset)}
+        @click=${() => {
+          this.clicks.next();
+          this.apply(preset);
+        }}
         @dragstart=${(e: DragEvent) => this.handleDragStart(e, preset)}
       >
         <div class="asset-thumb">
@@ -352,9 +387,43 @@ export class LutBrowser extends LitElement {
     `;
   }
 
+  /**
+   * A cloud LUT not yet downloaded: a still where a local tile grades the
+   * sample, and the cloud badge in the corner `is-on` does not use.
+   */
+  private cloudTile(item: CloudItem) {
+    return html`
+      <div
+        class="asset asset-tile"
+        draggable="false"
+        data-cloud=${item.id}
+        title=${item.name}
+        @click=${() => this.handleCloudClick(item)}
+      >
+        <div class="asset-thumb">
+          ${item.thumbnailUrl == null
+            ? ""
+            : html`<img
+                class="asset-thumb-img"
+                src=${item.thumbnailUrl}
+                alt=""
+                decoding="async"
+                draggable="false"
+              />`}
+          <cloud-badge class="asset-thumb-cloud" kind="lut" item-id=${item.id}></cloud-badge>
+        </div>
+        <span class="asset-name">${item.name}</span>
+      </div>
+    `;
+  }
+
+  private tileFor(tile: FxTile, current: string | null) {
+    return tile.type === "preset" ? this.tile(tile.preset, current) : this.cloudTile(tile.item);
+  }
+
   render() {
     const all = presetsOfKind("lut");
-    const matching = all.filter((preset) => this.matchesQuery(preset));
+    const catalog = cloudItemsOf("lut");
     const selection = this.gradableSelection();
     const document_ = useTimelineStore.getState().timeline;
     // Only when the whole selection agrees: a mixed selection has no one
@@ -367,16 +436,29 @@ export class LutBrowser extends LitElement {
         ? [...currentIds][0] || null
         : null;
 
-    const builtin = matching.filter((preset) => preset.origin === "builtin");
-    const user = matching.filter((preset) => preset.origin === "user");
+    // The category sections hold the built-ins and then, by name, the cloud
+    // LUTs, downloaded or not (`cloudMerge.ts`). An imported LUT keeps its
+    // own section at the top.
+    const graded = mergeFxTiles(
+      all.filter((preset) => preset.origin === "builtin" || preset.origin === "cloud"),
+      catalog,
+    ).filter((tile) =>
+      tile.type === "preset"
+        ? this.matchesQuery(tile.preset)
+        : cloudItemMatches(tile.item, this.query, CATEGORY_LABELS[tile.item.category ?? ""] ?? ""),
+    );
+    const user = all.filter((preset) => preset.origin === "user" && this.matchesQuery(preset));
 
     const sections = LUT_CATEGORIES.map((category) => ({
       label: CATEGORY_LABELS[category] ?? category,
-      presets: builtin.filter((preset) => preset.category === category),
-    })).filter((section) => section.presets.length > 0);
+      tiles: graded.filter((tile) => fxTileCategory(tile) === category),
+    })).filter((section) => section.tiles.length > 0);
 
     if (user.length > 0) {
-      sections.unshift({ label: "My LUTs", presets: user });
+      sections.unshift({
+        label: "My LUTs",
+        tiles: user.map((preset): FxTile => ({ type: "preset", preset })),
+      });
     }
 
     const broken = lutFailures();
@@ -424,7 +506,7 @@ export class LutBrowser extends LitElement {
               </span>
             </div>`
           : null}
-        ${all.length === 0
+        ${all.length === 0 && catalog.length === 0
           ? html`<div class="browse-empty">
               <div class="browse-empty-icon">
                 <span class="material-symbols-outlined">palette</span>
@@ -450,13 +532,11 @@ export class LutBrowser extends LitElement {
                     <div class="browse-section-head">
                       <span class="browse-section-title">${section.label}</span>
                       <span class="browse-section-count">
-                        ${section.presets.length}
+                        ${section.tiles.length}
                       </span>
                     </div>
                     <div class="asset-grid browse-grid">
-                      ${section.presets.map((preset) =>
-                        this.tile(preset, current),
-                      )}
+                      ${section.tiles.map((tile) => this.tileFor(tile, current))}
                     </div>
                   </section>
                 `,

@@ -125,9 +125,18 @@ export async function launchApp(options: LaunchOptions = {}): Promise<AppSession
   //                        user, which is the state the editor is under test
   //                        in; clicking through the tour would only be testing
   //                        the tour.
+  //   cloud_api_enabled    `electron/lib/cloud/cloudSession.ts` answers every
+  //                        catalog and download request "disabled" without
+  //                        touching the network, so no run depends on a
+  //                        server's content and every grid holds exactly the
+  //                        built-ins the specs were written against.
   await fsp.writeFile(
     path.join(userDataDir, "config.json"),
-    JSON.stringify({ mcp_autostart: false, ONBOARDING_COMPLETED: true }, null, 2),
+    JSON.stringify(
+      { mcp_autostart: false, ONBOARDING_COMPLETED: true, cloud_api_enabled: false },
+      null,
+      2,
+    ),
   );
 
   const app = await electron.launch({

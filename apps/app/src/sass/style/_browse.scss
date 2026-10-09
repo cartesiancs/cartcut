@@ -290,7 +290,11 @@ input.browse-input::-webkit-search-cancel-button:hover {
   cursor: default;
 }
 
-/* A button whose menu is open stays lit, so the menu says where it came from. */
+/*
+ * A button whose menu is open stays lit, so the menu says where it came from.
+ * So does a toggle that is on: the asset browser's cloud view.
+ */
+.browse-btn[aria-pressed="true"],
 .browse-btn[aria-expanded="true"] {
   border-color: $opt-line-strong;
   background-color: $browse-hover;
@@ -627,6 +631,48 @@ switch-showtype {
 .asset-thumb > .asset-thumb-action:hover {
   background-color: rgba(220, 53, 69, 0.9);
   color: #ffffff;
+}
+
+/*
+ * A cloud tile not yet downloaded: a cloud in the top left corner, the one
+ * corner nothing else uses, and the download's ring in the same place once it
+ * is clicked. Drawn as SVG so the tile's text stays its name alone, which is
+ * how the e2e harness finds a tile.
+ */
+.asset-thumb > .asset-thumb-cloud {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background-color: rgba(8, 9, 11, 0.62);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  color: $opt-text;
+  pointer-events: none;
+}
+
+.asset-thumb-cloud > svg {
+  display: block;
+}
+
+/* Inline by default, and an inline host of block sections measures nothing. */
+cloud-asset-grid {
+  display: block;
+}
+
+.asset-thumb-cloud > .cloud-ring.is-spinning {
+  animation: cloud-ring-spin 900ms linear infinite;
+}
+
+@keyframes cloud-ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* ------------------------------------------------------------------- empty */

@@ -30,5 +30,6 @@
         "filename": "ffprobe.exe"
       }
     }
-  }
+  },
+  "cloudApiUrl": "https://cloud.cartcut.cartesiancs.com"
 }

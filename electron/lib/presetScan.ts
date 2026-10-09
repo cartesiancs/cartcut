@@ -30,7 +30,7 @@ import * as fsp from "fs/promises";
  * Hand-copied across the boundary `electron/` may not import over, and pinned
  * by `presetScan.test.ts` against the renderer's copy, the way `FILETYPES` is.
  */
-export type PresetOrigin = "builtin" | "user" | "extension";
+export type PresetOrigin = "builtin" | "user" | "extension" | "cloud";
 
 /** Read as text into the payload. Must match `presetValidate.ts`. */
 export const SHADER_EXTENSIONS = [".frag", ".vert", ".glsl"];

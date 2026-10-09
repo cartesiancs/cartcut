@@ -44,7 +44,8 @@ import type { LutData } from "./lutData";
 type Entry =
   | { state: "loading" }
   | { state: "ready"; lut: LutData }
-  | { state: "failed"; message: string };
+  // `missing` marks "no such preset", the one failure an install can cure.
+  | { state: "failed"; message: string; missing?: true };
 
 const entries = new Map<string, Entry>();
 
@@ -92,6 +93,7 @@ export async function loadLut(presetId: string): Promise<LutData | null> {
     entries.set(presetId, {
       state: "failed",
       message: "no LUT preset with that id is installed",
+      missing: true,
     });
     return null;
   }
@@ -196,9 +198,13 @@ export function lutFailures(): Array<{ presetId: string; message: string }> {
 export function installLutResolver(): void {
   setLutResolver(lutFor);
   subscribePresets(() => {
-    for (const presetId of [...entries.keys()]) {
+    for (const [presetId, entry] of [...entries]) {
       const preset = presetById(presetId);
-      if (preset == null || preset.render.type !== "lut") {
+      // And a "not installed" for one that now is: a project opened before
+      // its cloud LUT was downloaded would otherwise stay ungraded until a
+      // restart.
+      const cured = entry.state === "failed" && entry.missing === true;
+      if (preset == null || preset.render.type !== "lut" || cured) {
         entries.delete(presetId);
       }
     }

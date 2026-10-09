@@ -27,7 +27,7 @@ import {
   type FxPreviewProvider,
   type FxPreviewRequest,
 } from "../fx/fxPreviewProvider";
-import { presetById } from "../fx/presetRegistry";
+import { presetById, subscribePresets } from "../fx/presetRegistry";
 import { defaultParamsOf, type FxHtmlRender, type FxPreset } from "../fx/presetTypes";
 import { GraphicGl } from "../renderer/graphicGl";
 import { renderTimelineAtTime } from "../renderer/timeline";
@@ -68,6 +68,10 @@ export function createGraphicPreviewProvider(fps = 30): FxPreviewProvider {
   const pending: FxPreviewRequest[] = [];
   const queued = new Set<string>();
   const failed = new Set<string>();
+  // Not `failed`, which is never retried: a tile asked for before its preset
+  // was installed must render once the registry has it.
+  const missing = new Set<string>();
+  subscribePresets(() => missing.clear());
   const listeners = new Set<() => void>();
   let scope: GraphicScope | null = null;
   let frame: HTMLCanvasElement | null = null;
@@ -111,7 +115,11 @@ export function createGraphicPreviewProvider(fps = 30): FxPreviewProvider {
 
   async function render(request: FxPreviewRequest): Promise<"done" | "later"> {
     const preset = presetById(request.presetId);
-    if (preset == null || preset.kind !== "graphic" || !ensure() || scope == null) {
+    if (preset == null) {
+      missing.add(request.key);
+      return "done";
+    }
+    if (preset.kind !== "graphic" || !ensure() || scope == null) {
       failed.add(request.key);
       return "done";
     }
@@ -218,7 +226,8 @@ export function createGraphicPreviewProvider(fps = 30): FxPreviewProvider {
         request.key == null ||
         cache.has(request.key) ||
         queued.has(request.key) ||
-        failed.has(request.key)
+        failed.has(request.key) ||
+        missing.has(request.key)
       ) {
         return;
       }

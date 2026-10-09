@@ -137,6 +137,7 @@
       "!examples/**",
       "!bin/**",
       "!dist-web/**",
+      "!server/**",
       "!docs/**",
       "!.github/**",
       "!apps/*/node_modules/**",

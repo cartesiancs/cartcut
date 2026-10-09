@@ -10,6 +10,12 @@ import {
   subscribeTemplates,
   type TemplateListing,
 } from "./templateRegistry";
+import { isReadableSchemaVersion } from "../timeline/tracks";
+import { cloudItemsOf, ensureCatalog, subscribeCloudListing } from "../cloud/cloudStore";
+import { cloudItemMatches, cloudTemplateTiles, type TemplateTile } from "../cloud/cloudMerge";
+import { createClickOrder, downloadThenApply } from "../cloud/cloudApply";
+import type { CloudItem } from "../cloud/cloudTypes";
+import "../cloud/cloudBadge";
 
 /**
  * The template library: browse, add, import, remove.
@@ -37,6 +43,10 @@ export class TemplateBrowser extends LitElement {
 
   private teardown: Array<() => void> = [];
   private loaded = false;
+  /** Which click is the latest, so a slow download cannot apply over a newer one. */
+  private clicks = createClickOrder();
+  /** Whether the panel has been on screen; the catalog is asked for only from then. */
+  private seen = false;
 
   createRenderRoot() {
     this.setAttribute("data-keeps-selection", "");
@@ -50,10 +60,13 @@ export class TemplateBrowser extends LitElement {
       subscribeTemplates(() => {
         this.templates = installedTemplates();
       }),
+      subscribeCloudListing(() => this.requestUpdate()),
     );
 
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) {
+        this.seen = true;
+        ensureCatalog("template");
         void this.ensureLoaded();
       }
     });
@@ -67,6 +80,13 @@ export class TemplateBrowser extends LitElement {
     }
     this.teardown = [];
     super.disconnectedCallback();
+  }
+
+  updated() {
+    // A no-op unless the catalog is missing or stale.
+    if (this.seen && this.offsetParent != null) {
+      ensureCatalog("template");
+    }
   }
 
   private async ensureLoaded() {
@@ -88,6 +108,7 @@ export class TemplateBrowser extends LitElement {
   // ---------------------------------------------------------------- actions
 
   private async handleAdd(listing: TemplateListing) {
+    this.clicks.next();
     if (this.busy) {
       return;
     }
@@ -103,6 +124,26 @@ export class TemplateBrowser extends LitElement {
     } finally {
       this.busy = false;
     }
+  }
+
+  /**
+   * A cloud template: download it, then add it at the playhead as a local
+   * tile would. Deliberately not behind `busy`, which would leave every other
+   * tile dead for as long as the download takes.
+   */
+  private handleCloudAdd(item: CloudItem) {
+    const token = this.clicks.next();
+    void downloadThenApply(this.clicks, token, "template", item.id, item.name, {
+      reload: () => refreshTemplateLibrary(),
+      apply: async () => {
+        const result = await addTemplateToTimeline(item.id, {
+          startMs: useTimelineStore.getState().cursor,
+        });
+        if (!result.ok) {
+          this.toast(result.message);
+        }
+      },
+    });
   }
 
   private handleDragStart(event: DragEvent, listing: TemplateListing) {
@@ -223,6 +264,60 @@ export class TemplateBrowser extends LitElement {
     `;
   }
 
+  /** A cloud template not yet downloaded: its thumbnail and the cloud badge. */
+  private cloudTile(item: CloudItem) {
+    return html`
+      <div
+        class="asset asset-tile"
+        draggable="false"
+        data-cloud=${item.id}
+        title=${item.name}
+        @click=${() => this.handleCloudAdd(item)}
+      >
+        <div class="asset-thumb">
+          ${item.thumbnailUrl == null
+            ? ""
+            : html`<img
+                class="asset-thumb-img"
+                src=${item.thumbnailUrl}
+                alt=""
+                decoding="async"
+                draggable="false"
+              />`}
+          <cloud-badge
+            class="asset-thumb-cloud"
+            kind="template"
+            item-id=${item.id}
+          ></cloud-badge>
+        </div>
+        <span class="asset-name">${item.name}</span>
+      </div>
+    `;
+  }
+
+  /**
+   * Downloaded and not yet downloaded together, by name, so a tile stays
+   * where it was when its download finishes (`cloudMerge.ts`).
+   */
+  private cloudSection(tiles: TemplateTile[]) {
+    if (tiles.length === 0) {
+      return "";
+    }
+    return html`
+      <section class="browse-section">
+        <div class="browse-section-head">
+          <span class="browse-section-title">Cloud</span>
+          <span class="browse-section-count">${tiles.length}</span>
+        </div>
+        <div class="asset-grid browse-grid">
+          ${tiles.map((tile) =>
+            tile.type === "template" ? this.tile(tile.listing) : this.cloudTile(tile.item),
+          )}
+        </div>
+      </section>
+    `;
+  }
+
   private section(title: string, rows: TemplateListing[]) {
     if (rows.length === 0) {
       return "";
@@ -241,8 +336,8 @@ export class TemplateBrowser extends LitElement {
   }
 
   /** Nothing installed, or nothing matching: the two ways the grid is empty. */
-  private empty(visible: number) {
-    if (this.templates.length === 0) {
+  private empty(visible: number, offered: number) {
+    if (this.templates.length === 0 && offered === 0) {
       return html`<div class="browse-empty">
         <div class="browse-empty-icon">
           <span class="material-symbols-outlined">dashboard_customize</span>
@@ -279,6 +374,15 @@ export class TemplateBrowser extends LitElement {
     const builtin = visible.filter((row) => row.origin === "builtin");
     const contributed = visible.filter((row) => row.origin === "extension");
     const mine = visible.filter((row) => row.origin === "user");
+    const catalog = cloudItemsOf("template");
+    const query = this.query.trim().toLowerCase();
+    const cloud = cloudTemplateTiles(
+      visible,
+      catalog.filter((item) => cloudItemMatches(item, query)),
+      isReadableSchemaVersion,
+    );
+    // Every visible tile, cloud ones included, for the "No matches" state.
+    const shown = builtin.length + contributed.length + mine.length + cloud.length;
 
     return html`
       <div class="browse-bar">
@@ -320,7 +424,7 @@ export class TemplateBrowser extends LitElement {
         </button>
       </div>
 
-      ${this.empty(visible.length)} ${this.section("Templates", builtin)}
+      ${this.empty(shown, catalog.length)} ${this.section("Templates", builtin)}
       <!--
         A section of its own, so a user who wonders where a template came from
         can see it, and so the delete glyph stays off rows this panel does not
@@ -328,6 +432,12 @@ export class TemplateBrowser extends LitElement {
       -->
       ${this.section("From Extensions", contributed)}
       ${this.section("My Templates", mine)}
+      <!--
+        Last, after everything already on this machine. Downloaded templates
+        stay here rather than joining My Templates: they are the cloud's, and
+        only a template the user imported carries the delete glyph.
+      -->
+      ${this.cloudSection(cloud)}
     `;
   }
 }

@@ -38,6 +38,12 @@ import {
 } from "../../features/export/settings";
 import { IS_MAC } from "../../utils/platform";
 import { resetOnboardingAndTutorial } from "../../features/tutorial/tutorialFlag";
+import {
+  cloudStore,
+  setCloudEnabled,
+  setCloudUrl,
+  subscribeCloudListing,
+} from "../../features/cloud/cloudStore";
 
 /**
  * The two halves of the settings panel.
@@ -136,6 +142,10 @@ export class ControlSetting extends LitElement {
       this.appVersion = `CartCut v${result.data.version}`;
     });
 
+    // The switch shows what main reports, so it follows a change made
+    // anywhere, and the panel never mounts more than once.
+    subscribeCloudListing(() => this.requestUpdate());
+
     return this;
   }
 
@@ -232,6 +242,102 @@ export class ControlSetting extends LitElement {
    */
   private async _handleClickResetOnboarding() {
     await resetOnboardingAndTutorial();
+  }
+
+  /**
+   * Through main, never `store:set`: main is the gate every cloud request
+   * passes, and turning it off there is what aborts the downloads in flight.
+   */
+  private _handleToggleCloud = (e: Event) => {
+    void setCloudEnabled((e.target as HTMLInputElement).checked);
+  };
+
+  /** Whether main refused the last address typed into the server field. */
+  @state()
+  private cloudUrlError = false;
+
+  /**
+   * On commit (Enter or leaving the field), not per keystroke: every accepted
+   * address drops the catalogs and stops the downloads in flight. A refused one
+   * stays in the field, marked, and changes nothing.
+   */
+  private _handleCloudUrl = async (e: Event) => {
+    this.cloudUrlError = !(await setCloudUrl((e.target as HTMLInputElement).value));
+  };
+
+  private _handleResetCloudUrl = async () => {
+    const input = this.querySelector<HTMLInputElement>("#setting-cloud-url");
+    if (input != null) {
+      input.value = "";
+    }
+    this.cloudUrlError = !(await setCloudUrl(""));
+  };
+
+  /**
+   * On by default, absent from builds with no bridge (the web build), and
+   * independent of the connection: off means no request is ever made, offline
+   * means none can be.
+   */
+  private renderCloudSwitch() {
+    const cloud = cloudStore.getState();
+    if (!cloud.available) {
+      return "";
+    }
+    return html`
+      <div class="form-check form-switch mb-2">
+        <input
+          class="form-check-input"
+          type="checkbox"
+          role="switch"
+          id="setting-cloud-content"
+          .checked=${cloud.enabled}
+          @change=${this._handleToggleCloud}
+        />
+        <label class="form-check-label text-light" for="setting-cloud-content">
+          ${this.lc.t("setting.cloud_content")}
+        </label>
+        <div class="form-text text-secondary">
+          ${this.lc.t("setting.cloud_content_desc")}
+        </div>
+      </div>
+
+      <!--
+        The same field in a development and a packaged build. Empty means the
+        default, which the placeholder shows: CARTCUT_CLOUD_URL when it is set,
+        otherwise cloudApiUrl from config.json.
+      -->
+      <label class="form-label text-light mb-1" for="setting-cloud-url">
+        ${this.lc.t("setting.cloud_url")}
+      </label>
+      <div class="input-group input-group-sm mb-1">
+        <input
+          id="setting-cloud-url"
+          type="url"
+          class="form-control bg-default text-light ${this.cloudUrlError ? "is-invalid" : ""}"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder=${cloud.defaultUrl ?? ""}
+          .value=${cloud.customUrl ? (cloud.url ?? "") : ""}
+          @change=${this._handleCloudUrl}
+        />
+        ${cloud.customUrl
+          ? html`<button
+              type="button"
+              class="btn btn-sm btn-default text-light"
+              title=${this.lc.t("setting.cloud_url_reset")}
+              aria-label=${this.lc.t("setting.cloud_url_reset")}
+              @click=${this._handleResetCloudUrl}
+            >
+              <span class="material-symbols-outlined">restart_alt</span>
+            </button>`
+          : ""}
+      </div>
+      <div class="form-text ${this.cloudUrlError ? "text-danger" : "text-secondary"} mb-2">
+        ${this.cloudUrlError
+          ? this.lc.t("setting.cloud_url_invalid")
+          : this.lc.t("setting.cloud_url_desc")}
+      </div>
+    `;
   }
 
   _handleClickResolution(w, h) {
@@ -812,7 +918,8 @@ export class ControlSetting extends LitElement {
   }
 
   /**
-   * The two modal buttons, the tour reset and the version, below both panes.
+   * The cloud switch, the two modal buttons, the tour reset and the version,
+   * below both panes.
    *
    * Not in either tab because they belong to neither. Save and Load used to sit
    * here too; they are File → Save Project (⌘S) and Open Project (⌘O), and a
@@ -824,6 +931,8 @@ export class ControlSetting extends LitElement {
    */
   private renderCommonSection() {
     return html`
+      ${this.renderCloudSwitch()}
+
       <button
         type="button"
         class="btn btn-sm btn-default text-light mt-1"

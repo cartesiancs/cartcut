@@ -38,7 +38,7 @@ import type {
   ActiveEffect,
   ActiveTransition,
 } from "../renderer/fx/planFrame";
-import { presetById } from "./presetRegistry";
+import { presetById, subscribePresets } from "./presetRegistry";
 import { defaultParamsOf } from "./presetTypes";
 import { sampleFrameCanvas } from "./sampleFrames";
 
@@ -112,6 +112,11 @@ export function createFxPreviewProvider(): FxPreviewProvider {
   const pending: FxPreviewRequest[] = [];
   const queued = new Set<string>();
   const failed = new Set<string>();
+  // Kept apart from `failed`, which is never retried: a tile asked for before
+  // its preset was installed (a cloud download, an extension still loading)
+  // must render once the registry has it, without a restart.
+  const missing = new Set<string>();
+  subscribePresets(() => missing.clear());
   const listeners = new Set<() => void>();
 
   let gl: WebGLRenderingContext | null = null;
@@ -195,7 +200,11 @@ export function createFxPreviewProvider(): FxPreviewProvider {
 
   async function render(request: FxPreviewRequest): Promise<void> {
     const preset = presetById(request.presetId);
-    if (preset == null || !ensureContext() || compositor == null) {
+    if (preset == null) {
+      missing.add(request.key);
+      return;
+    }
+    if (!ensureContext() || compositor == null) {
       failed.add(request.key);
       return;
     }
@@ -326,7 +335,8 @@ export function createFxPreviewProvider(): FxPreviewProvider {
         request.key == null ||
         cache.has(request.key) ||
         queued.has(request.key) ||
-        failed.has(request.key)
+        failed.has(request.key) ||
+        missing.has(request.key)
       ) {
         return;
       }

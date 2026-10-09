@@ -12,9 +12,11 @@ import {
   readDirectory,
 } from "./directoryEntries";
 import { AssetSort, sortAssetEntries } from "./assetSort";
+import { cloudStore, subscribeCloudListing } from "../cloud/cloudStore";
 import "./switchShowType";
 import "./assetList";
 import "./assetSortMenu";
+import "../cloud/cloudAssetGrid";
 
 type LoadStatus = "idle" | "loading" | "loaded" | "error";
 
@@ -91,6 +93,19 @@ export class AssetBrowser extends LitElement {
   sort: AssetSort = assetStore.getState().sort;
 
   /**
+   * Showing the cloud's free media instead of the folder. Never remembered:
+   * the panel always opens on the user's own files, and the folder view stays
+   * mounted underneath so its tutorial targets and its scroll survive.
+   */
+  @state()
+  private cloudView = false;
+
+  @state()
+  private cloudQuery = "";
+
+  private unsubscribeCloud?: () => void;
+
+  /**
    * `entries` in `sort`'s order, recomputed in `willUpdate` when either
    * changes. A new sort re-orders what was read and never reads the disk.
    */
@@ -133,7 +148,27 @@ export class AssetBrowser extends LitElement {
       }
     });
 
+    // The cloud button follows the setting, and turning the setting off from
+    // inside the cloud view puts the folder back.
+    this.unsubscribeCloud = subscribeCloudListing(() => {
+      if (this.cloudView && !this.cloudOffered()) {
+        this.cloudView = false;
+      }
+      this.requestUpdate();
+    });
+
     return this;
+  }
+
+  /** Whether the cloud button is there at all: a bridge, and the setting on. */
+  private cloudOffered(): boolean {
+    const state = cloudStore.getState();
+    return state.available && state.enabled;
+  }
+
+  private handleToggleCloud() {
+    this.cloudView = !this.cloudView;
+    this.closest(".tab-content")?.scrollTo({ top: 0 });
   }
 
   connectedCallback(): void {
@@ -157,6 +192,7 @@ export class AssetBrowser extends LitElement {
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.unsubscribe?.();
+    this.unsubscribeCloud?.();
     this.observer?.disconnect();
     this.observer = undefined;
   }
@@ -220,10 +256,31 @@ export class AssetBrowser extends LitElement {
   }
 
   render() {
+    // The folder's own controls, hidden rather than removed in the cloud view.
+    const local = this.cloudView ? "d-none" : "";
+    const cloudLabel = this.cloudView
+      ? this.lc.t("setting.local_assets")
+      : this.lc.t("setting.cloud_assets");
+
     return html`<div class="browse-bar is-floating">
+        ${this.cloudView
+          ? html`<label class="browse-field">
+              <span class="material-symbols-outlined browse-field-icon">search</span>
+              <input
+                type="search"
+                class="browse-input"
+                spellcheck="false"
+                placeholder=${this.lc.t("setting.cloud_search")}
+                .value=${this.cloudQuery}
+                @input=${(e: Event) =>
+                  (this.cloudQuery = (e.target as HTMLInputElement).value)}
+              />
+            </label>`
+          : ""}
+
         <button
           type="button"
-          class="browse-btn"
+          class="browse-btn ${local}"
           title=${this.lc.t("setting.parent_folder")}
           aria-label=${this.lc.t("setting.parent_folder")}
           ?disabled=${parentDirectory(this.nowDirectory) == null}
@@ -232,11 +289,11 @@ export class AssetBrowser extends LitElement {
           <span class="material-symbols-outlined">arrow_upward</span>
         </button>
 
-        ${this.templatePath()}
+        ${this.templatePath(local)}
 
         <button
           type="button"
-          class="browse-btn ${getLocationEnv() == "demo" ? "d-none" : ""}"
+          class="browse-btn ${getLocationEnv() == "demo" ? "d-none" : local}"
           data-tutorial="asset-change-folder"
           title=${this.lc.t("setting.change_project_folder")}
           aria-label=${this.lc.t("setting.change_project_folder")}
@@ -245,14 +302,36 @@ export class AssetBrowser extends LitElement {
           <span class="material-symbols-outlined">folder_open</span>
         </button>
 
-        <asset-sort-menu></asset-sort-menu>
+        <asset-sort-menu class=${local}></asset-sort-menu>
 
-        <switch-showtype></switch-showtype>
+        <switch-showtype class=${local}></switch-showtype>
+
+        ${this.cloudOffered()
+          ? html`<button
+              type="button"
+              class="browse-btn"
+              aria-pressed=${this.cloudView ? "true" : "false"}
+              title=${cloudLabel}
+              aria-label=${cloudLabel}
+              @click=${this.handleToggleCloud}
+            >
+              <span class="material-symbols-outlined">cloud</span>
+            </button>`
+          : ""}
       </div>
 
-      <div @asset-navigate=${this.handleNavigate} @asset-open=${this.handleOpen}>
+      <div
+        class=${local}
+        @asset-navigate=${this.handleNavigate}
+        @asset-open=${this.handleOpen}
+      >
         ${this.templateBody()}
-      </div>`;
+      </div>
+      ${this.cloudView
+        ? html`<cloud-asset-grid
+            .query=${this.cloudQuery.trim().toLowerCase()}
+          ></cloud-asset-grid>`
+        : ""}`;
   }
 
   /**
@@ -263,12 +342,12 @@ export class AssetBrowser extends LitElement {
    * name, and `_browse.scss#browse-path` clips the start instead. The whole
    * path is the tooltip.
    */
-  private templatePath() {
+  private templatePath(hidden = "") {
     // No folder yet: the shell alone, since the empty state under it already
     // says what to do and saying it twice reads as two different problems.
     const path = this.nowDirectory;
     if (path == "") {
-      return html`<div class="browse-field browse-field-path">
+      return html`<div class="browse-field browse-field-path ${hidden}">
         <span class="material-symbols-outlined browse-field-icon">folder</span>
       </div>`;
     }
@@ -280,7 +359,7 @@ export class AssetBrowser extends LitElement {
     const leaf = cut < 0 ? path : trimmed.slice(cut + 1) || path;
     const parent = cut < 0 ? "" : trimmed.slice(0, cut + 1);
 
-    return html`<div class="browse-field browse-field-path" title=${path}>
+    return html`<div class="browse-field browse-field-path ${hidden}" title=${path}>
       <span class="material-symbols-outlined browse-field-icon">folder</span>
       <span class="browse-path"
         ><bdi dir="ltr"
