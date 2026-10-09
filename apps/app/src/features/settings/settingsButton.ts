@@ -1,8 +1,8 @@
 /**
  * The gear beside Export in the title bar. Opens `<settings-dialog>`.
  *
- * Styled in `_settings.scss` as a circle the height of the Export pill, with
- * the same border and fill, so the two read as one group of controls.
+ * Styled in `_settings.scss` as a bare glyph the height of the Export pill,
+ * with a soft round fill on hover and keyboard focus.
  */
 
 import { LitElement, html } from "lit";

@@ -50,8 +50,12 @@ settings-button {
   color: #f1f3f5;
 }
 
+// 14px, so the glyph's box sits a whole 3px inside the 20px button. The bar's
+// content is 33px tall on a 1x screen (34 less a 1px border), so the button
+// lands at y 6.5: its fill rounds down to 7, and a 13px glyph, at 3.5 inside,
+// lands on a whole pixel and does not, which drew the gear a pixel high.
 .settings-trigger > .settings-trigger-icon {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1;
 }
 
