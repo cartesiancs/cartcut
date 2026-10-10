@@ -226,8 +226,9 @@ function buildTemplate(): any[] {
         // anyway, or `npm run start:hot`, which does both on every build and
         // is opted into per session (`lib/devReload.ts`).
         //
-        // The devtools stay, under `isDev` — they read the page rather than
-        // replacing it. `lib/window.ts` opens them on the same condition.
+        // The devtools stay, under `isDev`: they read the page rather than
+        // replacing it. `lib/window.ts` no longer opens them at launch unless
+        // `CARTCUT_DEVTOOLS=1`, so this item is the usual way in.
         ...(isDev ? [separator, { role: "toggleDevTools" }] : []),
       ],
     },

@@ -45,7 +45,9 @@ const window = {
     // on the machine to the console while it did it.
     installDisplayMediaHandler();
 
-    if (isDev) {
+    // Opt-in, like the recorder engine's below. View ▸ Toggle Developer Tools
+    // (⌥⌘I) still opens it in development whenever it is wanted.
+    if (isDev && process.env.CARTCUT_DEVTOOLS === "1") {
       mainWindow.webContents.openDevTools();
     }
 
