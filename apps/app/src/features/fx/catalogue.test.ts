@@ -24,11 +24,11 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { existsSync } from "fs";
 import path from "path";
-import { createHash } from "crypto";
 import { scanPresetRoot } from "../../../../../electron/lib/presetScan";
 import { validatePreset } from "./presetValidate";
 import { categoriesFor, type FxHtmlRender, type FxPreset } from "./presetTypes";
 import { mountSpecOf } from "../graphic/mountSpec";
+import { duplicates, htmlSourcesOf, pipelineOf } from "./pipelineKey";
 
 const PRESET_ROOT = path.resolve(__dirname, "../../../../../assets/presets");
 
@@ -77,102 +77,6 @@ beforeAll(async () => {
     });
   }
 });
-
-/**
- * A shader with its comments and whitespace removed.
- *
- * Comments are stripped deliberately: two presets that differ only in what
- * their headers claim are still the same preset, and leaving the prose in would
- * make the duplication check trivial to defeat by accident.
- */
-function normalize(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/[^\n]*/g, "")
-    .replace(/\s+/g, "");
-}
-
-/**
- * Markup or a stylesheet with its comments and whitespace removed. Not
- * `normalize`: CSS has no `//` comment, and stripping one would eat a
- * `content: "//"` along with the rest of its line.
- */
-function normalizeHtmlOrCss(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/\s+/g, "");
-}
-
-/** The markup and every style sheet of an HTML graphic, as one text. */
-function htmlSourcesOf(preset: FxPreset): string {
-  if (preset.render.type !== "html") {
-    return "";
-  }
-  return [preset.render.source, ...(preset.render.styles ?? [])]
-    .map((name) => preset.sources[name] ?? "")
-    .join("\n");
-}
-
-/**
- * Everything the compositor will actually run, in order.
- *
- * The *pipeline* rather than each file, because a shared helper is not
- * duplication. Gaussian Blur, Bloom, Halation and Tilt Shift all run the same
- * separable blur, and forbidding that would push each of them into keeping a
- * private, slightly-drifted copy — the opposite of the thing being prevented.
- * What must not repeat is the whole chain.
- */
-function pipelineOf(preset: FxPreset): string {
-  if (preset.render.type === "lut") {
-    // Every LUT preset runs the same shader and differs only in its table, so
-    // there is no pipeline here to compare. The equivalent rule — no two
-    // shipped tables grade alike — needs the parsed data and lives in
-    // `lut/lutCatalogue.test.ts`.
-    return "lut:" + preset.id;
-  }
-  if (preset.render.type === "html") {
-    // An HTML graphic's pipeline is its markup and its sheets: two graphics
-    // that differ only in a default are one graphic with a parameter.
-    const files = [preset.render.source, ...(preset.render.styles ?? [])];
-    const body = files
-      .map((name) => name + ":" + normalizeHtmlOrCss(preset.sources[name] ?? ""))
-      .join("|");
-    return createHash("sha1").update(body).digest("hex");
-  }
-  if (preset.render.type !== "shader") {
-    return "overlay:" + preset.render.source;
-  }
-  const stages = [
-    ...(preset.render.passes ?? []).map(
-      (pass) =>
-        pass.source + "@" + JSON.stringify(pass.constants ?? {}),
-    ),
-    preset.render.source,
-  ];
-  const body = stages
-    .map((stage) => {
-      const name = stage.split("@")[0];
-      return stage + ":" + normalize(preset.sources[name] ?? "");
-    })
-    .join("|");
-  const vertex =
-    preset.render.vertex != null
-      ? normalize(preset.sources[preset.render.vertex] ?? "")
-      : "";
-  return createHash("sha1").update(body + "|" + vertex).digest("hex");
-}
-
-function duplicates<T>(values: T[]): T[] {
-  const seen = new Set<string>();
-  const twice = new Set<string>();
-  for (const value of values) {
-    const key = JSON.stringify(value);
-    if (seen.has(key)) twice.add(key);
-    seen.add(key);
-  }
-  return [...twice].map((key) => JSON.parse(key) as T);
-}
 
 describe("the shipped catalogue", () => {
   it("all of it loads", () => {

@@ -65,6 +65,11 @@ content/
   512 KB, a symbolic link, and a name Windows cannot hold.
 - Ids are unique per kind, case-insensitively. The first folder in name order
   wins and the rest are skipped.
+- In this repository `content/` is gitignored and never committed; `cargo test`
+  reads `tests/fixtures/content`. Before restarting a server on it, run
+  `npx jiti scripts/cloud/checkContent.ts --strict --require-thumbnails` from
+  the repository root: the server lists anything whose manifest parses, and
+  the app only finds out after the download.
 
 ## API
 

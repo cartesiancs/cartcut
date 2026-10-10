@@ -1,7 +1,7 @@
 /**
  * Write the shipped LUT presets from their recipes.
  *
- *     npx vite-node scripts/generateLuts.ts
+ *     npx jiti scripts/generateLuts.ts
  *
  * Produces `assets/presets/luts/<slug>/{manifest.json,lut.cube}` for every
  * entry in `features/lut/recipes.ts`. All the interesting work is in
@@ -22,10 +22,11 @@ import { LUT_RECIPES } from "../apps/app/src/features/lut/recipes";
  * The repository root, from the working directory.
  *
  * Not `import.meta.url`, which the root tsconfig's module setting forbids, and
- * emphatically not `process.argv[1]`: under `vite-node` that is the runner in
- * `node_modules/.bin`, so resolving relative to it silently writes eighty
- * preset folders into `node_modules/assets`. The check below is what turns
- * "run from the wrong directory" into a message instead of into a mess.
+ * emphatically not `process.argv[1]`: under a runner such as `jiti` that is
+ * the runner in `node_modules/.bin`, so resolving relative to it silently
+ * writes eighty preset folders into `node_modules/assets`. The check below is
+ * what turns "run from the wrong directory" into a message instead of into a
+ * mess.
  */
 const cwd = process.cwd();
 if (!fs.existsSync(path.join(cwd, "assets", "presets"))) {

@@ -690,6 +690,16 @@ renderer have no cloud path of their own. Four rules carry it:
 The server serves only files its startup scan indexed, looked up by
 `(kind, id, path)`, never by joining the request onto the content folder.
 
+`server/content/` is the live catalogue and is **never in this repository**:
+`.gitignore` drops `/server/content/` (anchored, so `server/tests/fixtures/
+content` stays tracked) and the folder keeps its own git history. Nothing
+validates it before a user downloads it, so check it with
+`npx jiti scripts/cloud/checkContent.ts --strict --plan --require-thumbnails`
+(the validator, the catalog parser, a GLSL ES 1.00 lint, one name and one
+pipeline per item against every built-in) and
+`npx jiti tests/e2e/cloud/renderThumbnails.ts` (compiles and judges each item
+in a hidden instance and writes its `thumbnail.webp`).
+
 ## Testing
 
 Vitest, suites co-located with sources. `features/timeline/` and

@@ -17,3 +17,8 @@
 /tests/e2e/.fixtures
 /tests/e2e/.out
 dist-web/
+
+# The live cloud catalogue (server/content/<kind>s/<slug>/). It is served by
+# server/ and never shipped in this repository; it keeps its own git history.
+# Anchored, so server/tests/fixtures/content stays tracked for `cargo test`.
+/server/content/

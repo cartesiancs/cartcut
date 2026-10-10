@@ -91,6 +91,13 @@ export type LaunchOptions = {
    * close when it was supplied, because the caller owns it.
    */
   userDataDir?: string;
+  /**
+   * Keys written over the seeded `config.json` below. Nothing else can change
+   * them: the file is rewritten on every launch, and the renderer reads the
+   * cloud switch once at boot, so a value set later from the page is a
+   * different answer from the one the panels were built with.
+   */
+  config?: Record<string, unknown>;
 };
 
 export async function launchApp(options: LaunchOptions = {}): Promise<AppSession> {
@@ -133,7 +140,12 @@ export async function launchApp(options: LaunchOptions = {}): Promise<AppSession
   await fsp.writeFile(
     path.join(userDataDir, "config.json"),
     JSON.stringify(
-      { mcp_autostart: false, ONBOARDING_COMPLETED: true, cloud_api_enabled: false },
+      {
+        mcp_autostart: false,
+        ONBOARDING_COMPLETED: true,
+        cloud_api_enabled: false,
+        ...options.config,
+      },
       null,
       2,
     ),
