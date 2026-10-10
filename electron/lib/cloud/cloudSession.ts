@@ -24,6 +24,7 @@ import config from "../../config.json";
 import { netFetch } from "../netFetch";
 import { isUsableCloudId, isSafeCloudPath, parseCatalog, type CloudItem, type CloudMedia } from "./cloudCatalog";
 import { CloudDownloadCancelled, clearStaging, installCloudItem } from "./cloudDownload";
+import { removeCloudInstalls, summarizeCloudInstalls, type CloudInstallSummary } from "./cloudInstalled";
 import {
   cloudAssetRoot,
   cloudStagingRoot,
@@ -410,6 +411,26 @@ function resetSession(): void {
   session.abort();
   session = new AbortController();
   catalogs.clear();
+}
+
+/** How many items are installed from the cloud, and their size. Works offline and while off. */
+export function cloudInstallSummary(): Promise<CloudInstallSummary> {
+  return summarizeCloudInstalls(userData());
+}
+
+/**
+ * Delete everything installed from the cloud, and nothing else.
+ *
+ * Downloads in flight are stopped and waited for first: one that finished its
+ * swap after the folders were emptied would put its item back. The catalogs
+ * are dropped with them, since every `installed` flag in them is now wrong.
+ */
+export async function clearCloudInstalls(): Promise<{ ok: boolean; removed: number; failed: number }> {
+  const running = [...inflight.values()].map((entry) => entry.promise);
+  resetSession();
+  await Promise.allSettled(running);
+  const result = await removeCloudInstalls(userData());
+  return { ok: result.failed === 0, ...result };
 }
 
 // ------------------------------------------------------------------ installed

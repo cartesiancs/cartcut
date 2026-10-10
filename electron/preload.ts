@@ -101,7 +101,9 @@ const request = {
    * Items are named by kind and id only. `download(kind, id, jobId)` resolves
    * with `{ ok: true, path }` once the item is installed and reports
    * `{ jobId, fraction }` on `onProgress` until then. `cancel(jobId)` stops
-   * listening, and the download stops when nobody is.
+   * listening, and the download stops when nobody is. `clearInstalled()`
+   * deletes everything downloaded and takes no argument: main picks the
+   * folders, so no call can name a user's own preset.
    */
   cloud: {
     status: () => ipcRenderer.invoke("cloud:status"),
@@ -112,6 +114,8 @@ const request = {
     download: (kind, id, jobId) => ipcRenderer.invoke("cloud:download", kind, id, jobId),
     cancel: (jobId) => ipcRenderer.invoke("cloud:cancel", jobId),
     installedAssets: () => ipcRenderer.invoke("cloud:installedAssets"),
+    installedSummary: () => ipcRenderer.invoke("cloud:installedSummary"),
+    clearInstalled: () => ipcRenderer.invoke("cloud:clearInstalled"),
     onProgress: (handler) => {
       const wrapped = (_event, payload) => handler(payload);
       ipcRenderer.on("cloud:progress", wrapped);

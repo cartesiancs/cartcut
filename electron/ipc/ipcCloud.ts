@@ -15,10 +15,12 @@ import { net, type IpcMainInvokeEvent } from "electron";
 import { isCloudKind } from "../lib/cloud/cloudPaths";
 import {
   cancelCloudJob,
+  clearCloudInstalls,
   cloudBaseUrl,
   cloudCatalog,
   cloudDownload,
   cloudEnabled,
+  cloudInstallSummary,
   customCloudUrl,
   defaultCloudUrl,
   installedCloudAssets,
@@ -83,4 +85,10 @@ export const ipcCloud = {
   },
 
   installedAssets: async () => ({ items: await installedCloudAssets() }),
+
+  /** Counted on disk, so it answers with the setting off and offline. */
+  installedSummary: async () => cloudInstallSummary(),
+
+  /** Takes no argument: main decides what "downloaded" means, by folder. */
+  clearInstalled: async () => clearCloudInstalls(),
 };

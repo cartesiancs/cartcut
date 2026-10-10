@@ -20,6 +20,10 @@ export type CloudPort = {
   download: (kind: CloudKind, id: string, jobId: string) => Promise<CloudDownloadOutcome>;
   cancel: (jobId: string) => Promise<unknown>;
   installedAssets: () => Promise<{ items: CloudItem[] }>;
+  /** How many items are installed from the cloud, and their size in bytes. */
+  installedSummary: () => Promise<{ items: number; bytes: number }>;
+  /** Delete everything installed from the cloud. `failed` counts items that could not go. */
+  clearInstalled: () => Promise<{ ok: boolean; removed: number; failed: number }>;
   onProgress: (handler: (payload: { jobId: string; fraction: number }) => void) => () => void;
 };
 

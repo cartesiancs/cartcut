@@ -332,6 +332,35 @@ settings-button {
   background-color: #343b42;
 }
 
+// Deleting every download: the dialog's one destructive action, in the
+// error line's red.
+.settings-text-btn.is-danger {
+  color: #ec8a8d;
+}
+
+.settings-text-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.settings-text-btn:disabled:hover {
+  background-color: $opt-raised;
+}
+
+// A read-only value beside the control that acts on it, one 30px line.
+.settings-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+}
+
+.settings-value {
+  color: $opt-label;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 // `.ext-switch`'s colours at the size a dialog row wants.
 .settings-switch {
   appearance: none;

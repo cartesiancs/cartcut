@@ -374,3 +374,48 @@ export async function refreshInstalledAssets(): Promise<void> {
     cloudStore.setState({ installedAssets: [] });
   }
 }
+
+/** How many items are installed from the cloud, and their size; `null` with no bridge. */
+export async function cloudInstallSummary(): Promise<{ items: number; bytes: number } | null> {
+  if (port == null) {
+    return null;
+  }
+  try {
+    const result = await port.installedSummary();
+    return { items: Number(result?.items) || 0, bytes: Number(result?.bytes) || 0 };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Delete everything installed from the cloud, through main, which picks the
+ * folders and stops the downloads in flight. Built-in, extension and the
+ * user's own presets and templates are never touched: they live elsewhere.
+ *
+ * Every catalog is dropped (each `installed` flag in it is now wrong) and the
+ * asset view re-read. The preset and template registries are the caller's to
+ * reload, as they are after a download (`fxPresetBrowser.ts`).
+ */
+export async function clearCloudDownloads(): Promise<{
+  ok: boolean;
+  removed: number;
+  failed: number;
+} | null> {
+  if (port == null) {
+    return null;
+  }
+  try {
+    const result = await port.clearInstalled();
+    return {
+      ok: result?.ok === true,
+      removed: Number(result?.removed) || 0,
+      failed: Number(result?.failed) || 0,
+    };
+  } catch {
+    return null;
+  } finally {
+    cloudStore.setState({ catalogs: {} });
+    await refreshInstalledAssets();
+  }
+}

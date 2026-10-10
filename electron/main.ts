@@ -256,6 +256,8 @@ ipcMain.handle("cloud:catalog", ipcCloud.catalog);
 ipcMain.handle("cloud:download", ipcCloud.download);
 ipcMain.handle("cloud:cancel", ipcCloud.cancel);
 ipcMain.handle("cloud:installedAssets", ipcCloud.installedAssets);
+ipcMain.handle("cloud:installedSummary", ipcCloud.installedSummary);
+ipcMain.handle("cloud:clearInstalled", ipcCloud.clearInstalled);
 
 ipcMain.handle("desktopCapturer:getSources", ipcDesktopCapturer.getSources);
 

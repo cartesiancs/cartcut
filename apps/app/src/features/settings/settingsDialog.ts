@@ -8,7 +8,7 @@
  * Tab trap (`automatic-caption/src/clipPicker.ts`), typing passed through so
  * copy and paste still work in the address field, and a sidebar of sections:
  * General (the language, which used to be a Bootstrap modal of its own) and
- * the cloud.
+ * the cloud, which can also delete everything downloaded from it.
  *
  * Words are kept to labels. A row says what it controls in a word or two, and
  * the only sentence anywhere is an error.
@@ -21,11 +21,15 @@ import { LocaleController } from "../../controllers/locale";
 import { isTypingEvent } from "../../utils/typingTarget";
 import { isProjectDirty } from "../project/projectDirty";
 import {
+  clearCloudDownloads,
+  cloudInstallSummary,
   cloudStore,
   setCloudEnabled,
   setCloudUrl,
   subscribeCloudListing,
 } from "../cloud/cloudStore";
+import { loadPresets } from "../fx/presetRegistry";
+import { refreshTemplateLibrary } from "../template/templateRegistry";
 import { criticalDamping, springDurationMs, springEasing, type Spring } from "../motion/spring";
 
 type Section = "general" | "cloud";
@@ -59,6 +63,17 @@ const EXIT_MS = 120;
 
 const FOCUSABLE = "button:not([disabled]), input:not([disabled]), [tabindex='0']";
 
+/** A size the way a file browser shows one: whole kilobytes, then one decimal. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) {
+    return Math.max(1, Math.round(bytes / 1024)) + " KB";
+  }
+  if (bytes < 1024 * 1024 * 1024) {
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+}
+
 function prefersReducedMotion(): boolean {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 }
@@ -81,6 +96,11 @@ export class SettingsDialog extends LitElement {
   @state() private language: Language | null = null;
   /** Whether main refused the last address typed into the server field. */
   @state() private urlError = false;
+  /** What is downloaded from the cloud, counted when the dialog opens; `null` until main answers. */
+  @state() private downloaded: { items: number; bytes: number } | null = null;
+  @state() private clearing = false;
+  /** Whether the last delete left something behind (a file another program held open). */
+  @state() private clearFailed = false;
 
   private lc = new LocaleController(this);
   private returnFocus: HTMLElement | null = null;
@@ -108,7 +128,9 @@ export class SettingsDialog extends LitElement {
     this.isOpen = true;
     this.leaving = false;
     this.urlError = false;
+    this.clearFailed = false;
     this.language ??= this.lc.value;
+    void this.readDownloaded();
 
     // The panel itself takes focus, not its first control: a ring around a
     // nav item nobody pressed is noise, and the next Tab lands on that item.
@@ -256,6 +278,32 @@ export class SettingsDialog extends LitElement {
     input?.focus();
   };
 
+  private readDownloaded = async (): Promise<void> => {
+    this.downloaded = await cloudInstallSummary();
+  };
+
+  /**
+   * Main picks the folders; nothing here names one. Afterwards the preset and
+   * template registries are re-read, so a deleted item leaves its panel, and a
+   * clip still using one draws nothing, the contract for any missing preset.
+   */
+  private onClearDownloads = async (): Promise<void> => {
+    const count = this.downloaded?.items ?? 0;
+    if (count === 0 || this.clearing) {
+      return;
+    }
+    if (!window.confirm(this.lc.t("setting.cloud_clear_confirm").replace("{n}", String(count)))) {
+      return;
+    }
+    this.clearing = true;
+    this.clearFailed = false;
+    const result = await clearCloudDownloads();
+    await Promise.all([loadPresets(), refreshTemplateLibrary()]);
+    this.clearFailed = result == null || !result.ok;
+    this.clearing = false;
+    await this.readDownloaded();
+  };
+
   private onPickLanguage = (language: Language): void => {
     this.language = language;
     void window.electronAPI?.req?.store?.set("LANG", language);
@@ -380,8 +428,43 @@ export class SettingsDialog extends LitElement {
               : nothing}
           </div>
         </div>
+
+        <div class="settings-row">
+          <span class="settings-label">${t("setting.cloud_downloads")}</span>
+          <div class="settings-row-control is-end">
+            <div class="settings-inline">
+              <span class="settings-value">${this.downloadedText()}</span>
+              <button
+                type="button"
+                class="settings-text-btn is-danger"
+                ?disabled=${disabled || this.clearing || (this.downloaded?.items ?? 0) === 0}
+                @click=${this.onClearDownloads}
+              >
+                ${t("setting.cloud_clear")}
+              </button>
+            </div>
+            ${this.clearFailed
+              ? html`<div class="settings-error">${t("setting.cloud_clear_failed")}</div>`
+              : nothing}
+          </div>
+        </div>
       </div>
     `;
+  }
+
+  /** "12 items, 34.5 MB", "None", or nothing while main has not answered. */
+  private downloadedText(): string {
+    const downloaded = this.downloaded;
+    if (downloaded == null) {
+      return "";
+    }
+    if (downloaded.items === 0) {
+      return this.lc.t("setting.cloud_downloads_none");
+    }
+    return this.lc
+      .t("setting.cloud_downloads_summary")
+      .replace("{n}", String(downloaded.items))
+      .replace("{size}", formatBytes(downloaded.bytes));
   }
 
   render() {
