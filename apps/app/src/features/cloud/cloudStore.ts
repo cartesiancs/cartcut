@@ -35,7 +35,11 @@ export type CatalogState = {
 export interface ICloudStore {
   /** Whether a bridge exists at all. `false` on the web build. */
   available: boolean;
-  /** The setting, as main last reported it. On until it says otherwise. */
+  /**
+   * The setting, as main last reported it. Off until main answers: what a
+   * setting nobody has touched means depends on the build, and only main
+   * knows which build this is.
+   */
   enabled: boolean;
   /** `navigator.onLine`, kept by the `online` and `offline` events. */
   online: boolean;
@@ -54,7 +58,7 @@ export interface ICloudStore {
 
 export const cloudStore = createStore<ICloudStore>(() => ({
   available: false,
-  enabled: true,
+  enabled: false,
   online: true,
   url: null,
   defaultUrl: null,
@@ -137,8 +141,8 @@ export async function startCloud(): Promise<void> {
       customUrl: status?.custom === true,
     });
   } catch {
-    // Main did not answer. The default stands, and main's own gate still
-    // decides every request.
+    // Main did not answer. Off stands, and main's own gate still decides
+    // every request.
   }
 }
 

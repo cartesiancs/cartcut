@@ -670,9 +670,10 @@ fourth root with origin `"cloud"`, so the validator, the registries and the
 renderer have no cloud path of their own. Four rules carry it:
 
 - **Main is the gate and owns every URL and path.** `cloudSession.ts` answers
-  without a request when `cloud_api_enabled` is `false` (absent means on) or
-  `net.isOnline()` says no; the renderer names an item by kind and id only. The
-  switch goes through `cloud:setEnabled`, never `store:set`, so main can abort.
+  without a request when `cloud_api_enabled` is `false` (absent means off in a
+  development build, on in a packaged one) or `net.isOnline()` says no; the
+  renderer names an item by kind and id only. The switch goes through
+  `cloud:setEnabled`, never `store:set`, so main can abort.
   The server is Settings' `cloud_api_url`, else `CARTCUT_CLOUD_URL`, else
   `config.json`'s `cloudApiUrl`, in every build; changing it drops the catalogs.
 - **Cloud is always last.** Scanned last, so first-wins never lets it shadow a

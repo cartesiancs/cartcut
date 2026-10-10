@@ -15,6 +15,7 @@
  */
 
 import { app, net } from "electron";
+import isDev from "electron-is-dev";
 import Store from "electron-store";
 import * as fsp from "fs/promises";
 import path from "path";
@@ -32,7 +33,7 @@ import {
 
 const store = new Store();
 
-/** Absent means on: the API is enabled until someone turns it off. */
+/** Stored once someone flips the switch; `cloudEnabled` decides while absent. */
 const ENABLED_KEY = "cloud_api_enabled";
 /** The server address typed into Settings. Absent means the default. */
 const URL_KEY = "cloud_api_url";
@@ -72,8 +73,15 @@ function toPosix(value: string): string {
   return value.split(path.sep).join("/");
 }
 
+/**
+ * Never flipped means off in a development build and on in a packaged one: a
+ * first install of a release shows cloud content, and a development run makes
+ * no request until someone turns it on. Both builds share `userData`, so a
+ * value either one stores holds for the other too.
+ */
 export function cloudEnabled(): boolean {
-  return store.get(ENABLED_KEY) !== false;
+  const stored = store.get(ENABLED_KEY);
+  return typeof stored === "boolean" ? stored : !isDev;
 }
 
 /**
