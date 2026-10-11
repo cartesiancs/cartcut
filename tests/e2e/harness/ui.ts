@@ -71,7 +71,7 @@ export async function openSettingsTab(
   // A control that exists only in the requested pane, so this waits on the tab
   // switch having landed rather than merely on the sidebar pane being open.
   const witness =
-    tab === "canvas" ? "#projectFps" : "#nav-home select[data-setting], #nav-home .btn-group";
+    tab === "canvas" ? "#projectFps" : "#nav-home .opt-seg";
   await expect(page.locator(witness).first()).toBeVisible({ timeout: 15_000 });
 }
 

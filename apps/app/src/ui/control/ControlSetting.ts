@@ -8,6 +8,7 @@ import { LocaleController } from "../../controllers/locale";
 import "../../components/input/input";
 import "../../features/option/optionTabBar";
 import type { OptionTabSpec } from "../../features/option/optionTabBar";
+import { fillPercent, section } from "../../features/option/optionKit";
 import { FPS_PRESETS } from "../../features/timeline/frames";
 import { beginInputScrub } from "../../features/input/inputScrub";
 import { SCRUB_FIELDS } from "../../features/input/scrubFields";
@@ -263,7 +264,8 @@ export class ControlSetting extends LitElement {
   }
 
   /**
-   * One `<select>` row, sharing the panel's Bootstrap skin.
+   * One `<select>` under its name, in the inspector kit's field, with `hint`
+   * under it when there is one.
    *
    * `key` names the setting this select shows, so `updated()` can reconcile the
    * live selection against the store — see the note there.
@@ -273,24 +275,32 @@ export class ControlSetting extends LitElement {
     label: string,
     options: { value: string | number; label: string }[],
     handler: (e) => void,
+    hint?: string,
   ) {
     const value = this.settings[key];
 
     return html`
-      <label class="form-label text-light">${label}</label>
-      <select
-        data-setting=${key}
-        class="form-select text-light mb-3"
-        @change=${handler}
-      >
-        ${options.map(
-          (option) => html`
-            <option value=${option.value} ?selected=${option.value === value}>
-              ${option.label}
-            </option>
-          `,
-        )}
-      </select>
+      <div class="opt-field">
+        <div class="opt-row">
+          <label class="opt-label">${label}</label>
+        </div>
+        <select
+          data-setting=${key}
+          class="opt-select proj-control"
+          @change=${handler}
+        >
+          ${options.map(
+            (option) => html`
+              <option value=${option.value} ?selected=${option.value === value}>
+                ${option.label}
+              </option>
+            `,
+          )}
+        </select>
+        ${hint == null
+          ? ""
+          : html`<div class="opt-hint proj-hint">${hint}</div>`}
+      </div>
     `;
   }
 
@@ -315,7 +325,8 @@ export class ControlSetting extends LitElement {
   }
 
   /**
-   * A checkbox, for the one setting that is a boolean.
+   * A checkbox, for the one setting that is a boolean, drawn as a switch at the
+   * end of its name's row. `hint` is the line under it.
    *
    * Deliberately not routed through `syncSelects` the way the dropdowns are —
    * that exists because a `selected` *attribute* stops moving a `<select>` once
@@ -326,20 +337,22 @@ export class ControlSetting extends LitElement {
     label: string,
     checked: boolean,
     handler: (e) => void,
+    hint: string,
   ) {
     return html`
-      <div class="form-check mb-1">
-        <input
-          class="form-check-input"
-          type="checkbox"
-          id=${`export-${key}`}
-          data-setting=${key}
-          ?checked=${checked}
-          @change=${handler}
-        />
-        <label class="form-check-label text-light" for=${`export-${key}`}>
-          ${label}
-        </label>
+      <div class="opt-field">
+        <div class="opt-row">
+          <label class="opt-label" for=${`export-${key}`}>${label}</label>
+          <input
+            class="proj-switch"
+            type="checkbox"
+            id=${`export-${key}`}
+            data-setting=${key}
+            ?checked=${checked}
+            @change=${handler}
+          />
+        </div>
+        <div class="opt-hint proj-hint">${hint}</div>
       </div>
     `;
   }
@@ -359,179 +372,126 @@ export class ControlSetting extends LitElement {
     const duration = this.renderOption.duration;
 
     return html`
-      <label class="form-label text-light"
-        >${this.lc.t("setting.video_duration")}</label
-      >
-      <!-- The margin is on the row rather than on each group, so the row's box
-           ends where the inputs do: the tutorial draws its ring around it. -->
-      <div
-        class="d-flex flex-row bd-highlight gap-2 mb-3"
-        data-tutorial="project-duration"
-      >
-        <div class="input-group">
+      ${section({
+        title: this.lc.t("setting.video_duration"),
+        body: html`
+          <!-- The tutorial draws its ring around this row, so it holds the
+               two boxes and nothing else. -->
+          <div class="proj-pair" data-tutorial="project-duration">
+            <div class="proj-unit-field">
+              <input
+                id="projectDurationMinute"
+                type="number"
+                class="proj-unit-input scrub-number"
+                @mousedown=${this._handleScrubDown}
+                placeholder="m"
+                @change=${this._handleUpdateDurationMinute}
+                .value=${String(Math.floor(duration / 60))}
+                min="0"
+              />
+              <span class="proj-unit">${this.lc.t("setting.minute_unit")}</span>
+            </div>
+
+            <div class="proj-unit-field">
+              <input
+                id="projectDurationSecond"
+                type="number"
+                class="proj-unit-input scrub-number"
+                @mousedown=${this._handleScrubDown}
+                placeholder="${this.lc.t("setting.seconds")} e.g) 0"
+                @change=${this._handleUpdateDurationSecond}
+                .value=${String(duration % 60)}
+                min="0"
+              />
+              <span class="proj-unit"
+                >${this.lc.t("setting.seconds_unit")}</span
+              >
+            </div>
+          </div>
+        `,
+      })}
+      ${section({
+        title: this.lc.t("setting.frame"),
+        actions: html`
+          <div class="proj-unit-field proj-unit-inline">
+            <input
+              id="projectFps"
+              type="number"
+              class="proj-unit-input scrub-number"
+              @mousedown=${this._handleScrubDown}
+              list="projectFpsPresets"
+              min="1"
+              max="240"
+              step="1"
+              .value=${String(this.renderOption.fps)}
+              @change=${this._handleUpdateFps}
+            />
+            <datalist id="projectFpsPresets">
+              ${FPS_PRESETS.map((fps) => html`<option value=${fps}></option>`)}
+            </datalist>
+            <span class="proj-unit">fps</span>
+          </div>
+        `,
+      })}
+      ${section({
+        title: this.lc.t("setting.background"),
+        actions: html`
           <input
-            id="projectDurationMinute"
-            type="number"
-            class="form-control bg-default text-light scrub-number"
-            @mousedown=${this._handleScrubDown}
-            placeholder="m"
-            @change=${this._handleUpdateDurationMinute}
-            .value=${String(Math.floor(duration / 60))}
-            min="0"
+            id="backgroundColor"
+            type="color"
+            class="opt-swatch"
+            .value=${this.renderOption.backgroundColor}
+            @change=${this._handleUpdateBackgroundColor}
+            @input=${this._handleUpdateBackgroundColor}
           />
-          <span class="input-group-text bg-default text-light"
-            >${this.lc.t("setting.minute_unit")}</span
-          >
-        </div>
-
-        <div class="input-group">
-          <input
-            id="projectDurationSecond"
-            type="number"
-            class="form-control bg-default text-light scrub-number"
-            @mousedown=${this._handleScrubDown}
-            placeholder="${this.lc.t("setting.seconds")} e.g) 0"
-            @change=${this._handleUpdateDurationSecond}
-            .value=${String(duration % 60)}
-            min="0"
-          />
-          <span class="input-group-text bg-default text-light"
-            >${this.lc.t("setting.seconds_unit")}</span
-          >
-        </div>
-      </div>
-
-      <label class="form-label text-light">${this.lc.t("setting.frame")}</label>
-      <div class="input-group mb-3">
-        <input
-          id="projectFps"
-          type="number"
-          class="form-control bg-default text-light scrub-number"
-          @mousedown=${this._handleScrubDown}
-          list="projectFpsPresets"
-          min="1"
-          max="240"
-          step="1"
-          .value=${String(this.renderOption.fps)}
-          @change=${this._handleUpdateFps}
-        />
-        <datalist id="projectFpsPresets">
-          ${FPS_PRESETS.map((fps) => html`<option value=${fps}></option>`)}
-        </datalist>
-        <span class="input-group-text bg-default text-light">fps</span>
-      </div>
-
-      <label class="form-label text-light"
-        >${this.lc.t("setting.background")}</label
-      >
-      <div class="input-group mb-3">
-        <input
-          id="backgroundColor"
-          type="color"
-          class="form-control bg-default text-light"
-          .value=${this.renderOption.backgroundColor}
-          @change=${this._handleUpdateBackgroundColor}
-          @input=${this._handleUpdateBackgroundColor}
-        />
-      </div>
-
-      <label class="form-label text-light"
-        >${this.lc.t("setting.resolution")}</label
-      >
-      <div class="d-flex flex-row bd-highlight mb-2">
-        <input
-          id="previewSizeH"
-          type="number"
-          class="form-control bg-default text-light scrub-number me-1"
-          @mousedown=${this._handleScrubDown}
-          .value=${String(this.renderOption.previewSize.h)}
-          @change=${this._handleUpdatePreviewSizeH}
-        />
-        <input
-          id="previewSizeW"
-          type="number"
-          class="form-control bg-default text-light scrub-number"
-          @mousedown=${this._handleScrubDown}
-          .value=${String(this.renderOption.previewSize.w)}
-          @change=${this._handleUpdatePreviewSizeW}
-        />
-      </div>
-
-      ${this.renderResolutionPresets()}
+        `,
+      })}
+      ${section({
+        title: this.lc.t("setting.resolution"),
+        body: html`
+          <div class="opt-field">
+            <div class="proj-pair">
+              <div class="proj-unit-field">
+                <input
+                  id="previewSizeH"
+                  type="number"
+                  class="proj-unit-input scrub-number"
+                  @mousedown=${this._handleScrubDown}
+                  .value=${String(this.renderOption.previewSize.h)}
+                  @change=${this._handleUpdatePreviewSizeH}
+                />
+              </div>
+              <div class="proj-unit-field">
+                <input
+                  id="previewSizeW"
+                  type="number"
+                  class="proj-unit-input scrub-number"
+                  @mousedown=${this._handleScrubDown}
+                  .value=${String(this.renderOption.previewSize.w)}
+                  @change=${this._handleUpdatePreviewSizeW}
+                />
+              </div>
+            </div>
+          </div>
+          <div class="opt-field">${this.renderResolutionPresets()}</div>
+        `,
+      })}
     `;
   }
 
   /**
    * Four tiles in one row, each drawing its own aspect ratio.
    *
-   * Not `.btn`: the design system pins its padding with `!important`, which is
-   * wider than a quarter of the sidebar and is why these used to stack.
+   * The inspector kit's tiles (`opt-tile`), held at four columns by
+   * `.proj-tiles`. Not `.btn`: the design system pins its padding with
+   * `!important`, which is wider than a quarter of the sidebar and is why these
+   * used to stack.
    */
   private renderResolutionPresets() {
     const { w, h } = this.renderOption.previewSize;
 
     return html`
-      <style>
-        .resolution-presets {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 0.25rem;
-        }
-
-        .resolution-preset {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 0.25rem;
-          min-width: 0;
-          padding: 0.4rem 0.1rem 0.3rem;
-          border: 1px solid transparent;
-          border-radius: 8px;
-          background-color: #1c1f23;
-          color: #adb5bd;
-          font-size: 11px;
-          line-height: 1.1;
-          cursor: pointer;
-        }
-
-        .resolution-preset:hover {
-          background-color: #2a2e33;
-          color: #f8f9fa;
-        }
-
-        .resolution-preset.active {
-          border-color: rgba(255, 255, 255, 0.45);
-          color: #f8f9fa;
-        }
-
-        .resolution-preset-glyph-box {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: ${RATIO_GLYPH_PX}px;
-          height: ${RATIO_GLYPH_PX}px;
-        }
-
-        .resolution-preset-glyph {
-          border: 1.5px solid currentColor;
-          border-radius: 2px;
-        }
-
-        .resolution-preset.active .resolution-preset-glyph {
-          background-color: rgba(255, 255, 255, 0.18);
-        }
-
-        .resolution-preset-tag {
-          font-size: 10px;
-          opacity: 0.7;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          max-width: 100%;
-        }
-      </style>
-
-      <div class="resolution-presets mb-3">
+      <div class="opt-tiles proj-tiles">
         ${RESOLUTION_PRESETS.map((preset) => {
           const scale = RATIO_GLYPH_PX / Math.max(preset.w, preset.h);
           const active = preset.w === w && preset.h === h;
@@ -539,20 +499,23 @@ export class ControlSetting extends LitElement {
           return html`
             <button
               type="button"
-              class="resolution-preset ${active ? "active" : ""}"
+              class="opt-tile ${active ? "is-on" : ""}"
               title=${preset.title}
               @click=${() => this._handleClickResolution(preset.w, preset.h)}
             >
-              <span class="resolution-preset-glyph-box">
+              <span
+                class="proj-tile-glyph"
+                style="width: ${RATIO_GLYPH_PX}px; height: ${RATIO_GLYPH_PX}px;"
+              >
                 <span
-                  class="resolution-preset-glyph"
+                  class="opt-tile-shape"
                   style="width: ${Math.round(
                     preset.w * scale,
                   )}px; height: ${Math.round(preset.h * scale)}px;"
                 ></span>
               </span>
-              <span>${preset.ratio}</span>
-              <span class="resolution-preset-tag">${preset.tag}</span>
+              <span class="opt-tile-label">${preset.ratio}</span>
+              <span class="proj-tile-tag">${preset.tag}</span>
             </button>
           `;
         })}
@@ -602,61 +565,66 @@ export class ControlSetting extends LitElement {
         : ""}
       ${!isProRes && settings.qualityMode === "crf"
         ? html`
-            <label class="form-label text-light">
-              ${this.lc.t("setting.crf")}
-              <span class="text-secondary">${settings.crf}</span>
-            </label>
-            <input
-              type="range"
-              class="form-range"
-              min=${crfRange.min}
-              max=${crfRange.max}
-              .value=${String(settings.crf)}
-              @input=${(e) => this.patch({ crf: Number(e.target.value) })}
-            />
-            <p class="text-secondary mb-3" style="font-size: 0.75rem;">
-              ${this.lc.t("setting.crf_hint")}
-            </p>
+            <div class="opt-field">
+              <div class="opt-row">
+                <label class="opt-label">${this.lc.t("setting.crf")}</label>
+                <span class="opt-value">${settings.crf}</span>
+              </div>
+              <input
+                type="range"
+                class="opt-slider"
+                style="--opt-fill: ${fillPercent(
+                  settings.crf,
+                  crfRange.min,
+                  crfRange.max,
+                )};"
+                min=${crfRange.min}
+                max=${crfRange.max}
+                .value=${String(settings.crf)}
+                @input=${(e) => this.patch({ crf: Number(e.target.value) })}
+              />
+              <div class="opt-hint proj-hint">
+                ${this.lc.t("setting.crf_hint")}
+              </div>
+            </div>
           `
         : ""}
       ${!isProRes && settings.qualityMode === "bitrate"
         ? html`
-            <label class="form-label text-light"
-              >${this.lc.t("setting.bitrate")}</label
-            >
-            <div class="input-group mb-3">
-              <input
-                id="videoBitrate"
-                type="number"
-                class="form-control bg-default text-light scrub-number"
-                @mousedown=${this._handleScrubDown}
-                min="1"
-                .value=${String(settings.videoBitrate)}
-                @change=${(e) =>
-                  this.patch({ videoBitrate: Number(e.target.value) })}
-              />
-              <span class="input-group-text bg-default text-light"
-                >${this.lc.t("setting.bitrate_unit")}</span
-              >
+            <div class="opt-field">
+              <div class="opt-row">
+                <label class="opt-label">${this.lc.t("setting.bitrate")}</label>
+              </div>
+              <div class="proj-unit-field proj-control">
+                <input
+                  id="videoBitrate"
+                  type="number"
+                  class="proj-unit-input scrub-number"
+                  @mousedown=${this._handleScrubDown}
+                  min="1"
+                  .value=${String(settings.videoBitrate)}
+                  @change=${(e) =>
+                    this.patch({ videoBitrate: Number(e.target.value) })}
+                />
+                <span class="proj-unit"
+                  >${this.lc.t("setting.bitrate_unit")}</span
+                >
+              </div>
             </div>
           `
         : ""}
       ${canHardwareAccel
-        ? html`
-            ${this.renderCheckbox(
-              "hardwareAccel",
-              this.lc.t("setting.hardware_accel"),
-              settings.hardwareAccel,
-              (e) => this.patch({ hardwareAccel: e.target.checked }),
-            )}
-            <p class="text-secondary mb-3" style="font-size: 0.75rem;">
-              ${this.lc.t(
-                isProRes || settings.videoCodec === "h265"
-                  ? "setting.hardware_accel_hint"
-                  : "setting.hardware_accel_hint_h264",
-              )}
-            </p>
-          `
+        ? this.renderCheckbox(
+            "hardwareAccel",
+            this.lc.t("setting.hardware_accel"),
+            settings.hardwareAccel,
+            (e) => this.patch({ hardwareAccel: e.target.checked }),
+            this.lc.t(
+              isProRes || settings.videoCodec === "h265"
+                ? "setting.hardware_accel_hint"
+                : "setting.hardware_accel_hint_h264",
+            ),
+          )
         : ""}
       ${CODEC_SUPPORTS_SPEED_PRESET[settings.videoCodec] && !hardwareActive
         ? this.renderSelect(
@@ -667,20 +635,16 @@ export class ControlSetting extends LitElement {
           )
         : ""}
       ${isProRes
-        ? html`
-            ${this.renderSelect(
-              "proresProfile",
-              this.lc.t("setting.prores_profile"),
-              PRORES_PROFILES.map((profile) => ({
-                value: profile.value,
-                label: profile.label,
-              })),
-              (e) => this.patch({ proresProfile: Number(e.target.value) }),
-            )}
-            <p class="text-secondary mb-3" style="font-size: 0.75rem;">
-              ${this.lc.t("setting.prores_hint")}
-            </p>
-          `
+        ? this.renderSelect(
+            "proresProfile",
+            this.lc.t("setting.prores_profile"),
+            PRORES_PROFILES.map((profile) => ({
+              value: profile.value,
+              label: profile.label,
+            })),
+            (e) => this.patch({ proresProfile: Number(e.target.value) }),
+            this.lc.t("setting.prores_hint"),
+          )
         : ""}
     `;
   }
@@ -730,53 +694,68 @@ export class ControlSetting extends LitElement {
     `;
   }
 
-  /** Preset row, the summary line, and the codec detail behind a disclosure. */
+  /**
+   * Two cards: the preset row with its summary line, and the codec detail,
+   * whose head is the disclosure that opens it.
+   */
   private renderExportPane() {
     const activePreset = detectPreset(this.settings);
 
     return html`
-      <label class="form-label text-light"
-        >${this.lc.t("setting.export_preset")}</label
-      >
-      <div class="btn-group w-100 mb-2" role="group">
-        ${PRESET_NAMES.map(
-          (name) => html`
+      ${section({
+        title: this.lc.t("setting.export_preset"),
+        body: html`
+          <div class="opt-seg" role="group">
+            ${PRESET_NAMES.map(
+              (name) => html`
+                <button
+                  type="button"
+                  class="opt-seg-item ${activePreset === name ? "is-on" : ""}"
+                  aria-pressed=${activePreset === name ? "true" : "false"}
+                  @click=${() => this._handleClickPreset(name)}
+                >
+                  <span class="proj-seg-label"
+                    >${this.lc.t(`setting.preset_${name}`)}</span
+                  >
+                </button>
+              `,
+            )}
             <button
-              class="btn btn-sm ${activePreset === name
-                ? "btn-blue-fill"
-                : "btn-default text-light"}"
-              @click=${() => this._handleClickPreset(name)}
+              type="button"
+              class="opt-seg-item ${activePreset === "custom" ? "is-on" : ""}"
+              aria-pressed=${activePreset === "custom" ? "true" : "false"}
+              @click=${() => (this.showAdvanced = true)}
             >
-              ${this.lc.t(`setting.preset_${name}`)}
+              <span class="proj-seg-label"
+                >${this.lc.t("setting.preset_custom")}</span
+              >
             </button>
-          `,
-        )}
+          </div>
+
+          <div class="opt-hint" style="margin-top: 8px;">
+            ${describeExportSettings(this.settings)}
+          </div>
+        `,
+      })}
+
+      <div class="opt-section">
         <button
-          class="btn btn-sm ${activePreset === "custom"
-            ? "btn-blue-fill"
-            : "btn-default text-light"}"
-          @click=${() => (this.showAdvanced = true)}
+          type="button"
+          class="opt-head proj-disclosure"
+          aria-expanded=${this.showAdvanced ? "true" : "false"}
+          @click=${() => (this.showAdvanced = !this.showAdvanced)}
         >
-          ${this.lc.t("setting.preset_custom")}
+          <span class="opt-head-title"
+            >${this.lc.t("setting.advanced_settings")}</span
+          >
+          <span class="material-symbols-outlined proj-disclosure-icon">
+            ${this.showAdvanced ? "expand_less" : "expand_more"}
+          </span>
         </button>
-      </div>
 
-      <p class="text-secondary mb-2" style="font-size: 0.75rem;">
-        ${describeExportSettings(this.settings)}
-      </p>
-
-      <button
-        class="btn btn-sm btn-default text-light w-100 d-flex justify-content-between align-items-center mb-3"
-        @click=${() => (this.showAdvanced = !this.showAdvanced)}
-      >
-        <span>${this.lc.t("setting.advanced_settings")}</span>
-        <span class="material-symbols-outlined">
-          ${this.showAdvanced ? "expand_less" : "expand_more"}
-        </span>
-      </button>
-
-      <div class="${this.showAdvanced ? "" : "d-none"}">
-        ${this.renderVideoSection()} ${this.renderAudioSection()}
+        <div class="opt-body ${this.showAdvanced ? "" : "d-none"}">
+          ${this.renderVideoSection()} ${this.renderAudioSection()}
+        </div>
       </div>
 
       <!--
@@ -819,7 +798,7 @@ export class ControlSetting extends LitElement {
     return html`
       <button
         type="button"
-        class="btn btn-sm btn-default text-light mt-1"
+        class="browse-btn"
         data-bs-toggle="modal"
         data-bs-target="#shortKey"
       >
@@ -835,9 +814,7 @@ export class ControlSetting extends LitElement {
         <span class="material-symbols-outlined"> restart_alt </span>
       </button> -->
 
-      <p class="text-secondary mt-3 mb-0" ref="appVersion">
-        ${this.appVersion}
-      </p>
+      <p class="proj-version" ref="appVersion">${this.appVersion}</p>
     `;
   }
 
@@ -869,7 +846,7 @@ export class ControlSetting extends LitElement {
         ${this.renderExportPane()}
       </div>
 
-      <hr class="text-secondary" />
+      <hr class="proj-rule" />
 
       ${this.renderCommonSection()}
     `;

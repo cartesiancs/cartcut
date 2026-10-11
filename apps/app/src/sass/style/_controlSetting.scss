@@ -1,0 +1,301 @@
+/*
+ * ------------------------------------------- the sidebar's Canvas and Export
+ *
+ * `<control-ui-setting>` is built from the inspector's kit (`_option.scss`):
+ * one card per setting, the inspector's fields, segmented row, tiles and
+ * slider. What is here is only what the kit has no piece for: a number box
+ * with its unit inside the frame, a checkbox drawn as a switch, a card head
+ * that opens and closes its body, and the row under both panes.
+ *
+ * Everything is `proj-` prefixed and every number is the kit's or the browse
+ * bar's, so the sidebar and the inspector mean the same thing by the same grey.
+ */
+
+/*
+ * A custom element with no styles is `display: inline`, and an inline host
+ * of block cards measures as the line it sits on, not where its cards are.
+ */
+control-ui-setting {
+  display: block;
+}
+
+/* ---------------------------------------------------------------- fields */
+
+/*
+ * Two or more boxes sharing a line, each taking an equal part of it: the
+ * duration's minutes and seconds, the resolution's two sides.
+ */
+.proj-pair {
+  display: flex;
+  gap: 6px;
+}
+
+.proj-pair > .proj-unit-field {
+  flex: 1 1 0;
+}
+
+/*
+ * A number with its unit inside the frame, as the old input group had it.
+ *
+ * The frame carries the border and the focus, the way `.browse-field` does, so
+ * the unit lights with the number. The input stays the element the scrub is
+ * bound to and the one the e2e harness fills by id.
+ */
+.proj-unit-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid $opt-line;
+  border-radius: 7px;
+  background-color: $opt-field;
+  transition: border-color 140ms ease-out;
+}
+
+.proj-unit-field:hover {
+  border-color: $opt-line-strong;
+}
+
+.proj-unit-field:focus-within {
+  border-color: #4a5158;
+}
+
+/* In a card's head, beside the title, where it cannot take the spare width. */
+.proj-unit-field.proj-unit-inline {
+  width: 84px;
+}
+
+/*
+ * `.scrub-number` supplies the cursor and hides Chromium's spin buttons, so
+ * neither is repeated here.
+ */
+input.proj-unit-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  box-shadow: none;
+  color: $opt-text;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+input.proj-unit-input:focus {
+  color: $opt-bright;
+}
+
+input.proj-unit-input::placeholder {
+  color: #666d75;
+}
+
+.proj-unit {
+  flex: none;
+  color: $opt-label;
+  font-size: 11px;
+}
+
+/*
+ * A select or a field under its name. The kit's `.opt-row` is a single line;
+ * these controls are too wide to share one with a label in a narrow column,
+ * so the name sits above, at the 6px the kit keeps between a name and its
+ * slider.
+ */
+.proj-control {
+  margin-top: 6px;
+}
+
+/*
+ * A select is `inline-block`, so on its own line it still sits on the card's
+ * 16px text strut and the line box grows under it.
+ */
+select.proj-control {
+  display: block;
+}
+
+/* The kit's hint, under the control it explains rather than at a card's top. */
+.opt-hint.proj-hint {
+  margin-top: 6px;
+}
+
+/*
+ * A preset's name in the segmented row. The kit's cells are flex boxes, and
+ * text directly inside one cannot ellipsize, so in the narrowest column
+ * "Custom" ran out of its cell and past the card's edge.
+ */
+.proj-seg-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------- switch */
+
+/*
+ * The checkbox, drawn as `.ext-switch` draws its toggle. Still an
+ * `<input type="checkbox">` with `?checked` and `@change`, so nothing about how
+ * it is read or written changes; only its box does.
+ */
+input[type="checkbox"].proj-switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 15px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid $opt-line-strong;
+  border-radius: 999px;
+  background-color: $opt-raised;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease-out,
+    border-color 160ms ease-out;
+}
+
+input[type="checkbox"].proj-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background-color: $opt-label;
+  transition:
+    transform 160ms ease-out,
+    background-color 160ms ease-out;
+}
+
+input[type="checkbox"].proj-switch:checked {
+  border-color: transparent;
+  background-color: $opt-bright;
+}
+
+/* 24px inside the border, less the 2px inset either side and the 9px knob. */
+input[type="checkbox"].proj-switch:checked::after {
+  transform: translateX(11px);
+  background-color: $opt-card;
+}
+
+input[type="checkbox"].proj-switch:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+input[type="checkbox"].proj-switch:focus-visible {
+  outline: 1px solid #5a6067;
+  outline-offset: 1px;
+}
+
+/* ------------------------------------------------------------ disclosure */
+
+/*
+ * Advanced settings: the card's head is the button that opens its body, so
+ * the whole line is the target and the chevron says which way it goes.
+ */
+button.opt-head.proj-disclosure {
+  appearance: none;
+  width: 100%;
+  margin: 0;
+  padding-right: 9px;
+  border: none;
+  background-color: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 140ms ease-out;
+}
+
+button.opt-head.proj-disclosure:hover {
+  background-color: #1a1d20;
+}
+
+button.opt-head.proj-disclosure:hover > .opt-head-title {
+  color: $opt-bright;
+}
+
+button.opt-head.proj-disclosure:focus-visible {
+  outline: 1px solid #5a6067;
+  outline-offset: -1px;
+}
+
+/* Two classes, to outrank `material-symbols/outlined`, which loads later. */
+.proj-disclosure > .proj-disclosure-icon {
+  flex: none;
+  color: $opt-label;
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* ----------------------------------------------------------------- tiles */
+
+/*
+ * The canvas presets: four across at every width, as before, rather than the
+ * kit's `auto-fill`, which would put all four in the first half of a wide
+ * column.
+ */
+.opt-tiles.proj-tiles {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/*
+ * 2px at the sides rather than the kit's 4px: at a quarter of the narrowest
+ * column the kit's padding left "16:9" no room and it read as "16...".
+ */
+.proj-tiles .opt-tile {
+  justify-content: flex-start;
+  padding: 7px 2px 6px;
+}
+
+/* The glyph's own box, so a tall preset and a wide one put their words level. */
+.proj-tile-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/*
+ * The kit's `.opt-tile > .opt-tile-shape` matches a direct child only, and this
+ * shape sits inside the glyph box, so without its own outline every preset but
+ * the chosen one (which has a fill) drew nothing.
+ */
+.proj-tile-glyph > .opt-tile-shape {
+  display: block;
+  border: 1px solid currentColor;
+  border-radius: 1px;
+}
+
+.opt-tile.is-on .opt-tile-shape {
+  background-color: rgba(255, 255, 255, 0.18);
+}
+
+/* The second line that tells the two 16:9 presets apart. */
+.proj-tile-tag {
+  max-width: 100%;
+  font-size: 9px;
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ------------------------------------------------------------ the footer */
+
+/* Under both panes: a hairline, the shortcuts button and the version. */
+.proj-rule {
+  margin: 14px 0 10px;
+  border: none;
+  border-top: 1px solid $opt-line;
+  opacity: 1;
+}
+
+.proj-version {
+  margin: 10px 0 0;
+  color: $opt-label;
+  font-size: 11px;
+}
