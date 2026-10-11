@@ -5,7 +5,6 @@ import {
   audiblePathsAt,
   bucketPeakAt,
   compositeLevel,
-  meterFractionOf,
   type PeakLookup,
 } from "./audioLevel";
 import type { PeakData } from "./strip/peaks";
@@ -66,20 +65,6 @@ describe("amplitudeToDb", () => {
 
   it("does not report above unity", () => {
     expect(amplitudeToDb(2)).toBe(0);
-  });
-});
-
-describe("meterFractionOf", () => {
-  it("spans the floor to unity", () => {
-    expect(meterFractionOf(METER_FLOOR_DB)).toBe(0);
-    expect(meterFractionOf(0)).toBe(1);
-    expect(meterFractionOf(-30)).toBeCloseTo(0.5, 6);
-  });
-
-  it("clamps outside the scale rather than running off the bar", () => {
-    expect(meterFractionOf(-120)).toBe(0);
-    expect(meterFractionOf(6)).toBe(1);
-    expect(meterFractionOf(NaN)).toBe(0);
   });
 });
 

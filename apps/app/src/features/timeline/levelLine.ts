@@ -121,11 +121,10 @@ const LEVEL_KNEE_FRACTION = 0.75;
  * fader reaches silence at the bottom of the band rather than somewhere near
  * it.
  *
- * **Not `audioLevel.ts#meterFractionOf`, and the two must not be merged.** That
- * one maps a *meter* reading, which is output dBFS and cannot exceed 0. This
- * maps a clip's *gain*, which can, and it is tapered where the meter is not.
- * They would still look alike at a glance, and unifying them would silently
- * rescale one of them.
+ * **Not `preview/meterScale.ts`, and the two must not be merged.** That one
+ * places a *meter* reading, which is output dBFS and cannot exceed 0. This maps
+ * a clip's *gain*, which can, and each is tapered for its own job. Unifying
+ * them would silently rescale one of them.
  */
 export function levelFractionOf(db: number): number {
   const clamped = clampVolumeDb(db);

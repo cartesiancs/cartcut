@@ -70,15 +70,6 @@ export function amplitudeToDb(amplitude: number): number {
   return Math.max(METER_FLOOR_DB, Math.min(0, 20 * Math.log10(amplitude)));
 }
 
-/** Where a level sits on the meter, 0..1, linear in dB. */
-export function meterFractionOf(db: number): number {
-  if (!Number.isFinite(db)) {
-    return 0;
-  }
-  const clamped = Math.max(METER_FLOOR_DB, Math.min(0, db));
-  return (clamped - METER_FLOOR_DB) / -METER_FLOOR_DB;
-}
-
 /**
  * Decoded peaks for a file, or null when there are none to be had.
  *

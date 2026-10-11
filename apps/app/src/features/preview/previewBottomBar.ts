@@ -15,7 +15,6 @@ import { sharedAudioPeakProvider } from "../timeline/strip/audioPeaks";
 import {
   audiblePathsAt,
   compositeLevel,
-  meterFractionOf,
   amplitudeToDb,
 } from "../timeline/audioLevel";
 import {
@@ -25,6 +24,7 @@ import {
   silentAt,
   type MeterState,
 } from "./meterBallistics";
+import { METER_SEGMENT_DB, litSegmentsAt } from "./meterScale";
 
 /**
  * The strip under the preview: what is being heard, a way to stop hearing it,
@@ -51,14 +51,13 @@ import {
  *
  * A segmented meter quantises the scale, and the quantisation is the feature: a
  * continuous bar invites reading a position, which a peak meter cannot support,
- * while six lit-or-not blocks say only "about this loud" — which is all the
+ * while six lit-or-not blocks say only "about this loud", which is all the
  * measurement is good for.
  *
- * Six over the 60 dB scale is 10 dB a block, and the colours sit where a
- * hardware meter puts them: the last block is the one you are not meant to
- * reach.
+ * Where each block lights is `meterScale.ts`; the colours follow it: amber for
+ * the last 6 dB of headroom, red for clipping.
  */
-const SEGMENTS = 6;
+const SEGMENTS = METER_SEGMENT_DB.length;
 const SEGMENT_COLORS = [
   "#5ba85f",
   "#5ba85f",
@@ -281,14 +280,12 @@ export class PreviewBottomBar extends LitElement {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
-    const level = meterFractionOf(amplitudeToDb(this.meter.level));
-    const hold = meterFractionOf(amplitudeToDb(this.meter.hold));
+    const litCount = litSegmentsAt(amplitudeToDb(this.meter.level));
 
     // The block the peak marker sits in. A segmented meter has nowhere to put a
     // line between blocks, so the marker *is* a block, lit on its own past the
     // signal, which is the hardware idiom and needs no extra colour.
-    const holdIndex =
-      hold > 0 ? Math.min(SEGMENTS - 1, Math.floor(hold * SEGMENTS)) : -1;
+    const holdIndex = litSegmentsAt(amplitudeToDb(this.meter.hold)) - 1;
 
     // The gaps are whole device pixels and only the cells absorb the rounding.
     // A cell's right edge and the next one's left edge are rounded from two
@@ -304,7 +301,7 @@ export class PreviewBottomBar extends LitElement {
       // i counts from the left, the direction the meter fills.
       const left = Math.round(i * (cell + gap));
       const right = Math.round(i * (cell + gap) + cell);
-      const lit = level * SEGMENTS > i || i === holdIndex;
+      const lit = i < litCount || i === holdIndex;
 
       ctx.fillStyle = lit ? SEGMENT_COLORS[i] : SEGMENT_DARK;
       ctx.beginPath();
