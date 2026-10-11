@@ -122,6 +122,18 @@ const request = {
       return () => ipcRenderer.removeListener("cloud:progress", wrapped);
     },
   },
+  /**
+   * Settings' Storage section. Main picks every folder: the clears take no
+   * argument, and `openFolder` takes a name from a closed list (`appData`,
+   * `recordings`, `autosave`, `logs`, `temp`), never a path.
+   */
+  storage: {
+    tempSummary: () => ipcRenderer.invoke("storage:tempSummary"),
+    clearTemp: () => ipcRenderer.invoke("storage:clearTemp"),
+    recordingsSummary: () => ipcRenderer.invoke("storage:recordingsSummary"),
+    clearRecordings: () => ipcRenderer.invoke("storage:clearRecordings"),
+    openFolder: (folder) => ipcRenderer.invoke("storage:openFolder", folder),
+  },
   project: {
     save: () => ipcRenderer.invoke("dialog:saveProject"),
   },

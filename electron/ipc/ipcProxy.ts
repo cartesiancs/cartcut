@@ -37,6 +37,11 @@ export type GenerateResult = {
 /** True while a generation pass is running, so a second press is a no-op. */
 let running = false;
 
+/** Whether a pass is running, so clearing temporary files leaves its proxies alone. */
+export function proxyPassRunning(): boolean {
+  return running;
+}
+
 export const ipcProxy = {
   /** Every proxy that exists and still matches its source, keyed by source path. */
   list: async (): Promise<Record<string, ProxyEntry>> => {

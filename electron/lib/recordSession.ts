@@ -56,6 +56,7 @@ import {
 } from "./inputMonitor.js";
 import { writeInputLog } from "./recordInputFile.js";
 import { muxRecording, type PcmInput } from "./recordMux.js";
+import { recordingFilename } from "./storage/recordingFiles.js";
 
 /**
  * The files a session may write.
@@ -433,6 +434,13 @@ export function stopSession(sessionId: string): SessionTracks {
  * unexpected beats nowhere.
  */
 export async function recordingsDirectory(): Promise<string> {
+  const dir = recordingsRoot();
+  await fsp.mkdir(dir, { recursive: true });
+  return dir;
+}
+
+/** The same folder without creating it, so counting what is there leaves no trace. */
+export function recordingsRoot(): string {
   let root: string;
 
   try {
@@ -441,30 +449,7 @@ export async function recordingsDirectory(): Promise<string> {
     root = app.getPath("userData");
   }
 
-  const dir = path.join(root, "Cartcut Recordings");
-  await fsp.mkdir(dir, { recursive: true });
-  return dir;
-}
-
-/** `Cartcut 2026-09-03 16.42.10.mp4` — sortable, and legal on every platform. */
-function recordingFilename(when: Date): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-
-  return [
-    "Cartcut ",
-    when.getFullYear(),
-    "-",
-    pad(when.getMonth() + 1),
-    "-",
-    pad(when.getDate()),
-    " ",
-    pad(when.getHours()),
-    ".",
-    pad(when.getMinutes()),
-    ".",
-    pad(when.getSeconds()),
-    ".mp4",
-  ].join("");
+  return path.join(root, "Cartcut Recordings");
 }
 
 export type DeliverRequest = {

@@ -231,6 +231,10 @@ settings-button {
   border-radius: 10px;
 }
 
+.settings-group + .settings-group {
+  margin-top: 12px;
+}
+
 // Top-aligned, with every label and control one 30px line tall, so a label
 // stays level with its field when an error line opens under the field.
 .settings-row {

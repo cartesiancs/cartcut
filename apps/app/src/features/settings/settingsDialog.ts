@@ -8,7 +8,9 @@
  * Tab trap (`automatic-caption/src/clipPicker.ts`), typing passed through so
  * copy and paste still work in the address field, and a sidebar of sections:
  * General (the language, which used to be a Bootstrap modal of its own) and
- * the cloud, which can also delete everything downloaded from it.
+ * the cloud, which can also delete everything downloaded from it, and
+ * storage: the temporary files, the screen recorder's takes, and the folders
+ * where the app keeps its files.
  *
  * Words are kept to labels. A row says what it controls in a word or two, and
  * the only sentence anywhere is an error.
@@ -31,12 +33,30 @@ import {
 import { loadPresets } from "../fx/presetRegistry";
 import { refreshTemplateLibrary } from "../template/templateRegistry";
 import { criticalDamping, springDurationMs, springEasing, type Spring } from "../motion/spring";
+import {
+  clearRecordingFiles,
+  clearTempFiles,
+  openStorageFolder,
+  readRecordingsSummary,
+  readTempSummary,
+  storagePort,
+  type StorageFolder,
+} from "./storagePort";
 
-type Section = "general" | "cloud";
+type Section = "general" | "cloud" | "storage";
 
 const SECTIONS: ReadonlyArray<{ id: Section; icon: string; label: string }> = [
   { id: "general", icon: "tune", label: "setting.section_general" },
   { id: "cloud", icon: "cloud", label: "setting.section_cloud" },
+  { id: "storage", icon: "hard_drive", label: "setting.section_storage" },
+];
+
+/** The folders Storage can open. Recordings opens from its own row. */
+const FOLDERS: ReadonlyArray<{ id: StorageFolder; label: string }> = [
+  { id: "appData", label: "setting.storage_folder_app_data" },
+  { id: "autosave", label: "setting.storage_folder_autosave" },
+  { id: "logs", label: "setting.storage_folder_logs" },
+  { id: "temp", label: "setting.storage_folder_temp" },
 ];
 
 type Language = "en" | "ko";
@@ -101,6 +121,17 @@ export class SettingsDialog extends LitElement {
   @state() private clearing = false;
   /** Whether the last delete left something behind (a file another program held open). */
   @state() private clearFailed = false;
+  /** The temporary files' size, counted when the dialog opens; `null` until main answers. */
+  @state() private temp: { bytes: number } | null = null;
+  @state() private clearingTemp = false;
+  @state() private tempFailed = false;
+  /** The recorder's finished takes, counted when the dialog opens. */
+  @state() private recordings: { files: number; bytes: number } | null = null;
+  @state() private clearingRecordings = false;
+  /** `busy` when main refused because a take is running. */
+  @state() private recordingsError: "failed" | "busy" | null = null;
+  /** The folder whose Open last failed, so the error sits under its row. */
+  @state() private openFailed: StorageFolder | null = null;
 
   private lc = new LocaleController(this);
   private returnFocus: HTMLElement | null = null;
@@ -129,8 +160,12 @@ export class SettingsDialog extends LitElement {
     this.leaving = false;
     this.urlError = false;
     this.clearFailed = false;
+    this.tempFailed = false;
+    this.recordingsError = null;
+    this.openFailed = null;
     this.language ??= this.lc.value;
     void this.readDownloaded();
+    void this.readStorage();
 
     // The panel itself takes focus, not its first control: a ring around a
     // nav item nobody pressed is noise, and the next Tab lands on that item.
@@ -304,6 +339,57 @@ export class SettingsDialog extends LitElement {
     await this.readDownloaded();
   };
 
+  private readStorage = async (): Promise<void> => {
+    const [temp, recordings] = await Promise.all([readTempSummary(), readRecordingsSummary()]);
+    this.temp = temp;
+    this.recordings = recordings;
+  };
+
+  /** Main picks what is temporary; anything a clip points at is never in it. */
+  private onClearTemp = async (): Promise<void> => {
+    const bytes = this.temp?.bytes ?? 0;
+    if (bytes === 0 || this.clearingTemp) {
+      return;
+    }
+    if (!window.confirm(this.lc.t("setting.storage_temp_confirm").replace("{size}", formatBytes(bytes)))) {
+      return;
+    }
+    this.clearingTemp = true;
+    this.tempFailed = false;
+    const result = await clearTempFiles();
+    this.tempFailed = result == null || !result.ok;
+    this.clearingTemp = false;
+    await this.readStorage();
+  };
+
+  /** To the Trash, so a take deleted by mistake can still be put back. */
+  private onClearRecordings = async (): Promise<void> => {
+    const recordings = this.recordings;
+    if (recordings == null || recordings.files === 0 || this.clearingRecordings) {
+      return;
+    }
+    const question = this.lc
+      .t("setting.storage_recordings_confirm")
+      .replace("{n}", String(recordings.files))
+      .replace("{size}", formatBytes(recordings.bytes));
+    if (!window.confirm(question)) {
+      return;
+    }
+    this.clearingRecordings = true;
+    this.recordingsError = null;
+    const result = await clearRecordingFiles();
+    this.recordingsError = result?.busy === true ? "busy" : result?.ok === true ? null : "failed";
+    this.clearingRecordings = false;
+    await this.readStorage();
+  };
+
+  private onOpenFolder = async (folder: StorageFolder): Promise<void> => {
+    this.openFailed = null;
+    if (!(await openStorageFolder(folder))) {
+      this.openFailed = folder;
+    }
+  };
+
   private onPickLanguage = (language: Language): void => {
     this.language = language;
     void window.electronAPI?.req?.store?.set("LANG", language);
@@ -452,6 +538,132 @@ export class SettingsDialog extends LitElement {
     `;
   }
 
+  private storageSection() {
+    const t = (key: string) => this.lc.t(key);
+    // No bridge on the web build: the rows stay and are disabled, as the cloud's are.
+    const disabled = storagePort() == null;
+    const openFailed = (folder: StorageFolder) =>
+      this.openFailed === folder
+        ? html`<div class="settings-error">${t("setting.storage_open_failed")}</div>`
+        : nothing;
+
+    return html`
+      <div class="settings-group">
+        <div class="settings-row">
+          <span class="settings-label">${t("setting.storage_temp")}</span>
+          <div class="settings-row-control is-end">
+            <div class="settings-inline">
+              <span class="settings-value">${this.tempText()}</span>
+              <button
+                type="button"
+                class="settings-text-btn is-danger"
+                ?disabled=${disabled || this.clearingTemp || (this.temp?.bytes ?? 0) === 0}
+                @click=${this.onClearTemp}
+              >
+                ${t("setting.storage_delete")}
+              </button>
+            </div>
+            ${this.tempFailed
+              ? html`<div class="settings-error">${t("setting.storage_failed")}</div>`
+              : nothing}
+          </div>
+        </div>
+
+        <div class="settings-row">
+          <span class="settings-label">${t("setting.storage_recordings")}</span>
+          <div class="settings-row-control is-end">
+            <div class="settings-inline">
+              <span class="settings-value">${this.recordingsText()}</span>
+              <button
+                type="button"
+                class="settings-text-btn"
+                ?disabled=${disabled}
+                @click=${() => this.onOpenFolder("recordings")}
+              >
+                ${t("setting.storage_open")}
+              </button>
+              <button
+                type="button"
+                class="settings-text-btn is-danger"
+                ?disabled=${disabled ||
+                this.clearingRecordings ||
+                (this.recordings?.files ?? 0) === 0}
+                @click=${this.onClearRecordings}
+              >
+                ${t("setting.storage_delete")}
+              </button>
+            </div>
+            ${this.recordingsError != null
+              ? html`<div class="settings-error">
+                  ${t(
+                    this.recordingsError === "busy"
+                      ? "setting.storage_recording_busy"
+                      : "setting.storage_failed",
+                  )}
+                </div>`
+              : nothing}
+            ${openFailed("recordings")}
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        ${FOLDERS.map(
+          (folder) => html`
+            <div class="settings-row">
+              <span class="settings-label">${t(folder.label)}</span>
+              <div class="settings-row-control is-end">
+                <button
+                  type="button"
+                  class="settings-text-btn"
+                  ?disabled=${disabled}
+                  @click=${() => this.onOpenFolder(folder.id)}
+                >
+                  ${t("setting.storage_open")}
+                </button>
+                ${openFailed(folder.id)}
+              </div>
+            </div>
+          `,
+        )}
+      </div>
+    `;
+  }
+
+  /** "34.5 MB", "None", or nothing while main has not answered. */
+  private tempText(): string {
+    if (this.temp == null) {
+      return "";
+    }
+    return this.temp.bytes === 0 ? this.lc.t("setting.storage_none") : formatBytes(this.temp.bytes);
+  }
+
+  /** "43 files, 412.0 MB", "None", or nothing while main has not answered. */
+  private recordingsText(): string {
+    const recordings = this.recordings;
+    if (recordings == null) {
+      return "";
+    }
+    if (recordings.files === 0) {
+      return this.lc.t("setting.storage_none");
+    }
+    return this.lc
+      .t("setting.storage_recordings_summary")
+      .replace("{n}", String(recordings.files))
+      .replace("{size}", formatBytes(recordings.bytes));
+  }
+
+  private currentSection(section: Section) {
+    switch (section) {
+      case "general":
+        return this.generalSection();
+      case "cloud":
+        return this.cloudSection();
+      case "storage":
+        return this.storageSection();
+    }
+  }
+
   /** "12 items, 34.5 MB", "None", or nothing while main has not answered. */
   private downloadedText(): string {
     const downloaded = this.downloaded;
@@ -521,7 +733,7 @@ export class SettingsDialog extends LitElement {
               </button>
             </div>
             <div class="settings-main-body">
-              ${current.id === "general" ? this.generalSection() : this.cloudSection()}
+              ${this.currentSection(current.id)}
             </div>
           </div>
         </div>

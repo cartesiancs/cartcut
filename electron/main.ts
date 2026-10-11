@@ -55,6 +55,7 @@ import { ipcReverse } from "./ipc/ipcReverse.js";
 import { ipcTranscribe } from "./ipc/ipcTranscribe.js";
 import { ipcTts } from "./ipc/ipcTts.js";
 import { ipcCloud } from "./ipc/ipcCloud.js";
+import { ipcStorage } from "./ipc/ipcStorage.js";
 import { ipcAnalyze } from "./ipc/ipcAnalyze.js";
 import { runServer } from "./webServer.js";
 import { ipcSelfhosted } from "./ipc/ipcSelfhosted.js";
@@ -258,6 +259,14 @@ ipcMain.handle("cloud:cancel", ipcCloud.cancel);
 ipcMain.handle("cloud:installedAssets", ipcCloud.installedAssets);
 ipcMain.handle("cloud:installedSummary", ipcCloud.installedSummary);
 ipcMain.handle("cloud:clearInstalled", ipcCloud.clearInstalled);
+
+// Settings' Storage section. Main picks every folder; `openFolder` takes a name
+// from a closed list, never a path.
+ipcMain.handle("storage:tempSummary", ipcStorage.tempSummary);
+ipcMain.handle("storage:clearTemp", ipcStorage.clearTemp);
+ipcMain.handle("storage:recordingsSummary", ipcStorage.recordingsSummary);
+ipcMain.handle("storage:clearRecordings", ipcStorage.clearRecordings);
+ipcMain.handle("storage:openFolder", ipcStorage.openFolder);
 
 ipcMain.handle("desktopCapturer:getSources", ipcDesktopCapturer.getSources);
 
