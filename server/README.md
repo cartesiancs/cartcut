@@ -75,6 +75,7 @@ content/
 
 | Method | Path | |
 |---|---|---|
+| GET, HEAD | `/` | `{ name, version, ok }` |
 | GET | `/v1/health` | `{ ok, version, counts }` |
 | GET | `/v1/catalog/{kind}` | `{ kind, items }`; kind is `effect`, `transition`, `graphic`, `lut`, `template` or `asset` |
 | GET, HEAD | `/v1/files/{kind}/{id}/{path}` | one file |

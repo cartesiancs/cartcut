@@ -1,7 +1,7 @@
 //! Turning a request into a response.
 //!
-//! Three read-only routes and a CORS preflight. Nothing here touches the disk
-//! except to open a file the catalog already indexed.
+//! The root, three read-only routes under `/v1/` and a CORS preflight. Nothing
+//! here touches the disk except to open a file the catalog already indexed.
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -49,6 +49,9 @@ async fn route(catalog: &Catalog, method: &Method, path: &str) -> Response<Body>
         _ => return method_not_allowed(),
     };
 
+    if path == "/" {
+        return root(head);
+    }
     let Some(rest) = path.strip_prefix("/v1/") else {
         return not_found();
     };
@@ -71,6 +74,24 @@ async fn route(catalog: &Catalog, method: &Method, path: &str) -> Response<Body>
         return file(catalog, tail, head).await;
     }
     not_found()
+}
+
+/// `/`, for whatever probes a host's root before routing traffic to it. Its
+/// own body rather than `health`'s: it says the server is up and which build it
+/// is, and leaves what is being served to `/v1/health`.
+fn root(head: bool) -> Response<Body> {
+    let body = json!({
+        "name": env!("CARGO_PKG_NAME"),
+        "version": env!("CARGO_PKG_VERSION"),
+        "ok": true,
+    });
+    bytes(
+        StatusCode::OK,
+        "application/json",
+        NO_STORE,
+        Bytes::from(body.to_string()),
+        head,
+    )
 }
 
 fn health(catalog: &Catalog, head: bool) -> Response<Body> {

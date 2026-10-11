@@ -160,6 +160,25 @@ fn sha256(bytes: &[u8]) -> String {
 }
 
 #[tokio::test]
+async fn the_root_answers_200_with_its_own_json() {
+    let addr = start().await;
+    let reply = get(addr, "/").await;
+
+    assert_eq!(reply.status, 200);
+    assert_eq!(reply.header("content-type"), "application/json");
+    assert_eq!(reply.header("cache-control"), "no-store");
+    assert_eq!(
+        reply.json(),
+        json!({ "name": "cartcut-cloud", "version": env!("CARGO_PKG_VERSION"), "ok": true })
+    );
+
+    let head = send(addr, Method::HEAD, "/").await;
+    assert_eq!(head.status, 200);
+    assert!(head.body.is_empty());
+    assert_eq!(head.header("content-length"), reply.body.len().to_string());
+}
+
+#[tokio::test]
 async fn health_reports_what_is_being_served() {
     let addr = start().await;
     let reply = get(addr, "/v1/health").await;
@@ -481,7 +500,8 @@ async fn unknown_routes_and_methods_are_refused_with_json() {
         "/v1/catalog/plugin",
         "/v1/catalog/",
         "/v1/nothing",
-        "/",
+        "//",
+        "/index.html",
         "/v2/health",
         "/v1/health/",
     ] {
