@@ -1,7 +1,8 @@
 import { LitElement, html } from "lit";
 import { windowStore } from "../../features/window/windowStore";
 import { DEFAULT_DOCK_PCT } from "../../features/window/windowOps";
-import { customElement, property } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
+import { ifDefined } from "lit/directives/if-defined.js";
 import { LocaleController } from "../../controllers/locale";
 import {
   controlPanelStore,
@@ -13,12 +14,23 @@ import { serializeRenderOptions } from "../../features/project/renderOptionsFile
 import { exportTemplate } from "../../features/template/templateExport";
 import { renderTemplateThumbnail } from "../../features/template/templateThumbnail";
 
+type UtilityTile = {
+  label: string;
+  icon: string;
+  keywords: string;
+  /** The `aria-event` hook a test or the tutorial finds the tile by. */
+  event?: string;
+  open: () => void;
+};
+
 @customElement("control-ui-util")
 export class ControlText extends LitElement {
   private lc = new LocaleController(this);
 
   @property()
   controlPanel: IControlPanelStore = controlPanelStore.getInitialState();
+
+  @state() private query = "";
 
   createRenderRoot() {
     return this;
@@ -149,109 +161,125 @@ export class ControlText extends LitElement {
     this.toast(result.message);
   }
 
+  /**
+   * Every tile, in panel order. `keywords` are what someone might type who
+   * knows the job but not our name for it: "subtitle" finds Automatic Caption.
+   */
+  private tiles(): UtilityTile[] {
+    return [
+      {
+        label: "Record",
+        icon: "radio_button_checked",
+        keywords: "camera webcam video",
+        open: () => this._handleClickPanel("record"),
+      },
+      {
+        label: "Audio Record",
+        icon: "mic",
+        keywords: "microphone voice sound",
+        open: () => this._handleClickPanel("audioRecord"),
+      },
+      {
+        label: "Automatic Caption",
+        icon: "subtitles",
+        keywords: "subtitle transcript speech",
+        open: () => this._handleClickCaptionWindow(),
+      },
+      {
+        label: "Screen Recorder",
+        icon: "screen_record",
+        keywords: "screen capture record",
+        open: () => this._handleClickOverlayRecord(),
+      },
+      {
+        label: "Export Template",
+        icon: "dashboard_customize",
+        keywords: "template cttpl",
+        event: "export-template",
+        open: () => this._handleClickExportTemplate(),
+      },
+      {
+        label: "Text to Speech",
+        icon: "record_voice_over",
+        keywords: "tts voice narration",
+        event: "text-to-speech",
+        open: () => this._handleClickTextToSpeech(),
+      },
+      {
+        label: "Prompter",
+        icon: "speaker_notes",
+        keywords: "teleprompter script",
+        event: "prompter",
+        open: () => this._handleClickPrompter(),
+      },
+      {
+        label: "Proxy Media",
+        icon: "speed",
+        keywords: "proxy performance",
+        open: () => this._handleClickPanel("proxy"),
+      },
+      {
+        label: "Auto Track",
+        icon: "gps_fixed",
+        keywords: "motion tracking null",
+        open: () => this._handleClickPanel("autoTrack"),
+      },
+    ];
+  }
+
+  private _handleInputQuery(event: Event) {
+    this.query = (event.target as HTMLInputElement).value;
+  }
+
   render() {
+    const needle = this.query.trim().toLowerCase();
+    const visible = this.tiles().filter((tile) =>
+      `${tile.label} ${tile.keywords}`.toLowerCase().includes(needle),
+    );
+
     return html`
-      <p class="text-secondary">Utilities</p>
-      <div class="row px-2">
-        <div
-          class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
-          @click=${() => this._handleClickPanel("record")}
-        >
-          <span class="material-symbols-outlined icon-lg align-self-center">
-            radio_button_checked
-          </span>
-          <b class="align-self-center text-light text-center">Record</b>
-        </div>
-
-        <div
-          class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
-          @click=${() => this._handleClickPanel("audioRecord")}
-        >
-          <span class="material-symbols-outlined icon-lg align-self-center">
-            mic
-          </span>
-          <b class="align-self-center text-light text-center">Audio Record</b>
-        </div>
-
-        <div
-          class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
-          @click=${() => this._handleClickCaptionWindow()}
-        >
-          <span class="material-symbols-outlined icon-lg align-self-center">
-            subtitles
-          </span>
-          <b class="align-self-center text-light text-center"
-            >Automatic Caption</b
+      <div class="browse-bar">
+        <label class="browse-field">
+          <span class="material-symbols-outlined browse-field-icon"
+            >search</span
           >
-        </div>
-
-        <div
-          class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
-          @click=${() => this._handleClickOverlayRecord()}
-        >
-          <span class="material-symbols-outlined icon-lg align-self-center">
-            screen_record
-          </span>
-          <b class="align-self-center text-light text-center"
-            >Screen Recorder</b
-          >
-        </div>
-
-        <div
-          class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
-          aria-event="export-template"
-          @click=${() => this._handleClickExportTemplate()}
-        >
-          <span class="material-symbols-outlined icon-lg align-self-center">
-            dashboard_customize
-          </span>
-          <b class="align-self-center text-light text-center"
-            >Export Template</b
-          >
-        </div>
-
-        <div
-          class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
-          aria-event="text-to-speech"
-          @click=${() => this._handleClickTextToSpeech()}
-        >
-          <span class="material-symbols-outlined icon-lg align-self-center">
-            record_voice_over
-          </span>
-          <b class="align-self-center text-light text-center">Text to Speech</b>
-        </div>
-
-        <div
-          class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
-          aria-event="prompter"
-          @click=${() => this._handleClickPrompter()}
-        >
-          <span class="material-symbols-outlined icon-lg align-self-center">
-            speaker_notes
-          </span>
-          <b class="align-self-center text-light text-center">Prompter</b>
-        </div>
-
-        <div
-          class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
-          @click=${() => this._handleClickPanel("proxy")}
-        >
-          <span class="material-symbols-outlined icon-lg align-self-center">
-            speed
-          </span>
-          <b class="align-self-center text-light text-center">Proxy Media</b>
-        </div>
-
-        <div
-          class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
-          @click=${() => this._handleClickPanel("autoTrack")}
-        >
-          <span class="material-symbols-outlined icon-lg align-self-center">
-            gps_fixed
-          </span>
-          <b class="align-self-center text-light text-center">Auto Track</b>
-        </div>
+          <input
+            type="search"
+            class="browse-input"
+            spellcheck="false"
+            placeholder="Search utilities"
+            .value=${this.query}
+            @input=${this._handleInputQuery}
+          />
+        </label>
       </div>
+
+      ${visible.length === 0
+        ? html`<div class="browse-empty">
+            <div class="browse-empty-icon">
+              <span class="material-symbols-outlined">search_off</span>
+            </div>
+            <div class="browse-empty-title">No matches</div>
+            <div class="browse-empty-text">Try another name.</div>
+          </div>`
+        : html`<div class="row px-2">
+            ${visible.map(
+              (tile) => html`<div
+                class="col-4 d-flex flex-column bd-highlight overflow-hidden mt-1 asset"
+                aria-event=${ifDefined(tile.event)}
+                @click=${tile.open}
+              >
+                <span
+                  class="material-symbols-outlined icon-lg align-self-center"
+                >
+                  ${tile.icon}
+                </span>
+                <b class="align-self-center text-light text-center"
+                  >${tile.label}</b
+                >
+              </div>`,
+            )}
+          </div>`}
     `;
   }
 }
