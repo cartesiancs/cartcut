@@ -45,8 +45,10 @@ import type { TimelineDocument } from "../timeline/tracks";
 import {
   isShapeElement,
   setClipFillColorMany,
+  setClipFillOpacityMany,
   setClipShapeGeometryMany,
 } from "../timeline/shapeOps";
+import { fillOpacityOf } from "../shape/backdropFx";
 import { GestureCommit } from "./gestureCommit";
 import { eyeButton, iconButton, section, sliderField } from "./optionKit";
 
@@ -150,6 +152,13 @@ export class OptionShapeSection extends LitElement {
     return first == null
       ? null
       : shapeGeometryOf(useTimelineStore.getState().timeline[first]);
+  }
+
+  private get fillOpacity(): number {
+    const first = this.targets[0];
+    return first == null
+      ? 100
+      : fillOpacityOf(useTimelineStore.getState().timeline[first]);
   }
 
   private get fillColor(): string {
@@ -431,6 +440,30 @@ export class OptionShapeSection extends LitElement {
             }}
             @change=${this.commit}
           />
+        `,
+        // The fill alone, under the clip's opacity rather than instead of it:
+        // over a backdrop it is the tint, and at 0 the backdrop shows bare.
+        body: html`
+          <div class="opt-field" data-shape-row="fillOpacity">
+            ${sliderField({
+              label: "Opacity",
+              suffix: "%",
+              value: Math.round(this.fillOpacity),
+              min: 0,
+              max: 100,
+              onScrub: (next) => {
+                const ids = this.targets;
+                this.gesture.apply((doc) => setClipFillOpacityMany(doc, ids, next));
+                this.requestUpdate();
+              },
+              onCommit: this.commit,
+              onTyped: (next) => {
+                const ids = this.targets;
+                this.write((doc) => setClipFillOpacityMany(doc, ids, next));
+              },
+              onInvalid: () => this.requestUpdate(),
+            })}
+          </div>
         `,
       })}
     `;

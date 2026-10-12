@@ -103,12 +103,17 @@ export async function renderReferenceFrames(
 
       const store = C.loadedAssetStore.getState();
 
-      // Only build a GL runtime when the document actually has effects or
-      // transitions — `renderTimeline` makes the same call, and creating one
-      // otherwise allocates a canvas and a WebGL context for nothing.
+      // Only build a GL runtime when the document actually has effects,
+      // transitions or a shape with a backdrop. `renderTimeline` makes the
+      // same call (`planFrame.ts#hasFxElements`), and creating one otherwise
+      // allocates a canvas and a WebGL context for nothing. Missing the
+      // backdrop case would draw every mosaic here as a solid box.
       const needsFx =
         Object.values<any>(timeline).some(
-          (e) => e.filetype === "effect" || e.filetype === "transition",
+          (e) =>
+            e.filetype === "effect" ||
+            e.filetype === "transition" ||
+            (e.filetype === "shape" && e.backdropFx != null),
         );
       const fx = !needsFx
         ? null

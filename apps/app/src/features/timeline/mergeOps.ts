@@ -16,6 +16,12 @@
  */
 
 import { sameProgram } from "../fx/inlineProgram";
+import {
+  backdropFxOf,
+  fillOpacityOf,
+  sameBackdropFx,
+} from "../shape/backdropFx";
+import { sameShapeGeometry } from "../shape/shapeGeometry";
 import { sameParams } from "./effectOps";
 import type { TimelineElement } from "../../@types/timeline";
 import {
@@ -124,6 +130,28 @@ function canJoin(left: TimelineElement, right: TimelineElement): boolean {
     }
   }
 
+  // Every shape shares the "SHAPE" placeholder too. The merge keeps the left
+  // clip's fields, so two shapes are halves of one cut only when they would
+  // draw the same thing: joining a plain bar onto a mosaicked face kept the
+  // bar and silently dropped the mosaic for the length of the right half.
+  if (left.filetype === "shape" && right.filetype === "shape") {
+    if (left.option?.fillColor !== right.option?.fillColor) {
+      return false;
+    }
+    if (fillOpacityOf(left) !== fillOpacityOf(right)) {
+      return false;
+    }
+    if (!sameBackdropFx(backdropFxOf(left), backdropFxOf(right))) {
+      return false;
+    }
+    if (!sameShapeGeometry(left.geometry, right.geometry)) {
+      return false;
+    }
+    if (!samePoints(left.shape, right.shape)) {
+      return false;
+    }
+  }
+
   if (isAnimated(left) || isAnimated(right)) {
     return false;
   }
@@ -151,6 +179,25 @@ function canJoin(left: TimelineElement, right: TimelineElement): boolean {
   }
 
   return true;
+}
+
+/** Whether two hand-drawn outlines hold the same points, in the same order. */
+function samePoints(a: unknown, b: unknown): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+    return false;
+  }
+  return a.every((point, i) => {
+    const other = b[i];
+    return (
+      Array.isArray(point) &&
+      Array.isArray(other) &&
+      point[0] === other[0] &&
+      point[1] === other[1]
+    );
+  });
 }
 
 /**

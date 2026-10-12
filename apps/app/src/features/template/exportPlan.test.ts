@@ -75,6 +75,28 @@ describe("warnings", () => {
     if (!result.ok) return;
     expect(result.warnings[0]).toMatch(/^2 effect or transition clips/);
   });
+
+  it("warns that a shape's backdrop draws as a solid fill inside a template", () => {
+    // The inner timeline is painted with no compositor, so a mosaic is a box.
+    const backdropFx = { presetId: "com.cartcut.pixelate", params: {}, intensity: 100 };
+    const one = plan({ s: shapeElement({ backdropFx }), v: videoElement() });
+    expect(one.ok).toBe(true);
+    if (!one.ok) return;
+    expect(one.warnings).toEqual([
+      "1 shape's backdrop effect will not render inside a template; it draws as a solid fill.",
+    ]);
+
+    const two = plan({
+      s: shapeElement({ backdropFx }),
+      t: shapeElement({ key: "t", backdropFx }),
+    });
+    if (!two.ok) return;
+    expect(two.warnings[0]).toMatch(/^2 shapes' backdrop effects .* they draw as a solid fill/);
+
+    const plain = plan({ s: shapeElement() });
+    if (!plain.ok) return;
+    expect(plain.warnings).toEqual([]);
+  });
 });
 
 describe("staging", () => {

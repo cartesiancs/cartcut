@@ -54,7 +54,11 @@ import {
   lutUniformsFor,
 } from "../../lut/glsl";
 import type { LutData } from "../../lut/lutData";
-import type { ActiveEffect, ActiveTransition } from "./planFrame";
+import type {
+  ActiveBackdrop,
+  ActiveEffect,
+  ActiveTransition,
+} from "./planFrame";
 import {
   FxProgram,
   RenderTarget,
@@ -448,8 +452,11 @@ export class FxCompositor {
       // Resolved by the paint loop and `null` until the file has been read,
       // exactly as `overlayFrame` is — the frame draws ungraded and the next
       // one has it.
-      if (lut != null) {
-        this.applyLut(target, active, preset, lut, width, height);
+      if (
+        lut != null &&
+        this.runLut(target.canvas, preset, lut, active.intensity, width, height)
+      ) {
+        this.blitTargetTo(target, this.outputTarget, width, height, "copy");
       }
       return;
     }
@@ -473,22 +480,92 @@ export class FxCompositor {
       return;
     }
 
+    if (
+      this.runShader(
+        target.canvas,
+        preset,
+        active.intensity,
+        active.params,
+        timeSeconds,
+        width,
+        height,
+      )
+    ) {
+      this.blitTargetTo(target, this.outputTarget, width, height, "copy");
+    }
+  }
+
+  /**
+   * Run a shape's backdrop over `source` and hand the result to `land`.
+   *
+   * The same two executors an effect clip uses, so a mosaic inside a shape and
+   * a mosaic over the whole frame are one shader with one set of numbers. What
+   * differs is the landing: an effect replaces the frame with `copy`, and this
+   * gives the finished picture to the shape's renderer, which draws it clipped
+   * to its outline.
+   *
+   * `land` is called synchronously and is the only place the picture exists.
+   * It is the GL canvas itself, and the next thing this compositor draws
+   * overwrites it, so nothing outside the callback may hold on to it. Answers
+   * whether `land` ran; `false` is every way a backdrop can fail to draw, and
+   * the shape then fills solid rather than leaving the region see-through.
+   */
+  filterBackdrop(
+    source: TexImageSource,
+    active: ActiveBackdrop,
+    preset: FxPreset,
+    lut: LutData | null,
+    width: number,
+    height: number,
+    land: (image: CanvasImageSource) => void,
+  ): boolean {
+    const ran =
+      active.mode === "lut"
+        ? lut != null &&
+          this.runLut(source, preset, lut, active.intensity, width, height)
+        : this.runShader(
+            source,
+            preset,
+            active.intensity,
+            active.params,
+            active.timeSeconds,
+            width,
+            height,
+          );
+    if (!ran || !this.presentTarget(this.outputTarget, width, height)) {
+      return false;
+    }
+    land(this.gl.canvas as HTMLCanvasElement);
+    return true;
+  }
+
+  /**
+   * Run a shader preset's passes over `source`, leaving the result in
+   * `outputTarget`. Answers whether there is a result; a broken step passes the
+   * whole effect through rather than rendering something wrong.
+   */
+  private runShader(
+    source: TexImageSource,
+    preset: FxPreset,
+    intensityPercent: number,
+    params: FxParamValues,
+    timeSeconds: number,
+    width: number,
+    height: number,
+  ): boolean {
     if (preset.render.type !== "shader") {
-      return;
+      return false;
     }
 
     const gl = this.gl;
     this.sizeGlCanvas(width, height);
 
-    const original = this.uploadFrame(target.canvas);
+    const original = this.uploadFrame(source);
     if (original == null) {
-      return;
+      return false;
     }
 
-    const intensity = Math.max(
-      0,
-      Math.min(1, active.intensity / 100),
-    );
+    const intensity = Math.max(0, Math.min(1, intensityPercent / 100));
 
     /** One step of the chain, drawing `input` into `into`. */
     const runPass = (
@@ -510,7 +587,7 @@ export class FxCompositor {
         // live `fx:` track at this frame. A multi-pass preset therefore uploads
         // the same sampled values on every pass, which is what the parameters
         // of a single effect mean.
-        this.applyParams(program, preset, active.params);
+        this.applyParams(program, preset, params);
         // Written after the parameters so a pass constant wins where the two
         // name the same uniform — which is the point of having both: the same
         // blur shader takes its radius from the user and its axis from here.
@@ -533,7 +610,7 @@ export class FxCompositor {
       if (program == null) {
         // A broken step would leave the chain reading a cleared buffer, so the
         // whole effect passes through rather than rendering something wrong.
-        return;
+        return false;
       }
       runPass(program, input, next, pass.constants);
       input = next.texture;
@@ -544,43 +621,43 @@ export class FxCompositor {
 
     const finalProgram = this.programFor(preset);
     if (finalProgram == null) {
-      return;
+      return false;
     }
     runPass(finalProgram, input, this.outputTarget);
-
-    this.blitTargetTo(target, this.outputTarget, width, height, "copy");
+    return true;
   }
 
   /**
-   * Grade everything drawn so far — the adjustment layer.
+   * Grade `source` into `outputTarget`: the adjustment layer, or a backdrop.
    *
    * The same shader the per-clip applier runs (`lut/glsl.ts`), against this
    * compositor's own context and render targets rather than a fourth one. It
    * reads the scratch canvas back, which is why `planFrame` insisted the frame
-   * be composited at project resolution first.
+   * be composited at project resolution first. Answers whether there is a
+   * result.
    */
-  private applyLut(
-    target: CanvasRenderingContext2D,
-    active: ActiveEffect,
+  private runLut(
+    frame: TexImageSource,
     preset: FxPreset,
     lut: LutData,
+    intensityPercent: number,
     width: number,
     height: number,
-  ): void {
+  ): boolean {
     const gl = this.gl;
     const program = this.lutProgram();
     if (program == null) {
-      return;
+      return false;
     }
 
     this.sizeGlCanvas(width, height);
-    const source = this.uploadFrame(target.canvas);
+    const source = this.uploadFrame(frame);
     const table = this.lutTextureFor(preset.id, lut);
     if (source == null || table == null) {
-      return;
+      return false;
     }
 
-    const amount = Math.max(0, Math.min(1, active.intensity / 100));
+    const amount = Math.max(0, Math.min(1, intensityPercent / 100));
     const uniforms = lutUniformsFor(table.atlas);
 
     this.outputTarget.use(width, height, () => {
@@ -607,8 +684,7 @@ export class FxCompositor {
       gl.uniform1f(program.uniform(LUT_UNIFORM.amount), amount);
       program.draw();
     });
-
-    this.blitTargetTo(target, this.outputTarget, width, height, "copy");
+    return true;
   }
 
   private lutProgram(): FxProgram | null {
@@ -872,10 +948,30 @@ export class FxCompositor {
     height: number,
     operation: GlobalCompositeOperation,
   ): void {
+    if (!this.presentTarget(from, width, height)) {
+      return;
+    }
+
+    target.save();
+    target.globalCompositeOperation = operation;
+    target.globalAlpha = 1;
+    target.drawImage(this.gl.canvas as HTMLCanvasElement, 0, 0, width, height);
+    target.restore();
+  }
+
+  /**
+   * Draw a render target's texture onto the GL canvas itself, so a 2D context
+   * can `drawImage` it. Answers whether the GL canvas now holds it.
+   */
+  private presentTarget(
+    from: RenderTarget,
+    width: number,
+    height: number,
+  ): boolean {
     const gl = this.gl;
     const blit = this.blitProgram();
     if (blit == null) {
-      return;
+      return false;
     }
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -889,12 +985,7 @@ export class FxCompositor {
     if (this.options.blocking === true) {
       gl.finish();
     }
-
-    target.save();
-    target.globalCompositeOperation = operation;
-    target.globalAlpha = 1;
-    target.drawImage(gl.canvas as HTMLCanvasElement, 0, 0, width, height);
-    target.restore();
+    return true;
   }
 
   private blit: FxProgram | null = null;

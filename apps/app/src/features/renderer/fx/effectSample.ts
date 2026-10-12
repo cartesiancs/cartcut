@@ -56,12 +56,19 @@ function clampIntensity(value: number): number {
 /**
  * An effect's intensity and numeric parameters at `cursor`.
  *
+ * Structural rather than effect-only: a shape's backdrop holds the same two
+ * numbers and its tracks ride on the shape's own `animation`, so `planFrame`
+ * hands it `{ startTime, intensity, params, animation }` and both ask the
+ * same function.
+ *
  * `cursor` is absolute timeline ms, as it is for every other public sampler;
  * `sampleTrack` converts with the element's own `startTime` and answers the
  * static value for a cursor that has not reached the clip yet.
  */
 export function effectSampleAt(
-  element: EffectElementType,
+  element: Pick<EffectElementType, "startTime" | "intensity" | "params"> & {
+    animation?: unknown;
+  },
   cursor: number,
 ): EffectSample {
   const startTime = element.startTime;

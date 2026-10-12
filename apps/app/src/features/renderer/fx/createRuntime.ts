@@ -13,6 +13,7 @@
  */
 
 import type { EffectElementType } from "../../../@types/timeline";
+import { backdropModeOf } from "../../fx/backdropPreset";
 import { presetById } from "../../fx/presetRegistry";
 import { resolvePreset, type ProgramHolder } from "../../fx/resolvePreset";
 import { lutFor } from "../../lut/lutRegistry";
@@ -95,6 +96,7 @@ function runtimeWith(
     fps,
     modeOf: modeOfElement,
     presetOf: resolvePreset,
+    backdropModeOf: (holder) => backdropModeOf(resolvePreset(holder)),
     // Synchronous, and `null` until the table has been read off disk. The
     // preview repaints and picks it up on the next frame; an export cannot
     // wait like that, which is why `renderTimeline.ts` preloads first.

@@ -5,6 +5,8 @@ import type { Timeline } from "@app/@types/timeline";
 import { loadedAssetStore } from "@app/features/asset/loadedAssetStore";
 import { renderTimeline } from "@app/features/export/renderTimeline";
 import type { ExportOptions } from "@app/features/export/types";
+import { loadPresets } from "@app/features/fx/presetRegistry";
+import { installLutResolver } from "@app/features/lut/lutRegistry";
 import { renderImage } from "@app/features/renderer/image";
 import { renderVideoWithWait } from "@app/features/renderer/video";
 import { renderGif } from "@app/features/renderer/gif";
@@ -40,6 +42,9 @@ const elementRenderers: TimelineRenderers = {
   graphic: renderGraphic,
 };
 
+/** `installLutResolver` subscribes to the registry, so it runs once per window. */
+let lutResolverInstalled = false;
+
 export class RenderController implements ReactiveController {
   private host: ReactiveControllerHost | undefined;
   timeline: Timeline = {};
@@ -51,6 +56,21 @@ export class RenderController implements ReactiveController {
 
   private async runExport(options: ExportOptions) {
     const assetStore = loadedAssetStore.getState();
+
+    // The editor reads its presets at startup (`App.ts`); this window never did,
+    // so every installed effect, transition and LUT resolved to nothing and
+    // exported as a pass-through. A shape's backdrop made that a privacy
+    // failure rather than a cosmetic one: a mosaic whose preset is missing
+    // draws its shape solid, so every face would have exported as a box.
+    // The same preload as the editor's, so `preset:list` is there. The
+    // resolver goes first, as in `App.ts`, and once: it subscribes to the
+    // registry. The presets are re-read per export, so one installed since the
+    // last export is seen.
+    if (!lutResolverInstalled) {
+      installLutResolver();
+      lutResolverInstalled = true;
+    }
+    await loadPresets();
 
     // Awaited, so frame 0 cannot reach the main process before FFmpeg has
     // spawned — it worked before only by luck of message ordering.

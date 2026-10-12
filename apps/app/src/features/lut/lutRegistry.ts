@@ -36,6 +36,7 @@ import type { Timeline } from "../../@types/timeline";
 import { presetById, presetsOfKind, subscribePresets } from "../fx/presetRegistry";
 import type { FxPreset } from "../fx/presetTypes";
 import { lutOf } from "../renderer/lut";
+import { backdropFxOf } from "../shape/backdropFx";
 import { setLutResolver } from "../renderer/lut/apply";
 import { isImageLutFilename, parseLutText, describeLutError } from "./parse";
 import { parseImageLut } from "./haldImage";
@@ -156,8 +157,42 @@ export function lutIdsIn(elements: Timeline): string[] {
         ids.add(element.presetId);
       }
     }
+    // A shape's backdrop can be a LUT too, graded inside its outline. Missed
+    // here, the export's first frames would draw that region ungraded while
+    // the table was still being read.
+    const backdrop = backdropFxOf(element);
+    if (backdrop != null) {
+      const preset = presetById(backdrop.presetId);
+      if (preset != null && preset.render.type === "lut") {
+        ids.add(backdrop.presetId);
+      }
+    }
   }
   return [...ids];
+}
+
+/**
+ * Read every LUT a document uses that has not been read yet, and answer
+ * whether any arrived. `null` when there is nothing outstanding, which is
+ * every frame but the first few after a LUT is chosen, so the preview can ask
+ * on every paint and allocate nothing.
+ *
+ * For the preview, which has nothing else that would repaint when a table
+ * lands: `lutFor` answers `null` until then, a graded clip draws ungraded, and
+ * a shape whose backdrop is a LUT draws its fill solid. Without a repaint the
+ * shape stayed a solid box until something unrelated happened to redraw.
+ */
+export function loadPendingLuts(elements: Timeline): Promise<boolean> | null {
+  const pending = lutIdsIn(elements).filter((id) => {
+    const entry = entries.get(id);
+    return entry == null || entry.state === "loading";
+  });
+  if (pending.length === 0) {
+    return null;
+  }
+  return Promise.all(pending.map((id) => loadLut(id))).then((loaded) =>
+    loaded.some((lut) => lut != null),
+  );
 }
 
 /**

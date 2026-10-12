@@ -47,6 +47,9 @@ import { isReversed } from "../timeline/reverseOps";
 import { isGradable } from "../timeline/lutOps";
 import { maskOf } from "../mask/maskShape";
 import { shapeGeometryOf } from "../shape/shapeGeometry";
+import { backdropFxOf, fillOpacityOf, OPAQUE_FILL } from "../shape/backdropFx";
+import { backdropModeOf } from "../fx/backdropPreset";
+import { resolvePreset } from "../fx/resolvePreset";
 import { revealOf } from "../text/reveal";
 import { isRevealable } from "../timeline/textRevealOps";
 import { isMaskable } from "../timeline/maskOps";
@@ -153,6 +156,34 @@ export function programRow(
       ? { renderType: p.manifest.render.type }
       : {}),
     bytes,
+  };
+}
+
+/**
+ * A shape's backdrop: what runs, at what strength, and whether it can.
+ *
+ * `draws: false` is the one thing an agent cannot see in a contact sheet's
+ * thumbnails until it looks closely: the preset is not installed here, or is
+ * not one a backdrop can carry, and the shape is being filled solid instead.
+ * A program is reported by `programRow`, never by its source.
+ */
+export function backdropRow(element: unknown): {
+  presetId: string;
+  intensity: number;
+  params: Record<string, unknown>;
+  draws: boolean;
+  program?: ReturnType<typeof programRow>;
+} | null {
+  const fx = backdropFxOf(element);
+  if (fx == null) {
+    return null;
+  }
+  return {
+    presetId: fx.presetId,
+    intensity: fx.intensity,
+    params: fx.params,
+    draws: backdropModeOf(resolvePreset(fx)) != null,
+    ...(fx.program == null ? {} : { program: programRow(fx.program) }),
   };
 }
 
@@ -344,6 +375,16 @@ export function clipRow(
     }
     case "shape": {
       row.fillColor = element.option?.fillColor;
+      // Both only when they say something, so a row for a plain shape is the
+      // row it always was.
+      const fillOpacity = fillOpacityOf(element);
+      if (fillOpacity !== OPAQUE_FILL) {
+        row.fillOpacity = fillOpacity;
+      }
+      const backdrop = backdropRow(element);
+      if (backdrop != null) {
+        row.backdrop = backdrop;
+      }
       break;
     }
     case "group": {
@@ -629,6 +670,8 @@ export function clipDetail(
 
   if (element.filetype === "shape") {
     detail.fillColor = element.option?.fillColor;
+    detail.fillOpacity = fillOpacityOf(element);
+    detail.backdrop = backdropRow(element);
     detail.oWidth = element.oWidth;
     detail.oHeight = element.oHeight;
     // The point list itself is never sent — `previewCanvas.addShapePoint` grows

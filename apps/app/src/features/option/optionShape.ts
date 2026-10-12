@@ -7,6 +7,7 @@ import "./optionLutSection";
 import "./optionAdjustSection";
 import "./optionMaskSection";
 import "./optionShapeSection";
+import "./optionBackdropSection";
 import "./optionDecorationSection";
 import "./animationPresetBrowser";
 import "./optionTabBar";
@@ -116,6 +117,15 @@ export class OptionShape extends LitElement {
       <option-shape-section
         .elementIds=${[this.elementId]}
       ></option-shape-section>
+
+      <!--
+        An effect or a LUT run over what is beneath the shape, inside its
+        outline: a face mosaic, a frosted panel. After the fill, because the
+        fill is drawn over it as a tint.
+      -->
+      <option-backdrop-section
+        .elementIds=${[this.elementId]}
+      ></option-backdrop-section>
 
       <!--
         Border and drop shadow. Shape, image and video share this section

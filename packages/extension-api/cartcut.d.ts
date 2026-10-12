@@ -130,6 +130,12 @@ declare module "cartcut" {
     function setColorAdjustments(params: JsonValue): Promise<EditResult>;
     function setMask(params: JsonValue): Promise<EditResult>;
     function setShape(params: JsonValue): Promise<EditResult>;
+    /**
+     * Run an effect or LUT preset over what is beneath shape clips, inside
+     * their outlines: a face mosaic, a frosted panel. The `set_shape_backdrop`
+     * tool, so its parameters and answers are the same.
+     */
+    function setShapeBackdrop(params: JsonValue): Promise<EditResult>;
     function setVideoFilters(params: JsonValue): Promise<EditResult>;
     function setTextFont(params: JsonValue): Promise<EditResult>;
     function applyAnimationPreset(params: JsonValue): Promise<EditResult>;

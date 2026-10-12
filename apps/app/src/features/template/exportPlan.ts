@@ -33,6 +33,7 @@ import {
   withGraphicAssetRef,
   type AssetField,
 } from "../project/assetsFile";
+import { backdropFxOf } from "../shape/backdropFx";
 
 /** One file to copy into the archive. */
 export type StagedAsset = {
@@ -240,6 +241,21 @@ export function planTemplateExport(
       `${fx.length} effect or transition ${
         fx.length === 1 ? "clip" : "clips"
       } will not render inside a template.`,
+    );
+  }
+  // A template's inner timeline is painted with no compositor
+  // (`renderer/template.ts`), so a shape's backdrop cannot run there and the
+  // shape fills solid instead: a mosaic becomes a box.
+  const backdrops = Object.values(elements).filter(
+    (element) => backdropFxOf(element) != null,
+  );
+  if (backdrops.length > 0) {
+    warnings.push(
+      `${backdrops.length} ${
+        backdrops.length === 1 ? "shape's backdrop effect" : "shapes' backdrop effects"
+      } will not render inside a template; ${
+        backdrops.length === 1 ? "it draws" : "they draw"
+      } as a solid fill.`,
     );
   }
 

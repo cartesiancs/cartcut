@@ -37,6 +37,7 @@ import { hasFxElements } from "../renderer/fx/planFrame";
 import { count as perfCount } from "../debug/frameStats";
 import { proxyStore } from "../../states/proxyStore";
 import { releaseUnusedOverlays } from "../renderer/fx/overlaySource";
+import { loadPendingLuts } from "../lut/lutRegistry";
 import {
   animatableProperties,
   isVisualTimelineElement,
@@ -797,6 +798,15 @@ export class PreviewCanvas extends LitElement {
       // A batch that rejects must not also cost us the repaint — some of its
       // assets did load.
       .catch(() => this.scheduleDraw());
+
+    // The same for a LUT table, which this frame drew without if it had not
+    // been read yet: a graded clip ungraded, and a shape with a LUT backdrop
+    // filled solid. `null`, and nothing allocated, once every table is in.
+    void loadPendingLuts(assetTimeline(this.timeline))?.then((arrived) => {
+      if (arrived) {
+        this.scheduleDraw();
+      }
+    });
 
     // Every media handle is reconciled here, on every repaint — which includes
     // every cursor tick during playback. This is what mutes a clip the moment

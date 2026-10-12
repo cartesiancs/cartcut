@@ -238,6 +238,16 @@ Things that bite:
   clips its instants show (`sheetAssets.ts`): it awaits a graphic's paint
   between its seek and its draw, and on the shared handles every preview
   repaint in that gap put the video back at the playhead.
+- **A shape's backdrop is an effect landed inside its outline**
+  (`backdropFx`): the compositor runs the preset over the frame beneath and
+  hands the picture to `renderShape` through a port on the render context
+  (`renderer/backdrop.ts`), so the shape's mask, opacity and blend apply to it.
+  Any frame holding one takes the scratch pass, because preset sizes are
+  project pixels. It **fails closed**: a backdrop that cannot land (no WebGL,
+  preset missing or of the wrong kind, a template's inner timeline) draws the
+  fill solid whatever `fillOpacity` says, so a face mosaic never fails
+  see-through. Inside a transition it reads `outerBackdrop`, the frame the
+  transition is drawn over.
 - **A hidden track reaches the renderer as a derived `trackHidden` on each of
   its clips**, written by `tracks.ts#derivePriorities` exactly as `priority`
   is, because no render path below the store sees `tracks`. The paint loop,
@@ -365,7 +375,8 @@ features/caption/      the auto-caption panel's every decision, and the session
 features/window/       docked panels beside a host's content, one tabbed frame per
                        side, splitter, pure layout
 features/mask/         one mask per clip: templates, bezier geometry, the pen session
-features/shape/        parametric outlines, over mask/geometry.ts unchanged
+features/shape/        parametric outlines, over mask/geometry.ts unchanged; the
+                       backdrop (an Fx preset run inside the outline)
 features/lut/          .cube reading, tetrahedral sampling, atlas, 80 built-ins
 features/adjust/       15 sliders: tone bakes into a LUT, effects run a finish pass
 features/template/     a whole edit standing in for one clip (.cttpl)

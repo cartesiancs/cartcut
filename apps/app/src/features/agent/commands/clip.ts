@@ -22,6 +22,7 @@ import { affectsTextBlock, withFittedTextHeights } from "../../element/textFit";
 import { setTextWithRuns } from "../../timeline/textRunOps";
 import { setClipScale } from "../../timeline/scaleOps";
 import { setCornerRadius, setCornerRadiusOff } from "../../timeline/cornerOps";
+import { setClipFillOpacity } from "../../timeline/shapeOps";
 import { isLinkableProperty, linkOf } from "../../animation/link";
 
 registerCommands({
@@ -89,7 +90,7 @@ registerCommands({
       affectsTextBlock(writes.map(([path]) => path)) &&
       !writes.some(([path]) => path.join(".") === "height");
 
-    // Three fields cannot be a plain `setIn`, for two different reasons.
+    // Four fields cannot be a plain `setIn`, for two different reasons.
     //
     // A text clip's per-range styling is stored as offsets into its string, so
     // rewriting the string without moving them leaves every styled stretch on
@@ -118,11 +119,28 @@ registerCommands({
         typeof value === "number",
     );
 
+    // A shape's fill at full strength deletes its key, and `setClipFillOpacity`
+    // owns that too.
+    const fillOpacityWrite = writes.find(
+      ([path, value]) =>
+        path.length === 2 &&
+        path[0] === "option" &&
+        path[1] === "fillOpacity" &&
+        typeof value === "number",
+    );
+
     checkpoint((d) => {
       let base =
         textWrite == null
           ? d
           : setTextWithRuns(d, params.elementId, textWrite[1] as string);
+      if (fillOpacityWrite != null) {
+        base = setClipFillOpacity(
+          base,
+          params.elementId,
+          fillOpacityWrite[1] as number,
+        );
+      }
       if (scaleWrite != null) {
         base = setClipScale(base, params.elementId, scaleWrite[1] as number);
       }
@@ -136,7 +154,8 @@ registerCommands({
         if (
           path === textWrite?.[0] ||
           path === scaleWrite?.[0] ||
-          path === cornerWrite?.[0]
+          path === cornerWrite?.[0] ||
+          path === fillOpacityWrite?.[0]
         ) {
           continue;
         }

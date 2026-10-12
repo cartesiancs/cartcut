@@ -9,7 +9,7 @@ import {
   setTrackHidden,
   type TimelineDocument,
 } from "../../timeline/tracks";
-import { videoElement } from "../testing";
+import { shapeElement, videoElement } from "../testing";
 import { bakeTrack, normalizeKeyframes } from "../../animation/keyframes";
 
 function clip(over: {
@@ -338,5 +338,160 @@ describe("a hidden row", () => {
     const hidden = plan(hide(doc, "v0"), 4000);
     expect(hidden.transitions.size).toBe(0);
     expect(hidden.claimed.size).toBe(0);
+  });
+});
+
+describe("a shape's backdrop", () => {
+  /** A shape on a row above the two clips, mosaicking whatever is under it. */
+  function withBackdrop(
+    over: Record<string, unknown> = {},
+    animation?: Record<string, unknown>,
+  ): TimelineDocument {
+    const base = baseDoc();
+    const doc = normalizeDocument({
+      ...base,
+      tracks: [
+        createTrack("s0", "video", 0),
+        ...base.tracks.map((t) => ({ ...t, index: t.index + 1 })),
+      ],
+      elements: {
+        ...base.elements,
+        face: shapeElement({
+          trackId: "s0",
+          startTime: 1000,
+          duration: 2000,
+          backdropFx: {
+            presetId: "com.cartcut.pixelate",
+            params: { size: 16 },
+            intensity: 80,
+          },
+          ...over,
+        } as any),
+      },
+    });
+    if (animation == null) {
+      return doc;
+    }
+    const element: any = doc.elements.face;
+    return {
+      ...doc,
+      elements: {
+        ...doc.elements,
+        face: { ...element, animation: { ...element.animation, ...animation } },
+      },
+    };
+  }
+
+  const backdropShaders = () => "shader" as const;
+
+  function planWith(
+    doc: TimelineDocument,
+    timeInMs: number,
+    backdropModeOf:
+      | ((holder: { presetId: string }) => "shader" | "lut" | null)
+      | null = backdropShaders,
+  ) {
+    return planFrame({
+      elements: doc.elements,
+      timeInMs,
+      fps: 60,
+      modeOf: noneInstalled,
+      backdropModeOf: backdropModeOf ?? undefined,
+    });
+  }
+
+  it("makes a runtime worth building", () => {
+    // Without this the preview and the export build no compositor for a
+    // project whose only effect is a mosaic, and every face draws as a box.
+    expect(hasFxElements(withBackdrop().elements)).toBe(true);
+  });
+
+  it("is a plan of its own, not an empty one", () => {
+    // The defect this guards: `empty` used to count transitions and effects
+    // only, so a frame holding nothing but a backdrop was handed the shared
+    // empty plan and drew without a scratch pass or a port.
+    const result = planWith(withBackdrop(), 1500);
+    expect(result.empty).toBe(false);
+    expect(result.needsScratch).toBe(true);
+    expect(result.backdrops.get("face")).toMatchObject({
+      id: "face",
+      mode: "shader",
+      intensity: 80,
+      params: { size: 16 },
+    });
+    // The shape is still painted by the loop, so it is not an effect.
+    expect(result.effects.size).toBe(0);
+  });
+
+  it("measures the shader's time from the shape's own start, on the frame grid", () => {
+    const active = planWith(withBackdrop(), 1500).backdrops.get("face")!;
+    expect(active.timeSeconds).toBeCloseTo(0.5, 2);
+    // 1505 is inside the frame that starts at 1500 at 60fps.
+    expect(planWith(withBackdrop(), 1505).backdrops.get("face")!.timeSeconds).toBe(
+      active.timeSeconds,
+    );
+  });
+
+  it("is planned only while the shape is on screen", () => {
+    expect(planWith(withBackdrop(), 500).empty).toBe(true);
+    expect(planWith(withBackdrop(), 3000).empty).toBe(true);
+  });
+
+  it("is left out when its preset cannot run as a backdrop", () => {
+    // Not installed, or installed but a transition or a graphic: the shape
+    // then fills solid, which needs no scratch pass.
+    const result = planWith(withBackdrop(), 1500, () => null);
+    expect(result.backdrops.size).toBe(0);
+    expect(result.needsScratch).toBe(false);
+    expect(result.empty).toBe(true);
+  });
+
+  it("is left out entirely by a caller that plans no backdrops", () => {
+    // The preset browser's hand-built plans and every older caller pass no
+    // `backdropModeOf`.
+    expect(planWith(withBackdrop(), 1500, null).empty).toBe(true);
+  });
+
+  it("is left out on a hidden row", () => {
+    const doc = normalizeDocument(setTrackHidden(withBackdrop(), "s0", true));
+    expect(planWith(doc, 1500).empty).toBe(true);
+  });
+
+  it("ignores a backdrop on anything that is not a shape", () => {
+    // A hand-edited file could put the field on a video; nothing reads it there,
+    // so it must not buy that frame a scratch pass either.
+    const base = baseDoc();
+    const doc = {
+      ...base,
+      elements: {
+        ...base.elements,
+        a: { ...base.elements.a, backdropFx: { presetId: "p", params: {}, intensity: 100 } } as any,
+      },
+    };
+    expect(hasFxElements(doc.elements)).toBe(false);
+    expect(planWith(doc, 1000).empty).toBe(true);
+  });
+
+  it("resolves the shape's own intensity and parameter tracks", () => {
+    const track = (stops: Array<[number, number]>) => {
+      const x = normalizeKeyframes(
+        stops.map(([t, v]) => ({ type: "linear", p: [t, v], cs: [t, v], ce: [t, v] })),
+      );
+      return { isActivate: true, x, ax: bakeTrack(x, 60) };
+    };
+    const doc = withBackdrop({}, {
+      intensity: track([
+        [0, 0],
+        [2000, 100],
+      ]),
+      "fx:size": track([
+        [0, 10],
+        [2000, 30],
+      ]),
+    });
+    const active = planWith(doc, 2000).backdrops.get("face")!;
+    // Clip-local 1000ms of 2000.
+    expect(active.intensity).toBeCloseTo(50, 0);
+    expect(active.params.size).toBeCloseTo(20, 0);
   });
 });

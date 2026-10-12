@@ -29,18 +29,20 @@
  * this reasoning; this is the same fix for the other animated uniform.
  */
 
-import type { EffectElementType } from "../../../@types/timeline";
 import { frameStartMs } from "../../timeline/frames";
 
 /**
  * Seconds since the effect began, snapped to the frame grid.
+ *
+ * Takes anything with a `startTime`, because a shape's backdrop runs the same
+ * shaders and has the same reason to measure from its own first frame.
  *
  * Never negative: before the effect starts there is nothing to animate, and a
  * negative time fed to a `fract`/`mod` noise function produces a discontinuity
  * exactly at the clip's first frame.
  */
 export function effectTimeOf(
-  element: EffectElementType,
+  element: { startTime: number },
   timeInMs: number,
   fps: number,
 ): number {

@@ -26,8 +26,13 @@ import { applyLutGrade, lutGradeFor } from "./lut/apply";
 import { applyMask, clipToMask, destinationMatrix, maskRenderFor } from "./mask";
 import { applyMirror } from "./mirror";
 import { applyCrop } from "./crop";
-import { backdropOf, type Backdrop } from "./backdrop";
-import { layerFor } from "./surface";
+import {
+  backdropOf,
+  isolatedBackdropOf,
+  type Backdrop,
+  type BackdropFxPort,
+} from "./backdrop";
+import { layerFor, type Surface } from "./surface";
 import type { ElementRenderFunction } from "./type";
 
 /**
@@ -60,6 +65,20 @@ export type ElementRenderContext = {
    * properties of the clip alone.
    */
   isolated?: boolean;
+  /**
+   * Runs a shape's backdrop preset. Built by the paint loop over the FX
+   * compositor; absent everywhere else, and a shape with a backdrop then fills
+   * solid. See `renderer/backdrop.ts`.
+   */
+  backdropFx?: BackdropFxPort | null;
+  /**
+   * The frame a transition's clip is drawn over, for `backdropFx` alone.
+   *
+   * Set only together with `isolated`. The clip's own buffer is cleared and
+   * transparent, but the frame beneath the transition is complete when the
+   * transition is reached, and that is what a backdrop has to read.
+   */
+  outerBackdrop?: Surface["canvas"] | null;
 };
 
 /**
@@ -199,8 +218,8 @@ export function renderElement<T extends VisualTimelineElement>(
         );
 
   /**
-   * The frame this clip is being drawn over, for a renderer that has to read it
-   * — today only a text clip's frosted background band.
+   * The frame this clip is being drawn over, for a renderer that has to read it:
+   * a text clip's frosted background band, and a shape's backdrop preset.
    *
    * Captured **here**, from `ctx`, because a few lines down `ctx` may be a
    * transparent layer and the frame is then unreachable. The layer shares the
@@ -213,8 +232,15 @@ export function renderElement<T extends VisualTimelineElement>(
    * there to blur — a frosted band would sample nothing and come out as a hole
    * in the dissolve. The band's own colour still draws, so the clip does not
    * change shape for the length of the transition; it simply stops being glass.
+   *
+   * A shape's backdrop preset is the one exception, and reads the frame the
+   * transition is drawn over instead (`isolatedBackdropOf`): a mosaic that
+   * stopped for a dissolve would show the face it is there to hide.
    */
-  const backdrop = context?.isolated === true ? null : backdropOf(ctx);
+  const backdrop: Backdrop | null =
+    context?.isolated === true
+      ? isolatedBackdropOf(context.backdropFx, context.outerBackdrop)
+      : backdropOf(ctx, context?.backdropFx);
 
   // Deliberately *not* suspended inside a transition, for the reason the mask
   // and the grade are not: a border is a property of the clip, and a card that

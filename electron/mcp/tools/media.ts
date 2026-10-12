@@ -15,7 +15,7 @@ import {
   trackIdField,
   type Registrar,
 } from "./define";
-import { shapeGeometryFields } from "./shape";
+import { backdropFields, fillOpacityField, shapeGeometryFields } from "./shape";
 
 /**
  * Long enough for ffprobe plus a metadata decode on a feature-length file.
@@ -79,6 +79,8 @@ export function registerMediaTools(define: Registrar) {
         '"triangle" is a polygon with 3 points and is accepted as a name for one. ' +
         "Pass `points` instead of `kind` for an arbitrary polygon, in a 0-100 box; such a shape has no recipe, " +
         "and set_shape then needs a `kind` to give it one. " +
+        "Pass `backdrop` to run an effect inside the shape from the start, a face mosaic in one call; " +
+        "set_shape_backdrop says how it behaves. " +
         "A shape goes on a video track, so a lower-third bar needs a row between the picture and the text — " +
         Z_ORDER_NOTE,
       inputSchema: {
@@ -98,9 +100,16 @@ export function registerMediaTools(define: Registrar) {
         width: z.number().optional(),
         height: z.number().optional(),
         fillColor: z.string().optional().describe('Hex, e.g. "#ffffff".'),
+        fillOpacity: fillOpacityField.describe(
+          "0-100, the fill alone. Defaults to 100, or to 0 when `backdrop` is given.",
+        ),
         opacity: z.number().min(0).max(100).optional(),
         rotation: z.number().optional(),
         trackId: trackIdField.optional(),
+        backdrop: z
+          .object(backdropFields)
+          .optional()
+          .describe("An effect or LUT run over what is beneath the shape, inside it."),
       },
       annotations: mutating,
     },

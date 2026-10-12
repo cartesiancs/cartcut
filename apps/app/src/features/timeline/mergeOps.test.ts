@@ -8,7 +8,7 @@ import {
   type TimelineDocument,
 } from "./tracks";
 import { assertTrimInvariant, spanOf } from "./geometry";
-import { textElement, videoElement } from "../renderer/testing";
+import { shapeElement, textElement, videoElement } from "../renderer/testing";
 
 function doc(
   tracks: Array<[string, "video" | "audio" | "text"]>,
@@ -270,5 +270,96 @@ describe("mergeClips — declining by identity", () => {
     };
 
     declines(before, ["a", "b"]);
+  });
+});
+
+describe("mergeClips, two shapes", () => {
+  // Every shape shares the "SHAPE" placeholder, so the path proves nothing.
+  // The merge keeps the left clip's fields, so a right half that would draw
+  // differently is a clip whose look would silently vanish.
+  const mosaic = {
+    presetId: "com.cartcut.pixelate",
+    params: { size: 16 },
+    intensity: 100,
+  };
+
+  function shapes(left: Record<string, any>, right: Record<string, any>) {
+    const base = {
+      trackId: "track-1",
+      localpath: "SHAPE",
+      duration: 1000,
+    };
+    return doc([["track-1", "video"]], {
+      a: shapeElement({ ...base, startTime: 0, ...left }),
+      b: shapeElement({ ...base, startTime: 1000, ...right }),
+    });
+  }
+
+  it("rejoins the two halves of a split mosaic", () => {
+    const before = doc([["track-1", "video"]], {
+      a: shapeElement({
+        trackId: "track-1",
+        localpath: "SHAPE",
+        backdropFx: mosaic,
+        option: { fillColor: "#000000", fillOpacity: 0 },
+      }),
+    });
+    const split = splitClip(before, "a", 1500, "b");
+    expect(canMergeClips(split, ["a", "b"])).toBe(true);
+    expect(Object.keys(mergeClips(split, ["a", "b"]).elements)).toEqual(["a"]);
+  });
+
+  it("refuses to join a plain shape onto a mosaic", () => {
+    const next = shapes({}, { backdropFx: mosaic });
+    expect(canMergeClips(next, ["a", "b"])).toBe(false);
+    expect(mergeClips(next, ["a", "b"])).toBe(next);
+  });
+
+  it("refuses two mosaics that run different numbers", () => {
+    const next = shapes(
+      { backdropFx: mosaic },
+      { backdropFx: { ...mosaic, params: { size: 32 } } },
+    );
+    expect(canMergeClips(next, ["a", "b"])).toBe(false);
+  });
+
+  it("refuses two shapes with a different fill or fill opacity", () => {
+    expect(
+      canMergeClips(shapes({}, { option: { fillColor: "#00ff00" } }), ["a", "b"]),
+    ).toBe(false);
+    expect(
+      canMergeClips(
+        shapes({}, { option: { fillColor: "#ff0000", fillOpacity: 40 } }),
+        ["a", "b"],
+      ),
+    ).toBe(false);
+  });
+
+  it("refuses two different outlines", () => {
+    expect(
+      canMergeClips(
+        shapes(
+          {},
+          {
+            shape: [
+              [0, 0],
+              [100, 0],
+              [50, 100],
+            ],
+          },
+        ),
+        ["a", "b"],
+      ),
+    ).toBe(false);
+    expect(
+      canMergeClips(
+        shapes({ geometry: { kind: "rectangle" } }, { geometry: { kind: "ellipse" } }),
+        ["a", "b"],
+      ),
+    ).toBe(false);
+  });
+
+  it("still joins two identical plain shapes", () => {
+    expect(canMergeClips(shapes({}, {}), ["a", "b"])).toBe(true);
   });
 });

@@ -110,6 +110,7 @@ const EXPECTED = [
   // masking
   "set_mask",
   "set_shape",
+  "set_shape_backdrop",
   "set_clip_decoration",
   // groups
   "create_null",

@@ -25,7 +25,14 @@ import {
 } from "../../element/shapeElement";
 import type { ShapeGeometry, ShapeGeometryKind } from "../../../@types/timeline";
 import { coerceShapeGeometry } from "../../shape/shapeGeometry";
-import { shapePatchFrom, type ShapeToolParams } from "./shape";
+import {
+  backdropSummary,
+  requireBackdrop,
+  shapePatchFrom,
+  type BackdropToolInput,
+  type ShapeToolParams,
+} from "./shape";
+import { chooseClipBackdrop, setClipFillOpacity } from "../../timeline/shapeOps";
 import type { TimelineDocument } from "../../timeline/tracks";
 import { commit, declined } from "../commit";
 import { currentDoc, onFrame, playheadMs, projectFps, requireTrack } from "../context";
@@ -134,9 +141,12 @@ registerCommands({
       width?: number;
       height?: number;
       fillColor?: string;
+      fillOpacity?: number;
       opacity?: number;
       rotation?: number;
       trackId?: string;
+      /** An effect or LUT run over what is beneath the shape, inside it. */
+      backdrop?: BackdropToolInput;
     },
   ) => {
     if (params.points != null && params.points.length < 3) {
@@ -178,11 +188,37 @@ registerCommands({
       rotation: params.rotation,
     });
 
+    // Resolved before anything is placed, so a preset that is not installed is
+    // an error the agent hears rather than a shape that lands filled solid.
+    // `chooseClipBackdrop` switches the new shape's fill off; a `fillOpacity`
+    // the caller named is written after it, and wins.
+    const backdrop = params.backdrop == null ? null : requireBackdrop(params.backdrop);
+    const fillOpacity = params.fillOpacity;
+
     const elementId = uuidv4();
-    return commit(
-      (d: TimelineDocument) =>
-        placeNewElement(d, elementId, element, startTime, uuidv4(), params.trackId),
-      "The shape could not be placed.",
-    );
+    const result = commit((d: TimelineDocument) => {
+      let next = placeNewElement(d, elementId, element, startTime, uuidv4(), params.trackId);
+      if (next === d) {
+        return d;
+      }
+      if (backdrop != null) {
+        next = chooseClipBackdrop(next, elementId, backdrop.fx);
+      }
+      if (fillOpacity !== undefined) {
+        next = setClipFillOpacity(next, elementId, fillOpacity);
+      }
+      return next;
+    }, "The shape could not be placed.");
+
+    if (backdrop == null && params.fillOpacity === undefined) {
+      return result;
+    }
+    return {
+      ...(result as Record<string, unknown>),
+      ...(backdrop != null && backdrop.warnings.length > 0
+        ? { warnings: backdrop.warnings }
+        : {}),
+      ...backdropSummary(currentDoc().elements[elementId]),
+    };
   },
 });

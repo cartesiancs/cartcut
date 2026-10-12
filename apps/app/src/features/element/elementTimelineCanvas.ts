@@ -47,6 +47,8 @@ import { addEffect } from "../timeline/effectOps";
 import { addGraphic } from "../timeline/graphicOps";
 import { newGraphicOptions } from "../graphic/graphicPlacement";
 import { isGradable, setClipLut } from "../timeline/lutOps";
+import { chooseClipBackdrop, isShapeElement } from "../timeline/shapeOps";
+import { backdropModeOf } from "../fx/backdropPreset";
 import { mirrorToggleTarget, type MirrorAxis } from "../timeline/mirrorOps";
 import { isReversed, isReversible } from "../timeline/reverseOps";
 import { mirrorClips } from "../editor/actions";
@@ -2459,13 +2461,47 @@ export class elementTimelineCanvas extends LitElement {
   private dropFxPreset(
     presetId: string,
     startMs: number,
-    _x: number,
+    x: number,
     y: number,
   ) {
     const preset = presetById(presetId);
     if (preset == null) {
       this.toast("That preset is no longer installed.");
       return;
+    }
+
+    // An effect dropped on a shape runs inside that shape, the rule a LUT
+    // dropped on a clip follows (`dropLutPreset`): onto a clip means that
+    // clip's own. Anywhere else it is the adjustment layer it always was.
+    if (preset.kind === "effect") {
+      const hit = hitTest(
+        this.layout,
+        x,
+        y,
+        this.currentDoc().elements,
+        this.timelineRange,
+      );
+      if (
+        hit.kind === "clip" &&
+        isShapeElement(this.currentDoc().elements[hit.elementId])
+      ) {
+        if (backdropModeOf(preset) == null) {
+          this.toast(`${preset.name} plays over the frame and cannot run inside a shape.`);
+          return;
+        }
+        const shapeId = hit.elementId;
+        this.commit((doc) =>
+          chooseClipBackdrop(doc, shapeId, {
+            presetId,
+            params: defaultParamsFor(presetId),
+          }),
+        );
+        this.targetId = [shapeId];
+        selectionStore.getState().setIds([shapeId]);
+        this.showSideOption(shapeId);
+        this.drawCanvas();
+        return;
+      }
     }
 
     if (preset.kind === "transition") {

@@ -1144,7 +1144,11 @@ const CONDITIONAL_TRACKS: Array<{
   { match: isRevealTrack, present: (element) => element?.reveal != null, foreign: true },
   {
     match: isEffectIntensityTrack,
-    present: (element) => element?.filetype === "effect",
+    // A shape's backdrop has an intensity of its own, and it rides on the
+    // shape's `animation` under the effect's name.
+    present: (element) =>
+      element?.filetype === "effect" ||
+      (element?.filetype === "shape" && element?.backdropFx != null),
     foreign: false,
   },
   // The one rule that reads the property as well as the element, which is why
@@ -1157,9 +1161,20 @@ const CONDITIONAL_TRACKS: Array<{
     // Effects and graphics both take their parameters from a preset. Leaving a
     // graphic out here would make `normalizeAnimation` collect its curves as
     // orphans on every load.
-    present: (element, property) =>
-      (element?.filetype === "effect" || element?.filetype === "graphic") &&
-      typeof element?.params?.[fxParamKeyOf(property)] === "number",
+    //
+    // A shape's backdrop keeps its parameters inside the backdrop rather than
+    // on the element, so its tracks are carried while the backdrop has that
+    // key as a number, and collected with it when it goes.
+    present: (element, property) => {
+      const key = fxParamKeyOf(property);
+      if (element?.filetype === "effect" || element?.filetype === "graphic") {
+        return typeof element?.params?.[key] === "number";
+      }
+      if (element?.filetype === "shape") {
+        return typeof element?.backdropFx?.params?.[key] === "number";
+      }
+      return false;
+    },
     foreign: false,
   },
   // `foreign: false`, for the reason the effect's two families are: a level

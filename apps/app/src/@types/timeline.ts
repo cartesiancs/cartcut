@@ -984,8 +984,25 @@ export type ShapeElementType = TimelinePlaced &
     shape: number[][]; // [[x, y]...]
     /** The recipe, when there is one. See `ShapeGeometry`. */
     geometry?: ShapeGeometry;
+    /**
+     * An Fx preset run over everything drawn beneath the shape, inside its
+     * outline: a face mosaic, a frosted panel, a smear across one band. See
+     * `BackdropFx`. Absent on every shape that has none, key and all.
+     */
+    backdropFx?: BackdropFx;
     option: {
       fillColor: string;
+      /**
+       * 0-100, the fill's own strength, under the clip's opacity rather than
+       * instead of it. Absent means 100 and is deleted on the way back to it,
+       * so a shape nobody has made translucent saves as it always did.
+       *
+       * A field rather than an alpha byte in `fillColor`: that string is not
+       * validated anywhere, and `text/style.ts#withAlpha` hands back anything
+       * that is not `#rgb` or `#rrggbb` unchanged, so an opacity carried
+       * inside it would silently do nothing for every other spelling.
+       */
+      fillOpacity?: number;
     };
   };
 
@@ -1548,6 +1565,27 @@ export type ProgramBacked = {
   params: FxParams;
   /** The program itself, for an `inline.` id. */
   program?: InlineProgram;
+};
+
+/**
+ * An effect preset carried by a shape and run over what is beneath it, inside
+ * the shape's outline. CSS's `backdrop-filter`, generalised to every preset.
+ *
+ * The same preset, numbers and program an effect clip holds, and the same
+ * `intensity`, so an effect and a shape's backdrop take one validator, one
+ * sampler and one compositor path. What differs is where the result lands: an
+ * effect replaces the whole frame, a backdrop only the inside of its shape.
+ *
+ * Only an effect preset whose render is a shader, or a LUT preset. An overlay
+ * plays looping media over the frame and has nothing to read beneath it; a
+ * transition or a graphic binds different samplers altogether. The writer
+ * refuses anything else and `planFrame` skips it on the way out, so a hand-
+ * edited file draws a solid shape rather than binding the wrong program. The
+ * rule is `fx/backdropPreset.ts#backdropModeOf`.
+ */
+export type BackdropFx = ProgramBacked & {
+  /** 0-100, as an effect's. */
+  intensity: number;
 };
 
 /** Whether a preset id names an inline program rather than an installed folder. */
@@ -2234,6 +2272,18 @@ export function animatableProperties(
     (element as { reveal?: unknown }).reveal != null
   ) {
     own.push(...TEXT_ANIMATABLE_PROPERTIES);
+  }
+  // A shape's backdrop animates exactly as an effect does, under the effect's
+  // own track names: a shape has no `params` of its own, so `fx:<key>` cannot
+  // mean anything else on one. Gated on the backdrop, like the mask's five, so
+  // a plain shape offers neither. Read inline rather than through
+  // `shape/backdropFx.ts`, which this module may not import.
+  if (element.filetype === "shape") {
+    const backdrop = (element as { backdropFx?: { params?: Record<string, unknown> } })
+      .backdropFx;
+    if (backdrop != null) {
+      own.push(...EFFECT_ANIMATABLE_PROPERTIES, ...fxParamTracksOf(backdrop));
+    }
   }
   return own;
 }

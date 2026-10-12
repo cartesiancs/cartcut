@@ -9,6 +9,7 @@ import {
   audioElement,
   groupElement,
   imageElement,
+  shapeElement,
   textElement,
   videoElement,
 } from "../renderer/testing";
@@ -219,6 +220,37 @@ describe("buildCostCurve", () => {
     // Three effects share one scratch buffer, so this is well under 3x.
     expect(threeNet).toBeGreaterThan(oneNet);
     expect(threeNet).toBeLessThan(oneNet * 2);
+  });
+
+  it("charges a shape's backdrop as an effect, and a plain shape as a shape", () => {
+    // A backdrop is an effect run over the whole frame: the scratch pass, the
+    // upload and the passes, once per shape.
+    const plain = buildCostCurve(
+      { s: shapeElement({ startTime: 0, duration: 10_000 }) },
+      TOTAL_FRAMES,
+      FPS,
+    );
+    const mosaic = buildCostCurve(
+      {
+        s: shapeElement({
+          startTime: 0,
+          duration: 10_000,
+          backdropFx: { presetId: "com.cartcut.pixelate", params: {}, intensity: 100 },
+        }),
+      },
+      TOTAL_FRAMES,
+      FPS,
+    );
+    const effect = buildCostCurve(
+      {
+        s: shapeElement({ startTime: 0, duration: 10_000 }),
+        e: effectElement({ startTime: 0, duration: 10_000 }),
+      },
+      TOTAL_FRAMES,
+      FPS,
+    );
+    expect(frameWeight(mosaic, 5)).toBeGreaterThan(frameWeight(plain, 5));
+    expect(frameWeight(mosaic, 5)).toBeCloseTo(frameWeight(effect, 5), 9);
   });
 
   it("costs more inside a transition's window than outside it", () => {

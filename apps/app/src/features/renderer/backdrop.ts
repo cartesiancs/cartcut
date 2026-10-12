@@ -44,14 +44,54 @@
  * region is device-space once installed, and rounded corners map exactly,
  * elliptical under a non-uniform scale, which is what the band drawn over it
  * does too.
+ *
+ * ## Any preset, through a port
+ *
+ * A shape's backdrop runs an Fx preset rather than a blur: a mosaic over a
+ * face, a smear across one band, a LUT inside a window. That needs WebGL, and
+ * nothing in `renderer/` may hold a GL context or read the preset registry,
+ * so the work arrives as a `BackdropFxPort`, built by the paint loop over the
+ * compositor and carried on the backdrop next to the canvas it reads. A host
+ * with no compositor passes none, and the shape then fills solid.
+ *
+ * The landing is the frost's exactly: trace the region under the element's
+ * transform, clip, reset to identity and draw the finished picture 1:1. The
+ * port's picture is the whole frame run through the preset, so a blur pulls
+ * colour in from outside the region here too.
  */
 
 import { matrixScale } from "./shadow";
 import type { Surface } from "./surface";
 
+/**
+ * Run a shape's backdrop preset over `source` and hand the result to `land`.
+ *
+ * Synchronous, and `land` is called at most once with a picture the size of
+ * `source` that exists only for the length of the call. Answers whether `land`
+ * ran. `elementId` is how the port finds what `planFrame` sampled for this
+ * shape at this frame; an id it has nothing for answers `false`.
+ */
+export type BackdropFxPort = (
+  elementId: string,
+  source: Surface["canvas"],
+  land: (image: CanvasImageSource) => void,
+) => boolean;
+
 /** The frame beneath the clip being drawn, in the destination's pixel grid. */
 export type Backdrop = {
-  canvas: Surface["canvas"];
+  /**
+   * What a frost reads. `null` inside a transition, where the clip is drawn
+   * alone into a cleared buffer; the frost then declines, as it always has.
+   */
+  canvas: Surface["canvas"] | null;
+  /**
+   * What a backdrop preset reads, and the port that runs it. Present only
+   * where a compositor is, and inside a transition too: the frame the
+   * transition is about to be drawn over is still beneath the clip, and a
+   * mosaic that switched off for the length of a dissolve would show the face
+   * it exists to hide.
+   */
+  fx?: { port: BackdropFxPort; source: Surface["canvas"] } | null;
 };
 
 /**
@@ -60,8 +100,30 @@ export type Backdrop = {
  * Read in `renderElement` before any layer is allocated, because after that
  * `ctx` may be the layer and the frame is no longer reachable.
  */
-export function backdropOf(ctx: CanvasRenderingContext2D): Backdrop {
-  return { canvas: ctx.canvas as unknown as Surface["canvas"] };
+export function backdropOf(
+  ctx: CanvasRenderingContext2D,
+  port?: BackdropFxPort | null,
+): Backdrop {
+  const canvas = ctx.canvas as unknown as Surface["canvas"];
+  return port == null
+    ? { canvas }
+    : { canvas, fx: { port, source: canvas } };
+}
+
+/**
+ * The backdrop inside a transition: no frost, and the outer frame for a preset.
+ *
+ * `null` when there is no port or no outer frame, which is every caller but
+ * the paint loop.
+ */
+export function isolatedBackdropOf(
+  port: BackdropFxPort | null | undefined,
+  outer: Surface["canvas"] | null | undefined,
+): Backdrop | null {
+  if (port == null || outer == null) {
+    return null;
+  }
+  return { canvas: null, fx: { port, source: outer } };
 }
 
 /**
@@ -92,16 +154,12 @@ export function frostBackdrop(
   blurElementPx: number,
   tracePath: (ctx: CanvasRenderingContext2D) => boolean,
 ): boolean {
-  if (backdrop == null || !(blurElementPx > 0)) {
+  if (backdrop == null || backdrop.canvas == null || !(blurElementPx > 0)) {
     return false;
   }
 
   const source = backdrop.canvas;
-  const destination = ctx.canvas;
-  if (
-    source.width !== destination.width ||
-    source.height !== destination.height
-  ) {
+  if (!sharesGrid(source, ctx)) {
     return false;
   }
 
@@ -119,6 +177,67 @@ export function frostBackdrop(
     return false;
   }
 
+  return throughRegion(ctx, tracePath, () => {
+    ctx.filter = `blur(${deviceBlur}px)`;
+    ctx.drawImage(source, 0, 0);
+    return true;
+  });
+}
+
+/**
+ * Run a shape's backdrop preset and draw the result inside a region.
+ *
+ * `tracePath` is `frostBackdrop`'s, and so is everything after it. Answers
+ * whether anything was drawn: `false` for no port (a host with no compositor,
+ * a template's inner timeline), for a frame the port had nothing planned for
+ * (a preset that is not installed, or not one a backdrop can carry), for a
+ * source out of register with the destination, and for a region that traced
+ * empty. The caller decides what a `false` means; for a shape it means "fill
+ * solid", so a mosaic that cannot run hides the face rather than showing it.
+ */
+export function landBackdropFx(
+  ctx: CanvasRenderingContext2D,
+  backdrop: Backdrop | null | undefined,
+  elementId: string,
+  tracePath: (ctx: CanvasRenderingContext2D) => boolean,
+): boolean {
+  const fx = backdrop?.fx;
+  if (fx == null || !sharesGrid(fx.source, ctx)) {
+    return false;
+  }
+  return throughRegion(ctx, tracePath, () =>
+    fx.port(elementId, fx.source, (image) => ctx.drawImage(image, 0, 0)),
+  );
+}
+
+/**
+ * Whether a backdrop can be drawn onto `ctx` at identity with no mapping.
+ *
+ * The invariant this module's header states. A mismatch declines rather than
+ * drawing out of register: on the preview's device canvas, for one, the port
+ * would be handed a frame that is not the project's.
+ */
+function sharesGrid(
+  source: Surface["canvas"],
+  ctx: CanvasRenderingContext2D,
+): boolean {
+  const destination = ctx.canvas;
+  return (
+    source.width === destination.width && source.height === destination.height
+  );
+}
+
+/**
+ * Clip to a traced region, reset to identity and draw.
+ *
+ * The region is traced under the transform in effect, which is element-local
+ * space for every caller, and becomes device-space the moment it is installed.
+ */
+function throughRegion(
+  ctx: CanvasRenderingContext2D,
+  tracePath: (ctx: CanvasRenderingContext2D) => boolean,
+  draw: () => boolean,
+): boolean {
   ctx.save();
   try {
     ctx.beginPath();
@@ -129,11 +248,9 @@ export function frostBackdrop(
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     // `source-over` explicitly: on the isolated path the caller's context may
-    // carry a mode, and the frost is the bottom of the clip's own stack.
+    // carry a mode, and the backdrop is the bottom of the clip's own stack.
     ctx.globalCompositeOperation = "source-over";
-    ctx.filter = `blur(${deviceBlur}px)`;
-    ctx.drawImage(source, 0, 0);
-    return true;
+    return draw();
   } finally {
     // `filter` is context state like any other, and a leaked `blur()` would
     // apply to every later draw on this surface. `mask.ts` clears it the same

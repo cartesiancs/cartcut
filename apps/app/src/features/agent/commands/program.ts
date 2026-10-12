@@ -11,6 +11,7 @@ import { programFilesFor } from "../../fx/programExport";
 import { loadPresets } from "../../fx/presetRegistry";
 import { inlineDiagnostics, resolvePreset } from "../../fx/resolvePreset";
 import { inlinePresetId } from "../../fx/programHash";
+import { backdropFxOf } from "../../shape/backdropFx";
 import { currentDoc, requireElement } from "../context";
 import { checkProgram } from "../programInput";
 import { renderFilmstrip } from "../filmstrip";
@@ -19,19 +20,28 @@ import { registerCommands } from "../registry";
 /** Default cap on one `get_program` answer, in characters of source. */
 const DEFAULT_MAX_CHARS = 20_000;
 
+/**
+ * What holds the program on a clip: the clip itself, or a shape's backdrop.
+ *
+ * Everything below reads only `presetId` and `program` off it, which is the
+ * shape `ProgramBacked` gives an effect, a transition, a graphic and a
+ * backdrop alike, so a shape's inline GLSL is read and exported exactly as an
+ * effect's is.
+ */
 function requireProgramClip(elementId: string) {
   const element = requireElement(currentDoc(), elementId) as any;
-  if (element.program == null) {
-    if (element.presetId == null) {
+  const holder = element.filetype === "shape" ? backdropFxOf(element) : element;
+  if (holder?.program == null) {
+    if (holder?.presetId == null) {
       throw new Error(
         `Clip "${elementId}" is a ${element.filetype} clip, which has no program.`,
       );
     }
     throw new Error(
-      `Clip "${elementId}" uses the installed preset "${element.presetId}", not an inline program.`,
+      `Clip "${elementId}" uses the installed preset "${holder.presetId}", not an inline program.`,
     );
   }
-  return element;
+  return holder;
 }
 
 registerCommands({

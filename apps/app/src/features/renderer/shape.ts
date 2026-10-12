@@ -1,8 +1,10 @@
 import type { ShapeElementType } from "../../@types/timeline";
 import { appendSubpath } from "../mask/draw";
 import { roundCornersEach } from "../mask/round";
+import { backdropFxOf, fillOpacityOf, OPAQUE_FILL } from "../shape/backdropFx";
 import { shapeGeometryOf } from "../shape/shapeGeometry";
 import { outlineInBox, radiusAtOf } from "../shape/shapeOutline";
+import { landBackdropFx } from "./backdrop";
 import { paintDecoration, type ClipOutline } from "./decoration";
 import type { ElementRenderFunction } from "./type";
 
@@ -21,25 +23,66 @@ import type { ElementRenderFunction } from "./type";
  * needs the same path several times: once for the shadow's silhouette, once
  * for the fill, once or twice more for the stroke. An undecorated shape takes
  * the same single fill it always did.
+ *
+ * ## A backdrop
+ *
+ * A shape can carry an Fx preset that runs over what is beneath it, inside its
+ * outline: `backdropFx`. It is drawn first, at the bottom of the shape's own
+ * stack and under its fill, so the fill becomes a tint over it and the shape's
+ * opacity, mask, blend and grade all apply to it with no code of their own.
+ *
+ * When a backdrop is asked for and cannot land, the fill is drawn **solid**,
+ * whatever `fillOpacity` says. A face mosaic is the reason: the fill is made
+ * transparent so the mosaic shows, and a mosaic that failed to run (no WebGL,
+ * a preset that is not installed, a template's inner timeline) would otherwise
+ * leave the face it exists to hide in plain view. A solid box looks wrong; a
+ * see-through one looks like nothing happened.
  */
 export const renderShape: ElementRenderFunction<ShapeElementType> = (
   ctx,
   elementId,
   shapeElement,
   timelineCursor,
+  backdrop,
 ) => {
   const outline = shapeOutlineOf(shapeElement);
+  const wantsBackdrop = backdropFxOf(shapeElement) != null;
 
   // Once, not once per point. Inside the loop it was never set at all for a
   // shape with no points, leaving the fill to whatever the last element used.
   ctx.fillStyle = shapeElement.option.fillColor;
 
   paintDecoration(ctx, shapeElement, outline, () => {
+    // Before anything the shape draws, so on the fast path, where the backdrop
+    // is this very canvas, the preset reads the frame without the shape in it.
+    const landed =
+      wantsBackdrop &&
+      landBackdropFx(ctx, backdrop, elementId, (target) => {
+        outline.trace(target);
+        return true;
+      });
+
+    const fillOpacity =
+      wantsBackdrop && !landed ? OPAQUE_FILL : fillOpacityOf(shapeElement);
+    if (fillOpacity <= 0) {
+      return;
+    }
+
+    // An opaque fill issues exactly the calls it always did, with no save and
+    // no alpha write, which is what keeps `golden.test.ts`'s digests in place.
+    const translucent = fillOpacity < OPAQUE_FILL;
+    if (translucent) {
+      ctx.save();
+      ctx.globalAlpha *= fillOpacity / OPAQUE_FILL;
+    }
     ctx.beginPath();
     outline.trace(ctx);
     // The default nonzero rule, so a reversed inner ring is a hole. Asking for
     // `"evenodd"` would also change what a self-intersecting outline fills.
     ctx.fill();
+    if (translucent) {
+      ctx.restore();
+    }
   });
 };
 

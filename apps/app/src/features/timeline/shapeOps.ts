@@ -1,5 +1,5 @@
 /**
- * Writing a shape's recipe and its fill, as pure ops.
+ * Writing a shape's recipe, its fill and its backdrop, as pure ops.
  *
  * The three rules `blendOps.ts` states, plus the fourth `maskOps.ts` adds:
  *
@@ -36,7 +36,20 @@
  * from the other direction.
  */
 
-import type { ShapeElementType, TimelineElement } from "../../@types/timeline";
+import {
+  fxParamKeyOf,
+  isFxParamTrack,
+  type FxParams,
+  type ShapeElementType,
+  type TimelineElement,
+} from "../../@types/timeline";
+import {
+  backdropFxOf,
+  coerceBackdropFx,
+  coerceFillOpacity,
+  sameBackdropFx,
+  type BackdropFxInput,
+} from "../shape/backdropFx";
 import {
   mergeShapeGeometry,
   sameShapeGeometry,
@@ -191,4 +204,192 @@ export function setClipFillColorMany(
   fillColor: string,
 ): TimelineDocument {
   return elementIds.reduce((acc, id) => setClipFillColor(acc, id, fillColor), doc);
+}
+
+/**
+ * Give a shape a backdrop preset, change it, or take it away with `null`.
+ *
+ * `fx` is stored as the caller hands it, after `coerceBackdropFx`: the caller
+ * is the one with a registry, and has already checked the preset is one a
+ * backdrop can carry and seeded its defaults (`fx/backdropPreset.ts`). An input
+ * the coercer refuses declines, rather than storing a backdrop that could
+ * never draw and would leave the shape filled solid for no visible reason.
+ *
+ * A preset change drops the `fx:` tracks of parameters the new preset does
+ * not have, as `effectOps.setEffectPreset` does and for the same reason: left
+ * to `normalizeAnimation` they would ride along until the next load. Taking
+ * the backdrop away drops every one of them, and its `intensity` track.
+ */
+export function setClipBackdropFx(
+  doc: TimelineDocument,
+  elementId: string,
+  fx: BackdropFxInput | null,
+): TimelineDocument {
+  const element = doc.elements[elementId];
+  if (!isShapeElement(element)) {
+    return doc;
+  }
+  const before = backdropFxOf(element);
+
+  if (fx == null) {
+    if (before == null && !("backdropFx" in element)) {
+      return doc;
+    }
+    // Removed, not set to `undefined`, for `clearClipShapeGeometry`'s reason.
+    const { backdropFx: _cleared, ...rest } = element;
+    const updated = withoutBackdropTracks(rest as ShapeElementType, null);
+    return { ...doc, elements: { ...doc.elements, [elementId]: updated } };
+  }
+
+  const next = coerceBackdropFx(fx);
+  if (next == null || sameBackdropFx(before, next)) {
+    return doc;
+  }
+  const updated = withoutBackdropTracks(
+    { ...element, backdropFx: next },
+    next.params,
+  );
+  return { ...doc, elements: { ...doc.elements, [elementId]: updated } };
+}
+
+/**
+ * Choose a shape's backdrop preset, the way every surface does it.
+ *
+ * Two rules the inspector, a tile dropped on the timeline and the agent all
+ * share, which is why they live here once:
+ *
+ *  - **Intensity carries over** when a shape already has a backdrop and the
+ *    caller names none, as an effect's does across a preset change: trying a
+ *    different look should not reset how strongly it was dialled in.
+ *  - **The first backdrop switches the fill off.** A shape is made with an
+ *    opaque fill, which would hide the very thing the backdrop draws; someone
+ *    who picked a mosaic and saw nothing change would decide it had failed.
+ *    A shape that already had a backdrop keeps the fill it was given.
+ */
+export function chooseClipBackdrop(
+  doc: TimelineDocument,
+  elementId: string,
+  fx: BackdropFxInput,
+): TimelineDocument {
+  const element = doc.elements[elementId];
+  if (!isShapeElement(element)) {
+    return doc;
+  }
+  const before = backdropFxOf(element);
+  let next = setClipBackdropFx(doc, elementId, {
+    ...fx,
+    intensity: fx.intensity ?? before?.intensity,
+  });
+  if (next === doc) {
+    return doc;
+  }
+  if (before == null) {
+    next = setClipFillOpacity(next, elementId, 0);
+  }
+  return next;
+}
+
+/**
+ * Patch a backdrop's parameter values and strength, leaving its preset alone.
+ *
+ * What the inspector's sliders write. Declines on a shape with no backdrop and
+ * on a patch that changes nothing, so a slider dragged back to where it began
+ * records no step.
+ */
+export function patchClipBackdropFx(
+  doc: TimelineDocument,
+  elementId: string,
+  patch: { params?: FxParams; intensity?: number },
+): TimelineDocument {
+  const element = doc.elements[elementId];
+  const before = isShapeElement(element) ? backdropFxOf(element) : null;
+  if (before == null) {
+    return doc;
+  }
+  return setClipBackdropFx(doc, elementId, {
+    ...before,
+    params: { ...before.params, ...(patch.params ?? {}) },
+    intensity: patch.intensity ?? before.intensity,
+  });
+}
+
+/**
+ * Set the fill's own opacity, 0-100. Clamped, and deleted at 100 so a shape
+ * nobody has made translucent saves as it always did.
+ */
+export function setClipFillOpacity(
+  doc: TimelineDocument,
+  elementId: string,
+  fillOpacity: number,
+): TimelineDocument {
+  const element = doc.elements[elementId];
+  if (!isShapeElement(element)) {
+    return doc;
+  }
+  const next = coerceFillOpacity(fillOpacity);
+  if (next === null) {
+    return doc;
+  }
+  const stored = element.option?.fillOpacity;
+  if (next === undefined ? stored === undefined : stored === next) {
+    return doc;
+  }
+
+  const { fillOpacity: _previous, ...option } = element.option ?? {
+    fillColor: "#ffffff",
+  };
+  const updated: ShapeElementType = {
+    ...element,
+    option: next === undefined ? option : { ...option, fillOpacity: next },
+  };
+  return { ...doc, elements: { ...doc.elements, [elementId]: updated } };
+}
+
+export function setClipBackdropFxMany(
+  doc: TimelineDocument,
+  elementIds: readonly string[],
+  fx: BackdropFxInput | null,
+): TimelineDocument {
+  return elementIds.reduce((acc, id) => setClipBackdropFx(acc, id, fx), doc);
+}
+
+export function setClipFillOpacityMany(
+  doc: TimelineDocument,
+  elementIds: readonly string[],
+  fillOpacity: number,
+): TimelineDocument {
+  return elementIds.reduce(
+    (acc, id) => setClipFillOpacity(acc, id, fillOpacity),
+    doc,
+  );
+}
+
+/**
+ * The shape with the backdrop's tracks that no longer drive anything removed.
+ *
+ * `params` is the backdrop's new parameter set, or `null` when the backdrop is
+ * going: then the `intensity` track goes too. Answers the element by identity
+ * when there is nothing to drop.
+ */
+function withoutBackdropTracks(
+  element: ShapeElementType,
+  params: FxParams | null,
+): ShapeElementType {
+  const animation = (element as { animation?: Record<string, unknown> }).animation;
+  if (animation == null) {
+    return element;
+  }
+  const next: Record<string, unknown> = {};
+  let dropped = false;
+  for (const property of Object.keys(animation)) {
+    const stale = isFxParamTrack(property)
+      ? params == null || typeof params[fxParamKeyOf(property)] !== "number"
+      : property === "intensity" && params == null;
+    if (stale) {
+      dropped = true;
+      continue;
+    }
+    next[property] = animation[property];
+  }
+  return dropped ? ({ ...element, animation: next } as ShapeElementType) : element;
 }

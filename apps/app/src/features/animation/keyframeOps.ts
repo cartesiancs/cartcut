@@ -24,6 +24,8 @@ import {
 } from "../../@types/timeline";
 import { DEFAULT_INTENSITY } from "../element/effectElement";
 import { setEffectIntensity, setProgramParams } from "../timeline/effectOps";
+import { backdropFxOf, backdropIntensityOf } from "../shape/backdropFx";
+import { patchClipBackdropFx } from "../timeline/shapeOps";
 import {
   DEFAULT_MASK_FEATHER,
   DEFAULT_MASK_LOCATION,
@@ -711,8 +713,14 @@ function staticValueOf(
     case "revealProgress":
       return revealOf(element)?.progress ?? DEFAULT_REVEAL_PROGRESS;
     // The effect's overall strength, 0-100, the number the Intensity row shows.
-    case "intensity":
+    // On a shape it is its backdrop's, which is where the row reads it from.
+    case "intensity": {
+      if (element.filetype === "shape") {
+        const backdrop = backdropFxOf(element);
+        return backdrop == null ? DEFAULT_INTENSITY : backdropIntensityOf(backdrop);
+      }
       return any.intensity ?? DEFAULT_INTENSITY;
+    }
     // Read through the guard, not off the field, exactly as the mask's five
     // are: `volumeDbOf` supplies the 0 dB default for a clip that has never
     // been touched and clamps a hand-edited `-100` into range. A raw
@@ -733,7 +741,11 @@ function staticValueOf(
   // `animatableProperties` only offers a key whose stored value is a finite
   // number, so the fallback is unreachable from the app. It is stated rather
   // than assumed because a hand-edited project can reach here.
-  const value = any.params?.[fxParamKeyOf(property)];
+  //
+  // A shape keeps its backdrop's parameters inside the backdrop.
+  const params =
+    element.filetype === "shape" ? backdropFxOf(element)?.params : any.params;
+  const value = params?.[fxParamKeyOf(property)];
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
@@ -1009,8 +1021,13 @@ function withStaticValue(
     // reason: `setEffectIntensity` clamps to 0-100 and `setEffectParams`
     // declines by identity, and neither guarantee should have a second
     // implementation sitting here.
+    //
+    // A shape's is its backdrop's, through the op that clamps it and declines
+    // on a shape with none.
     case "intensity":
-      return setEffectIntensity(doc, elementId, value);
+      return element.filetype === "shape"
+        ? patchClipBackdropFx(doc, elementId, { intensity: value })
+        : setEffectIntensity(doc, elementId, value);
 
     case "revealProgress":
       return setClipTextRevealFields(doc, elementId, { progress: value });
@@ -1032,6 +1049,11 @@ function withStaticValue(
   // this never has to read the other parameters first, and it takes an effect
   // and a graphic alike: `setEffectParams` declined a graphic, which left the
   // stopwatch and the curve editor silently doing nothing on one.
+  if (element.filetype === "shape") {
+    return patchClipBackdropFx(doc, elementId, {
+      params: { [fxParamKeyOf(property)]: value },
+    });
+  }
   return setProgramParams(doc, elementId, {
     [fxParamKeyOf(property)]: value,
   });

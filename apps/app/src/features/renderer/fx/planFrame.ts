@@ -23,17 +23,26 @@
  */
 
 import type {
+  BackdropFx,
   EffectElementType,
   FxParams,
   Timeline,
   TransitionElementType,
 } from "../../../@types/timeline";
 import { isTimeInRange } from "../../../utils/time";
+import { isElementVisibleAtTime } from "../../element/time";
+import type { BackdropMode } from "../../fx/backdropPreset";
+import {
+  backdropFxOf,
+  backdropIntensityOf,
+  backdropParamsOf,
+} from "../../shape/backdropFx";
 import { spanOf } from "../../timeline/geometry";
 import { frameStartMs } from "../../timeline/frames";
 import { progressOf, windowOf } from "../../timeline/transitionGeometry";
 import type { ProgramHolder } from "../../fx/resolvePreset";
 import { effectSampleAt } from "./effectSample";
+import { effectTimeOf } from "./effectTime";
 
 /** How a preset wants to be executed. `null` when it is not installed. */
 export type PresetMode = "overlay" | "shader" | "lut";
@@ -87,6 +96,26 @@ export type ActiveEffect = {
   params: FxParams;
 };
 
+/**
+ * One shape whose backdrop the compositor has to run this frame.
+ *
+ * Unlike an effect, the shape is still painted by the ordinary loop: this only
+ * says what its renderer will find when it asks the backdrop port, which is
+ * how the effect lands inside its outline and nowhere else.
+ */
+export type ActiveBackdrop = {
+  id: string;
+  /** The shape's own `backdropFx`, which is what the preset resolves from. */
+  fx: BackdropFx;
+  mode: BackdropMode;
+  /** 0-100, the `intensity` track resolved at this frame. */
+  intensity: number;
+  /** `fx.params` with every live `fx:` track on the shape resolved. */
+  params: FxParams;
+  /** The shader's `time`: seconds since the shape began, frame-snapped. */
+  timeSeconds: number;
+};
+
 export type FramePlan = {
   /** Keyed by `drawAtId`. */
   transitions: Map<string, ActiveTransition>;
@@ -94,6 +123,8 @@ export type FramePlan = {
   claimed: Set<string>;
   /** Keyed by element id, consulted as the loop reaches each one. */
   effects: Map<string, ActiveEffect>;
+  /** Keyed by shape id, read by the backdrop port when the shape paints. */
+  backdrops: Map<string, ActiveBackdrop>;
   /**
    * Whether the frame must be composited into a project-resolution canvas.
    *
@@ -101,6 +132,11 @@ export type FramePlan = {
    * overlay is a Canvas2D composite operation against what is already there,
    * which needs no readback; a transition draws its two clips into buffers of
    * its own and hands back a finished image.
+   *
+   * True for any backdrop too, and not only for the readback: a preset's sizes
+   * are project pixels (`resolution` is the project frame), so a mosaic run on
+   * the preview's device canvas would change its block size with the zoom and
+   * slide its grid with the pan.
    */
   needsScratch: boolean;
   /** Nothing to do — the loop should take its original path. */
@@ -112,6 +148,7 @@ const EMPTY_PLAN: FramePlan = {
   transitions: new Map(),
   claimed: new Set(),
   effects: new Map(),
+  backdrops: new Map(),
   needsScratch: false,
   empty: true,
 };
@@ -131,6 +168,16 @@ export type PlanFrameInput = {
    * pass-through behaviour the whole feature promises.
    */
   modeOf: (element: ProgramHolder) => PresetMode | null;
+  /**
+   * How a shape's backdrop preset runs, or `null` when it cannot run as one.
+   *
+   * Separate from `modeOf`, which never reads a preset's `kind`; see
+   * `fx/backdropPreset.ts`. Optional so the preset browser's hand-built plans
+   * and every existing caller keep compiling, and absent means "plan no
+   * backdrops": the shapes then draw their fill solid, which is what a
+   * backdrop that cannot land always does.
+   */
+  backdropModeOf?: (element: ProgramHolder) => BackdropMode | null;
 };
 
 /**
@@ -147,12 +194,19 @@ export function hasFxElements(elements: Timeline): boolean {
     if (element.filetype === "effect" || element.filetype === "transition") {
       return true;
     }
+    // A shape's backdrop runs through the same compositor. Without this the
+    // preview, the export and the contact sheet would build no runtime for a
+    // project whose only effect is a mosaic, and every face would draw as a
+    // solid box.
+    if (backdropFxOf(element) != null) {
+      return true;
+    }
   }
   return false;
 }
 
 export function planFrame(input: PlanFrameInput): FramePlan {
-  const { elements, timeInMs, fps, modeOf } = input;
+  const { elements, timeInMs, fps, modeOf, backdropModeOf } = input;
 
   if (!hasFxElements(elements)) {
     return EMPTY_PLAN;
@@ -161,6 +215,7 @@ export function planFrame(input: PlanFrameInput): FramePlan {
   const transitions = new Map<string, ActiveTransition>();
   const claimed = new Set<string>();
   const effects = new Map<string, ActiveEffect>();
+  const backdrops = new Map<string, ActiveBackdrop>();
   let needsScratch = false;
 
   for (const [id, element] of Object.entries(elements)) {
@@ -233,13 +288,51 @@ export function planFrame(input: PlanFrameInput): FramePlan {
       if (mode === "shader" || mode === "lut") {
         needsScratch = true;
       }
+      continue;
+    }
+
+    if (element.filetype === "shape" && backdropModeOf != null) {
+      const fx = backdropFxOf(element);
+      if (fx == null) {
+        continue;
+      }
+      const mode = backdropModeOf(fx);
+      if (mode == null) {
+        continue;
+      }
+      // The renderer's own visibility rule, transitions included: a shape a
+      // transition holds on screen past its out-point is painted, so its
+      // backdrop has to be planned for exactly the frames it is.
+      if (!isElementVisibleAtTime(timeInMs, elements, element)) {
+        continue;
+      }
+      const snapped = frameStartMs(timeInMs, fps);
+      const sampled = effectSampleAt(
+        {
+          startTime: element.startTime,
+          intensity: backdropIntensityOf(fx),
+          params: backdropParamsOf(fx),
+          animation: element.animation,
+        },
+        snapped,
+      );
+      backdrops.set(id, {
+        id,
+        fx,
+        mode,
+        intensity: sampled.intensity,
+        params: sampled.params,
+        timeSeconds: effectTimeOf(element, timeInMs, fps),
+      });
+      needsScratch = true;
     }
   }
 
-  const empty = transitions.size === 0 && effects.size === 0;
+  const empty =
+    transitions.size === 0 && effects.size === 0 && backdrops.size === 0;
   if (empty) {
     return EMPTY_PLAN;
   }
 
-  return { transitions, claimed, effects, needsScratch, empty };
+  return { transitions, claimed, effects, backdrops, needsScratch, empty };
 }

@@ -9,11 +9,17 @@ import {
 import { normalizeShapeGeometry, shapeGeometryOf } from "../shape/shapeGeometry";
 import { flattenOutline } from "../shape/shapeOutline";
 import {
+  chooseClipBackdrop,
   clearClipShapeGeometry,
   isShapeElement,
   mirrorFor,
+  patchClipBackdropFx,
+  setClipBackdropFx,
+  setClipBackdropFxMany,
   setClipFillColor,
   setClipFillColorMany,
+  setClipFillOpacity,
+  setClipFillOpacityMany,
   setClipShapeGeometry,
   setClipShapeGeometryMany,
 } from "./shapeOps";
@@ -312,5 +318,192 @@ describe("the mirror of a shape with no recipe", () => {
       [100, 100],
       [0, 100],
     ]);
+  });
+});
+
+describe("setClipBackdropFx", () => {
+  const PIXELATE = {
+    presetId: "com.cartcut.pixelate",
+    params: { size: 16, average: true },
+    intensity: 100,
+  };
+
+  it("gives a shape a backdrop, coerced", () => {
+    const next = setClipBackdropFx(doc(), "shape", { ...PIXELATE, intensity: 140 });
+    expect(next.elements.shape).toMatchObject({
+      backdropFx: { ...PIXELATE, intensity: 100 },
+    });
+  });
+
+  it("declines a shape that already has that backdrop", () => {
+    const once = setClipBackdropFx(doc(), "shape", PIXELATE);
+    expect(setClipBackdropFx(once, "shape", { ...PIXELATE, params: { ...PIXELATE.params } })).toBe(once);
+  });
+
+  it("declines anything that is not a shape", () => {
+    const d = doc();
+    for (const id of ["picture", "title", "sound", "missing"]) {
+      expect(setClipBackdropFx(d, id, PIXELATE)).toBe(d);
+    }
+  });
+
+  it("declines a backdrop the coercer refuses", () => {
+    const d = doc();
+    expect(setClipBackdropFx(d, "shape", { presetId: "" })).toBe(d);
+    expect(setClipBackdropFx(d, "shape", { presetId: "inline.0123456789abcdef" })).toBe(d);
+  });
+
+  it("takes it away with null, deleting the key", () => {
+    const withFx = setClipBackdropFx(doc(), "shape", PIXELATE);
+    const cleared = setClipBackdropFx(withFx, "shape", null);
+    expect("backdropFx" in cleared.elements.shape).toBe(false);
+    // And declines when there is nothing to take.
+    expect(setClipBackdropFx(cleared, "shape", null)).toBe(cleared);
+  });
+
+  it("never mutates the shape it was given", () => {
+    const d = doc();
+    const before = JSON.stringify(d.elements.shape);
+    setClipBackdropFx(d, "shape", PIXELATE);
+    expect(JSON.stringify(d.elements.shape)).toBe(before);
+  });
+
+  it("drops the tracks of parameters the new preset does not have", () => {
+    const track = { isActivate: true, x: [], ax: [] };
+    const withFx = setClipBackdropFx(doc(), "shape", PIXELATE);
+    const animated = {
+      ...withFx,
+      elements: {
+        ...withFx.elements,
+        shape: {
+          ...withFx.elements.shape,
+          animation: {
+            ...(withFx.elements.shape as any).animation,
+            "fx:size": track,
+            intensity: track,
+          },
+        } as any,
+      },
+    };
+
+    const blurred = setClipBackdropFx(animated, "shape", {
+      presetId: "com.cartcut.gaussian-blur",
+      params: { radius: 8 },
+      intensity: 100,
+    });
+    const after = (blurred.elements.shape as any).animation;
+    expect(after["fx:size"]).toBeUndefined();
+    // Intensity belongs to the backdrop, not to the preset, so it stays.
+    expect(after.intensity).toBe(track);
+    // Every movement track the shape had is kept.
+    expect(after.position).toBeDefined();
+
+    const cleared = (setClipBackdropFx(animated, "shape", null).elements.shape as any).animation;
+    expect(cleared["fx:size"]).toBeUndefined();
+    expect(cleared.intensity).toBeUndefined();
+    expect(cleared.position).toBeDefined();
+  });
+
+  it("folds over a selection, skipping what is not a shape", () => {
+    const next = setClipBackdropFxMany(doc(), ["shape", "drawn", "picture"], PIXELATE);
+    expect((next.elements.shape as any).backdropFx).toBeDefined();
+    expect((next.elements.drawn as any).backdropFx).toBeDefined();
+    expect((next.elements.picture as any).backdropFx).toBeUndefined();
+  });
+});
+
+describe("patchClipBackdropFx", () => {
+  const PIXELATE = {
+    presetId: "com.cartcut.pixelate",
+    params: { size: 16, average: true },
+    intensity: 100,
+  };
+
+  it("changes one parameter and keeps the rest", () => {
+    const withFx = setClipBackdropFx(doc(), "shape", PIXELATE);
+    const next = patchClipBackdropFx(withFx, "shape", { params: { size: 40 } });
+    expect((next.elements.shape as any).backdropFx).toEqual({
+      ...PIXELATE,
+      params: { size: 40, average: true },
+    });
+  });
+
+  it("declines a shape with no backdrop, and a patch that changes nothing", () => {
+    const d = doc();
+    expect(patchClipBackdropFx(d, "shape", { intensity: 50 })).toBe(d);
+    const withFx = setClipBackdropFx(d, "shape", PIXELATE);
+    expect(patchClipBackdropFx(withFx, "shape", { params: { size: 16 } })).toBe(withFx);
+  });
+});
+
+describe("setClipFillOpacity", () => {
+  it("stores a translucent fill beside the colour", () => {
+    const next = setClipFillOpacity(doc(), "shape", 40);
+    expect((next.elements.shape as any).option).toEqual({
+      fillColor: "#ff0000",
+      fillOpacity: 40,
+    });
+  });
+
+  it("deletes the key at full strength, so the shape saves as it always did", () => {
+    const d = doc();
+    const translucent = setClipFillOpacity(d, "shape", 40);
+    const back = setClipFillOpacity(translucent, "shape", 100);
+    expect((back.elements.shape as any).option).toEqual({ fillColor: "#ff0000" });
+    expect(JSON.stringify(back.elements.shape)).toBe(JSON.stringify(d.elements.shape));
+  });
+
+  it("declines what changes nothing, a non-number and a non-shape", () => {
+    const d = doc();
+    expect(setClipFillOpacity(d, "shape", 100)).toBe(d);
+    expect(setClipFillOpacity(d, "shape", 140)).toBe(d);
+    expect(setClipFillOpacity(d, "shape", NaN)).toBe(d);
+    expect(setClipFillOpacity(d, "picture", 40)).toBe(d);
+    const once = setClipFillOpacity(d, "shape", 40);
+    expect(setClipFillOpacity(once, "shape", 40)).toBe(once);
+  });
+
+  it("clamps below zero", () => {
+    expect((setClipFillOpacity(doc(), "shape", -10).elements.shape as any).option.fillOpacity).toBe(0);
+  });
+
+  it("folds over a selection", () => {
+    const next = setClipFillOpacityMany(doc(), ["shape", "drawn"], 0);
+    expect((next.elements.shape as any).option.fillOpacity).toBe(0);
+    expect((next.elements.drawn as any).option.fillOpacity).toBe(0);
+  });
+});
+
+describe("chooseClipBackdrop", () => {
+  const PIXELATE = { presetId: "com.cartcut.pixelate", params: { size: 16 } };
+
+  it("switches the fill off for a shape's first backdrop", () => {
+    const next = chooseClipBackdrop(doc(), "shape", PIXELATE);
+    expect((next.elements.shape as any).option.fillOpacity).toBe(0);
+    expect((next.elements.shape as any).backdropFx.intensity).toBe(100);
+  });
+
+  it("keeps the fill and the intensity across a preset change", () => {
+    let next = chooseClipBackdrop(doc(), "shape", { ...PIXELATE, intensity: 60 });
+    next = setClipFillOpacity(next, "shape", 35);
+    next = chooseClipBackdrop(next, "shape", {
+      presetId: "com.cartcut.gaussian-blur",
+      params: { radius: 8 },
+    });
+    const shape = next.elements.shape as any;
+    expect(shape.backdropFx).toEqual({
+      presetId: "com.cartcut.gaussian-blur",
+      params: { radius: 8 },
+      intensity: 60,
+    });
+    expect(shape.option.fillOpacity).toBe(35);
+  });
+
+  it("declines what changes nothing, and anything that is not a shape", () => {
+    const once = chooseClipBackdrop(doc(), "shape", PIXELATE);
+    expect(chooseClipBackdrop(once, "shape", PIXELATE)).toBe(once);
+    const d = doc();
+    expect(chooseClipBackdrop(d, "picture", PIXELATE)).toBe(d);
+    expect(chooseClipBackdrop(d, "shape", { presetId: "" })).toBe(d);
   });
 });

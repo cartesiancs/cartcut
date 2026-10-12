@@ -7,9 +7,10 @@ import type { Backdrop } from "./backdrop";
 /**
  * How one element paints itself.
  *
- * `backdrop` is the frame beneath the clip, and only `renderText` reads it — for
- * a frosted background band, the one property that is a function of what is
- * already on screen rather than of the element. It is optional because every
+ * `backdrop` is the frame beneath the clip. Two renderers read it: `renderText`
+ * for a frosted background band and `renderShape` for a backdrop preset, the
+ * two properties that are a function of what is already on screen rather than
+ * of the element. It is optional because every
  * other renderer ignores it and because several callers legitimately have none:
  * `rasterizeText` draws onto an empty canvas, and a transition draws each half
  * into a cleared buffer. See `renderer/backdrop.ts` for why it is a parameter

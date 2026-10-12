@@ -8,6 +8,11 @@
  * The fields are flat rather than nested, so an agent can change a sweep
  * without restating a start. `set_shape` folds them back into the one `arc`
  * object the document holds.
+ *
+ * `set_shape_backdrop` is the other property a shape has that nothing else
+ * does: an effect or LUT preset run over what is beneath it, inside its
+ * outline. A tool of its own, because `set_shape` is about the outline and
+ * needs a `kind` on a shape drawn by hand.
  */
 
 import { z } from "zod";
@@ -16,9 +21,39 @@ import {
   SHAPE_GEOMETRY_KINDS,
   STROKE_ALIGNMENTS,
   mutating,
+  programField,
   tool,
   type Registrar,
 } from "./define";
+
+/** What names a shape's backdrop. Shared by `set_shape_backdrop` and `add_shape`. */
+export const backdropFields = {
+  presetId: z
+    .string()
+    .optional()
+    .describe(
+      "An effect from list_effect_presets (e.g. com.cartcut.pixelate, com.cartcut.gaussian-blur, " +
+        "com.cartcut.motion-blur) or a LUT from list_luts. Or pass `program`.",
+    ),
+  program: programField
+    .optional()
+    .describe("An inline effect program, `kind: \"effect\"`, instead of `presetId`."),
+  params: z
+    .record(z.any())
+    .optional()
+    .describe("The preset's parameters by key. Any left out take the preset's defaults."),
+  intensity: z.number().min(0).max(100).optional().describe("0-100. Default 100."),
+};
+
+/** The fill's own strength, under the clip's opacity. */
+export const fillOpacityField = z
+  .number()
+  .min(0)
+  .max(100)
+  .optional()
+  .describe(
+    "0-100, the fill alone. A backdrop shows through a translucent fill as a tint; 0 shows the backdrop only.",
+  );
 
 /** Shared by `set_shape` and `add_shape`, so the two cannot drift apart. */
 export const shapeGeometryFields = {
@@ -83,6 +118,34 @@ export function registerShapeTools(define: Registrar) {
       annotations: mutating,
     },
     tool((args) => requestEditor("set_shape", args)),
+  );
+
+  define(
+    "set_shape_backdrop",
+    {
+      title: "Run an effect inside a shape",
+      description:
+        "Run an effect or LUT preset over everything painted beneath shape clips, inside their outlines, " +
+        "leaving the rest of the frame alone. This is how to blur or pixelate a face, frost a panel behind a " +
+        "caption, smear one band sideways (com.cartcut.motion-blur with an `angle`), or grade inside a window. " +
+        "A face mosaic is an ellipse with com.cartcut.pixelate; to make it follow the face, parent it with " +
+        "set_clip_parent to a null that tracks it (Auto Track in the app makes one, and moves it only, so size " +
+        "the ellipse with room to spare). What counts as beneath is decided by track order, as for any clip. " +
+        "The first backdrop on a shape switches its fill off (fillOpacity 0) unless you pass `fillOpacity`; " +
+        "raise it to tint the region. Pass `params` or `intensity` alone to adjust a backdrop already there, " +
+        "and `remove: true` to take it away. Overlay presets are refused. A backdrop whose preset cannot run " +
+        "draws the shape's fill solid instead, so a mosaic never fails see-through: get_clip reports " +
+        "`backdrop.draws`. `intensity` and numeric parameters animate as for an effect: set_animation and " +
+        "add_keyframes with `intensity` or `fx:<key>` on the shape.",
+      inputSchema: {
+        elementIds: z.array(z.string()).min(1),
+        ...backdropFields,
+        fillOpacity: fillOpacityField,
+        remove: z.boolean().optional().describe("Take the backdrop away. Pass nothing else with it."),
+      },
+      annotations: mutating,
+    },
+    tool((args) => requestEditor("set_shape_backdrop", args)),
   );
 
   define(

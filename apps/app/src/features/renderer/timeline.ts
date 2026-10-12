@@ -5,10 +5,12 @@ import {
 } from "../../@types/timeline";
 import { isElementVisibleAtTime } from "../element/time";
 import { createMemo } from "../timeline/transform";
+import type { BackdropFxPort } from "./backdrop";
 import { renderElement } from "./element";
 import { effectTimeOf } from "./fx/effectTime";
 import { planFrame, type FramePlan } from "./fx/planFrame";
 import type { FxRuntime } from "./fx/runtime";
+import type { Surface } from "./surface";
 import type { ElementRenderFunction } from "./type";
 
 
@@ -111,6 +113,7 @@ export function renderTimelineAtTime(
           timeInMs,
           fps: fx.fps,
           modeOf: fx.modeOf,
+          backdropModeOf: fx.backdropModeOf,
         });
 
   // Nothing to composite: keep the original single-pass path, drawing straight
@@ -157,6 +160,52 @@ export function renderTimelineAtTime(
   }
 }
 
+/**
+ * The port a shape's renderer runs its backdrop preset through, or `null`.
+ *
+ * `null` when nothing on this frame has a backdrop to run, which is every
+ * frame of every project that has never used one, so the common path builds
+ * no closure. A shape with a backdrop then fills solid.
+ *
+ * Declines a source that is not the project frame: `planFrame` asked for a
+ * scratch pass, so the frame beneath a backdrop is always project-sized here,
+ * and a mismatch means it is not (a scratch canvas that could not be made, for
+ * one). A preset's sizes are project pixels, so running it on any other grid
+ * would draw the wrong picture rather than none.
+ */
+function backdropPortFor(
+  plan: FramePlan | null,
+  fx: FxRuntime | null,
+  width: number,
+  height: number,
+): BackdropFxPort | null {
+  if (plan == null || fx == null || plan.backdrops.size === 0) {
+    return null;
+  }
+  return (elementId, source, land) => {
+    const active = plan.backdrops.get(elementId);
+    if (active == null) {
+      return false;
+    }
+    if (source.width !== width || source.height !== height) {
+      return false;
+    }
+    const preset = fx.presetOf(active.fx);
+    if (preset == null) {
+      return false;
+    }
+    return fx.compositor.filterBackdrop(
+      source as unknown as TexImageSource,
+      active,
+      preset,
+      active.mode === "lut" ? fx.lutFor(preset.id) : null,
+      width,
+      height,
+      land,
+    );
+  };
+}
+
 function paint(
   ctx: CanvasRenderingContext2D,
   timeline: Timeline,
@@ -181,15 +230,25 @@ function paint(
   // resolved at `timeInMs`, so reusing it across frames would draw the previous
   // one; within a frame it turns every sibling's chain walk into a lookup.
   const memo = createMemo();
-  const context = { elements: timeline, memo };
+  const backdropFx = backdropPortFor(plan, fx, width, height);
+  const context = { elements: timeline, memo, backdropFx };
 
   /**
    * The same context, marked as drawing into a buffer holding one clip alone.
    *
    * Built once per frame rather than spread at each `drawOne` call, so the
    * transform memo is shared with the main loop instead of being rebuilt.
+   *
+   * `outerBackdrop` is this frame's own canvas: when a transition draws its two
+   * clips, everything beneath it has already been painted here, and that is
+   * what a shape's backdrop preset inside the transition has to read.
    */
-  const isolatedContext = { ...context, isolated: true };
+  const isolatedContext = {
+    ...context,
+    isolated: true,
+    outerBackdrop:
+      backdropFx == null ? null : (ctx.canvas as unknown as Surface["canvas"]),
+  };
 
   /**
    * Draw one element by itself into some other context.

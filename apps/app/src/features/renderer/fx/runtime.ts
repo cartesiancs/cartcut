@@ -11,6 +11,7 @@
  */
 
 import type { EffectElementType } from "../../../@types/timeline";
+import type { BackdropMode } from "../../fx/backdropPreset";
 import type { FxPreset } from "../../fx/presetTypes";
 import type { ProgramHolder } from "../../fx/resolvePreset";
 import type { LutData } from "../../lut/lutData";
@@ -36,6 +37,11 @@ export type FxRuntime = {
   modeOf: (element: ProgramHolder) => PresetMode | null;
   /** The element's preset itself, or `null` when there is none to run. */
   presetOf: (element: ProgramHolder) => FxPreset | null;
+  /**
+   * How a shape's backdrop preset runs, or `null` when it cannot run as one:
+   * not installed, or not an effect or LUT preset. See `fx/backdropPreset.ts`.
+   */
+  backdropModeOf: (holder: ProgramHolder) => BackdropMode | null;
   /**
    * The colour table behind a LUT preset, or `null` when it is not ready.
    *

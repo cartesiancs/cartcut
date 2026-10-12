@@ -144,6 +144,7 @@ export function createExtensionApi(deps: ApiDeps): Record<string, unknown> {
     setColorAdjustments: editorCommand(deps, "set_color_adjustments"),
     setMask: editorCommand(deps, "set_mask"),
     setShape: editorCommand(deps, "set_shape"),
+    setShapeBackdrop: editorCommand(deps, "set_shape_backdrop"),
     setVideoFilters: editorCommand(deps, "set_video_filters"),
     setTextFont: editorCommand(deps, "set_text_font"),
     applyAnimationPreset: editorCommand(deps, "apply_animation_preset"),

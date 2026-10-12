@@ -106,6 +106,10 @@ const WRITABLE: Record<string, string[][]> = {
   ],
   shape: [
     ["option", "fillColor"],
+    // 0-100, the fill alone. **Not a plain `setIn`**, for `scale`'s reason:
+    // full strength deletes the key, so `update_clip` routes it through
+    // `shapeOps#setClipFillOpacity`.
+    ["option", "fillOpacity"],
     // A border and a drop shadow, as leaves: `flatten` recurses into a nested
     // patch, so a `["stroke"]` entry would never match anything it produces.
     // `set_clip_decoration` is the multi-clip form.
@@ -177,6 +181,7 @@ const WRITABLE: Record<string, string[][]> = {
  */
 export const RANGES: Record<string, { min?: number; max?: number }> = {
   opacity: { min: 0, max: 100 },
+  "option.fillOpacity": { min: 0, max: 100 },
   // Tenths, floored at zero and with no ceiling — `clampScaleTenths` states
   // why: a negative factor mirrors the clip rather than shrinking it, and a
   // clip magnified past the frame is a legitimate picture.

@@ -463,6 +463,31 @@ add_effect({ presetId: "…", startMs, durationMs, intensity: 60 })
 fade an effect in and out on one clip, and any `number` parameter animates the
 same way as `fx:<key>`.
 
+**An effect inside a shape applies only there.** A shape can carry any effect
+or LUT preset as its backdrop: it runs over everything painted beneath the
+shape, inside its outline, and leaves the rest of the frame alone. That is how
+to blur or pixelate a face or a licence plate, frost a panel behind a caption,
+or smear one band sideways.
+
+```
+add_shape({ kind: "ellipse", x, y, width, height, startMs, durationMs,
+            backdrop: { presetId: "com.cartcut.pixelate", params: { size: 24 } } })
+set_shape_backdrop({ elementIds: [id], presetId: "com.cartcut.gaussian-blur" })
+set_shape_backdrop({ elementIds: [id], presetId: "com.cartcut.motion-blur",
+                     params: { length: 60, angle: 0 } })
+```
+
+The first backdrop switches the shape's fill off, so only the effect shows;
+pass `fillOpacity` to keep some of the fill as a tint. To follow a moving face,
+parent the shape to a null that tracks it with `set_clip_parent` (Auto Track
+in the app makes one). The null follows position only, so draw the ellipse
+with room to spare rather than tight to the face. Track order decides what is
+beneath, as for any clip: the shape belongs above the footage and below the
+captions. If the preset cannot run, the shape draws its fill solid instead of
+going see-through, and `get_clip` reports `backdrop.draws: false`; check it on
+anything that hides someone's identity, and look at a frame with
+`get_contact_sheet` before you call it done.
+
 ## Typography and graphics
 
 A **graphic** is a layer drawn by a program: HTML and CSS for lettering, GLSL

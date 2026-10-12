@@ -1,6 +1,7 @@
 import type { Timeline } from "../../@types/timeline";
 import { isVisualTimelineElement } from "../../@types/timeline";
 import { isElementVisibleAtTime } from "../element/time";
+import { backdropFxOf } from "../shape/backdropFx";
 import { frameToMs, msToFrameCeil } from "../timeline/frames";
 
 /**
@@ -181,6 +182,13 @@ function weightAt(timeline: Timeline, timeInMs: number): number {
     }
 
     weight += VISIBLE_COST[element.filetype] ?? VISIBLE_COST_DEFAULT;
+
+    // A shape's backdrop is an effect run over the whole frame and landed in
+    // its outline: the same scratch pass, the same upload and the same passes,
+    // once per shape. Five mosaicked faces cost what five effects do.
+    if (backdropFxOf(element) != null) {
+      effects++;
+    }
   }
 
   if (effects > 0) {
