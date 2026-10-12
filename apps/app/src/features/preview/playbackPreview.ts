@@ -2,10 +2,9 @@
  * The preview's two modes, and everything that differs between them.
  *
  * The editing preview earns its chrome: elements parked outside the frame are
- * drawn dimmed so they can still be found and grabbed, a hairline marks where
- * the rendered frame actually ends, the selection carries an outline and eight
- * grips, and `FIT_PADDING_PX` leaves a margin so a clip flush to the edge is
- * still visible. Every one of those is in the way when the point is to *watch*
+ * drawn dimmed so they can still be found and grabbed, the selection carries
+ * an outline and eight grips, and `FIT_PADDING_PX` leaves a margin so a clip
+ * flush to the edge is still visible. Every one of those is in the way when the point is to *watch*
  * the cut rather than to change it.
  *
  * So there is a second mode, and it is defined here as data — one `PreviewChrome`
@@ -33,8 +32,6 @@ export const CANVAS_BG = "#101112";
 export const PRESENTATION_BG = "#000000";
 
 export type PreviewChrome = {
-  /** The hairline rectangle marking the rendered resolution. */
-  frameGuide: boolean;
   /** The dimmed blit that shows what is hanging outside the frame. */
   dimOutside: boolean;
   /** Selection outline, grips, pen and shape overlays, snap guides. */
@@ -48,7 +45,6 @@ export type PreviewChrome = {
 };
 
 const EDITING_CHROME: PreviewChrome = {
-  frameGuide: true,
   dimOutside: true,
   selection: true,
   background: CANVAS_BG,
@@ -69,7 +65,6 @@ const EDITING_CHROME: PreviewChrome = {
  * zoom 100 is exactly the frame filling the viewport on its tight axis.
  */
 const PRESENTING_CHROME: PreviewChrome = {
-  frameGuide: false,
   dimOutside: false,
   selection: false,
   background: PRESENTATION_BG,

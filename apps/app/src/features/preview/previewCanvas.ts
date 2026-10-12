@@ -138,7 +138,6 @@ import {
   computeGeometry,
   fitViewport,
   screenToWorld,
-  worldToScreen,
   zoomAround,
   clampZoom,
   ZOOM_STEP,
@@ -157,7 +156,6 @@ import { paintTextGlyphsOnly, selectionRectsOf } from "../renderer/text";
 
 /** How much of an out-of-frame pixel survives. */
 const OUTSIDE_ALPHA = 0.28;
-const FRAME_GUIDE_COLOR = "rgba(255, 255, 255, 0.35)";
 
 /**
  * The snap guide, and the darker casing drawn a little wider under it.
@@ -885,10 +883,6 @@ export class PreviewCanvas extends LitElement {
     ctx.drawImage(offscreen, 0, 0);
     ctx.restore();
 
-    if (this.chrome.frameGuide) {
-      this.drawFrameGuide(ctx, dpr, frame);
-    }
-
     // 5. Selection chrome and snap guides: always full opacity, never clipped.
     //
     //    All of it goes at once while presenting, and the *selection* does not:
@@ -917,29 +911,6 @@ export class PreviewCanvas extends LitElement {
       }
       ctx.restore();
     }
-  }
-
-  /** The rendered resolution, marked out on the infinite plane. */
-  private drawFrameGuide(
-    ctx: CanvasRenderingContext2D,
-    dpr: number,
-    frame: { w: number; h: number },
-  ) {
-    const topLeft = worldToScreen(this.geometry, 0, 0);
-    const bottomRight = worldToScreen(this.geometry, frame.w, frame.h);
-
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.lineWidth = dpr;
-    ctx.strokeStyle = FRAME_GUIDE_COLOR;
-    ctx.strokeRect(
-      topLeft.x * dpr,
-      topLeft.y * dpr,
-      (bottomRight.x - topLeft.x) * dpr,
-      (bottomRight.y - topLeft.y) * dpr,
-    );
-    ctx.restore();
   }
 
   /**

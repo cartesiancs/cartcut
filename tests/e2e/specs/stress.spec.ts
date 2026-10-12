@@ -477,11 +477,11 @@ test("every editing element survives a full-length export, frame for frame", asy
     //
     // `previewCanvas.ts` renders the scene into an offscreen at *device* size
     // with the viewport's pan and zoom baked in, then composites a dimmed
-    // full-plane pass, a clipped in-frame pass, the frame guide and any
-    // selection chrome over it. What is on screen is therefore the scene
-    // resampled at an arbitrary zoom over a dimmed copy of itself — there is no
-    // region of it that is pixel-comparable to a reference render without first
-    // inverting that transform.
+    // full-plane pass, a clipped in-frame pass and any selection chrome over
+    // it. What is on screen is therefore the scene resampled at an arbitrary
+    // zoom over a dimmed copy of itself: there is no region of it that is
+    // pixel-comparable to a reference render without first inverting that
+    // transform.
     //
     // So this asserts the one thing that survives: presence. The preview must
     // not be blank while the export has content, or the reverse. That is the

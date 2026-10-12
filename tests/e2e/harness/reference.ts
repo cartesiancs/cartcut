@@ -179,8 +179,8 @@ export async function renderReferenceFrames(
  * Not directly comparable to a reference render pixel for pixel, and the reason
  * is structural rather than incidental: `previewCanvas.ts` draws the scene into
  * an offscreen at *device* size with the viewport's pan and zoom baked in, then
- * composites a dimmed full-plane pass, a clipped in-frame pass, the frame guide
- * and any selection chrome over it. What comes back is the scene resampled at
+ * composites a dimmed full-plane pass, a clipped in-frame pass and any
+ * selection chrome over it. What comes back is the scene resampled at
  * an arbitrary zoom over a dimmed copy of itself. So this is used only for
  * structural comparison — ink bounds, centroids, a heavily downsampled mean.
  */

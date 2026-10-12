@@ -17,7 +17,6 @@ describe("chromeFor", () => {
   it("draws the editing preview as it always did", () => {
     const chrome = chromeFor(false);
     expect(chrome).toEqual({
-      frameGuide: true,
       dimOutside: true,
       selection: true,
       background: CANVAS_BG,
@@ -29,7 +28,6 @@ describe("chromeFor", () => {
   it("turns every piece of chrome off at once for the presentation", () => {
     const chrome = chromeFor(true);
     expect(chrome).toEqual({
-      frameGuide: false,
       dimOutside: false,
       selection: false,
       background: PRESENTATION_BG,

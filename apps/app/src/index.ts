@@ -190,7 +190,7 @@ export { mime, project, fonts, loadedAssetStore };
  * export FX runtime — at project resolution, and diffing that against the
  * decoded video. Screenshotting the visible preview canvas cannot stand in for
  * it: that canvas is device-sized, carries the viewport's pan and zoom, and has
- * a dimmed pass, frame guides and selection chrome composited over it.
+ * a dimmed pass and selection chrome composited over it.
  *
  * Every name below is a re-export of a module the app already loads. There is
  * no test-only code path here, nothing branches on whether a test is attached,
