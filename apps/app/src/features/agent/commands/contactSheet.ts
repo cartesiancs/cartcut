@@ -174,10 +174,8 @@ registerCommands({
     // playhead between this sheet's seek and its draw.
     const scope = createVideoScope("sheet:" + Date.now());
 
-    // Only when the document has one: building a runtime allocates a canvas and
-    // a WebGL context, and most projects need neither. Its overlay videos are
-    // the scope's too.
-    const fx = hasFxElements(timeline) ? createExportFxRuntime(options.fps, scope.id) : null;
+    // Built once the templates are read, below: an effect inside one counts.
+    let fx: ReturnType<typeof createExportFxRuntime> | null = null;
 
     sheetCtx.fillStyle = "#101010";
     sheetCtx.fillRect(0, 0, sheet.width, sheet.height);
@@ -187,6 +185,10 @@ registerCommands({
     // Templates, LUTs and fonts, as the exporter loads them. Without this a
     // sheet showed a template as empty space and a graded clip ungraded.
     const expanded = await preloadForComposite(timeline, resolveTemplate);
+    // Only when the document has one, a template's contents included:
+    // building a runtime allocates a canvas and a WebGL context, and most
+    // projects need neither. Its overlay videos are the scope's too.
+    fx = hasFxElements(expanded) ? createExportFxRuntime(options.fps, scope.id) : null;
 
     // HTML graphics are rasterised from Chromium's paint, ahead of each frame,
     // into a scope of the sheet's own. A GLSL one draws in its generator.

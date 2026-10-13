@@ -4,6 +4,7 @@ import { relativizeInside, resolveInside } from "../project/assetPaths";
 import {
   audioElement,
   effectElement,
+  transitionElement,
   imageElement,
   shapeElement,
   textElement,
@@ -55,12 +56,20 @@ describe("refusals", () => {
 });
 
 describe("warnings", () => {
-  it("warns about effects and transitions, without refusing", () => {
-    const result = plan({ e: effectElement(), v: videoElement() });
+  // Effects, transitions and shape backdrops used to be warned about: the
+  // inner timeline was painted with no compositor, so they vanished once the
+  // template was placed. They are drawn through the compositor's child now.
+  it("says nothing about effects, transitions or backdrops, which render", () => {
+    const backdropFx = { presetId: "com.cartcut.pixelate", params: {}, intensity: 100 };
+    const result = plan({
+      e: effectElement(),
+      t: transitionElement({ fromId: "v", toId: "w" }),
+      s: shapeElement({ backdropFx }),
+      v: videoElement(),
+    });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0]).toMatch(/will not render inside a template/);
+    expect(result.warnings).toEqual([]);
   });
 
   it("says nothing when there is nothing to say", () => {
@@ -68,34 +77,6 @@ describe("warnings", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.warnings).toEqual([]);
-  });
-
-  it("counts them, and pluralises", () => {
-    const result = plan({ a: effectElement(), b: effectElement() });
-    if (!result.ok) return;
-    expect(result.warnings[0]).toMatch(/^2 effect or transition clips/);
-  });
-
-  it("warns that a shape's backdrop draws as a solid fill inside a template", () => {
-    // The inner timeline is painted with no compositor, so a mosaic is a box.
-    const backdropFx = { presetId: "com.cartcut.pixelate", params: {}, intensity: 100 };
-    const one = plan({ s: shapeElement({ backdropFx }), v: videoElement() });
-    expect(one.ok).toBe(true);
-    if (!one.ok) return;
-    expect(one.warnings).toEqual([
-      "1 shape's backdrop effect will not render inside a template; it draws as a solid fill.",
-    ]);
-
-    const two = plan({
-      s: shapeElement({ backdropFx }),
-      t: shapeElement({ key: "t", backdropFx }),
-    });
-    if (!two.ok) return;
-    expect(two.warnings[0]).toMatch(/^2 shapes' backdrop effects .* they draw as a solid fill/);
-
-    const plain = plan({ s: shapeElement() });
-    if (!plain.ok) return;
-    expect(plain.warnings).toEqual([]);
   });
 });
 

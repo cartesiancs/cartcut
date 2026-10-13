@@ -863,7 +863,9 @@ export class PreviewCanvas extends LitElement {
       // it — creating one allocates a WebGL context — and `null` where there is
       // no WebGL at all. Either way the frame then draws exactly as it did
       // before this feature existed.
-      hasFxElements(this.timeline)
+      // Asked of the expanded map, so an effect inside a template earns the
+      // runtime its template draws with (`renderer/template.ts`).
+      hasFxElements(assetTimeline(this.timeline))
         ? previewFxRuntime(this.renderOption.fps, this.timelineControl.isPlay)
         : null,
     );

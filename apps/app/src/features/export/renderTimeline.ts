@@ -127,25 +127,6 @@ export async function renderTimeline(
   const scope = createVideoScope(`export:${Date.now()}`);
 
   /**
-   * Effects and transitions for this export.
-   *
-   * Its own context and compositor, separate from the preview's: this one
-   * blocks on the GPU, because `captureFrame` reads the canvas back with
-   * `getImageData` immediately after compositing and that read must see the GL
-   * result. Sharing the preview's would also mean two frame loops writing the
-   * same drawing buffer.
-   *
-   * Built only when the timeline actually contains an effect or a transition.
-   * Creating one allocates a canvas and a WebGL context, and most exports need
-   * neither — so an export of an ordinary edit costs exactly what it did before
-   * this feature existed, down to the number of canvases it creates.
-   *
-   * `null` where there is no WebGL, and every frame then renders exactly as it
-   * did before this feature — no effects, no transitions, no crash.
-   */
-  const fx = hasFxElements(timeline) ? createExportFxRuntime(fps, scope.id) : null;
-
-  /**
    * Read every LUT this project refers to *before* the first frame.
    *
    * The registry loads lazily and answers `null` until a table has arrived,
@@ -182,6 +163,27 @@ export async function renderTimeline(
   const assets = withoutHiddenClips(
     assetTimeline(withoutHiddenClips(timeline), resolveTemplate),
   );
+
+  /**
+   * Effects and transitions for this export.
+   *
+   * Its own context and compositor, separate from the preview's: this one
+   * blocks on the GPU, because `captureFrame` reads the canvas back with
+   * `getImageData` immediately after compositing and that read must see the GL
+   * result. Sharing the preview's would also mean two frame loops writing the
+   * same drawing buffer.
+   *
+   * Built only when the project actually contains an effect, a transition or a
+   * backdrop, asked of the expanded map so one inside a template counts: the
+   * template draws it through the compositor's child (`renderer/template.ts`).
+   * Creating one allocates a canvas and a WebGL context, and most exports need
+   * neither, so an export of an ordinary edit costs exactly what it did before
+   * this feature existed, down to the number of canvases it creates.
+   *
+   * `null` where there is no WebGL, and every frame then renders exactly as it
+   * did before this feature: no effects, no transitions, no crash.
+   */
+  const fx = hasFxElements(assets) ? createExportFxRuntime(fps, scope.id) : null;
 
   // The per-clip grade runs on the GPU and `captureFrame` reads the canvas
   // back with `getImageData` on the next line, so that read has to see the

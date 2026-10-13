@@ -65,3 +65,26 @@ export type FxRuntime = {
     timeInMs: number,
   ) => CanvasImageSource | null;
 };
+
+const nestedRuntimes = new WeakMap<FxRuntime, FxRuntime | null>();
+
+/**
+ * The runtime a template's own composite runs with: the same presets, rate
+ * and sources, through the compositor's child (`FxCompositor#child`). `null`
+ * for no runtime, and inside a template, where nothing nests further.
+ * Remembered per runtime, so the preview's one-per-session runtime keeps one
+ * child for the session rather than one per frame.
+ */
+export function nestedFxRuntime(fx: FxRuntime | null): FxRuntime | null {
+  if (fx == null) {
+    return null;
+  }
+  const known = nestedRuntimes.get(fx);
+  if (known !== undefined) {
+    return known;
+  }
+  const compositor = fx.compositor.child();
+  const nested = compositor == null ? null : { ...fx, compositor };
+  nestedRuntimes.set(fx, nested);
+  return nested;
+}

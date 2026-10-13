@@ -116,10 +116,12 @@ export class ControlText extends LitElement {
    * Package the current project as a `.cttpl`.
    *
    * Everything decidable is in `features/template/exportPlan.ts`; this reads
-   * the two stores and reports the result. The warnings it may come back with
-   * are shown rather than swallowed: an author whose template contains an
-   * effect needs to know it will not render inside one, and after the file is
-   * written is too late to be told nothing at all.
+   * the two stores and reports the result. Any warning it comes back with is
+   * shown rather than swallowed: after the file is written is too late to be
+   * told nothing at all.
+   *
+   * In a template's own tab the stores hold that template, so this packages
+   * it: the timeline showing is the one exported.
    */
   private async _handleClickExportTemplate() {
     const document_ = useTimelineStore.getState().getDocument();

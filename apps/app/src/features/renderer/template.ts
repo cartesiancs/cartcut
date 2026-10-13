@@ -27,15 +27,15 @@
  * looks exactly like a template that is simply full-bleed. `templateComposite.test.ts`
  * pins it with a half-height clip and a coloured scene.
  *
- * ## What is deliberately not passed
+ * ## Effects, transitions and backdrops inside it
  *
- * `fx` is `null`. Effects and transitions inside a template do not render:
- * `FxRuntime`'s compositor holds a single shared scratch surface, and entering
- * it from inside a nested render would have it clear the frame it is composing.
- * Making it re-entrant is the phase-2 work. Until then `paint` skips both
- * through `isVisualTimelineElement`, which is silent — so `templateExport.ts`
- * warns at the moment a template carrying them is written, where someone can
- * still do something about it.
+ * Drawn, through the compositor's child (`FxCompositor#child`), which the
+ * composite in progress names (`timeline.ts#activeCompositeFx`). The child has
+ * a scratch canvas and clip buffers of its own: the outer compositor's scratch
+ * may hold the outer frame half composited, and a transition whose clip is
+ * this template is drawing it into the outer `clipA`. A backdrop inside a
+ * template sees the template's own layers beneath it, not the project's, as a
+ * nested composition does in any editor.
  *
  * ## The resolver is injected
  *
@@ -48,7 +48,12 @@
 import type { TemplateElementType, Timeline } from "../../@types/timeline";
 import { composeTemplate, type TemplateData } from "../template/compose";
 import { namedLayer } from "./surface";
-import { renderTimelineAtTime, type TimelineRenderers } from "./timeline";
+import { nestedFxRuntime } from "./fx/runtime";
+import {
+  activeCompositeFx,
+  renderTimelineAtTime,
+  type TimelineRenderers,
+} from "./timeline";
 
 /** Fully transparent: `fillRect` with this over a cleared layer is a no-op. */
 const TRANSPARENT = "rgba(0, 0, 0, 0)";
@@ -230,7 +235,10 @@ export function renderTemplate(
     nativeH,
     undefined,
     undefined,
-    null,
+    // The template's own effects, transitions and backdrops, through a
+    // compositor of their own (`FxCompositor#child`): what its tab shows is
+    // what the placed clip shows. `null` where the composite has no runtime.
+    nestedFxRuntime(activeCompositeFx()),
   );
 
   const width = Number(element.width) || 0;

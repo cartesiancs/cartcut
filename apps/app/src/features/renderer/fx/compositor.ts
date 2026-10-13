@@ -144,6 +144,11 @@ export class FxCompositor {
   private clipA: HTMLCanvasElement | null = null;
   private clipB: HTMLCanvasElement | null = null;
 
+  /** The compositor a template's own composite runs through. See `child`. */
+  private nested: FxCompositor | null = null;
+  /** Whether this is one, which cannot have one of its own. */
+  private isNested = false;
+
   constructor(
     private gl: WebGLRenderingContext,
     private options: CompositorOptions = {},
@@ -153,6 +158,43 @@ export class FxCompositor {
     this.outputTarget = new RenderTarget(gl, true);
     this.passA = new RenderTarget(gl, false);
     this.passB = new RenderTarget(gl, false);
+  }
+
+  /**
+   * The compositor for a template's own composite, or `null` inside one.
+   *
+   * A template is drawn by a second `renderTimelineAtTime` into its own layer,
+   * from inside this one's paint (`renderer/template.ts`). That inner render
+   * must not touch this compositor's scratch canvas or its two clip buffers:
+   * the outer frame may be half composited into the scratch, and a transition
+   * whose clip is a template is drawing that clip into `clipA` when the inner
+   * render starts. So the child has canvases and render targets of its own.
+   *
+   * What it shares is everything that is a cache of the presets: compiled
+   * programs, preset textures, colour tables, and the set of failures already
+   * reported. Sharing the GL context is safe because every entry point here
+   * binds its own framebuffer, viewport and program and finishes its GL work
+   * before it returns; a transition draws both clips in 2D before it makes its
+   * first GL call, so an inner render is never in the middle of an outer one.
+   *
+   * One level, as templates are (`template/compose.ts` strips a template
+   * inside a template), so a child answers `null`.
+   */
+  child(): FxCompositor | null {
+    if (this.isNested) {
+      return null;
+    }
+    if (this.nested == null) {
+      const nested = new FxCompositor(this.gl, this.options);
+      nested.programs = this.programs;
+      nested.inlinePrograms = this.inlinePrograms;
+      nested.textures = this.textures;
+      nested.lutTextures = this.lutTextures;
+      nested.reported = this.reported;
+      nested.isNested = true;
+      this.nested = nested;
+    }
+    return this.nested;
   }
 
   // ---------------------------------------------------------------- canvases
@@ -1013,25 +1055,33 @@ export class FxCompositor {
   }
 
   dispose(): void {
-    for (const program of this.programs.values()) {
-      program.dispose();
+    this.nested?.dispose();
+    this.nested = null;
+
+    // The preset caches are the parent's, shared with its child: only the
+    // parent releases them.
+    if (!this.isNested) {
+      for (const program of this.programs.values()) {
+        program.dispose();
+      }
+      this.programs.clear();
+      this.inlinePrograms.clear();
+
+      for (const entry of this.lutTextures.values()) {
+        if (entry != null) this.gl.deleteTexture(entry.texture);
+      }
+      this.lutTextures.clear();
+
+      for (const texture of this.textures.values()) {
+        if (texture != null) this.gl.deleteTexture(texture);
+      }
+      this.textures.clear();
     }
-    this.programs.clear();
-    this.inlinePrograms.clear();
+
     this.blit?.dispose();
     this.blit = null;
     this.lut?.dispose();
     this.lut = null;
-
-    for (const entry of this.lutTextures.values()) {
-      if (entry != null) this.gl.deleteTexture(entry.texture);
-    }
-    this.lutTextures.clear();
-
-    for (const texture of this.textures.values()) {
-      if (texture != null) this.gl.deleteTexture(texture);
-    }
-    this.textures.clear();
 
     if (this.frameTexture != null) {
       this.gl.deleteTexture(this.frameTexture);

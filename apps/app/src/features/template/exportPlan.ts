@@ -33,7 +33,6 @@ import {
   withGraphicAssetRef,
   type AssetField,
 } from "../project/assetsFile";
-import { backdropFxOf } from "../shape/backdropFx";
 
 /** One file to copy into the archive. */
 export type StagedAsset = {
@@ -230,34 +229,11 @@ export function planTemplateExport(
     next[id] = rewritten ?? element;
   }
 
+  // Nothing to warn about any more: effects, transitions and shape backdrops
+  // inside a template are drawn through the compositor's child
+  // (`renderer/template.ts`), so they render placed as they did in the
+  // template's own project. The list stays for the next thing that does not.
   const warnings: string[] = [];
-  const fx = Object.keys(elements).filter(
-    (id) =>
-      elements[id]?.filetype === "effect" ||
-      elements[id]?.filetype === "transition",
-  );
-  if (fx.length > 0) {
-    warnings.push(
-      `${fx.length} effect or transition ${
-        fx.length === 1 ? "clip" : "clips"
-      } will not render inside a template.`,
-    );
-  }
-  // A template's inner timeline is painted with no compositor
-  // (`renderer/template.ts`), so a shape's backdrop cannot run there and the
-  // shape fills solid instead: a mosaic becomes a box.
-  const backdrops = Object.values(elements).filter(
-    (element) => backdropFxOf(element) != null,
-  );
-  if (backdrops.length > 0) {
-    warnings.push(
-      `${backdrops.length} ${
-        backdrops.length === 1 ? "shape's backdrop effect" : "shapes' backdrop effects"
-      } will not render inside a template; ${
-        backdrops.length === 1 ? "it draws" : "they draw"
-      } as a solid fill.`,
-    );
-  }
 
   return {
     ok: true,

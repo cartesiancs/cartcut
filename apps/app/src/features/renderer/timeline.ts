@@ -79,6 +79,22 @@ function prioritySorted(timeline: Timeline): [string, Timeline[string]][] {
   return sorted;
 }
 
+/**
+ * The effects runtime of the composite in progress, for the template renderer.
+ *
+ * A template's contents are drawn by a nested `renderTimelineAtTime` from
+ * inside `renderElement`, which takes no runtime: the renderer table has one
+ * signature for every element. So the composite in progress names its runtime
+ * here for the length of the call, and `renderer/template.ts` hands the inner
+ * composite that runtime's child. A synchronous scope, safe for the reason
+ * `withVideoScope` is: every renderer is synchronous.
+ */
+let compositeFx: FxRuntime | null = null;
+
+export function activeCompositeFx(): FxRuntime | null {
+  return compositeFx;
+}
+
 export function renderTimelineAtTime(
   ctx: CanvasRenderingContext2D,
   timeline: Timeline,
@@ -104,6 +120,40 @@ export function renderTimelineAtTime(
    * up yet — and in both cases this function takes the path it always took.
    */
   fx?: FxRuntime | null,
+) {
+  const outer = compositeFx;
+  compositeFx = fx ?? null;
+  try {
+    compositeAtTime(
+      ctx,
+      timeline,
+      timeInMs,
+      renderers,
+      backgroundColor,
+      width,
+      height,
+      outlineOptions,
+      callbackPerElementRender,
+      fx,
+    );
+  } finally {
+    compositeFx = outer;
+  }
+}
+
+function compositeAtTime(
+  ctx: CanvasRenderingContext2D,
+  timeline: Timeline,
+  timeInMs: number,
+  renderers: TimelineRenderers,
+  backgroundColor: string,
+  width: number,
+  height: number,
+  outlineOptions: OutlineOption,
+  callbackPerElementRender:
+    | ((elementId: string, element: VisualTimelineElement) => void)
+    | undefined,
+  fx: FxRuntime | null | undefined,
 ) {
   const plan =
     fx == null

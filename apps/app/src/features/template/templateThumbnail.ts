@@ -77,7 +77,7 @@ export async function renderTemplateThumbnail(
     });
     await loadedAssetStore.getState().seek(assets, atMs, options.fps);
 
-    const fx = hasFxElements(timeline)
+    const fx = hasFxElements(assets)
       ? createExportFxRuntime(options.fps)
       : null;
 
