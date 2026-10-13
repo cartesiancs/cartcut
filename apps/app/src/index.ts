@@ -248,3 +248,18 @@ export { preloadLutsForDocument } from "./features/lut/lutRegistry";
 // `collectSubtitleText` is what the save dialog would have written.
 export { runImportSubtitlePaths } from "./features/subtitle/subtitleCommands";
 export { collectSubtitleText } from "./features/subtitle/exportSubtitleFile";
+// A template's own timeline, for `specs/template-timeline.spec.ts`. Placing a
+// template and expanding it are the functions the library tile and the clip's
+// context menu call; the tabs are clicked for real. `projectSnapshot` is what
+// a save writes, read back without unzipping it.
+export {
+  installTemplateFromPath,
+} from "./features/template/templateInstall";
+export {
+  installedTemplates,
+  refreshTemplateLibrary,
+} from "./features/template/templateRegistry";
+export { addTemplateToTimeline } from "./features/template/addTemplate";
+export { expandTemplate } from "./features/composition/expandTemplate";
+export { requestTimelineSwitch } from "./features/composition/navigation";
+export { projectSnapshot } from "./features/composition/projectSnapshot";
