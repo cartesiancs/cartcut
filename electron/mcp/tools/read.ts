@@ -38,6 +38,8 @@ export function registerReadTools(define: Registrar) {
       description:
         "Resolution, frame rate, duration, playhead, track list and clip counts. " +
         "Start here: it is small, and it gives you the track ids the other tools take. " +
+        "`activeTimeline` says which timeline every tool reads and edits: the project's main one, or a " +
+        "template the user expanded into a tab of its own, whose clips, times and frame are the template's. " +
         Z_ORDER_NOTE,
       inputSchema: {},
       annotations: readOnly,

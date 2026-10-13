@@ -29,6 +29,7 @@ import { currentDoc, onFrame, requireElement, requireTrack } from "../context";
 import { requireProgram } from "../programInput";
 import { defaultBox, trackKindFor } from "../../graphic/graphicPlacement";
 import { registerCommands } from "../registry";
+import { useTimelineStore } from "../../../states/timelineStore";
 
 type Box = { x?: number; y?: number; width?: number; height?: number };
 
@@ -107,6 +108,9 @@ registerCommands({
       throw new Error("apply_typography needs at least one clip id.");
     }
     const { target, warnings } = typographyTarget(params);
+    // The clips are in the timeline showing now; the fonts load before the
+    // edit, and the edit lands here whichever tab is showing by then.
+    const timelineId = useTimelineStore.getState().activeTimelineId;
     const doc = currentDoc();
     for (const id of ids) {
       const element = requireElement(doc, id) as any;
@@ -122,11 +126,12 @@ registerCommands({
 
     const converted = ids.map((id) => ({
       id,
-      dropped: graphicTwinOf(currentDoc().elements[id] as any, target, fontValueOf).dropped,
+      dropped: graphicTwinOf(doc.elements[id] as any, target, fontValueOf).dropped,
     }));
     const result = commit(
       (d: TimelineDocument) => textToGraphic(d, ids, target, fontValueOf),
       "None of those clips could be converted.",
+      timelineId,
     );
     return withWarnings({ ...result, converted }, warnings);
   },

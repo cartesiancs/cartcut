@@ -87,7 +87,11 @@ export function reverseClips(elementIds: readonly string[]): void {
   }
   listen(api);
 
-  const doc = useTimelineStore.getState().getDocument();
+  const state = useTimelineStore.getState();
+  const doc = state.getDocument();
+  // The timeline the clips are in. The reversed file lands there however long
+  // the job takes and whichever tab is showing when it finishes.
+  const timelineId = state.activeTimelineId;
   for (const elementId of new Set(elementIds)) {
     if (isReversePending(elementId)) {
       continue;
@@ -96,7 +100,7 @@ export function reverseClips(elementIds: readonly string[]): void {
     if (snapshot == null) {
       continue;
     }
-    void run(api, elementId, snapshot);
+    void run(api, elementId, snapshot, timelineId);
   }
 }
 
@@ -110,6 +114,7 @@ async function run(
   api: ReverseBridge,
   elementId: string,
   snapshot: ReverseSnapshot,
+  timelineId: string,
 ): Promise<void> {
   const jobId = uuidv4();
   const name = fileName(snapshot.localpath);
@@ -134,7 +139,7 @@ async function run(
     if (result.ok) {
       const localpath = sameShape(snapshot.localpath, result.path);
       let applied = false;
-      useTimelineStore.getState().withCheckpoint((doc) => {
+      useTimelineStore.getState().withCheckpointOn(timelineId, (doc) => {
         const next = applyReverse(doc, elementId, snapshot, {
           localpath,
           durationMs: result.durationMs,

@@ -34,6 +34,7 @@ import {
   trackRow,
 } from "../serialize";
 import { registerCommands } from "../registry";
+import { MAIN_TIMELINE } from "../../composition/project";
 
 /** Default page size for `list_clips`, chosen to stay well under the warning. */
 const DEFAULT_LIMIT = 100;
@@ -83,6 +84,21 @@ function overlapsWindow(
   return true;
 }
 
+/** The timeline being edited, as the overview names it. */
+function activeTimelineRow(state: {
+  activeTimelineId: string;
+  compositions: Record<string, { name: string }>;
+}): { id: string; kind: "main" | "template"; name: string } {
+  if (state.activeTimelineId === MAIN_TIMELINE) {
+    return { id: MAIN_TIMELINE, kind: "main", name: "Main" };
+  }
+  return {
+    id: state.activeTimelineId,
+    kind: "template",
+    name: state.compositions[state.activeTimelineId]?.name ?? "Template",
+  };
+}
+
 registerCommands({
   ping: () => ({ ok: true, app: "cartcut" }),
 
@@ -121,6 +137,11 @@ registerCommands({
       undoDepth: state.history.historyNow + 1,
       redoDepth:
         state.history.timelineHistory.length - state.history.historyNow - 1,
+      // Which timeline every other answer here describes, and every edit
+      // lands in: the project's own, or a template's opened in a tab of its
+      // own ("Expand Template"). In a template, `resolution` is the
+      // template's frame and the times are the template's own.
+      activeTimeline: activeTimelineRow(state),
     };
   },
 

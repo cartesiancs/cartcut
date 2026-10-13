@@ -40,6 +40,7 @@ import {
   type RasterBox,
 } from "../timeline/rasterize";
 import { useTimelineStore } from "../../states/timelineStore";
+import { contentOfState } from "../../states/timelineWorkspace";
 import { runsOutlineBleed } from "../text/runs";
 
 export type RasterizeResult =
@@ -146,15 +147,19 @@ export async function rasterizeTextElements(
   elementIds: string[],
   timelineCursor = 0,
 ): Promise<RasterizeResult[]> {
+  // Read before the first await: the clips are in the timeline showing now,
+  // and the images replace them there whichever tab is showing at the end.
+  const timelineId = useTimelineStore.getState().activeTimelineId;
   await fontsSettled();
 
-  const state = useTimelineStore.getState();
+  const elements =
+    contentOfState(useTimelineStore.getState(), timelineId)?.elements ?? {};
   const results: RasterizeResult[] = [];
   const baked: Array<{ elementId: string; localpath: string; box: RasterBox }> =
     [];
 
   for (const elementId of elementIds) {
-    const element = state.timeline[elementId];
+    const element = elements[elementId];
     if (element == null || element.filetype !== "text") {
       results.push({ ok: false, elementId, reason: "not a text clip" });
       continue;
@@ -192,7 +197,7 @@ export async function rasterizeTextElements(
   if (baked.length > 0) {
     // One checkpoint for the whole batch: rasterising three selected titles is
     // one action to the user, so it must be one Cmd+Z.
-    useTimelineStore.getState().withCheckpoint((doc) => {
+    useTimelineStore.getState().withCheckpointOn(timelineId, (doc) => {
       let next = doc;
       for (const { elementId, localpath, box } of baked) {
         next = rasterizeTextInDoc(next, elementId, localpath, box);

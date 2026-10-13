@@ -37,6 +37,7 @@ import type { TimelineDocument } from "../../timeline/tracks";
 import { commit, declined } from "../commit";
 import { currentDoc, onFrame, playheadMs, projectFps, requireTrack } from "../context";
 import { registerCommands } from "../registry";
+import { useTimelineStore } from "../../../states/timelineStore";
 
 type MediaItem = {
   path: string;
@@ -76,6 +77,10 @@ registerCommands({
     if (items.length === 0) {
       throw new Error("add_media needs at least one entry in `items`.");
     }
+    // Read before the probes are awaited: the clips land in the timeline that
+    // was showing when they were asked for, at its playhead.
+    const timelineId = useTimelineStore.getState().activeTimelineId;
+    const askedAt = Math.max(0, params.startMs ?? playheadMs());
 
     // Probed in parallel, and settled rather than raced: one unreadable file
     // must not lose the other nine.
@@ -111,7 +116,7 @@ registerCommands({
     }
 
     const sequential = params.sequential !== false;
-    const runStart = onFrame(Math.max(0, params.startMs ?? playheadMs()));
+    const runStart = onFrame(askedAt);
 
     // The same transform a mouse drop runs. CLAUDE.md's rule that an AI edit
     // takes the user's own code path only holds if there is one path: two
@@ -125,6 +130,7 @@ registerCommands({
           { startMs: runStart, fps: projectFps(), newId: uuidv4, sequential },
         ).doc,
       "Those clips could not be placed.",
+      timelineId,
     );
 
     return { ...result, skipped, sequential };

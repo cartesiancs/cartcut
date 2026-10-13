@@ -22,7 +22,8 @@
 import { activeTransaction, applyInTransaction } from "../extension/transaction";
 import { isTimelineLocked } from "../../states/timelineLockStore";
 import { useTimelineStore } from "../../states/timelineStore";
-import type { TimelineDocument } from "../timeline/tracks";
+import { contentOfState } from "../../states/timelineWorkspace";
+import { SCHEMA_VERSION, type TimelineDocument } from "../timeline/tracks";
 import { ensureUndoBaseline } from "./checkpoint";
 import { clipRow } from "./serialize";
 
@@ -56,6 +57,13 @@ export const LOCKED_REASON =
 export function commit(
   fn: (doc: TimelineDocument) => TimelineDocument,
   declineReason: string,
+  /**
+   * The timeline the edit is for, when the command awaited something first
+   * (a probe, a font list) and the user may have switched tabs meanwhile.
+   * Read at the command's start; the edit lands there. The timeline showing
+   * when absent.
+   */
+  timelineId?: string,
 ): EditResult {
   // Before the probe, because a locked timeline is not a declined edit: the op
   // would have gone through perfectly well, and the agent needs to be told the
@@ -78,7 +86,15 @@ export function commit(
     return diffOf(outcome.before, outcome.after);
   }
 
-  const before = useTimelineStore.getState().getDocument();
+  const target = timelineId ?? useTimelineStore.getState().activeTimelineId;
+  const documentOfTarget = (): TimelineDocument | null => {
+    const content = contentOfState(useTimelineStore.getState(), target);
+    return content == null ? null : { schemaVersion: SCHEMA_VERSION, ...content };
+  };
+  const before = documentOfTarget();
+  if (before == null) {
+    return declined("The timeline this edit was for is no longer in the project.");
+  }
 
   // Probe before committing anything. `withCheckpoint` would tell us the same
   // thing by identity, but `ensureUndoBaseline` has to run *first* to be any
@@ -91,9 +107,9 @@ export function commit(
   }
 
   ensureUndoBaseline();
-  useTimelineStore.getState().withCheckpoint(fn);
+  useTimelineStore.getState().withCheckpointOn(target, fn);
 
-  const after = useTimelineStore.getState().getDocument();
+  const after = documentOfTarget() ?? before;
 
   return diffOf(before, after);
 }

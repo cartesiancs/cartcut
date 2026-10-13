@@ -80,6 +80,10 @@ export async function speak(
 ): Promise<SpeakOutcome> {
   const { port } = deps;
   listen(port);
+  // Where the line goes: the timeline and the playhead showing when it was
+  // asked for, not whatever is showing once synthesis finishes.
+  const { activeTimelineId: timelineId, cursor: startMs } =
+    useTimelineStore.getState();
 
   const jobId = (deps.mintId ?? uuidv4)();
   backgroundTaskStore.getState().add({
@@ -108,7 +112,7 @@ export async function speak(
         ? { kind: "cancelled" }
         : { kind: "failed", message: reply.error ?? "Synthesis failed." };
     }
-    return await place(reply.path, deps.prober);
+    return await place(reply.path, timelineId, startMs, deps.prober);
   } catch (error) {
     return {
       kind: "failed",
@@ -129,6 +133,8 @@ export async function speak(
  */
 async function place(
   file: string,
+  timelineId: string,
+  startMs: number,
   prober?: MediaProber,
 ): Promise<SpeakOutcome> {
   const plan = await planImport([file], prober);
@@ -142,9 +148,9 @@ async function place(
   let elementId = "";
   let durationMs = 0;
 
-  timeline.withCheckpoint((doc) => {
+  timeline.withCheckpointOn(timelineId, (doc) => {
     const { doc: next, createdIds } = placeImported(doc, plan, {
-      startMs: timeline.cursor,
+      startMs,
       fps,
       newId: () => uuidv4(),
     });

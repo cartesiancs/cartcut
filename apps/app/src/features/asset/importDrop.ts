@@ -138,6 +138,10 @@ export async function importPathsAt(
   if (paths.length === 0) {
     return [];
   }
+  // The timeline the drop was made on. Probing takes a while, and the clips
+  // land where the user put them even if another tab is showing by then;
+  // `target.trackId` names one of this timeline's rows.
+  const timelineId = useTimelineStore.getState().activeTimelineId;
 
   // Templates and subtitles are partitioned out **above** `planImport`,
   // deliberately. Neither is media, and `probeMedia` is this app's single gate
@@ -189,7 +193,7 @@ export async function importPathsAt(
 
   let createdIds: string[] = [];
 
-  useTimelineStore.getState().withCheckpoint((doc) => {
+  useTimelineStore.getState().withCheckpointOn(timelineId, (doc) => {
     const result = placeImported(doc, plan, {
       startMs: target.startMs,
       trackId: target.trackId,
