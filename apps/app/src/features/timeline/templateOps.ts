@@ -241,7 +241,7 @@ export function setTemplateFill(
   fill: TemplateFill | null,
 ): TimelineDocument {
   const element = doc.elements[elementId];
-  if (!isDurationLocked(element)) {
+  if (element?.filetype !== "template") {
     return doc;
   }
   if (typeof slotId !== "string" || slotId.trim() === "") {
@@ -284,7 +284,7 @@ export function setTemplateFillOffset(
   offsetMs: number,
 ): TimelineDocument {
   const element = doc.elements[elementId];
-  if (!isDurationLocked(element)) {
+  if (element?.filetype !== "template") {
     return doc;
   }
   const fill = ((element as TemplateElementType).fills ?? {})[slotId];

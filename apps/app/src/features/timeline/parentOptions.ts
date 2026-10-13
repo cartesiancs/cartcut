@@ -21,6 +21,7 @@
 
 import type { Timeline } from "../../@types/timeline";
 import { canBeGrouped } from "./groupOps";
+import { isRigMember, rigRoleOf } from "./rig";
 import {
   MAX_GROUP_DEPTH,
   depthOf,
@@ -31,7 +32,7 @@ import {
 } from "./hierarchy";
 
 /** Why a group cannot take this selection. */
-export type ParentRefusal = "self" | "cycle" | "depth";
+export type ParentRefusal = "self" | "cycle" | "depth" | "rig";
 
 export type ParentChoice = {
   id: string;
@@ -64,7 +65,15 @@ export function canPickParent(
   elementIds: string[],
 ): boolean {
   const ids = liveIds(elements, elementIds);
-  return ids.length > 0 && ids.every((id) => canBeGrouped(elements[id]));
+  return ids.length > 0 && ids.every((id) => pickable(elements, id));
+}
+
+/**
+ * Whether one element may be given a parent at all: groupable, and not held
+ * by a stabilize rig, whose members `setParent` declines in every direction.
+ */
+function pickable(elements: Timeline, id: string): boolean {
+  return canBeGrouped(elements[id]) && !isRigMember(elements, id);
 }
 
 /**
@@ -82,6 +91,11 @@ function refusalFor(
 ): ParentRefusal | null {
   if (ids.includes(groupId)) {
     return "self";
+  }
+  // A rig's groups belong to the rig: the camera's children are exactly the
+  // footage and nulls it was built from, and the zoom holds only the camera.
+  if (rigRoleOf(elements[groupId]) != null) {
+    return "rig";
   }
 
   const parentDepth = depthOf(elements, groupId) + 1;
@@ -114,7 +128,7 @@ export function parentChoicesFor(
   elementIds: string[],
 ): ParentChoice[] {
   const ids = liveIds(elements, elementIds);
-  if (ids.length === 0 || !ids.every((id) => canBeGrouped(elements[id]))) {
+  if (ids.length === 0 || !ids.every((id) => pickable(elements, id))) {
     return [];
   }
 

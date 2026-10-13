@@ -9,6 +9,8 @@ import {
 import { imageElement, videoElement } from "../features/renderer/testing";
 import { createGroup, ungroup } from "../features/timeline/groupOps";
 import { detachAudioFrom } from "../features/timeline/audioOps";
+import { stabilize } from "../features/track/stabilizeOp";
+import { createTrackNull } from "../features/track/trackNullOp";
 
 const store = () => useTimelineStore.getState();
 
@@ -416,5 +418,54 @@ describe("detaching audio through withCheckpoint", () => {
     store().withCheckpoint((doc) => detachAudioFrom(doc, ["v"], () => "b"));
 
     expect(store().history.timelineHistory).toHaveLength(before);
+  });
+});
+
+describe("stabilize through the store", () => {
+  beforeEach(reset);
+
+  const tracked = () => {
+    const base: TimelineDocument = {
+      schemaVersion: SCHEMA_VERSION,
+      tracks: [createTrack("t0", "video", 0)],
+      elements: {
+        foot: imageElement({ trackId: "t0", width: 1920, height: 1080, duration: 2000 }),
+      },
+    };
+    const samples = [0, 500, 1000, 1500].map((tMs) => ({ tMs, x: 900 + tMs / 20, y: 500 }));
+    return createTrackNull(base, { samples, nullId: "trk", newTrackId: "g-trk", endMs: 2000, bakeHz: 60 });
+  };
+  const params = (over: Record<string, unknown> = {}) => ({
+    clipId: "foot",
+    nullId: "trk",
+    target: { x: 960, y: 540 },
+    frame: { width: 1920, height: 1080 },
+    fps: 60,
+    autoZoom: true,
+    zoomId: "zoom",
+    cameraId: "cam",
+    trackIds: { zoom: "g-zoom", camera: "g-cam" },
+    ...over,
+  });
+
+  it("is one undo step, undone back to the document before it", () => {
+    store().withCheckpoint(() => tracked());
+    const before = store().getDocument();
+    const length = store().history.timelineHistory.length;
+
+    store().withCheckpoint((doc) => stabilize(doc, params()).doc);
+    expect(store().history.timelineHistory).toHaveLength(length + 1);
+    expect(store().timeline.cam).toBeDefined();
+
+    store().rollbackTimelineFromCheckPoint(-1);
+    expect(store().getDocument().elements).toEqual(before.elements);
+  });
+
+  it("records nothing when it refuses", () => {
+    store().withCheckpoint(() => tracked());
+    const length = store().history.timelineHistory.length;
+
+    store().withCheckpoint((doc) => stabilize(doc, params({ nullId: "nope" })).doc);
+    expect(store().history.timelineHistory).toHaveLength(length);
   });
 });

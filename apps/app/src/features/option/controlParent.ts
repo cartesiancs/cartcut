@@ -39,6 +39,7 @@ const REFUSAL_TITLE: Record<ParentRefusal, string> = {
   self: "A clip cannot be its own parent.",
   cycle: "That group is already inside this one.",
   depth: "Groups cannot nest more than 8 deep.",
+  rig: "A stabilize rig holds only the clip and nulls it was built from.",
 };
 
 /** The value the `<option>` for "no parent" carries. */

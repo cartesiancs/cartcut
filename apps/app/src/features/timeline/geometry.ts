@@ -30,6 +30,7 @@ import type {
   VideoElementType,
 } from "../../@types/timeline";
 import { elementUtils } from "../../utils/element";
+import { rigRoleOf } from "./rig";
 import {
   curveSourceAt,
   curveSpanLength,
@@ -75,7 +76,8 @@ export function isDynamicElement(
 /**
  * Whether this element's length belongs to its author rather than to the user.
  *
- * True for a `template` and nothing else. A template is a whole edit standing
+ * True for a `template`, and for either group of a stabilize rig. A template is
+ * a whole edit standing
  * in for one clip: its timing is what was authored, and a user who could trim
  * or split it would be cutting the author's work apart while the composition
  * inside went on running to its own clock.
@@ -94,7 +96,10 @@ export function isDynamicElement(
 export function isDurationLocked(
   element: TimelineElement | undefined | null,
 ): boolean {
-  return element?.filetype === "template";
+  // A rig's camera holds a copy of a null's keyframes on the null's own time
+  // base. Trimming its start would rebase that copy, and splitting it would
+  // leave the footage under the left half holding the cut value for good.
+  return element?.filetype === "template" || rigRoleOf(element) != null;
 }
 
 /**

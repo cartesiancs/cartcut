@@ -19,6 +19,8 @@ import { EDGE_SLACK_MS } from "../../utils/time";
 import { chooseTrackFor } from "./placement";
 import { cloneAnimation } from "../animation/keyframes";
 import { withDescendants } from "./hierarchy";
+import { dissolveRig } from "./groupOps";
+import { RIG_CAMERA, RIG_ZOOM, rigOf, rigRoleOf, withoutParent } from "./rig";
 import {
   clipsOnTrack,
   normalizeDocument,
@@ -237,22 +239,46 @@ export function deleteClips(
   doc: TimelineDocument,
   elementIds: string[],
 ): TimelineDocument {
+  // A stabilize rig is the exception. Its groups are machinery the user never
+  // put anything into, so deleting either one removes the stabilization and
+  // leaves the footage exactly as it was; whatever the request also names is
+  // deleted after that, so select-all and Delete still empties the timeline.
+  const unrigged = dissolveRigsIn(doc, elementIds);
+
   // A group takes its contents with it. That is what grouping means in every
   // editor that has it, and the alternative — orphaning the children, which is
   // what After Effects does when you delete a parent — would scatter them to
   // wherever their parent-local coordinates happen to land in canvas space.
   // `ungroup` is the way to keep the contents, and it is a separate gesture
   // precisely so that neither outcome can arrive by surprise.
-  const present = withDescendants(doc.elements, elementIds);
+  const present = withDescendants(unrigged.elements, elementIds);
   if (present.length === 0) {
-    return doc;
+    return unrigged;
   }
 
-  const elements = { ...doc.elements };
+  const elements = { ...unrigged.elements };
   for (const id of present) {
     delete elements[id];
   }
-  return withElements(doc, elements);
+  return withElements(unrigged, elements);
+}
+
+/** Dissolve every intact rig one of `elementIds` is a group of. */
+function dissolveRigsIn(
+  doc: TimelineDocument,
+  elementIds: string[],
+): TimelineDocument {
+  let next = doc;
+  for (const id of elementIds) {
+    if (rigRoleOf(next.elements[id]) == null) {
+      continue;
+    }
+    const rig = rigOf(next.elements, id);
+    if (rig != null) {
+      next = dissolveRig(next, rig);
+    }
+  }
+  return next;
 }
 
 /**
@@ -267,6 +293,11 @@ export function rippleDelete(
   const element = doc.elements[elementId];
   if (element == null) {
     return doc;
+  }
+  // A rig's bar leaves no gap anyone placed: removing it is dissolving it, and
+  // nothing on its row moves.
+  if (rigRoleOf(element) != null && rigOf(doc.elements, elementId) != null) {
+    return dissolveRigsIn(doc, [elementId]);
   }
 
   const { end, length } = spanOf(element);
@@ -529,11 +560,45 @@ export function pasteClips(
       return clip;
     }
     const moved = remap.get(parentId);
-    return moved == null ? clip : ({ ...clip, parentId: moved } as TimelineElement);
+    if (moved != null) {
+      return { ...clip, parentId: moved } as TimelineElement;
+    }
+    // A clip copied out of a stabilize rig, without the rig. Its numbers are
+    // the ones it had before it was stabilized, so at the root it is exactly
+    // the unstabilized original; put back in the camera it would be a second
+    // clip moved by a camera copied from somebody else's null.
+    if (rigRoleOf(doc.elements[parentId]) === RIG_CAMERA) {
+      return withoutParent(clip);
+    }
+    return clip;
+  };
+
+  // A rig group pasted without its partner is a plain group: a zoom with no
+  // camera, or a camera that would be a second one under the original zoom,
+  // is not a rig, and a marker left on it would make it look like one.
+  const partnered = (oldId: string, clip: TimelineElement): boolean => {
+    const role = rigRoleOf(clip);
+    if (role === RIG_ZOOM) {
+      return Object.values(clips).some(
+        (other) => rigRoleOf(other) === RIG_CAMERA && (other as any).parentId === oldId,
+      );
+    }
+    if (role === RIG_CAMERA) {
+      const parentId = (clip as any).parentId;
+      return parentId != null && rigRoleOf(clips[parentId]) === RIG_ZOOM;
+    }
+    return true;
+  };
+  const unmarked = (oldId: string, clip: TimelineElement): TimelineElement => {
+    if (partnered(oldId, clip)) {
+      return clip;
+    }
+    const { rig: _role, ...rest } = clip as TimelineElement & { rig?: unknown };
+    return rest as TimelineElement;
   };
 
   for (const [oldId, original] of Object.entries(clips)) {
-    const clip = reparent(original);
+    const clip = reparent(unmarked(oldId, original));
     const start = Math.max(0, atMs + (clip.startTime - anchor));
     const span = { start, end: start + spanLength(clip) };
     const newId = remap.get(oldId) as string;

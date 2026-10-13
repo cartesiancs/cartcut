@@ -172,8 +172,8 @@ migrator. So absent means default, answered on the way in, and setting a field
 back to its default **deletes the key** rather than storing it. A project nobody
 has used the feature on saves byte-identically to one written before it existed.
 `blend`, `lut`, `adjust`, `mask`, `reveal`, `geometry`, `reversed`, `mirror`,
-`cornerRadius`, `replaceable` and the conditional keyframe tracks all follow
-this. **A new filetype is one exception**, because an older build would
+`cornerRadius`, `replaceable`, a group's `rig` and the conditional keyframe
+tracks all follow this. **A new filetype is one exception**, because an older build would
 throw on it mid-paint rather than ignore it: the two writers stamp
 `tracks.ts#schemaVersionFor(elements)`, which is 3 only while a `graphic`
 exists, and the readers accept 2 to 4 (`isReadableSchemaVersion`). Delete the
@@ -428,6 +428,9 @@ features/graphic/      layers drawn by a program: HTML typography (sanitise, spl
 features/record/       the recorder's pure logic and its auto-zoom: zoomPlan (when),
                        zoomCamera (how), recordFit (where); windows in apps/overlay-record
 features/reverse/      reversed media files, made by electron/lib/reversePipeline.ts
+features/track/        Auto Track: frame source, tracker, the path per project frame
+                       (toDisplayedPath), the null; Stabilize (stabilizeOp) and the
+                       two panel edits (trackEdits); the rig model is timeline/rig.ts
 features/prompter/     the teleprompter window: a script, then a scroll paced in
                        lines per second by a session over ports
 features/note/         timeline notes: a pin drawn by the canvas, a card in the DOM,
@@ -553,6 +556,21 @@ The handful of facts inside those that are worth stating up front:
   A rect outside the host is invisible rather than small, and invisible in a way
   no `getBoundingClientRect` check can see, because the column carries
   `overflow: hidden`.
+- **Stabilize moves the picture, never the footage's numbers.** The rig is a
+  root zoom group (pivot on the target, scale = the zoom) holding a camera
+  group whose position is `K - null`, value for value and on the null's own
+  time base, holding the footage and its nulls. Their `parentId` is written
+  directly, because `setParent` rewrites numbers through a float round trip
+  even for an identity, so taking the rig apart is dropping `parentId` and
+  exact. Deleting or ungrouping either group does that; both are
+  duration-locked; `setParent`, `createGroup` and the parent picker decline
+  rig members; the preview does not hand them to the pointer. A track is
+  measured without the camera (`rig.ts#preRigElements`) and per project
+  frame at the source frame on show (`toDisplayedPath`). Where a frame centre
+  lands exactly on a source frame's start (60fps footage at 30, 24 at 60 on
+  every fifth frame) the decoder shows the earlier frame two times in three and
+  the later the third, measured end to end in `stabilize.spec.ts`; the path
+  predicts the earlier.
 - **A recording's zoom is keyframes, never pixels.** The composite pass draws the
   capture 1:1; `features/record/` plans a camera from the cursor and click tracks
   and writes it to the clip's `size` and `position`, so it stays editable and

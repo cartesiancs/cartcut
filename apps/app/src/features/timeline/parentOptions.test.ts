@@ -236,6 +236,17 @@ describe("the contract with setParent", () => {
       ["img"],
     ],
     [
+      "a document with a stabilize rig",
+      doc({
+        zoom: groupElement({ name: "Stabilize", trackId: "g1", rig: "stabilize-zoom" } as any),
+        cam: groupElement({ name: "Camera", trackId: "g1", startTime: 5000, parentId: "zoom", rig: "stabilize-camera" } as any),
+        foot: imageElement({ trackId: "v1", parentId: "cam" } as any),
+        spare: groupElement({ name: "S", trackId: "g1", startTime: 9000 } as any),
+        img: imageElement({ trackId: "v1", startTime: 9000 }),
+      }),
+      ["img"],
+    ],
+    [
       "a multi-clip selection",
       doc({
         ...nested(2),
@@ -322,5 +333,28 @@ describe("canPickParent", () => {
   it("is false for an empty or dead selection", () => {
     expect(canPickParent(d.elements, [])).toBe(false);
     expect(canPickParent(d.elements, ["gone"])).toBe(false);
+  });
+});
+
+describe("a stabilize rig", () => {
+  const d = doc({
+    zoom: groupElement({ name: "Stabilize", trackId: "g1", rig: "stabilize-zoom" } as any),
+    cam: groupElement({ name: "Camera", trackId: "g1", startTime: 5000, parentId: "zoom", rig: "stabilize-camera" } as any),
+    foot: imageElement({ trackId: "v1", parentId: "cam" } as any),
+    img: imageElement({ trackId: "v1", startTime: 9000 }),
+  });
+
+  it("offers its groups to nobody, with the reason", () => {
+    const choices = parentChoicesFor(d.elements, ["img"]);
+    expect(byId(choices, "zoom")).toMatchObject({ disabled: true, reason: "rig" });
+    expect(byId(choices, "cam")).toMatchObject({ disabled: true, reason: "rig" });
+  });
+
+  it("shows no picker for what it holds", () => {
+    expect(canPickParent(d.elements, ["foot"])).toBe(false);
+    expect(canPickParent(d.elements, ["cam"])).toBe(false);
+    expect(canPickParent(d.elements, ["foot", "img"])).toBe(false);
+    expect(parentChoicesFor(d.elements, ["foot"])).toEqual([]);
+    expect(canPickParent(d.elements, ["img"])).toBe(true);
   });
 });

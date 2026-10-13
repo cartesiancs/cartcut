@@ -54,6 +54,14 @@ import {
   subtreeHeight,
   wouldCycle,
 } from "./hierarchy";
+import {
+  isRigMember,
+  rigChildrenOf,
+  rigOf,
+  rigRoleOf,
+  withoutParent,
+  type Rig,
+} from "./rig";
 import { normalizeDocument, type TimelineDocument } from "./tracks";
 import {
   applyPoint,
@@ -404,6 +412,12 @@ export function createGroup(
   if (ids.some((id) => !canBeGrouped(elements[id]))) {
     return doc;
   }
+  // A rig's members are held where the lock needs them: wrapping the zoom in
+  // a group would take it off the root, and wrapping footage would rewrite the
+  // numbers the camera was copied against.
+  if (ids.some((id) => isRigMember(elements, id))) {
+    return doc;
+  }
 
   const sharedParent = parentOf(elements, ids[0]);
   if (ids.some((id) => parentOf(elements, id) !== sharedParent)) {
@@ -486,6 +500,10 @@ export function createGroup(
  * confirm first — `isGroupAnimated` is provided for exactly that.
  *
  * Declines by identity when `groupId` is not a group.
+ *
+ * Either group of an intact stabilize rig dissolves the whole rig instead
+ * (`dissolveRig`), which is exact where this is not: ungrouping the camera
+ * here would freeze the stabilization at `atMs` into the footage.
  */
 export function ungroup(
   doc: TimelineDocument,
@@ -497,6 +515,10 @@ export function ungroup(
   const group = elements[groupId];
   if (group == null || !isGroupType(group)) {
     return doc;
+  }
+  const rig = rigOf(elements, groupId);
+  if (rig != null && rigRoleOf(group) != null) {
+    return dissolveRig(doc, rig);
   }
 
   const groupMatrix = localMatrixOf(group, atMs);
@@ -574,6 +596,24 @@ export function isGroupAnimated(
   );
 }
 
+/**
+ * Whether ungrouping `groupId` would throw animation away, which is what the
+ * Clip menu confirms and the agent's `ungroup` refuses without `force`.
+ *
+ * A rig group is animated (its camera always is) and loses nothing: `ungroup`
+ * dissolves the rig, which is exact.
+ */
+export function ungroupLoses(elements: Timeline, groupId: string): boolean {
+  const element = elements[groupId];
+  if (element == null || element.filetype !== "group") {
+    return false;
+  }
+  if (rigRoleOf(element) != null && rigOf(elements, groupId) != null) {
+    return false;
+  }
+  return isGroupAnimated(elements, groupId);
+}
+
 // --------------------------------------------------------------- setParent
 
 /**
@@ -598,6 +638,16 @@ export function setParent(
     return doc;
   }
   if (ids.some((id) => !canBeGrouped(elements[id]))) {
+    return doc;
+  }
+  // Into a rig, a rig group itself, or out of a camera: each would either
+  // rewrite numbers the camera was copied against or carry the stabilization
+  // off with the element. `adoptIntoRig` and `dissolveRig` are the two ways in
+  // and out, and both are exact.
+  if (parentId != null && rigRoleOf(elements[parentId]) != null) {
+    return doc;
+  }
+  if (ids.some((id) => isRigMember(elements, id))) {
     return doc;
   }
 
@@ -655,6 +705,98 @@ export function setParent(
   }
 
   return normalizeDocument({ ...doc, elements: next });
+}
+
+// ------------------------------------------------------------------- rigs
+
+/**
+ * Put root-level `elementIds` straight into a rig's camera, numbers untouched.
+ *
+ * Not `setParent`, which keeps a child still by pushing its `location` and
+ * every position key through a matrix round trip and re-baking, even when the
+ * matrix is the identity: about a third of arbitrary doubles come back one
+ * ulp off. A camera's children are defined to keep the numbers they were
+ * measured with, so this writes `parentId` and nothing else.
+ *
+ * Declines by identity unless `cameraId` is the camera of an intact rig and
+ * every id exists, can be grouped, is at the root, is not itself a rig group,
+ * and fits under `MAX_GROUP_DEPTH` from inside the camera. Ids already in the
+ * camera are left as they are; all of them already there is a decline.
+ */
+export function adoptIntoRig(
+  doc: TimelineDocument,
+  cameraId: string,
+  elementIds: string[],
+): TimelineDocument {
+  const elements = doc.elements;
+  const rig = rigOf(elements, cameraId);
+  if (rig == null || rig.cameraId !== cameraId) {
+    return doc;
+  }
+
+  const ids = [...new Set(elementIds)];
+  if (ids.length === 0) {
+    return doc;
+  }
+  const childDepth = depthOf(elements, cameraId) + 1;
+  const moving: string[] = [];
+  for (const id of ids) {
+    const element = elements[id];
+    if (element == null || !canBeGrouped(element) || rigRoleOf(element) != null) {
+      return doc;
+    }
+    const current = (element as any).parentId;
+    if (current === cameraId) {
+      continue;
+    }
+    if (current != null && current !== "") {
+      return doc;
+    }
+    if (childDepth + subtreeHeight(elements, id) > MAX_GROUP_DEPTH) {
+      return doc;
+    }
+    moving.push(id);
+  }
+  if (moving.length === 0) {
+    return doc;
+  }
+
+  const next: Timeline = { ...elements };
+  for (const id of moving) {
+    next[id] = { ...elements[id], parentId: cameraId } as TimelineElement;
+  }
+  return normalizeDocument({ ...doc, elements: next });
+}
+
+/**
+ * Take a rig apart and leave everything in it as it was before the rig.
+ *
+ * The camera's children lose their `parentId`, which restores them exactly:
+ * their numbers were never rewritten, so their local space was the world all
+ * along. Both groups are removed. Anything else that ended up directly in the
+ * zoom (only the agent's `set_clip_parent` could have put it there before
+ * `setParent` learnt to decline) goes through `ungroup`, which is exact for a
+ * zoom because a zoom is never animated.
+ *
+ * Track rows are left alone, as `ungroup` and `deleteClips` leave them.
+ */
+export function dissolveRig(doc: TimelineDocument, rig: Rig): TimelineDocument {
+  const elements = doc.elements;
+  const zoom = elements[rig.zoomId];
+  if (zoom == null || elements[rig.cameraId] == null) {
+    return doc;
+  }
+
+  const next: Timeline = { ...elements };
+  for (const id of rigChildrenOf(elements, rig.cameraId)) {
+    next[id] = withoutParent(elements[id]);
+  }
+  delete next[rig.cameraId];
+  // Unmarked, so `ungroup` treats it as the plain group it now is.
+  const { rig: _role, ...plainZoom } = zoom as GroupElementType;
+  next[rig.zoomId] = plainZoom as TimelineElement;
+
+  return ungroup({ ...doc, elements: next }, rig.zoomId, zoom.startTime);
 }
 
 /** Detach `elementIds` from whatever holds them, keeping them in place. */

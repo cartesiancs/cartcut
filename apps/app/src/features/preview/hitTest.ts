@@ -24,6 +24,7 @@ import type {
 } from "../../@types/timeline";
 import { isVisualTimelineElement } from "../../@types/timeline";
 import { isElementVisibleAtTime } from "../element/time";
+import { isHeldByRig } from "../timeline/rig";
 
 export type HitZone =
   | "position"
@@ -205,6 +206,14 @@ export function canPointerTarget(
   // an invisible clip catching the clicks aimed at whatever shows through it.
   // Ahead of the group rule, which would answer `true` regardless.
   if (element.trackHidden === true) {
+    return false;
+  }
+
+  // A stabilize rig's groups, and what sits directly in its camera, are held
+  // where the lock was built: a drag on any of them would leave the camera
+  // describing a picture that is no longer there. They are selected on the
+  // timeline instead. A label riding the tracked null is not held.
+  if (isHeldByRig(timeline, element)) {
     return false;
   }
 

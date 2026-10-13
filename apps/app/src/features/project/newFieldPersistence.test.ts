@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from "vitest";
 
+import { createNullElement } from "../element/nullElement";
 import { imageElement, shapeElement, textElement } from "../renderer/testing";
 import {
   SCHEMA_VERSION,
@@ -60,9 +61,19 @@ describe("a project using none of the new fields", () => {
       }),
     );
 
-    for (const key of ["link", "stroke", "shadow", "runs", "animate"]) {
+    for (const key of ["link", "stroke", "shadow", "runs", "animate", "rig"]) {
       expect(written).not.toContain(`"${key}"`);
     }
+  });
+
+  it("has no stabilize marker on an ordinary null or group", () => {
+    const written = serialised(
+      docWith({
+        nul: { ...createNullElement({ center: { x: 50, y: 50 } }), trackId: "v0" },
+        picture: imageElement({ trackId: "v0", startTime: 0, duration: 1000 }),
+      }),
+    );
+    expect(written).not.toContain(`"rig"`);
   });
 });
 

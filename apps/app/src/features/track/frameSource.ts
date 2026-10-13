@@ -66,8 +66,94 @@ export type HarvestRequest = {
    */
   strideMs: number;
   onFrame: (frame: TrackFrame, progress: number) => void;
+  /**
+   * Every frame presented while playing, kept or strided, by its source time.
+   * Not called on the seeking fallback, whose steps are not frame times.
+   * Fold it through `nextFrameGap` to learn how long one source frame is.
+   */
+  onArrival?: (sourceMs: number) => void;
   signal?: AbortSignal;
 };
+
+/**
+ * Gaps below this are one frame presented twice, not a frame rate. rVFC's
+ * `mediaTime` is the container's timestamp, so two different frames are never
+ * closer than a millisecond apart at any rate a camera records.
+ */
+const SAME_FRAME_MS = 0.25;
+
+/**
+ * Fold one presented frame into the running estimate of a source frame, in
+ * source ms.
+ *
+ * Every arrival counts, kept or strided, which is what makes the estimate one
+ * frame rather than one stride. The smallest gap wins because a dropped frame
+ * only ever makes a gap longer: the stride and the compositor can hide frames,
+ * never invent them.
+ */
+export function nextFrameGap(
+  estimate: number | null,
+  previousMs: number | null,
+  arrivalMs: number,
+): number | null {
+  if (previousMs == null || !Number.isFinite(previousMs)) {
+    return estimate;
+  }
+  const gap = arrivalMs - previousMs;
+  if (!(gap > SAME_FRAME_MS)) {
+    return estimate;
+  }
+  return estimate == null ? gap : Math.min(estimate, gap);
+}
+
+/**
+ * The presentation time of the frame a seek to `seekMs` put on show, from the
+ * frames presented after it.
+ *
+ * The harvest reports its seed at the instant it was asked for, because a
+ * paused seek reports no `mediaTime`. But the frame a seek shows starts at or
+ * before that instant, up to a whole frame before it, and a seed labelled late
+ * reads to `toDisplayedPath` as a frame that stays on show for longer than it
+ * does. The arrivals know the real grid: a re-presented seed frame is the last
+ * arrival at or before the seek, and otherwise the grid is walked back from
+ * the first arrival in steps of `frameMs`. With neither, the seek stands.
+ */
+export function seekedFrameMs(
+  seekMs: number,
+  arrivals: readonly number[],
+  frameMs: number | null,
+): number {
+  const reach = seekMs + SEEK_REACH_MS;
+  let atOrBefore: number | null = null;
+  let first: number | null = null;
+  for (const ms of arrivals) {
+    if (!Number.isFinite(ms)) {
+      continue;
+    }
+    if (ms <= reach && (atOrBefore == null || ms > atOrBefore)) {
+      atOrBefore = ms;
+    }
+    if (ms > reach && (first == null || ms < first)) {
+      first = ms;
+    }
+  }
+  if (atOrBefore != null) {
+    return atOrBefore;
+  }
+  if (first == null || frameMs == null || !(frameMs > 0)) {
+    return seekMs;
+  }
+  return first - Math.ceil((first - reach) / frameMs) * frameMs;
+}
+
+/** How far past a seek a frame may start and still be the one it showed. */
+const SEEK_REACH_MS = 0.5;
+
+/**
+ * How many arrivals `seekedFrameMs` needs: the seed frame, if it is presented
+ * again, comes first, and two more fix the grid.
+ */
+export const SEEK_ARRIVALS_NEEDED = 3;
 
 export type FrameSource = {
   /** The source's own pixel dimensions. */
@@ -221,6 +307,7 @@ export async function openFrameSource(
         capture,
         { startMs, endMs, strideMs, signal },
         report,
+        request.onArrival,
       );
     },
 
@@ -256,6 +343,7 @@ function harvestByPlaying(
     signal?: AbortSignal;
   },
   report: (sourceMs: number, image: GrayImage) => void,
+  arrived?: (sourceMs: number) => void,
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const { startMs, endMs, strideMs, signal } = range;
@@ -288,6 +376,7 @@ function harvestByPlaying(
         return;
       }
       const sourceMs = metadata.mediaTime * 1000;
+      arrived?.(sourceMs);
 
       if (sourceMs > endMs) {
         finish();

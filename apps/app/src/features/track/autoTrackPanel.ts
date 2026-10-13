@@ -8,9 +8,15 @@
  * whole "make this label stick to that sign" feature is already built, and it
  * was missing only something that knows where the sign is.
  *
- * The panel is a stage and two buttons, Track (Cancel while it runs) and Create
- * Null, and it says nothing in sentences. A drag on the picture still sizes the
+ * The panel is a stage and three buttons, Track (Cancel while it runs), Create
+ * Null and Stabilize, and it says nothing in sentences except when Stabilize
+ * cannot do all it was asked (a toast). A drag on the picture still sizes the
  * box for anyone who wants a bigger one; a click gets `CLICK_BOX_RADIUS`.
+ *
+ * Stabilize is the null used the other way round: rather than something
+ * following the feature, the picture moves so the feature stays on the centre
+ * of the frame (`stabilizeOp.ts`). Everything either button does to the
+ * document is in `trackEdits.ts`, where it can be tested without a DOM.
  *
  * ## Why it draws the source rather than the composite
  *
@@ -54,13 +60,20 @@ import type { TimelineElement } from "../../@types/timeline";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { selectionStore } from "../../states/selectionStore";
 import { useTimelineStore } from "../../states/timelineStore";
-import { bakeRateFor } from "../animation/keyframes";
 import { CANVAS_BG } from "../preview/playbackPreview";
 import { fitViewport, type Viewport, type ViewportGeometry } from "../preview/viewport";
 import { frameDurationMs } from "../timeline/frames";
 import { sourceTimeAt, spanOf } from "../timeline/geometry";
-import { openFrameSource, type FrameSource } from "./frameSource";
-import { simplifyPath } from "./simplify";
+import { refusesEdit } from "../editor/timelineLock";
+import { rigOf } from "../timeline/rig";
+import {
+  nextFrameGap,
+  openFrameSource,
+  SEEK_ARRIVALS_NEEDED,
+  type FrameSource,
+} from "./frameSource";
+import { refusalMessage, zoomMessage } from "./stabilizeOp";
+import { createNullFromTrack, seatRun, stabilizeFromTrack } from "./trackEdits";
 import {
   containViewport,
   panViewport,
@@ -71,8 +84,6 @@ import {
   type StageSize,
 } from "./stageView";
 import { joinRun, keptBy, positionAt } from "./trackPath";
-import { toProjectPath, trackedEndMs } from "./trackToTimeline";
-import { createTrackNull } from "./trackNullOp";
 import {
   finishTracker,
   startTracker,
@@ -135,6 +146,14 @@ export class AutoTrackPanel extends LitElement {
   @state() private boxRefused = false;
   /** Source ms of the frame on the canvas; NaN while it is not known. */
   @state() private shownMs = Number.NaN;
+  /** One source frame, as the harvests have measured it; `null` until one has. */
+  private sourceFrameMs: number | null = null;
+  /**
+   * The null Create Null last made, and the path it was made from. Stabilize
+   * reuses it while `path` is that same array, so pressing Create Null and
+   * then Stabilize does not leave two nulls.
+   */
+  private nullForPath: { path: readonly TrackSample[]; nullId: string } | null = null;
 
   private source: FrameSource | null = null;
   private viewport: Viewport = fitViewport(1, 1);
@@ -247,6 +266,8 @@ export class AutoTrackPanel extends LitElement {
     this.clipId = picked;
     this.box = null;
     this.path = [];
+    this.sourceFrameMs = null;
+    this.nullForPath = null;
     this.pathLost = false;
     this.boxRefused = false;
     this.runKept = [];
@@ -780,6 +801,11 @@ export class AutoTrackPanel extends LitElement {
     this.progress = 0;
 
     let state: TrackerState | null = null;
+    // Every frame presented, kept or strided: the first few seat the seed on
+    // the frame its seek showed, and all of them measure one source frame.
+    const arrivals: number[] = [];
+    let frameGap = this.sourceFrameMs;
+    let previousArrival: number | null = null;
 
     try {
       await source.harvest({
@@ -789,6 +815,13 @@ export class AutoTrackPanel extends LitElement {
         // snapped onto a keyframe time another sample already holds.
         strideMs: frameDurationMs(fps),
         signal: abort.signal,
+        onArrival: (arrivalMs) => {
+          if (arrivals.length < SEEK_ARRIVALS_NEEDED) {
+            arrivals.push(arrivalMs);
+          }
+          frameGap = nextFrameGap(frameGap, previousArrival, arrivalMs);
+          previousArrival = arrivalMs;
+        },
         onFrame: (frame, progress) => {
           state =
             state == null
@@ -847,7 +880,8 @@ export class AutoTrackPanel extends LitElement {
       return;
     }
 
-    this.path = joinRun(this.runKept, run);
+    this.sourceFrameMs = frameGap;
+    this.path = seatRun(this.runKept, run, seedMs, arrivals, frameGap);
     this.pathLost = result?.status === "lost";
     this.runKept = [];
     this.runSamples = [];
@@ -867,47 +901,112 @@ export class AutoTrackPanel extends LitElement {
 
   // --------------------------------------------------------------- the null
 
+  /** What the two document edits need to know about this clip's track. */
+  private tracked(source: FrameSource) {
+    return {
+      clipId: this.clipId as string,
+      samples: this.path,
+      frameWidth: source.workingWidth,
+      frameHeight: source.workingHeight,
+      sourceFrameMs: this.sourceFrameMs,
+      fps: renderOptionStore.getState().options.fps,
+    };
+  }
+
   private createNull(): void {
     const element = this.clip();
     const source = this.source;
     if (element == null || source == null || this.path.length < 2) {
       return;
     }
-
-    const { fps } = renderOptionStore.getState().options;
-    const path = toProjectPath(this.path, {
-      elements: useTimelineStore.getState().timeline,
-      clipId: this.clipId as string,
-      frameWidth: source.workingWidth,
-      frameHeight: source.workingHeight,
-      fps,
-    });
+    if (refusesEdit()) {
+      return;
+    }
 
     const nullId = uuidv4();
-
-    useTimelineStore.getState().withCheckpoint((doc) =>
-      createTrackNull(doc, {
-        samples: simplifyPath(path),
-        nullId,
-        newTrackId: uuidv4(),
-        endMs: trackedEndMs(path, element, fps) ?? undefined,
-        bakeHz: bakeRateFor(fps),
-      }),
-    );
+    const path = this.path;
+    const trackId = uuidv4();
+    useTimelineStore
+      .getState()
+      .withCheckpoint((doc) =>
+        createNullFromTrack(doc, this.tracked(source), { nullId, trackId }),
+      );
 
     if (useTimelineStore.getState().timeline[nullId] == null) {
       return;
     }
+    this.nullForPath = { path, nullId };
 
     // Select it and open the inspector on it, so the pick-whip is one click
     // away. Both, because the inspector does not follow `selectionStore`: it is
     // shown by whoever made the selection (`elementTimelineCanvas#
     // showSideOption`), and the selection alone left it on whatever it showed
     // before. It is also the only confirmation, since the panel says nothing.
-    selectionStore.getState().setIds([nullId]);
+    this.showGroup(nullId);
+  }
+
+  // ------------------------------------------------------------- stabilize
+
+  private stabilize(): void {
+    const element = this.clip();
+    const source = this.source;
+    if (element == null || source == null || this.path.length < 2) {
+      return;
+    }
+    if (refusesEdit()) {
+      return;
+    }
+
+    const { previewSize } = renderOptionStore.getState().options;
+    const reuseNullId =
+      this.nullForPath?.path === this.path ? this.nullForPath.nullId : null;
+    const ids = {
+      reuseNullId,
+      nullId: uuidv4(),
+      nullTrackId: uuidv4(),
+    };
+    const params = {
+      // The frame being edited: a template tab's own when one is open.
+      target: { x: previewSize.w / 2, y: previewSize.h / 2 },
+      frame: { width: previewSize.w, height: previewSize.h },
+      autoZoom: true,
+      zoomId: uuidv4(),
+      cameraId: uuidv4(),
+      trackIds: { zoom: uuidv4(), camera: uuidv4() },
+    };
+
+    let result: ReturnType<typeof stabilizeFromTrack> | null = null;
+    useTimelineStore.getState().withCheckpoint((doc) => {
+      result = stabilizeFromTrack(doc, this.tracked(source), ids, params);
+      return result.doc;
+    });
+
+    const done = result as ReturnType<typeof stabilizeFromTrack> | null;
+    if (done == null) {
+      return;
+    }
+    if (!done.outcome.ok) {
+      toast(refusalMessage(done.outcome.reason));
+      return;
+    }
+    if (done.nullId != null) {
+      this.nullForPath = { path: this.path, nullId: done.nullId };
+    }
+
+    // The zoom group is what there is to adjust afterwards: its scale is the
+    // zoom, and its position is where the point is held.
+    this.showGroup(done.outcome.zoomId);
+    const message = zoomMessage(done.outcome);
+    if (message != null) {
+      toast(message);
+    }
+  }
+
+  private showGroup(id: string): void {
+    selectionStore.getState().setIds([id]);
     (document.querySelector("option-group") as any)?.showOption({
       filetype: "group",
-      elementId: nullId,
+      elementId: id,
     });
   }
 
@@ -923,6 +1022,13 @@ export class AutoTrackPanel extends LitElement {
       !this.boxRefused &&
       this.endSourceMs(element) > this.shownMs;
     const canCreate = element != null && !busy && this.path.length >= 2;
+    // Footage inside an ordinary group cannot be stabilized; inside a rig it
+    // is re-aimed.
+    const timeline = useTimelineStore.getState().timeline;
+    const canStabilize =
+      canCreate &&
+      ((element as { parentId?: string | null }).parentId == null ||
+        rigOf(timeline, this.clipId as string) != null);
 
     return html`
       <div class="auto-track-stage">
@@ -968,6 +1074,15 @@ export class AutoTrackPanel extends LitElement {
           <span class="material-symbols-outlined">filter_center_focus</span
           >Create Null
         </button>
+        <button
+          type="button"
+          class="auto-track-btn"
+          ?disabled=${!canStabilize}
+          @click=${() => this.stabilize()}
+        >
+          <span class="material-symbols-outlined">video_stable</span
+          >Stabilize
+        </button>
       </div>
     `;
   }
@@ -992,4 +1107,12 @@ export class AutoTrackPanel extends LitElement {
     }
     return nothing;
   }
+}
+
+/** A note at the bottom of the window, as `cloudApply.ts` gives one. */
+function toast(message: string): void {
+  (document.querySelector("toast-box") as any)?.showToast({
+    message,
+    delay: "4000",
+  });
 }

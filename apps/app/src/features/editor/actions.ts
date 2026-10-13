@@ -28,7 +28,7 @@ import { selectionStore } from "../../states/selectionStore";
 import { useTimelineStore } from "../../states/timelineStore";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { deleteClips, pasteClips, splitAtPlayhead } from "../timeline/clipOps";
-import { createGroup, isGroupAnimated, ungroup } from "../timeline/groupOps";
+import { createGroup, ungroup, ungroupLoses } from "../timeline/groupOps";
 import { canMergeClips, mergeClips } from "../timeline/mergeOps";
 import { canRotateClips, rotateClips } from "../timeline/rotateOps";
 import { toggleMirror, type MirrorAxis } from "../timeline/mirrorOps";
@@ -312,11 +312,7 @@ export function ungroupClips(ids: string[]): void {
   // there is no way to fold a time-varying transform into a child's static
   // fields, so `ungroup` keeps only the instant at the playhead.
   const current = doc();
-  const animated = ids.filter(
-    (id) =>
-      current.elements[id]?.filetype === "group" &&
-      isGroupAnimated(current.elements, id),
-  );
+  const animated = ids.filter((id) => ungroupLoses(current.elements, id));
   if (animated.length > 0) {
     const ok = window.confirm(
       "This group is animated. Ungrouping keeps only its transform at the " +

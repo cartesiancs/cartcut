@@ -16,6 +16,7 @@ import {
 } from "../timeline/tracks";
 import {
   audioElement,
+  groupElement,
   imageElement,
   shapeElement,
   textElement,
@@ -373,5 +374,18 @@ describe("blend", () => {
     expect(clipDetail("a", d.elements.a)).toMatchObject({
       blend: "source-over",
     });
+  });
+});
+
+describe("a stabilize rig's groups", () => {
+  it("carry their role in a row and a detail, and a plain group carries none", () => {
+    const zoom = groupElement({ name: "Stabilize", rig: "stabilize-zoom" } as any);
+    const camera = groupElement({ name: "Camera", rig: "stabilize-camera" } as any);
+    const plain = groupElement({ name: "Null" } as any);
+
+    expect(clipRow("z", zoom).rig).toBe("stabilize-zoom");
+    expect(clipDetail("c", camera).rig).toBe("stabilize-camera");
+    expect("rig" in clipRow("p", plain)).toBe(false);
+    expect("rig" in clipDetail("p", plain)).toBe(false);
   });
 });

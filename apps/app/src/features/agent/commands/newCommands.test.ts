@@ -33,6 +33,8 @@ import {
 } from "../../renderer/testing";
 import { volumeDbAt } from "../../timeline/audio";
 import { getCommand } from "../registry";
+import { riggedDoc } from "../../timeline/rigTesting";
+import { rigOf } from "../../timeline/rig";
 import type { MediaProber } from "../../element/mediaProbe";
 
 import "./read";
@@ -1592,6 +1594,53 @@ describe("group commands", () => {
     expect(result.ok).toBe(true);
     expect(doc().elements[grouped.groupId]).toBeUndefined();
     expect(doc().elements.a.parentId ?? null).toBeNull();
+  });
+
+  it("ungroups a stabilize rig without force, restoring its footage exactly", async () => {
+    const rig = riggedDoc();
+    seed(rig.elements, rig.tracks.map((t) => [t.id, t.kind]));
+    const before = doc().elements.foot;
+
+    const result = await run("ungroup", { groupIds: ["cam"] });
+
+    expect(result.ok).toBe(true);
+    expect(doc().elements.cam).toBeUndefined();
+    expect(doc().elements.zoom).toBeUndefined();
+    const { parentId: _p, priority: _q, ...was } = before as any;
+    const { parentId, priority: _r, ...now } = doc().elements.foot as any;
+    expect(parentId).toBeUndefined();
+    expect(now).toEqual(was);
+  });
+
+  it("duplicates a stabilize rig whole, as a second rig of its own", async () => {
+    const rig = riggedDoc();
+    seed(rig.elements, rig.tracks.map((t) => [t.id, t.kind]));
+
+    const result = await run("duplicate_clips", { elementIds: ["zoom"], toMs: 9_000 });
+
+    expect(result.ok).toBe(true);
+    const elements = doc().elements;
+    const zooms = Object.keys(elements).filter((id) => (elements[id] as any).rig === "stabilize-zoom");
+    expect(zooms).toHaveLength(2);
+    const copy = zooms.find((id) => id !== "zoom") as string;
+    const footCopy = Object.keys(elements).find(
+      (id) => id !== "foot" && elements[id].filetype === "image",
+    ) as string;
+    expect(rigOf(elements, footCopy)?.zoomId).toBe(copy);
+    expect(rigOf(elements, "foot")).toEqual({ zoomId: "zoom", cameraId: "cam" });
+  });
+
+  it("refuses to re-parent what a stabilize rig holds", async () => {
+    const rig = riggedDoc();
+    seed(rig.elements, rig.tracks.map((t) => [t.id, t.kind]));
+    const before = historyLength();
+
+    const result = await run("set_clip_parent", { elementIds: ["foot"], parentId: null });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/stabilize rig/);
+    expect(historyLength()).toBe(before);
+    expect(doc().elements.foot.parentId).toBe("cam");
   });
 
   it("ungroups a plain group without needing force", async () => {

@@ -125,7 +125,14 @@ import {
   type AudioPeakProvider,
 } from "../timeline/strip/audioPeaks";
 import { type TimelineDocument } from "../timeline/tracks";
-import { canBeGrouped, removeFromParent } from "../timeline/groupOps";
+import { canBeGrouped, dissolveRig, removeFromParent } from "../timeline/groupOps";
+import { isRigMember, rigOf, type Rig } from "../timeline/rig";
+import {
+  refusalMessage,
+  stabilize,
+  stabilizePairOf,
+  zoomMessage,
+} from "../track/stabilizeOp";
 import { addTemplateToTimeline } from "../template/addTemplate";
 import {
   clearReplaceable,
@@ -955,11 +962,84 @@ export class elementTimelineCanvas extends LitElement {
   }
 
   /**
+   * Hold the right-clicked null's tracked point on the frame's centre by
+   * moving the right-clicked clip under it (`track/stabilizeOp.ts`).
+   *
+   * Offered only for exactly a clip and a null the op would accept, so the
+   * refusal toast below is for a document that changed between the click and
+   * the choice.
+   */
+  public stabilizeSelected() {
+    const doc = this.currentDoc();
+    const pair = stabilizePairOf(doc, [...this.targetIdDuringRightClick]);
+    if (pair == null) {
+      return;
+    }
+    const { previewSize, fps } = renderOptionStore.getState().options;
+    let outcome: ReturnType<typeof stabilize>["outcome"] | null = null;
+    this.commit((input) => {
+      const result = stabilize(input, {
+        ...pair,
+        target: { x: previewSize.w / 2, y: previewSize.h / 2 },
+        frame: { width: previewSize.w, height: previewSize.h },
+        fps,
+        autoZoom: true,
+        zoomId: uuidv4(),
+        cameraId: uuidv4(),
+        trackIds: { zoom: uuidv4(), camera: uuidv4() },
+      });
+      outcome = result.outcome;
+      return result.doc;
+    });
+
+    const done = outcome as ReturnType<typeof stabilize>["outcome"] | null;
+    if (done == null) {
+      return;
+    }
+    if (!done.ok) {
+      this.toast(refusalMessage(done.reason));
+      return;
+    }
+    this.targetId = [done.zoomId];
+    this.showSideOption(done.zoomId);
+    const message = zoomMessage(done);
+    if (message != null) {
+      this.toast(message);
+    }
+    this.drawCanvas();
+  }
+
+  /** Take apart every rig the right-clicked clips belong to, exactly. */
+  public removeStabilization() {
+    const rigs = this.rigsInSnapshot();
+    this.commit((doc) =>
+      rigs.reduce((next, rig) => dissolveRig(next, rig), doc),
+    );
+    this.drawCanvas();
+  }
+
+  /** The intact rigs the right-click snapshot touches, each once. */
+  private rigsInSnapshot(): Rig[] {
+    const doc = this.currentDoc();
+    const seen = new Map<string, Rig>();
+    for (const id of this.targetIdDuringRightClick) {
+      const rig = rigOf(doc.elements, id);
+      if (rig != null) {
+        seen.set(rig.zoomId, rig);
+      }
+    }
+    return [...seen.values()];
+  }
+
+  /**
    * The group entries for the context menu, chosen from what is selected.
    *
    * "Ungroup" only when a group is in the selection; "remove from group" only
    * when something in it actually has a parent — offering an item that can only
-   * decline is worse than not offering it.
+   * decline is worse than not offering it. For the same reason none of the
+   * three is offered for a stabilize rig's members, which `setParent` and
+   * `createGroup` decline; the rig is taken apart whole, by "Remove
+   * stabilization".
    */
   private groupMenuTemplate(): string {
     const ids = this.targetIdDuringRightClick;
@@ -972,6 +1052,17 @@ export class elementTimelineCanvas extends LitElement {
       `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').${method}()" item-name="${label}" item-icon="${icon}"> </menu-dropdown-item>`;
 
     const rows: string[] = [];
+    const held = ids.some((id) => isRigMember(doc.elements, id));
+
+    if (stabilizePairOf(doc, ids) != null) {
+      rows.push(call("stabilizeSelected", "Stabilize on null", "video_stable"));
+    }
+    if (this.rigsInSnapshot().length > 0) {
+      rows.push(call("removeStabilization", "Remove stabilization", "layers_clear"));
+    }
+    if (held) {
+      return rows.join("\n          ");
+    }
 
     if (ids.every((id) => canBeGrouped(doc.elements[id]))) {
       rows.push(call("groupSelected", "Group selected", "layers"));

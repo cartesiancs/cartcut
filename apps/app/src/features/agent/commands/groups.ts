@@ -16,13 +16,14 @@ import { v4 as uuidv4 } from "uuid";
 import {
   canBeGrouped,
   createGroup,
-  isGroupAnimated,
   setParent,
   ungroup,
+  ungroupLoses,
 } from "../../timeline/groupOps";
 import { createNullElement } from "../../element/nullElement";
 import { placeNewElement } from "../../timeline/placement";
 import { appendTrackOfKind } from "../../timeline/tracks";
+import { isRigMember, rigRoleOf } from "../../timeline/rig";
 import { renderOptionStore } from "../../../states/renderOptionStore";
 import { projectBakeHz } from "../../editor/frameRate";
 import { commit, declined } from "../commit";
@@ -136,7 +137,7 @@ registerCommands({
     const atMs = Math.max(0, Math.round(params.atMs ?? playheadMs()));
 
     // Checked before the commit so a refusal costs no history entry at all.
-    const animated = ids.filter((id) => isGroupAnimated(doc.elements, id));
+    const animated = ids.filter((id) => ungroupLoses(doc.elements, id));
     if (animated.length > 0 && params.force !== true) {
       return {
         ...declined(
@@ -176,6 +177,16 @@ registerCommands({
             `use group_clips to make one.`,
         );
       }
+    }
+
+    // A stabilize rig is taken apart whole, never member by member: the
+    // camera was copied from its null against the footage's own numbers.
+    const held = ids.filter((id) => isRigMember(doc.elements, id));
+    if (held.length > 0 || (params.parentId != null && rigRoleOf(doc.elements[params.parentId]) != null)) {
+      return declined(
+        `${held.length > 0 ? `${held.map((id) => `"${id}"`).join(", ")} ${held.length === 1 ? "is" : "are"} held by a stabilize rig` : "That group is part of a stabilize rig"}. ` +
+          `To remove the stabilization, ungroup or delete the rig's group (it restores the footage exactly).`,
+      );
     }
 
     const atMs = Math.max(0, Math.round(params.atMs ?? playheadMs()));

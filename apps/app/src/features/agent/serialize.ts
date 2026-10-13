@@ -389,6 +389,13 @@ export function clipRow(
     }
     case "group": {
       row.name = element.name;
+      // A stabilize rig's groups look like two empty nulls otherwise, and an
+      // agent tidying up would delete them. Deleting or ungrouping one is
+      // fine (it dissolves the rig exactly); it should know that is what it is
+      // doing.
+      if (element.rig != null) {
+        row.rig = element.rig;
+      }
       break;
     }
     // The template's identity and how much of it is still empty — and
@@ -689,6 +696,9 @@ export function clipDetail(
 
   if (element.filetype === "group") {
     detail.name = element.name;
+    if (element.rig != null) {
+      detail.rig = element.rig;
+    }
   }
 
   if (element.filetype === "audio") {

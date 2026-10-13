@@ -1421,7 +1421,23 @@ export type GroupElementType = TimelinePlaced &
     filetype: "group";
     /** Shown on the group's bar. Every other clip is named by its source file. */
     name: string;
+    /**
+     * The part this group plays in a stabilize rig, if it is one.
+     *
+     * A rig is two groups, built only by `features/track/stabilizeOp.ts`: a
+     * root zoom whose pivot sits on the target, and inside it a camera whose
+     * position track is an affine copy of a tracking null. The footage and its
+     * nulls sit in the camera with their numbers untouched, which is what lets
+     * deleting or ungrouping either group restore them exactly instead of
+     * taking them along (`groupOps.ts#dissolveRig`). `features/timeline/rig.ts`
+     * reads it, and no other group ever carries the key, so `SCHEMA_VERSION`
+     * did not move.
+     */
+    rig?: RigRole;
   };
+
+/** See `GroupElementType.rig`. */
+export type RigRole = "stabilize-zoom" | "stabilize-camera";
 
 /**
  * What the user has dropped into one of a template's slots.

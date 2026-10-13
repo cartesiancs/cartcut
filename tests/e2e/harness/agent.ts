@@ -178,7 +178,8 @@ export async function setPlayhead(session: AppSession, atMs: number): Promise<un
 }
 
 export async function selectClips(session: AppSession, ids: string[]): Promise<unknown> {
-  return agent(session, "select_clips", { ids });
+  // The command reads `elementIds`; sent as `ids` it selected nothing.
+  return agent(session, "select_clips", { elementIds: ids });
 }
 
 /**

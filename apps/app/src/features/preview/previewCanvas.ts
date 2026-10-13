@@ -116,6 +116,7 @@ import {
   worldBoundsOf,
   worldMatrixOf,
 } from "../timeline/transform";
+import { isHeldByRig } from "../timeline/rig";
 import {
   nullGizmoGeometry,
   nullHitZoneOf,
@@ -956,7 +957,13 @@ export class PreviewCanvas extends LitElement {
       const element: any = this.timeline[elementId];
       // A hidden row's null is not a pointer target either (`canPointerTarget`),
       // so it draws no handles nobody could grab.
-      if (element?.filetype !== "group" || element.trackHidden === true) {
+      // Nor a rig's groups or the nulls in its camera, which the pointer may
+      // not have either (`canPointerTarget`).
+      if (
+        element?.filetype !== "group" ||
+        element.trackHidden === true ||
+        isHeldByRig(this.timeline, element)
+      ) {
         continue;
       }
 
