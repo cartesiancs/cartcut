@@ -37,6 +37,7 @@ import type { Timeline } from "../../@types/timeline";
 import type { RenderOptions } from "../../states/renderOptionStore";
 import type { TimelineTrack } from "../timeline/tracks";
 import { TIMELINE_VIEW_ENTRY } from "./timelineView";
+import { COMPOSITIONS_ENTRY } from "./compositionsFile";
 
 /**
  * A 64-bit digest of `text`, as 16 lowercase hex characters.
@@ -103,9 +104,17 @@ export function projectStateDigest(
   options: RenderOptions,
   extensionData: string | null = null,
   timelineView: string | null = null,
+  compositions: string | null = null,
 ): string {
   return digest64(
-    projectStateText(elements, tracks, options, extensionData, timelineView),
+    projectStateText(
+      elements,
+      tracks,
+      options,
+      extensionData,
+      timelineView,
+      compositions,
+    ),
   );
 }
 
@@ -140,6 +149,12 @@ export function projectStateText(
    * not hash the same as one holding only the other.
    */
   timelineView: string | null = null,
+  /**
+   * The templates the project owns, as `compositionsFile.ts#compositionsDigestText`
+   * gives them (no asset paths), or `null` for none. An edit inside one is an
+   * edit to the project. Tagged with its entry name, as the view entry is.
+   */
+  compositions: string | null = null,
 ): string {
   return [
     JSON.stringify(elements),
@@ -147,6 +162,7 @@ export function projectStateText(
     JSON.stringify(digestableOptions(options)),
     ...(extensionData == null ? [] : [extensionData]),
     ...(timelineView == null ? [] : [`${TIMELINE_VIEW_ENTRY}:${timelineView}`]),
+    ...(compositions == null ? [] : [`${COMPOSITIONS_ENTRY}:${compositions}`]),
   ].join("\n");
 }
 

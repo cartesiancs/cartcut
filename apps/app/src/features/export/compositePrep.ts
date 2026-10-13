@@ -14,11 +14,18 @@ import type { Timeline } from "../../@types/timeline";
 import { loadFontLibrary } from "../font/fontLibrary";
 import { preloadLutsForDocument } from "../lut/lutRegistry";
 import { assetTimeline } from "../template/assetTimeline";
-import { preloadTemplatesForDocument } from "../template/templateRegistry";
+import type { TemplateResolver } from "../renderer/template";
+import {
+  preloadTemplatesForDocument,
+  templateFor,
+} from "../template/templateRegistry";
 
-export async function preloadForComposite(timeline: Timeline): Promise<Timeline> {
+export async function preloadForComposite(
+  timeline: Timeline,
+  resolve: TemplateResolver = templateFor,
+): Promise<Timeline> {
   await preloadTemplatesForDocument(timeline);
-  const expanded = assetTimeline(timeline);
+  const expanded = assetTimeline(timeline, resolve);
   await Promise.all([preloadLutsForDocument(expanded), loadFontLibrary()]);
   return expanded;
 }

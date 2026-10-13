@@ -78,9 +78,38 @@ export function schemaVersionFor(
   return SCHEMA_VERSION;
 }
 
+/**
+ * The version a project holding a template of its own is written as.
+ *
+ * The other exception, for a different reason. A build from before
+ * `compositions.json` does not throw on it: it ignores the entry, draws
+ * nothing where the expanded template sits, and writes the project back
+ * without it, losing the user's edited template for good. Refusing to open is
+ * the honest answer. Written only while main names a composition
+ * (`project/compositionsFile.ts`), and a version that implies the graphic one.
+ */
+export const COMPOSITION_SCHEMA_VERSION = 4 as const;
+
+/** The version to write a project under, compositions included. */
+export function projectSchemaVersionFor(
+  elements: Record<string, { filetype?: unknown } | null | undefined>,
+  compositionCount: number,
+):
+  | typeof SCHEMA_VERSION
+  | typeof GRAPHIC_SCHEMA_VERSION
+  | typeof COMPOSITION_SCHEMA_VERSION {
+  return compositionCount > 0
+    ? COMPOSITION_SCHEMA_VERSION
+    : schemaVersionFor(elements);
+}
+
 /** Whether this build can open a file stamped with `version`. */
 export function isReadableSchemaVersion(version: unknown): boolean {
-  return version === SCHEMA_VERSION || version === GRAPHIC_SCHEMA_VERSION;
+  return (
+    version === SCHEMA_VERSION ||
+    version === GRAPHIC_SCHEMA_VERSION ||
+    version === COMPOSITION_SCHEMA_VERSION
+  );
 }
 
 const KIND_PREFIX: Record<TrackKind, string> = {

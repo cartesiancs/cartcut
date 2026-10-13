@@ -7,6 +7,12 @@ import {
 } from "../renderer/timeline";
 import { preloadForComposite } from "./compositePrep";
 import { assetTimeline } from "../template/assetTimeline";
+import { templateFor } from "../template/templateRegistry";
+import {
+  templateExpanderFor,
+  withTemplateResolver,
+  type TemplateResolver,
+} from "../renderer/template";
 import { withoutHiddenClips } from "../timeline/tracks";
 import { createExportFxRuntime } from "../renderer/fx/createRuntime";
 import { releaseOverlayScope } from "../renderer/fx/overlaySource";
@@ -38,6 +44,14 @@ import { createFrameProfiler } from "./profile";
 export type RenderTimelineControls = {
   /** Aborts the loop between frames, and while waiting on a seek. */
   signal?: AbortSignal;
+  /**
+   * Where templates are read from for the whole render: the project's own
+   * templates as they stood when Render was pressed
+   * (`timelineWorkspace.ts#snapshotTemplateResolver`), so one edited while
+   * this runs does not change the frames still to come. The live registry
+   * when absent.
+   */
+  resolveTemplate?: TemplateResolver;
 };
 
 /**
@@ -80,6 +94,8 @@ export async function renderTimeline(
     backgroundColor,
   } = options;
   const { signal } = controls;
+  const resolveTemplate = controls.resolveTemplate ?? templateFor;
+  const expandTemplate = templateExpanderFor(resolveTemplate);
 
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -138,7 +154,7 @@ export async function renderTimeline(
    * so a table that landed on frame three would leave frames one and two
    * ungraded in the delivered file, and nothing downstream would ever say so.
    */
-  await preloadForComposite(timeline);
+  await preloadForComposite(timeline, resolveTemplate);
 
   /**
    * And every template, for exactly the same reason.
@@ -163,7 +179,9 @@ export async function renderTimeline(
    * contents, which carry no flag of their own. The preview cannot do the
    * same: there the decoder is also where the sound comes from.
    */
-  const assets = withoutHiddenClips(assetTimeline(withoutHiddenClips(timeline)));
+  const assets = withoutHiddenClips(
+    assetTimeline(withoutHiddenClips(timeline), resolveTemplate),
+  );
 
   // The per-clip grade runs on the GPU and `captureFrame` reads the canvas
   // back with `getImageData` on the next line, so that read has to see the
@@ -194,7 +212,7 @@ export async function renderTimeline(
    * kept painting: a minimised window with background throttling on stops
    * firing `paint` altogether, measured, and every frame would time out.
    */
-  const html = graphics != null && needsHtmlHost(assets);
+  const html = graphics != null && needsHtmlHost(assets, expandTemplate);
   const releasePainting = html ? await paintHold.hold() : null;
   if (html) {
     beginExportGraphics();
@@ -242,7 +260,7 @@ export async function renderTimeline(
 
       if (html && graphics != null) {
         const painted = await profiler.measureAsync("graphics", () =>
-          prepareScopeFrame(graphics, timeline, timeInMs),
+          prepareScopeFrame(graphics, timeline, timeInMs, { expandTemplate }),
         );
         // Not shipped blank. A graphic missing from one frame of a delivered
         // file is worse than an export that stops and says why.
@@ -263,19 +281,21 @@ export async function renderTimeline(
         // It is also what covers a template's *nested* clips, which follow the
         // one renderer table `App.ts` installs globally rather than the table
         // passed here. See `withVideoScope`.
-        withGraphicScope(graphics, () =>
-          withVideoScope(scope, () =>
-            renderTimelineAtTime(
-              ctx,
-              timeline,
-              timeInMs,
-              elementRenderers,
-              backgroundColor,
-              width,
-              height,
-              undefined,
-              undefined,
-              fx,
+        withTemplateResolver(resolveTemplate, () =>
+          withGraphicScope(graphics, () =>
+            withVideoScope(scope, () =>
+              renderTimelineAtTime(
+                ctx,
+                timeline,
+                timeInMs,
+                elementRenderers,
+                backgroundColor,
+                width,
+                height,
+                undefined,
+                undefined,
+                fx,
+              ),
             ),
           ),
         ),

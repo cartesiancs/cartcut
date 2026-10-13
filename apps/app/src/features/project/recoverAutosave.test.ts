@@ -240,12 +240,44 @@ describe("recovering", () => {
       }),
     );
     await recoverAutosave(PICK, guard(true, false), p.reader, p.effects);
-    expect(p.adoptedExtras).toEqual([{ extensions: null, timelineView: view }]);
+    expect(p.adoptedExtras).toEqual([
+      { extensions: null, timelineView: view, compositions: null },
+    ]);
   });
 
   it("hands over null for an archive with no row heights", async () => {
     await recoverAutosave(PICK, guard(true, false), p.reader, p.effects);
-    expect(p.adoptedExtras).toEqual([{ extensions: null, timelineView: null }]);
+    expect(p.adoptedExtras).toEqual([
+      { extensions: null, timelineView: null, compositions: null },
+    ]);
+  });
+
+  it("brings the project's own templates back with the document", async () => {
+    // Without them every clip naming one would come back drawing nothing.
+    const owned = JSON.stringify({
+      v: 1,
+      compositions: [
+        {
+          id: "c1",
+          name: "Intro",
+          size: { w: 10, h: 10 },
+          tracks: [],
+          elements: {},
+          assetPaths: { version: 1, entries: {} },
+        },
+      ],
+    });
+    p.setBytes(
+      await archive({
+        extra: {
+          "compositions.json": owned,
+          "autosave.json": JSON.stringify({ v: 1, anchor: PROJECT }),
+        },
+      }),
+    );
+    await recoverAutosave(PICK, guard(true, false), p.reader, p.effects);
+    expect(p.adoptedExtras[0].compositions).toBe(owned);
+    expect(Object.keys((p.adopted[0] as any).compositions)).toEqual(["c1"]);
   });
 
   it("adopts the document", async () => {

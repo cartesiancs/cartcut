@@ -40,7 +40,10 @@
 
 import type { Timeline } from "../../@types/timeline";
 import type { RenderOptions } from "../../states/renderOptionStore";
-import { schemaVersionFor, type TimelineTrack } from "../timeline/tracks";
+import {
+  projectSchemaVersionFor,
+  type TimelineTrack,
+} from "../timeline/tracks";
 import { serializeAssetPaths } from "./assetsFile";
 import { serializeRenderOptions } from "./renderOptionsFile";
 
@@ -65,6 +68,12 @@ export type SerializeProjectInput = {
    * is the destination; for an autosave it is the `.ngt` being stood in for.
    */
   anchor: string;
+  /**
+   * The compositions this save writes beside the document
+   * (`compositionsFile.ts`). Only their count is read here: a project holding
+   * one is stamped `COMPOSITION_SCHEMA_VERSION`.
+   */
+  compositionCount?: number;
   /**
    * Written into `renderOptions.json` and never read back
    * (`renderOptionsFile.ts` says so). Defaulted rather than required because
@@ -93,7 +102,12 @@ export function serializeProjectEntries(
     // so an added *entry* or field must never move this number. A new
     // filetype does, and only while one is present: see
     // `tracks.ts#GRAPHIC_SCHEMA_VERSION`.
-    project: JSON.stringify({ schemaVersion: schemaVersionFor(elements as any) }),
+    project: JSON.stringify({
+      schemaVersion: projectSchemaVersionFor(
+        elements as any,
+        input.compositionCount ?? 0,
+      ),
+    }),
     timeline: JSON.stringify(elements),
     tracks: JSON.stringify(tracks),
     renderOptions: JSON.stringify(

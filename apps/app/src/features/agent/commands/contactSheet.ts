@@ -40,6 +40,12 @@ import { createVideoScope, withVideoScope, type VideoScope } from "../../asset/v
 import { releaseOverlayScope } from "../../renderer/fx/overlaySource";
 import { sheetAssets } from "./sheetAssets";
 import { renderTimelineAtTime } from "../../renderer/timeline";
+import {
+  templateExpanderFor,
+  withTemplateResolver,
+} from "../../renderer/template";
+import { templateFor } from "../../template/templateRegistry";
+import { snapshotTemplateResolver } from "../../../states/timelineWorkspace";
 import { exportElementRenderers } from "../../export/renderers";
 import { createExportFxRuntime } from "../../renderer/fx/createRuntime";
 import { hasFxElements } from "../../renderer/fx/planFrame";
@@ -121,6 +127,14 @@ registerCommands({
 
     const timeline = useTimelineStore.getState().timeline;
     const options = renderOptionStore.getState().options;
+    // The templates the project owns, as they are now, for the whole sheet:
+    // it awaits between frames, and one edited meanwhile must not change the
+    // frames after it (`renderer/template.ts#withTemplateResolver`).
+    const resolveTemplate = snapshotTemplateResolver(
+      useTimelineStore.getState(),
+      templateFor,
+    );
+    const expandTemplate = templateExpanderFor(resolveTemplate);
     const { w: frameWidth, h: frameHeight } = options.previewSize;
 
     const tileWidth = Math.min(
@@ -172,14 +186,14 @@ registerCommands({
 
     // Templates, LUTs and fonts, as the exporter loads them. Without this a
     // sheet showed a template as empty space and a graded clip ungraded.
-    const expanded = await preloadForComposite(timeline);
+    const expanded = await preloadForComposite(timeline, resolveTemplate);
 
     // HTML graphics are rasterised from Chromium's paint, ahead of each frame,
     // into a scope of the sheet's own. A GLSL one draws in its generator.
     const graphics = hasGraphicElements(expanded)
       ? createGraphicScope(scope.id, new GraphicGl({ blocking: true }), options.fps)
       : null;
-    const html = graphics != null && needsHtmlHost(expanded);
+    const html = graphics != null && needsHtmlHost(expanded, expandTemplate);
     // Painting, as an export does: an agent calls this while the editor sits
     // behind its terminal, where a throttled window paints nothing and every
     // graphic came out missing from the sheet.
@@ -204,26 +218,31 @@ registerCommands({
           // the preview from preparing any graphic for the rest of the session.
           beginExportGraphics();
           try {
-            graphicsPainted = (await prepareScopeFrame(graphics, timeline, timeMs)) && graphicsPainted;
+            graphicsPainted =
+              (await prepareScopeFrame(graphics, timeline, timeMs, {
+                expandTemplate,
+              })) && graphicsPainted;
           } finally {
             endExportGraphics();
           }
         }
 
-        // Synchronous, so neither scope can leak past this call.
-        withGraphicScope(graphics, () =>
-          withVideoScope(scope, () =>
-            renderTimelineAtTime(
-              frameCtx,
-              timeline,
-              timeMs,
-              exportElementRenderers,
-              options.backgroundColor,
-              frameWidth,
-              frameHeight,
-              undefined,
-              undefined,
-              fx,
+        // Synchronous, so no scope can leak past this call.
+        withTemplateResolver(resolveTemplate, () =>
+          withGraphicScope(graphics, () =>
+            withVideoScope(scope, () =>
+              renderTimelineAtTime(
+                frameCtx,
+                timeline,
+                timeMs,
+                exportElementRenderers,
+                options.backgroundColor,
+                frameWidth,
+                frameHeight,
+                undefined,
+                undefined,
+                fx,
+              ),
             ),
           ),
         );

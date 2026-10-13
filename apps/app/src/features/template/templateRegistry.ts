@@ -35,6 +35,7 @@
 import JSZip from "jszip";
 import type { TemplateElementType, Timeline } from "../../@types/timeline";
 import type { ExistsFn } from "../project/assetsFile";
+import { compositionIdOf } from "../composition/project";
 import { parseTemplateManifest, type TemplateManifest } from "./archive";
 import type { TemplateData } from "./compose";
 import { readTemplateDocument, type NgtEntries } from "./templateDocument";
@@ -77,6 +78,24 @@ type Entry =
 const entries = new Map<string, Entry>();
 let library: TemplateListing[] = [];
 const listeners = new Set<() => void>();
+
+/**
+ * Where a template the project owns is read from.
+ *
+ * A `project:` id names a composition (`composition/project.ts`), which lives
+ * in the timeline store rather than on disk, so it is answered by this and
+ * never loaded, cached or reported as a failure. Injected, as the template
+ * renderer's resolver is, so this module never imports a store and stays
+ * testable in the `node` suite. `App.ts` installs it.
+ */
+let projectTemplates: (compositionId: string) => TemplateData | null = () =>
+  null;
+
+export function installProjectTemplates(
+  resolve: (compositionId: string) => TemplateData | null,
+): void {
+  projectTemplates = resolve;
+}
 
 /** The last path segment of a folder — the fallback display name. */
 function folderName(dir: string): string {
@@ -155,6 +174,10 @@ export function subscribeTemplates(listener: () => void): () => void {
  * Safe to call from the paint loop: it never awaits and never throws.
  */
 export function templateFor(templateId: string): TemplateData | null {
+  const compositionId = compositionIdOf(templateId);
+  if (compositionId != null) {
+    return projectTemplates(compositionId);
+  }
   const entry = entries.get(templateId);
   if (entry != null) {
     return entry.state === "ready" ? entry.data : null;
@@ -168,6 +191,10 @@ export function templateFor(templateId: string): TemplateData | null {
 export async function loadTemplate(
   templateId: string,
 ): Promise<TemplateData | null> {
+  // Nothing to read: the project holds it.
+  if (compositionIdOf(templateId) != null) {
+    return templateFor(templateId);
+  }
   const existing = entries.get(templateId);
   if (existing != null) {
     if (existing.state === "ready") {
@@ -268,6 +295,7 @@ export function resetTemplateRegistry(): void {
   library = [];
   listeners.clear();
   reader = defaultReader;
+  projectTemplates = () => null;
 }
 
 /** Test-only: put a document in directly, without touching the disk. */

@@ -49,6 +49,8 @@ import {
 } from "./autosaveSession";
 import { currentProjectDigest, projectBaseline } from "./projectDirty";
 import { serializeProjectEntries } from "./projectEntries";
+import { compositionsExtraEntries } from "./compositionsFile";
+import { projectSnapshot } from "../composition/projectSnapshot";
 import { buildNgtBytes } from "./projectArchive";
 
 /** The narrow part of the preload bridge Auto Save needs. */
@@ -169,8 +171,13 @@ function realSource(): { snapshot: () => AutosaveSnapshot | null } {
   return {
     snapshot: () => {
       try {
-        const state = useTimelineStore.getState();
-        const options = renderOptionStore.getState().options;
+        // The project, whichever timeline is showing: an autosave holds the
+        // bytes a save would, and a save writes main, the templates main
+        // names, and the project's own frame (`projectSnapshot.ts`).
+        const snapshot = projectSnapshot();
+        const main = snapshot.project.main;
+        const compositions = snapshot.project.compositions;
+        const options = snapshot.options;
         const file = projectFile();
 
         // The anchor is the `.ngt` this stands in for — never the cache file
@@ -180,9 +187,10 @@ function realSource(): { snapshot: () => AutosaveSnapshot | null } {
         const anchor = file;
 
         const entries = serializeProjectEntries({
-          elements: state.timeline,
-          tracks: state.tracks,
+          elements: main.elements,
+          tracks: main.tracks,
           options: options,
+          compositionCount: Object.keys(compositions).length,
           // With no `.ngt` yet there is nothing to be relative to, so the
           // document's absolute paths are all the archive can carry — which is
           // correct for a project that has never been saved anywhere.
@@ -196,7 +204,10 @@ function realSource(): { snapshot: () => AutosaveSnapshot | null } {
         // lazy `bytes()`: the rows can be resized between the snapshot and the
         // write, and an archive whose heights differ from the digest it was
         // filed under would be recorded as holding a state it does not.
-        const timelineView = timelineViewExtraEntries(state.tracks);
+        const timelineView = timelineViewExtraEntries(snapshot.tracks);
+        // Serialized now for the same reason: the archive has to hold what
+        // the digest it is filed under describes.
+        const owned = compositionsExtraEntries(compositions, anchor ?? "");
 
         return {
           digest: currentProjectDigest(),
@@ -213,6 +224,8 @@ function realSource(): { snapshot: () => AutosaveSnapshot | null } {
               // How tall each resized row is. Absent when every row is at the
               // default height.
               ...timelineView,
+              // The templates the project owns. Absent when it owns none.
+              ...owned,
               // The sixth entry. `project.load` reads five *named* entries and
               // ignores the rest, so this does not move `SCHEMA_VERSION`, and
               // it never appears in a user-saved `.ngt`. It exists so each
@@ -280,12 +293,26 @@ export function installAutosave(): () => void {
   let lastElements = useTimelineStore.getState().timeline;
   let lastTracks = useTimelineStore.getState().tracks;
 
+  // And the timelines not showing, which an undo, a late result landing in a
+  // parked timeline, or an Expand can change without touching the live one.
+  // A switch of tab moves all four and changes nothing in the project, which
+  // the session finds out from the digest before it writes anything.
+  let lastParked = useTimelineStore.getState().parked;
+  let lastCompositions = useTimelineStore.getState().compositions;
+
   const offTimeline = useTimelineStore.subscribe((state) => {
-    if (state.timeline === lastElements && state.tracks === lastTracks) {
+    if (
+      state.timeline === lastElements &&
+      state.tracks === lastTracks &&
+      state.parked === lastParked &&
+      state.compositions === lastCompositions
+    ) {
       return;
     }
     lastElements = state.timeline;
     lastTracks = state.tracks;
+    lastParked = state.parked;
+    lastCompositions = state.compositions;
     perfCount("autosave.noteChange");
     live.noteChange();
   });

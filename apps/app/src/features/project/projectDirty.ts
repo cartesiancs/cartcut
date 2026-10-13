@@ -34,6 +34,8 @@ import { renderOptionStore } from "../../states/renderOptionStore";
 import { useTimelineStore } from "../../states/timelineStore";
 import { timelineViewEntryText } from "../../states/trackHeightStore";
 import { projectStateDigest } from "./projectDigest";
+import { compositionsDigestText } from "./compositionsFile";
+import { projectSnapshot } from "../composition/projectSnapshot";
 
 /**
  * The digest of the project as it stands.
@@ -43,13 +45,16 @@ import { projectStateDigest } from "./projectDigest";
  * copy.
  */
 export function currentProjectDigest(): string {
-  const state = useTimelineStore.getState();
+  // The project, whichever timeline is showing, so switching tabs never reads
+  // as an edit and an edit inside a template always does.
+  const snapshot = projectSnapshot();
   return projectStateDigest(
-    state.timeline,
-    state.tracks,
-    renderOptionStore.getState().options,
+    snapshot.project.main.elements,
+    snapshot.project.main.tracks,
+    snapshot.options,
     extensionsEntryText(),
-    timelineViewEntryText(state.tracks),
+    timelineViewEntryText(snapshot.tracks),
+    compositionsDigestText(snapshot.project.compositions),
   );
 }
 
@@ -124,8 +129,17 @@ export function projectBaseline(): string | null {
  * as unmodified.
  */
 export function isProjectEmpty(): boolean {
-  const state = useTimelineStore.getState();
-  return Object.keys(state.timeline).length === 0 && state.tracks.length === 0;
+  // Every timeline, not the one showing: an emptied template's tab is not an
+  // empty project, and recovery must not overwrite main because of it.
+  const { main, compositions } = useTimelineStore.getState().getProject();
+  if (Object.keys(main.elements).length > 0 || main.tracks.length > 0) {
+    return false;
+  }
+  return Object.values(compositions).every(
+    (composition) =>
+      Object.keys(composition.elements).length === 0 &&
+      composition.tracks.length === 0,
+  );
 }
 
 /** Drop the baseline. For tests, and for a new project. */

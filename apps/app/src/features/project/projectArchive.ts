@@ -36,6 +36,8 @@ export type ProjectExtras = {
   extensions: string | null;
   /** `timelineView.json`: how tall each row is. */
   timelineView: string | null;
+  /** `compositions.json`: the templates the project owns. Optional so older callers compile. */
+  compositions?: string | null;
 };
 
 /**

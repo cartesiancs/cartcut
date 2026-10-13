@@ -57,16 +57,53 @@ describe("readProjectDocument", () => {
   // -------------------------------------------------------- the schema gate
   it("refuses a newer schema version", async () => {
     const result = await readProjectDocument(
-      entries({ project: '{"schemaVersion":4}' }),
+      entries({ project: '{"schemaVersion":5}' }),
       "/a/p.ngt",
       NOT_FOUND,
     );
     expect(result).toEqual({
       ok: false,
       reason: "schema",
-      found: 4,
+      found: 5,
       expected: 2,
     });
+  });
+
+  it("opens version 4, which is what a project owning a template is written as", async () => {
+    const result = await readProjectDocument(
+      entries({ project: '{"schemaVersion":4}' }),
+      "/a/p.ngt",
+      NOT_FOUND,
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("hands back no compositions for an archive without the entry", async () => {
+    const result = await readProjectDocument(entries(), "/a/p.ngt", NOT_FOUND);
+    expect(result.ok && result.compositions).toEqual({});
+  });
+
+  it("reads the compositions entry it is handed", async () => {
+    const text = JSON.stringify({
+      v: 1,
+      compositions: [
+        {
+          id: "c1",
+          name: "Intro",
+          size: { w: 10, h: 20 },
+          tracks: [],
+          elements: {},
+          assetPaths: { version: 1, entries: {} },
+        },
+      ],
+    });
+    const result = await readProjectDocument(
+      entries(),
+      "/a/p.ngt",
+      NOT_FOUND,
+      text,
+    );
+    expect(result.ok && Object.keys(result.compositions)).toEqual(["c1"]);
   });
 
   it("opens version 3, which is what a project holding a graphic is written as", async () => {

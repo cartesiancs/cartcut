@@ -40,6 +40,12 @@ import {
   type ReadProjectResult,
 } from "../features/project/projectDocument";
 
+import {
+  COMPOSITIONS_ENTRY,
+  compositionsExtraEntries,
+} from "../features/project/compositionsFile";
+import { projectSnapshot } from "../features/composition/projectSnapshot";
+
 const timelineStore = useTimelineStore.getState();
 const uiState = uiStore.getState();
 
@@ -127,7 +133,11 @@ const project = {
     const filepath: string = picked;
 
     let entries;
-    const extras: ProjectExtras = { extensions: null, timelineView: null };
+    const extras: ProjectExtras = {
+      extensions: null,
+      timelineView: null,
+      compositions: null,
+    };
     try {
       // One read of the archive, not two. The document and the project's
       // settings used to be pulled from separate `loadAsync` chains with no
@@ -142,6 +152,7 @@ const project = {
       // which is what lets this be added without moving `SCHEMA_VERSION`.
       extras.extensions = await readNgtExtra(zip, EXTENSIONS_ENTRY);
       extras.timelineView = await readNgtExtra(zip, TIMELINE_VIEW_ENTRY);
+      extras.compositions = await readNgtExtra(zip, COMPOSITIONS_ENTRY);
     } catch (error) {
       project.showLoadFailure(
         `This project could not be opened — ${String(error)}.`,
@@ -152,8 +163,11 @@ const project = {
     // `existFile` takes a real filesystem path, which is why `relinkAssets`
     // converts before it probes — handing it a `file://` URL makes
     // `fsp.access` report a present file as missing.
-    const read = await readProjectDocument(entries, filepath, (fsPath) =>
-      filesystem.existFile(fsPath),
+    const read = await readProjectDocument(
+      entries,
+      filepath,
+      (fsPath) => filesystem.existFile(fsPath),
+      extras.compositions ?? null,
     );
 
     // Nothing has been touched yet, which is the point of reading before
@@ -188,6 +202,14 @@ const project = {
     _source: string,
     extras: Partial<ProjectExtras> = {},
   ): void {
+    // First of all, while the previous project is still whole. If one of its
+    // templates was showing, this puts its timeline away and gives the render
+    // options back the previous project's own frame
+    // (`composition/switchEffects.ts`), which the file's options below then
+    // replace. Clearing after them, as this used to, let that restore
+    // overwrite the frame size just read from the file.
+    timelineStore.clearTimeline();
+
     // Before the document, so an extension woken by `project.opened` finds its
     // own data already there rather than reading an empty store and caching
     // the answer.
@@ -200,7 +222,13 @@ const project = {
     // nothing from the previously open project is left behind. Also before
     // `markProjectSaved`, whose baseline digest includes these heights. The
     // notes ride in the same entry and are replaced for the same reasons.
-    const trackIds = read.document.tracks.map((track) => track.id);
+    // Every row in the project, the templates' own included: theirs are
+    // resized and noted in their tabs and saved in the same entry.
+    const compositions = read.compositions ?? {};
+    const trackIds = [
+      ...read.document.tracks,
+      ...Object.values(compositions).flatMap((composition) => composition.tracks),
+    ].map((track) => track.id);
     trackHeightStore
       .getState()
       .replace(parseTimelineViewEntry(extras.timelineView ?? null, trackIds));
@@ -220,13 +248,22 @@ const project = {
         ),
       );
 
-    timelineStore.clearTimeline();
-    timelineStore.patchDocument(read.document, { bakeHz: projectBakeHz() });
+    timelineStore.loadProject(
+      {
+        main: { tracks: read.document.tracks, elements: read.document.elements },
+        compositions,
+      },
+      { bakeHz: projectBakeHz() },
+    );
 
     // Nothing else on the load path does this, so a text element naming a font
-    // the user has not picked this session would draw in the fallback — in the
-    // preview and in the export.
+    // the user has not picked this session would draw in the fallback, in the
+    // preview and in the export. A template's own text draws in main's picture
+    // as much as main's does.
     registerDocumentFonts(read.document.elements);
+    for (const composition of Object.values(compositions)) {
+      registerDocumentFonts(composition.elements);
+    }
 
     if (read.missing > 0) {
       // Counted in files rather than clips: twenty cuts of one missing video
@@ -253,7 +290,11 @@ const project = {
   saveProjectFile: async function ({
     projectDestination,
   }): Promise<SaveOutcome> {
-    const { tracks, elements } = useTimelineStore.getState().getDocument();
+    // The project, whichever timeline is showing: main's document, the
+    // templates main names, and the project's own frame size.
+    const snapshot = projectSnapshot();
+    const { tracks, elements } = snapshot.project.main;
+    const compositions = snapshot.project.compositions;
     // Guarded: `previewRatio` is written into `renderOptions.json` and never
     // read back (`renderOptionsFile.ts` says so), so a missing component is
     // worth a default rather than a thrown save.
@@ -267,9 +308,10 @@ const project = {
     const entries = serializeProjectEntries({
       elements,
       tracks,
-      options: renderOptionStore.getState().options,
+      options: snapshot.options,
       anchor: projectDestination,
       previewRatio,
+      compositionCount: Object.keys(compositions).length,
     });
 
     // The optional entries, or nothing at all. Each answers an empty object
@@ -278,7 +320,8 @@ const project = {
     // byte-identical to a project saved before either existed.
     const content = await buildNgtBlob(entries, {
       ...extensionsExtraEntries(),
-      ...timelineViewExtraEntries(tracks),
+      ...timelineViewExtraEntries(snapshot.tracks),
+      ...compositionsExtraEntries(compositions, projectDestination),
     });
     const base64 = arrayBufferToBase64(await content.arrayBuffer());
 

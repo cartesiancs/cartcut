@@ -18,9 +18,18 @@
  */
 
 import type { Timeline } from "../../@types/timeline";
+import type { TemplateResolver } from "../renderer/template";
 import { expandTemplates } from "./compose";
 import { templateFor } from "./templateRegistry";
 
-export function assetTimeline(elements: Timeline): Timeline {
-  return expandTemplates(elements, templateFor);
+/**
+ * `resolve` is the registry for the preview. An export passes the resolver it
+ * captured when Render was pressed, so the files it decodes are the ones its
+ * frames draw (`renderer/template.ts#withTemplateResolver`).
+ */
+export function assetTimeline(
+  elements: Timeline,
+  resolve: TemplateResolver = templateFor,
+): Timeline {
+  return expandTemplates(elements, resolve);
 }

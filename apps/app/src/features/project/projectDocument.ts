@@ -36,7 +36,9 @@ import {
   type TimelineDocument,
   type TimelineTrack,
 } from "../timeline/tracks";
+import type { Composition } from "../composition/project";
 import { relinkAssets, type ExistsFn } from "./assetsFile";
+import { readCompositions } from "./compositionsFile";
 import type { NgtEntries } from "./projectEntries";
 
 export type ReadProjectResult =
@@ -49,6 +51,11 @@ export type ReadProjectResult =
       relinked: number;
       /** Distinct files not found — counted in files, never in clips. */
       missing: number;
+      /**
+       * The templates the project owns (`compositions.json`), relinked like
+       * the document. Empty for a project without the entry.
+       */
+      compositions: Record<string, Composition>;
     }
   | { ok: false; reason: "schema"; found: unknown; expected: typeof SCHEMA_VERSION }
   | { ok: false; reason: "unreadable"; message: string };
@@ -76,6 +83,8 @@ export async function readProjectDocument(
   entries: NgtEntries,
   anchor: string,
   exists: ExistsFn,
+  /** The `compositions.json` extra, as text, when the archive has one. */
+  compositionsText: string | null = null,
 ): Promise<ReadProjectResult> {
   // Projects written before tracks existed have no `project.json` and no
   // `tracks.json`; their elements carry a hand-assigned `priority` that
@@ -141,12 +150,16 @@ export async function readProjectDocument(
     elements: relink.elements as Timeline,
   });
 
+  const owned = await readCompositions(compositionsText, anchor, exists);
+
   return {
     ok: true,
     document,
     renderOptions: parse(entries.renderOptions),
-    relinked: relink.relinked,
-    missing: relink.missing,
+    // A file missing from main and from a template is counted once in each.
+    relinked: relink.relinked + owned.relinked,
+    missing: relink.missing + owned.missing,
+    compositions: owned.compositions,
   };
 }
 

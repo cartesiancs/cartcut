@@ -11,7 +11,13 @@ import { installTemplateResolver } from "./features/renderer/template";
 import { installPreviewGraphicRuntime } from "./features/graphic/graphicRuntime";
 import { IS_MAC } from "./utils/platform";
 import { exportElementRenderers } from "./features/export/renderers";
-import { templateFor, refreshTemplateLibrary } from "./features/template/templateRegistry";
+import {
+  installProjectTemplates,
+  refreshTemplateLibrary,
+  templateFor,
+} from "./features/template/templateRegistry";
+import { useTimelineStore } from "./states/timelineStore";
+import { compositionDataOf } from "./states/timelineWorkspace";
 import { startCloud } from "./features/cloud/cloudStore";
 import { MOBILE_LAYOUT } from "./features/mobile/install";
 import "./features/mobile/mobileShell";
@@ -70,6 +76,12 @@ export class App extends LitElement {
     // moment late is a frame nobody saw — and it is what stops a template's
     // clips showing whatever their decoders happened to be holding.
     installTemplateResolver(templateFor, exportElementRenderers);
+
+    // A template the project owns (one expanded into a timeline of its own)
+    // is read from the timeline store, live, whichever timeline is showing.
+    installProjectTemplates((compositionId) =>
+      compositionDataOf(useTimelineStore.getState(), compositionId),
+    );
 
     // And the graphic renderer's: the preview's generator, the registry, the
     // latest HTML rasters. An export opens a scope of its own instead.

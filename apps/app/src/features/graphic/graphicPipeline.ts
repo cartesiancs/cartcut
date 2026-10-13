@@ -74,11 +74,15 @@ function fontOf(element: GraphicElementType, value: string): FontEntry {
   return fontEntryFor(asset ?? value, bundledPath);
 }
 
+/** How a template's contents are found: the live registry, or a captured one. */
+type TemplateExpander = PlanInput["expandTemplate"];
+
 function planInput(
   elements: Timeline,
   timeInMs: number,
   fps: number,
   scaleOf: (instanceId: string) => number,
+  expandTemplate: TemplateExpander = templateCompositionAt,
 ): PlanInput {
   listenForFonts();
   return {
@@ -86,7 +90,7 @@ function planInput(
     timeInMs,
     fps,
     presetOf: (element) => resolvePreset(element),
-    expandTemplate: templateCompositionAt,
+    expandTemplate,
     scaleOf,
     resolvers: {
       // The element is not known here; `asset:` font values are resolved in
@@ -120,8 +124,11 @@ const fontsOf: PrepareDeps["fontsOf"] = (job) => {
 };
 
 /** Whether this document has anything for the host to do, inside a template included. */
-export function needsHtmlHost(elements: Timeline): boolean {
-  return hasHtmlGraphics(elements, (element) => resolvePreset(element), templateCompositionAt);
+export function needsHtmlHost(
+  elements: Timeline,
+  expandTemplate: TemplateExpander = templateCompositionAt,
+): boolean {
+  return hasHtmlGraphics(elements, (element) => resolvePreset(element), expandTemplate);
 }
 
 const previewDeps = depsFor(previewHtmlHost());
@@ -151,10 +158,24 @@ export async function prepareScopeFrame(
   scope: GraphicScope,
   elements: Timeline,
   timeInMs: number,
-  { queued = true }: { queued?: boolean } = {},
+  {
+    queued = true,
+    expandTemplate = templateCompositionAt,
+  }: {
+    queued?: boolean;
+    /**
+     * Where a template's contents come from. An export passes the resolver it
+     * captured at the click (`templateExpanderFor`), because this awaits fonts
+     * before it plans, and a composition edited during that await would be
+     * rasterised from its new contents and drawn from its old ones.
+     */
+    expandTemplate?: TemplateExpander;
+  } = {},
 ): Promise<boolean> {
   await loadFontLibrary();
-  const jobs = planGraphics(planInput(elements, timeInMs, scope.fps, () => 1));
+  const jobs = planGraphics(
+    planInput(elements, timeInMs, scope.fps, () => 1, expandTemplate),
+  );
   scope.rasters.clear();
   if (jobs.length === 0) {
     return true;

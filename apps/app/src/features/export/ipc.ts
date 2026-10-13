@@ -1,5 +1,6 @@
 import type { Timeline } from "../../@types/timeline";
 import { loadedAssetStore } from "../asset/loadedAssetStore";
+import type { TemplateResolver } from "../renderer/template";
 import type { TimelineRenderers } from "../renderer/timeline";
 import { renderTimeline } from "./renderTimeline";
 import type { ExportOptions } from "./types";
@@ -10,6 +11,7 @@ export async function requestIPCVideoExport(
   options: ExportOptions,
   progressCallback: (currentFrame: number, totalFrames: number) => void,
   signal?: AbortSignal,
+  resolveTemplate?: TemplateResolver,
 ): Promise<void> {
   const assetStore = loadedAssetStore.getState();
 
@@ -41,7 +43,7 @@ export async function requestIPCVideoExport(
           sessionId,
         );
       },
-      { signal },
+      { signal, resolveTemplate },
     );
 
     // After the loop, not on the last frame: a zero-length project emits no

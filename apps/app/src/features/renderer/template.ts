@@ -53,8 +53,40 @@ import { renderTimelineAtTime, type TimelineRenderers } from "./timeline";
 /** Fully transparent: `fillRect` with this over a cleared layer is a no-op. */
 const TRANSPARENT = "rgba(0, 0, 0, 0)";
 
-let resolveTemplate: (templateId: string) => TemplateData | null = () => null;
+/** Where a template id's document comes from. `templateRegistry#templateFor` in the app. */
+export type TemplateResolver = (templateId: string) => TemplateData | null;
+
+let resolveTemplate: TemplateResolver = () => null;
 let renderers: TimelineRenderers | null = null;
+
+/**
+ * The resolver a composite in progress has asked for, over the installed one.
+ *
+ * An export draws from the project as it stood when Render was pressed, and a
+ * template the project owns (a composition) can be edited while it runs. So the
+ * export captures its compositions at the click and composites inside
+ * `withTemplateResolver`, the arrangement `withVideoScope` makes for decoders.
+ * Safe for the reason that one is: every renderer is synchronous, so the scope
+ * cannot leak past the composite it wraps.
+ */
+let scopedResolver: TemplateResolver | null = null;
+
+function activeResolver(): TemplateResolver {
+  return scopedResolver ?? resolveTemplate;
+}
+
+export function withTemplateResolver<T>(
+  resolve: TemplateResolver,
+  fn: () => T,
+): T {
+  const previous = scopedResolver;
+  scopedResolver = resolve;
+  try {
+    return fn();
+  } finally {
+    scopedResolver = previous;
+  }
+}
 
 /**
  * Point the template renderer at a registry and a renderer table.
@@ -63,7 +95,7 @@ let renderers: TimelineRenderers | null = null;
  * suites with a table of their own.
  */
 export function installTemplateResolver(
-  resolve: (templateId: string) => TemplateData | null,
+  resolve: TemplateResolver,
   table: TimelineRenderers,
 ): void {
   resolveTemplate = resolve;
@@ -133,8 +165,9 @@ export function templateCompositionAt(
   elementId: string,
   element: TemplateElementType,
   timelineCursor: number,
+  resolve: TemplateResolver = activeResolver(),
 ): { elements: Timeline; cursor: number } | null {
-  const data = resolveTemplate(element.templateId);
+  const data = resolve(element.templateId);
   if (data == null) {
     return null;
   }
@@ -142,6 +175,22 @@ export function templateCompositionAt(
     elements: compositionFor(data, elementId, element),
     cursor: innerCursorOf(element, timelineCursor, data.durationMs),
   };
+}
+
+/**
+ * `templateCompositionAt` bound to one resolver, for work that awaits between
+ * frames and so cannot sit inside `withTemplateResolver`: an export's and a
+ * contact sheet's graphic prepare.
+ */
+export function templateExpanderFor(
+  resolve: TemplateResolver,
+): (
+  elementId: string,
+  element: TemplateElementType,
+  timelineCursor: number,
+) => { elements: Timeline; cursor: number } | null {
+  return (elementId, element, timelineCursor) =>
+    templateCompositionAt(elementId, element, timelineCursor, resolve);
 }
 
 export function renderTemplate(
@@ -155,7 +204,7 @@ export function renderTemplate(
     return;
   }
 
-  const data = resolveTemplate(element.templateId);
+  const data = activeResolver()(element.templateId);
   // Not installed, not read yet, or unreadable — all three draw nothing and
   // report nothing. The contract `lutFor` already has, and the reason the bar
   // carries the template's `name`: something has to say what is missing, and

@@ -43,6 +43,7 @@ import {
   type ProjectExtras,
 } from "./projectArchive";
 import { TIMELINE_VIEW_ENTRY } from "./timelineView";
+import { COMPOSITIONS_ENTRY } from "./compositionsFile";
 import {
   readProjectDocument,
   readProjectFailureMessage,
@@ -176,13 +177,20 @@ export async function recoverAutosave(
 
   let entries;
   let autosaveMeta: AutosaveArchiveMeta = null;
-  const extras: ProjectExtras = { extensions: null, timelineView: null };
+  const extras: ProjectExtras = {
+    extensions: null,
+    timelineView: null,
+    compositions: null,
+  };
   try {
     const zip = await openNgt(await reader.readFile(pick.file));
     entries = await readNgtEntries(zip);
     const raw = parse(await readNgtExtra(zip, "autosave.json"));
     extras.extensions = await readNgtExtra(zip, EXTENSIONS_ENTRY);
     extras.timelineView = await readNgtExtra(zip, TIMELINE_VIEW_ENTRY);
+    // The project's own templates, or a recovered autosave would bring back
+    // every clip that names one and none of what they draw.
+    extras.compositions = await readNgtExtra(zip, COMPOSITIONS_ENTRY);
     autosaveMeta =
       raw != null && typeof raw === "object"
         ? (raw as AutosaveArchiveMeta)
@@ -201,7 +209,12 @@ export async function recoverAutosave(
       ? autosaveMeta.anchor
       : pick.file;
 
-  const read = await readProjectDocument(entries, anchor, reader.exists);
+  const read = await readProjectDocument(
+    entries,
+    anchor,
+    reader.exists,
+    extras.compositions ?? null,
+  );
   if (!read.ok) {
     const message = readProjectFailureMessage(read);
     effects.warn(message);

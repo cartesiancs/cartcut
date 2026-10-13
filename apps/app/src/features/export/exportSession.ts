@@ -26,6 +26,12 @@ import { requestIPCVideoExport } from "./ipc";
 import { exportElementRenderers } from "./renderers";
 import { frameCount } from "./frames";
 import { snapshotExportOptions, snapshotTimeline } from "./snapshot";
+import {
+  projectRenderOptions,
+  projectSnapshot,
+} from "../composition/projectSnapshot";
+import { snapshotTemplateResolver } from "../../states/timelineWorkspace";
+import { templateFor } from "../template/templateRegistry";
 
 /**
  * How long a cancel may sit unconfirmed before the button frees itself.
@@ -102,10 +108,17 @@ export async function startExport(): Promise<void> {
   // Read after the dialog, at the last instant before any work begins: the
   // dialog is modal to the window but the user may have been editing right up
   // to opening it.
-  const timeline = snapshotTimeline(useTimelineStore.getState().timeline);
-  const options = snapshotExportOptions(
-    renderOptionStore.getState().options,
-    videoDestination,
+  // The project, whichever timeline is showing: main's document at the
+  // project's own frame. A template's own timeline is edited in its tab and
+  // reaches the file through the clip that places it.
+  const snapshot = projectSnapshot();
+  const timeline = snapshotTimeline(snapshot.project.main.elements);
+  const options = snapshotExportOptions(snapshot.options, videoDestination);
+  // And every template the project owns, as it stands now: one edited while
+  // this renders must not change the frames still to come.
+  const resolveTemplate = snapshotTemplateResolver(
+    useTimelineStore.getState(),
+    templateFor,
   );
 
   /*
@@ -141,6 +154,7 @@ export async function startExport(): Promise<void> {
       (currentFrame, totalFrames) =>
         exportProgress.onFrame(currentFrame, totalFrames),
       running.signal,
+      resolveTemplate,
     );
 
     // The frame loop is done; FFmpeg is not. `finishStream` only closes its
@@ -236,7 +250,7 @@ async function requestHttpRender(): Promise<void> {
   installHttpRenderListeners();
 
   const tempPath = await window.electronAPI.req.app.getTempPath();
-  const renderOptionState = renderOptionStore.getState().options;
+  const renderOptionState = projectRenderOptions();
   const elementControlComponent: any =
     document.querySelector("element-control");
 
@@ -269,7 +283,7 @@ async function requestHttpRender(): Promise<void> {
   // It used to mutate the store's own elements in place.
   const timeline: any = snapshotTimeline(
     Object.fromEntries(
-      Object.entries(useTimelineStore.getState().timeline).sort(
+      Object.entries(projectSnapshot().project.main.elements).sort(
         ([, a]: any, [, b]: any) => a.priority - b.priority,
       ),
     ),
