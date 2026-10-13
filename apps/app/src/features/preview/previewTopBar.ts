@@ -3,6 +3,7 @@ import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
+import { newNullLengthMs } from "../composition/timelineEnd";
 import {
   ActiveStringType,
   IControlPanelStore,
@@ -161,12 +162,13 @@ export class PreviewTopBar extends LitElement {
    */
   createNull() {
     const elementId = uuidv4();
-    const { previewSize, duration } = this.renderOption;
+    const { previewSize } = this.renderOption;
 
     const element = createNullElement({
       center: { x: Number(previewSize.w) / 2, y: Number(previewSize.h) / 2 },
-      // `renderOption.duration` is in seconds.
-      duration: duration * 1000,
+      // The whole of the timeline it lands in: the project's length, or a
+      // template's own (`composition/timelineEnd.ts`).
+      duration: newNullLengthMs(),
     });
 
     this.timelineState.withCheckpoint((doc) =>
@@ -433,65 +435,8 @@ export class PreviewTopBar extends LitElement {
           flex: 0 0 auto;
         }
 
-        /* 2px, not the 0.5rem the filled chips needed: a quiet tab has no box
-           of its own to separate, and wider gaps read as three loose words. */
-        .preview-tab-scroll {
-          display: flex;
-          flex-direction: row;
-          align-items: center;
-          gap: 2px;
-          min-width: 0;
-          overflow-x: auto;
-          overflow-y: hidden;
-          /* No scrollbar anywhere: the edge fades are the affordance. */
-          scrollbar-width: none;
-          -ms-overflow-style: none;
-        }
-
-        .preview-tab-scroll::-webkit-scrollbar {
-          display: none;
-        }
-
-        .preview-tab-scroll > * {
-          flex: 0 0 auto;
-        }
-
-        /* A mask rather than an overlaid gradient, so the fade holds over the
-           bar's background whatever that background becomes. */
-        .preview-tab-scroll.fade-start {
-          -webkit-mask-image: linear-gradient(
-            to right,
-            transparent 0,
-            #000 1.5rem
-          );
-          mask-image: linear-gradient(to right, transparent 0, #000 1.5rem);
-        }
-
-        .preview-tab-scroll.fade-end {
-          -webkit-mask-image: linear-gradient(
-            to left,
-            transparent 0,
-            #000 1.5rem
-          );
-          mask-image: linear-gradient(to left, transparent 0, #000 1.5rem);
-        }
-
-        .preview-tab-scroll.fade-start.fade-end {
-          -webkit-mask-image: linear-gradient(
-            to right,
-            transparent 0,
-            #000 1.5rem,
-            #000 calc(100% - 1.5rem),
-            transparent 100%
-          );
-          mask-image: linear-gradient(
-            to right,
-            transparent 0,
-            #000 1.5rem,
-            #000 calc(100% - 1.5rem),
-            transparent 100%
-          );
-        }
+        /* The strip itself is the shared .tb-tab-strip in _toolbar.scss,
+           which the title bar's timeline tabs use too. */
       </style>
 
       <div class="timeline-cursor-buttons bg-darker">
@@ -499,7 +444,7 @@ export class PreviewTopBar extends LitElement {
              one row of tabs that all scroll together is the only arrangement
              that still looks like one thing at a few hundred pixels. -->
         <div
-          class="preview-tab-bar preview-tab-scroll p-1 ${this.tabOverflowStart
+          class="preview-tab-bar preview-tab-scroll tb-tab-strip p-1 ${this.tabOverflowStart
             ? "fade-start"
             : ""} ${this.tabOverflowEnd ? "fade-end" : ""}"
           @scroll=${this._handleTabScroll}

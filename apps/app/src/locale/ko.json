@@ -80,6 +80,7 @@
     "minute_unit": "분",
     "frame": "프레임",
     "resolution": "해상도",
+    "resolution_in_template": "프로젝트 해상도입니다. 템플릿의 타임라인은 만들어진 크기를 유지하므로 Main 탭에서 설정합니다.",
     "save_project": "프로젝트 저장",
     "load_project": "프로젝트 불러오기",
     "bitrate": "비트레이트",

@@ -1,6 +1,7 @@
 import { LitElement, css, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
+import { activeTimelineScrollEndMs } from "../composition/timelineEnd";
 import { IUIStore, uiStore } from "../../states/uiStore";
 import {
   IRenderOptionStore,
@@ -150,11 +151,12 @@ export class ElementTimelineBottomScroll extends LitElement {
         "#elementTimelineCanvasRef",
       ) as HTMLElement;
 
-      const projectDuration = this.renderOption.duration;
+      // In ms: main's length, or a template's with room past its last clip.
+      const projectEndMs = activeTimelineScrollEndMs();
       const timelineRange = this.timelineRange;
       const timeMagnification = timelineRange / 4;
 
-      const end = ((projectDuration * 1000) / 5) * timeMagnification;
+      const end = (projectEndMs / 5) * timeMagnification;
 
       const width = 100 / (end / timelineCanvas.offsetWidth);
 
@@ -215,7 +217,7 @@ export class ElementTimelineBottomScroll extends LitElement {
   /** The largest scroll this project admits at the current zoom. */
   private maxScroll(): number {
     return maxTimelineScroll(
-      this.renderOption.duration * 1000,
+      activeTimelineScrollEndMs(),
       this.timelineRange,
       useTimelineStore.getState().canvasWidth,
     );

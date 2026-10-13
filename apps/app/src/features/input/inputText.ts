@@ -65,7 +65,8 @@ export class InputText extends LitElement {
 
   setWidthInner() {
     const element = this.timeline[this.elementId];
-    if (element.filetype !== "text") {
+    // Gone when the timeline it belongs to is no longer the one showing.
+    if (element?.filetype !== "text") {
       return;
     }
     console.log();
@@ -82,7 +83,8 @@ export class InputText extends LitElement {
 
   updateText({ value }: { value: string }) {
     const element = this.timeline[this.elementId];
-    if (element.filetype !== "text") {
+    // Gone when the timeline it belongs to is no longer the one showing.
+    if (element?.filetype !== "text") {
       return;
     }
     console.log(element, this.timeline, this.elementId);

@@ -94,6 +94,65 @@ $tb-hover: #1f2327;
   opacity: 1;
 }
 
+/*
+ * A row of `.tb-tab` chips that scrolls sideways: the preview's panels and the
+ * timelines above the timeline. One rule for both, so the two rows cannot drift
+ * apart.
+ *
+ * 2px between chips, not the 0.5rem the filled chips needed: a quiet tab has
+ * no box of its own to separate, and wider gaps read as three loose words.
+ * `min-width: 0` is what lets the strip shrink past its content width. No
+ * scrollbar anywhere: the edge fades are the affordance, and a mask rather
+ * than an overlaid gradient holds over whatever the bar's background becomes.
+ * The fades and the wheel are driven by `features/window/tabStrip.ts`.
+ */
+.tb-tab-strip {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.tb-tab-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.tb-tab-strip > * {
+  flex: 0 0 auto;
+}
+
+.tb-tab-strip.fade-start {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 1.5rem);
+  mask-image: linear-gradient(to right, transparent 0, #000 1.5rem);
+}
+
+.tb-tab-strip.fade-end {
+  -webkit-mask-image: linear-gradient(to left, transparent 0, #000 1.5rem);
+  mask-image: linear-gradient(to left, transparent 0, #000 1.5rem);
+}
+
+.tb-tab-strip.fade-start.fade-end {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 1.5rem,
+    #000 calc(100% - 1.5rem),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 1.5rem,
+    #000 calc(100% - 1.5rem),
+    transparent 100%
+  );
+}
+
 /* ----------------------------------------------------------------- buttons */
 
 .tb-group {

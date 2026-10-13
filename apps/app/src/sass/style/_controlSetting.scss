@@ -95,6 +95,20 @@ input.proj-unit-input::placeholder {
   color: #666d75;
 }
 
+/*
+ * The resolution while a template's own timeline is showing: that size is
+ * fixed (the clips placing it draw from a layer that size), so the fields and
+ * the ratio tiles read as set rather than as something to change.
+ */
+input.proj-unit-input:disabled {
+  color: #666d75;
+  cursor: default;
+}
+
+.proj-tiles > .opt-tile:disabled {
+  opacity: 0.45;
+}
+
 .proj-unit {
   flex: none;
   color: $opt-label;

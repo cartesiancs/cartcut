@@ -18,6 +18,10 @@ import { renderOptionStore } from "../../states/renderOptionStore";
 import { snapMsToFrame } from "../timeline/frames";
 import { addTemplate, createTemplateElement } from "../timeline/templateOps";
 import { loadTemplate, templateListing } from "./templateRegistry";
+import {
+  NESTED_TEMPLATE_MESSAGE,
+  canHoldTemplates,
+} from "../composition/nesting";
 
 export type AddTemplateResult =
   | { ok: true; elementId: string }
@@ -38,6 +42,17 @@ export async function addTemplateToTimeline(
   templateId: string,
   target: AddTemplateTarget,
 ): Promise<AddTemplateResult> {
+  // The timeline the gesture was made in, and its frame, read before the
+  // await: the template is placed there even if another tab is showing by
+  // the time it has loaded, fitted to the frame the user was looking at.
+  const timelineId = useTimelineStore.getState().activeTimelineId;
+  if (!canHoldTemplates(timelineId)) {
+    return { ok: false, message: NESTED_TEMPLATE_MESSAGE };
+  }
+  const options = renderOptionStore.getState().options;
+  const frame = { ...(options.previewSize ?? { w: 1920, h: 1080 }) };
+  const fps = options.fps ?? 60;
+
   const listing = templateListing(templateId);
   if (listing == null) {
     return { ok: false, message: "That template is not installed." };
@@ -51,10 +66,6 @@ export async function addTemplateToTimeline(
     };
   }
 
-  const options = renderOptionStore.getState().options;
-  const frame = options.previewSize ?? { w: 1920, h: 1080 };
-  const fps = options.fps ?? 60;
-
   const element = createTemplateElement({
     templateId,
     name: data.name,
@@ -66,7 +77,7 @@ export async function addTemplateToTimeline(
   const elementId = uuidv4();
   const startMs = snapMsToFrame(Math.max(0, target.startMs), fps);
 
-  useTimelineStore.getState().withCheckpoint((doc) =>
+  useTimelineStore.getState().withCheckpointOn(timelineId, (doc) =>
     addTemplate(
       doc,
       elementId,
@@ -77,5 +88,12 @@ export async function addTemplateToTimeline(
     ),
   );
 
+  // A placement can decline (no room on the row asked for), and saying it
+  // worked would leave a caller timing the next drop off a clip that is not
+  // there.
+  const placed = useTimelineStore.getState().getProject().main.elements[elementId];
+  if (placed == null) {
+    return { ok: false, message: `${listing.name} could not be placed there.` };
+  }
   return { ok: true, elementId };
 }

@@ -28,6 +28,7 @@ import { projectBakeHz } from "../../editor/frameRate";
 import { commit, declined } from "../commit";
 import { currentDoc, playheadMs, requireElement } from "../context";
 import { registerCommands } from "../registry";
+import { newNullLengthMs } from "../../composition/timelineEnd";
 
 registerCommands({
   /**
@@ -46,7 +47,7 @@ registerCommands({
     x?: number;
     y?: number;
   }) => {
-    const { previewSize, duration } = renderOptionStore.getState().options;
+    const { previewSize } = renderOptionStore.getState().options;
     const nullId = uuidv4();
 
     const element = createNullElement({
@@ -57,8 +58,9 @@ registerCommands({
         x: params.x ?? Number(previewSize.w) / 2,
         y: params.y ?? Number(previewSize.h) / 2,
       },
-      // `renderOption.duration` is in seconds.
-      duration: duration * 1000,
+      // The whole of the timeline it lands in: the project's length, or a
+      // template's own (`composition/timelineEnd.ts`).
+      duration: newNullLengthMs(),
     });
 
     // Seated at 0, not the playhead: `localSampleAt` falls back to the static

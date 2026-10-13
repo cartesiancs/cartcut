@@ -36,6 +36,11 @@ import { isCroppable } from "../timeline/cropOps";
 import { projectBakeHz } from "./frameRate";
 import { refusesEdit } from "./timelineLock";
 import { cancelActiveGestures } from "./gestureCancel";
+import {
+  NESTED_TEMPLATE_MESSAGE,
+  canHoldTemplates,
+  withoutTemplateClips,
+} from "../composition/nesting";
 import { canDetachAudio } from "../timeline/audio";
 import { detachAudioFrom } from "../timeline/audioOps";
 import { normalizeFps, snapMsToFrame } from "../timeline/frames";
@@ -194,8 +199,24 @@ export function cutSelection(): void {
 /** Paste at the playhead, keeping the copied clips' spacing relative to each other. */
 export function pasteFromClipboard(): void {
   const at = playheadMs();
-  const clipboard = selectionStore.getState().clipboard;
+  let clipboard = selectionStore.getState().clipboard;
+  // Copied from main into a template's own timeline: everything but the
+  // template clips, which cannot go there (`composition/nesting.ts`).
+  if (!canHoldTemplates(useTimelineStore.getState().activeTimelineId)) {
+    const filtered = withoutTemplateClips(clipboard);
+    if (filtered.dropped > 0) {
+      notifyUser(NESTED_TEMPLATE_MESSAGE);
+    }
+    clipboard = filtered.clips;
+  }
   commit((input) => pasteClips(input, clipboard, at, uuidv4));
+}
+
+/** A toast, where there is a page to show one on. */
+function notifyUser(message: string): void {
+  const page = (globalThis as { document?: Document }).document;
+  (page?.querySelector("toast-box") as { showToast?: (o: object) => void } | null)
+    ?.showToast?.({ message, delay: "4000" });
 }
 
 /** Split the selection's audio onto audio tracks of its own. */

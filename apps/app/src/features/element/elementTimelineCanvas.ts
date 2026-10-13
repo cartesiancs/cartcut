@@ -200,6 +200,10 @@ import { targetForElement } from "../mediaInfo/mediaInfoView";
 import { timelineTouchMode } from "../mobile/timelineTouch";
 import type { SurfaceMode } from "../mobile/touchGesture";
 import { noteStore } from "../../states/noteStore";
+import { expandTemplate } from "../composition/expandTemplate";
+import { activeTimelineEndMs } from "../composition/timelineEnd";
+import { compositionOfElement } from "../composition/project";
+import { MOBILE_LAYOUT } from "../mobile/install";
 import {
   drawNotePins,
   noteAnchorAt,
@@ -788,7 +792,8 @@ export class elementTimelineCanvas extends LitElement {
       // which is a decision `deleteClips` owns rather than the painter).
       selection: withDescendants(this.timeline, this.targetId),
       playheadMs: this.timelineCursor,
-      projectEndMs: this.renderOption.duration * 1000,
+      // Main's length, or a template's own (`composition/timelineEnd.ts`).
+      projectEndMs: activeTimelineEndMs(),
       snapGuideMs: this.snapGuideMs,
       // Hinted only while hovered; a transcript-driven edit has hundreds of
       // cuts and marking them all would be noise.
@@ -1121,6 +1126,58 @@ export class elementTimelineCanvas extends LitElement {
     if (target != null) {
       openMediaInfo(target);
     }
+  }
+
+  // ------------------------------------------------------ template timelines
+
+  /** Open the right-clicked template's own timeline in a tab of its own. */
+  public expandTemplateForSelected() {
+    const id = this.targetIdDuringRightClick[0];
+    if (id == null) {
+      return;
+    }
+    void expandTemplate(id).then((outcome) => {
+      if (!outcome.ok && outcome.reason !== "locked") {
+        (document.querySelector("toast-box") as any)?.showToast({
+          message: outcome.reason,
+          delay: "4000",
+        });
+      }
+    });
+  }
+
+  /** Save the right-clicked template, one this project owns, to the library. */
+  public saveTemplateForSelected() {
+    const element = this.currentDoc().elements[this.targetIdDuringRightClick[0]];
+    const compositionId = compositionOfElement(element);
+    if (compositionId != null) {
+      void (document.querySelector("timeline-tabs") as any)?.saveTemplate?.(
+        compositionId,
+      );
+    }
+  }
+
+  /**
+   * "Expand Template" for exactly one template clip, and "Save as Template…"
+   * once it is one the project owns. Not on the phone layout, which hides the
+   * row above the timeline that holds the tabs to get back.
+   */
+  private templateMenuTemplate(): string {
+    const ids = this.targetIdDuringRightClick;
+    if (ids.length !== 1 || MOBILE_LAYOUT) {
+      return "";
+    }
+    const element = this.currentDoc().elements[ids[0]];
+    if (element?.filetype !== "template") {
+      return "";
+    }
+    const call = (method: string, label: string, icon: string) =>
+      `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').${method}()" item-name="${label}" item-icon="${icon}"> </menu-dropdown-item>`;
+    const rows = [call("expandTemplateForSelected", "Expand Template", "open_in_full")];
+    if (compositionOfElement(element) != null) {
+      rows.push(call("saveTemplateForSelected", "Save as Template…", "bookmark_add"));
+    }
+    return rows.join("\n          ");
   }
 
   /**
@@ -2863,6 +2920,7 @@ export class elementTimelineCanvas extends LitElement {
   showMenuDropdown({ x, y }) {
     document.querySelector("#menuRightClick").innerHTML = `
         <menu-dropdown-body top="${y}" left="${x}">
+          ${this.templateMenuTemplate()}
           ${this.infoMenuTemplate()}
           ${this.animationMenuTemplate()}
           ${this.mediaMenuTemplate()}

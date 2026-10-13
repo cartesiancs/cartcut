@@ -14,6 +14,7 @@
  * would stop being a picture of the template.
  */
 
+import type { Timeline } from "../../@types/timeline";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { useTimelineStore } from "../../states/timelineStore";
 import { loadedAssetStore } from "../asset/loadedAssetStore";
@@ -45,11 +46,17 @@ function dataUrlToBytes(dataUrl: string): Uint8Array {
  */
 export async function renderTemplateThumbnail(
   atMs: number,
+  /**
+   * What to draw, when it is not the timeline showing at the frame being
+   * edited: a template the project owns, saved from a tab that is not open.
+   */
+  source?: { elements: Timeline; size: { w: number; h: number } },
 ): Promise<Uint8Array | null> {
   try {
-    const timeline = useTimelineStore.getState().timeline;
+    const timeline = source?.elements ?? useTimelineStore.getState().timeline;
     const options = renderOptionStore.getState().options;
-    const { w: frameWidth, h: frameHeight } = options.previewSize;
+    const { w: frameWidth, h: frameHeight } =
+      source?.size ?? options.previewSize;
     if (!(frameWidth > 0) || !(frameHeight > 0)) {
       return null;
     }

@@ -8,6 +8,7 @@ import { formatTimecode } from "../../features/timeline/timecode";
 import "../../features/element/elementTimelineScroll";
 import "../../features/element/elementTimelineBottom";
 import "../../features/editor/timelineToolbar";
+import "../../features/composition/timelineTabs";
 import { isTypingEvent } from "../../utils/typingTarget";
 
 @customElement("timeline-ui")
@@ -229,6 +230,22 @@ export class Timeline extends LitElement {
           gap: 4px;
         }
 
+        /* The timeline tabs: whatever is left of the column after the play
+           controls and the timecode, scrolling sideways past that. A zero
+           basis, so the tabs take only the space left and never squeeze the
+           timecode; a block, because a custom element with no display of its
+           own is inline and its width would do nothing. */
+        .transport-tabs {
+          display: block;
+          flex: 1 1 0;
+          min-width: 0;
+          margin-left: 8px;
+        }
+
+        .transport-timecode {
+          flex: none;
+        }
+
         .transport-btn {
           appearance: none;
           flex: none;
@@ -311,6 +328,7 @@ export class Timeline extends LitElement {
             <span class="transport-timecode"
               >${formatTimecode(this.timelineCursor, this.fps)}</span
             >
+            <timeline-tabs class="transport-tabs"></timeline-tabs>
           </div>
         </div>
         <div class="d-flex col col-5 gap-2">

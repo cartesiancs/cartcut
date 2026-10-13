@@ -80,6 +80,7 @@
     "minute_unit": "m",
     "frame": "Frame",
     "resolution": "Resolution",
+    "resolution_in_template": "The project's resolution. A template's own timeline keeps the size it was made at, so this is set from the Main tab.",
     "save_project": "Save Project",
     "load_project": "Load Project",
     "bitrate": "Bitrate",

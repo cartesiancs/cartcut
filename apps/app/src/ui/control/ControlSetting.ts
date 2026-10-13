@@ -4,6 +4,8 @@ import {
   IRenderOptionStore,
   renderOptionStore,
 } from "../../states/renderOptionStore";
+import { useTimelineStore } from "../../states/timelineStore";
+import { MAIN_TIMELINE } from "../../features/composition/project";
 import { LocaleController } from "../../controllers/locale";
 import "../../components/input/input";
 import "../../features/option/optionTabBar";
@@ -128,9 +130,26 @@ export class ControlSetting extends LitElement {
   @state()
   private showAdvanced = false;
 
+  /**
+   * Whether a template's own timeline is the one being edited. The frame size
+   * shown is then the template's (`composition/switchEffects.ts`), which is
+   * fixed: the clips placing it are drawn from a layer that size, so the
+   * resolution fields are disabled until main is showing again.
+   */
+  @state()
+  private editingTemplate =
+    useTimelineStore.getState().activeTimelineId !== MAIN_TIMELINE;
+
   createRenderRoot() {
     renderOptionStore.subscribe((state) => {
       this.renderOption = state.options;
+    });
+
+    useTimelineStore.subscribe((state) => {
+      const editingTemplate = state.activeTimelineId !== MAIN_TIMELINE;
+      if (editingTemplate !== this.editingTemplate) {
+        this.editingTemplate = editingTemplate;
+      }
     });
 
     window.electronAPI.req.app.getAppInfo().then((result) => {
@@ -152,11 +171,17 @@ export class ControlSetting extends LitElement {
   }
 
   _handleUpdatePreviewSizeW(e) {
+    if (this.editingTemplate) {
+      return;
+    }
     this.renderOption.previewSize.w = Number(e.target.value);
     this.renderOptionStore.updateOptions(this.renderOption);
   }
 
   _handleUpdatePreviewSizeH(e) {
+    if (this.editingTemplate) {
+      return;
+    }
     this.renderOption.previewSize.h = Number(e.target.value);
     this.renderOptionStore.updateOptions(this.renderOption);
   }
@@ -213,6 +238,9 @@ export class ControlSetting extends LitElement {
     if (spec == null) {
       return;
     }
+    if ((e.currentTarget as HTMLInputElement).disabled) {
+      return;
+    }
     beginInputScrub(e, spec);
   }
 
@@ -228,6 +256,9 @@ export class ControlSetting extends LitElement {
   }
 
   _handleClickResolution(w, h) {
+    if (this.editingTemplate) {
+      return;
+    }
     this.renderOption.previewSize.w = w;
     this.renderOption.previewSize.h = h;
     this.renderOptionStore.updateOptions(this.renderOption);
@@ -456,6 +487,7 @@ export class ControlSetting extends LitElement {
                   id="previewSizeH"
                   type="number"
                   class="proj-unit-input scrub-number"
+                  ?disabled=${this.editingTemplate}
                   @mousedown=${this._handleScrubDown}
                   .value=${String(this.renderOption.previewSize.h)}
                   @change=${this._handleUpdatePreviewSizeH}
@@ -466,6 +498,7 @@ export class ControlSetting extends LitElement {
                   id="previewSizeW"
                   type="number"
                   class="proj-unit-input scrub-number"
+                  ?disabled=${this.editingTemplate}
                   @mousedown=${this._handleScrubDown}
                   .value=${String(this.renderOption.previewSize.w)}
                   @change=${this._handleUpdatePreviewSizeW}
@@ -474,6 +507,12 @@ export class ControlSetting extends LitElement {
             </div>
           </div>
           <div class="opt-field">${this.renderResolutionPresets()}</div>
+          ${this.editingTemplate
+            ? html`<div class="opt-hint proj-hint">
+                ${this.lc.t("setting.resolution_in_template") ||
+                "The project's resolution. A template's own timeline keeps the size it was made at, so this is set from the Main tab."}
+              </div>`
+            : ""}
         `,
       })}
     `;
@@ -500,6 +539,7 @@ export class ControlSetting extends LitElement {
             <button
               type="button"
               class="opt-tile ${active ? "is-on" : ""}"
+              ?disabled=${this.editingTemplate}
               title=${preset.title}
               @click=${() => this._handleClickResolution(preset.w, preset.h)}
             >
