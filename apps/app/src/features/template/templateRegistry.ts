@@ -128,6 +128,21 @@ export function setTemplateLibrary(next: readonly InstalledTemplate[]): void {
   announce();
 }
 
+/**
+ * Drop one template's parsed document, so the next read takes the file again.
+ *
+ * `setTemplateLibrary` forgets a template whose folder is gone, and nothing
+ * else: a template re-installed under the same id keeps the same folder and
+ * the same `template.ngt` path, so the listing cannot tell the new file from
+ * the old one and the cached document would be drawn until a restart. The
+ * install path calls this once its bytes are on disk.
+ */
+export function forgetTemplate(templateId: string): void {
+  if (entries.delete(templateId)) {
+    announce();
+  }
+}
+
 /** Notified whenever the library changes. Returns its own unsubscribe. */
 export function subscribeTemplates(listener: () => void): () => void {
   listeners.add(listener);

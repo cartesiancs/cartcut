@@ -171,6 +171,7 @@ export async function readTemplateDocument(
     size: templateSizeOf(renderOptions),
     durationMs: templateDurationOf(document.elements, renderOptions),
     elements: document.elements,
+    tracks: document.tracks,
     // Derived once here rather than on every read, which is what lets
     // `composeTemplate` treat the slot list as a lookup.
     slots: slotsOf(document.elements),

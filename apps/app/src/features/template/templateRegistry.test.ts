@@ -4,6 +4,7 @@ import { imageElement } from "../renderer/testing";
 import { createTemplateElement } from "../timeline/templateOps";
 import type { TemplateData } from "./compose";
 import {
+  forgetTemplate,
   installedTemplates,
   loadTemplate,
   preloadTemplatesForDocument,
@@ -93,6 +94,36 @@ describe("the library", () => {
 
     setTemplateLibrary([]);
     expect(templateFor("neon")).toBeNull();
+  });
+
+  it("reads a re-installed template again once told to forget it", async () => {
+    // Same id, same folder, same path: nothing in the listing says the file
+    // behind it changed, so the install path has to say so.
+    let version = 1;
+    setTemplateReader(async () => data({ name: `v${version}` }));
+    setTemplateLibrary([listing()]);
+    await loadTemplate("neon");
+    expect(templateFor("neon")?.name).toBe("v1");
+
+    version = 2;
+    setTemplateLibrary([listing()]);
+    expect(templateFor("neon")?.name).toBe("v1");
+
+    const seen = vi.fn();
+    const off = subscribeTemplates(seen);
+    forgetTemplate("neon");
+    off();
+    expect(seen).toHaveBeenCalledTimes(1);
+    await loadTemplate("neon");
+    expect(templateFor("neon")?.name).toBe("v2");
+  });
+
+  it("forgets nothing, and tells nobody, for an id it never read", () => {
+    const seen = vi.fn();
+    const off = subscribeTemplates(seen);
+    forgetTemplate("ghost");
+    off();
+    expect(seen).not.toHaveBeenCalled();
   });
 
   it("notifies subscribers, and stops when unsubscribed", () => {

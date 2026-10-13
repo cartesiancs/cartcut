@@ -4,9 +4,16 @@ import {
   imageElement,
   shapeElement,
   textElement,
+  transitionElement,
   videoElement,
 } from "../renderer/testing";
-import { composeTemplate, expandTemplates, innerKeyOf } from "./compose";
+import { resolveLinks } from "../animation/link";
+import {
+  bakeFills,
+  composeTemplate,
+  expandTemplates,
+  innerKeyOf,
+} from "./compose";
 import type { TemplateData } from "./compose";
 import { slotsOf } from "./slots";
 
@@ -132,6 +139,72 @@ describe("namespacing", () => {
       placed(),
     );
     expect((composed["outer::child"] as any).parentId).toBeUndefined();
+  });
+
+  it("carries a property link's source into the namespace", () => {
+    // Left on its bare key, the link found nothing in the composed map and
+    // fell back to the static value: authored in the template's own project,
+    // it worked; placed, it silently did not.
+    const composed = composeTemplate(
+      data({
+        elements: {
+          spin: { ...shapeElement({ rotation: 45 }), filetype: "group", name: "N" },
+          card: imageElement({
+            opacity: 100,
+            link: {
+              opacity: {
+                from: { elementId: "spin", property: "rotation" },
+                in: [-90, 0, 90],
+                out: [0, 100, 0],
+              },
+            },
+          } as never),
+        } as unknown as Timeline,
+      }),
+      "outer",
+      placed(),
+    );
+    expect((composed["outer::card"] as any).link.opacity.from.elementId).toBe(
+      "outer::spin",
+    );
+    expect(resolveLinks(composed, "outer::card", 0)).toEqual({ opacity: 50 });
+  });
+
+  it("drops a link whose source is not in the template", () => {
+    const composed = composeTemplate(
+      data({
+        elements: {
+          card: imageElement({
+            link: {
+              opacity: {
+                from: { elementId: "ghost", property: "rotation" },
+                in: [0, 1],
+                out: [0, 1],
+              },
+            },
+          } as never),
+        } as unknown as Timeline,
+      }),
+      "outer",
+      placed(),
+    );
+    expect((composed["outer::card"] as any).link).toBeUndefined();
+  });
+
+  it("carries a transition's two clips into the namespace", () => {
+    const composed = composeTemplate(
+      data({
+        elements: {
+          a: imageElement(),
+          b: imageElement(),
+          cut: transitionElement({ fromId: "a", toId: "b" }),
+        } as unknown as Timeline,
+      }),
+      "outer",
+      placed(),
+    );
+    expect((composed["outer::cut"] as any).fromId).toBe("outer::a");
+    expect((composed["outer::cut"] as any).toId).toBe("outer::b");
   });
 
   it("round-trips through innerKeyOf", () => {
@@ -339,6 +412,143 @@ describe("filling a media slot", () => {
   });
 });
 
+describe("a fill of a different kind of picture", () => {
+  const photo = {
+    kind: "media" as const,
+    localpath: "file:///me/photo.png",
+    offsetMs: 0,
+    sourceDurationMs: 0,
+  };
+
+  it("turns a video slot into a still, keeping the author's placement", () => {
+    const source = data();
+    const composed = composeTemplate(
+      source,
+      "outer",
+      placed({ fills: { hero: photo } }),
+    );
+    const shot = composed["outer::shot"] as any;
+    const authored = source.elements.shot as any;
+    expect(shot.filetype).toBe("image");
+    expect(shot.localpath).toBe("file:///me/photo.png");
+    expect(shot.startTime).toBe(authored.startTime);
+    expect(shot.duration).toBe(authored.duration);
+    expect(shot.animation).toBe(authored.animation);
+    for (const field of [
+      "trim",
+      "sourceDuration",
+      "isExistAudio",
+      "codec",
+      "speed",
+      "filter",
+      "origin",
+    ]) {
+      expect(field in shot).toBe(false);
+    }
+  });
+
+  it("takes a video slot to a gif", () => {
+    const composed = composeTemplate(
+      data(),
+      "outer",
+      placed({ fills: { hero: { ...photo, localpath: "file:///me/loop.gif" } } }),
+    );
+    expect((composed["outer::shot"] as any).filetype).toBe("gif");
+    expect("trim" in (composed["outer::shot"] as any)).toBe(false);
+  });
+
+  it("turns an image slot into a video with a window over the fill", () => {
+    const composed = composeTemplate(
+      data({
+        elements: {
+          pic: imageElement({
+            duration: 2000,
+            width: 300,
+            height: 200,
+            replaceable: { slotId: "hero" },
+          }),
+        } as Timeline,
+      }),
+      "outer",
+      placed({
+        fills: {
+          hero: {
+            kind: "media",
+            localpath: "file:///me/clip.mov",
+            offsetMs: 500,
+            sourceDurationMs: 9000,
+            hasAudio: true,
+          },
+        },
+      }),
+    );
+    const pic = composed["outer::pic"] as any;
+    expect(pic.filetype).toBe("video");
+    expect(pic.trim).toEqual({ startTime: 500, endTime: 2500 });
+    expect(pic.sourceDuration).toBe(9000);
+    expect(pic.speed).toBe(1);
+    expect(pic.isExistAudio).toBe(true);
+    expect(pic.origin).toEqual({ width: 300, height: 200 });
+    expect(pic.filter).toEqual({ enable: false, list: [] });
+  });
+
+  it("says no sound for a video fill that did not record any", () => {
+    const composed = composeTemplate(
+      data({
+        elements: {
+          pic: imageElement({ replaceable: { slotId: "hero" } }),
+        } as Timeline,
+      }),
+      "outer",
+      placed({
+        fills: {
+          hero: {
+            kind: "media",
+            localpath: "file:///me/clip.mp4",
+            offsetMs: 0,
+            sourceDurationMs: 4000,
+          },
+        },
+      }),
+    );
+    expect((composed["outer::pic"] as any).isExistAudio).toBe(false);
+  });
+
+  it("takes a matching video fill's sound from the fill when it says", () => {
+    const fill = (hasAudio?: boolean) =>
+      composeTemplate(
+        data(),
+        "outer",
+        placed({
+          fills: {
+            hero: {
+              kind: "media",
+              localpath: "file:///me/mine.mp4",
+              offsetMs: 0,
+              sourceDurationMs: 9000,
+              ...(hasAudio == null ? {} : { hasAudio }),
+            },
+          },
+        }),
+      )["outer::shot"] as any;
+    expect(fill(false).isExistAudio).toBe(false);
+    expect(fill(true).isExistAudio).toBe(true);
+    // A fill from before the field keeps the placeholder's answer.
+    expect(fill().isExistAudio).toBe((templateDoc().shot as any).isExistAudio);
+  });
+
+  it("leaves the element's kind alone for a file it cannot place", () => {
+    const composed = composeTemplate(
+      data(),
+      "outer",
+      placed({
+        fills: { hero: { ...photo, localpath: "file:///me/notes.txt" } },
+      }),
+    );
+    expect((composed["outer::shot"] as any).filetype).toBe("video");
+  });
+});
+
 describe("filling a text slot", () => {
   it("replaces the text", () => {
     const composed = composeTemplate(
@@ -521,3 +731,94 @@ describe("expandTemplates", () => {
     );
   });
 });
+
+describe("bakeFills", () => {
+  it("applies the instance's fills under the template's own keys", () => {
+    const baked = bakeFills(
+      data(),
+      placed({ fills: { name: { kind: "text", text: "Ada" } } }),
+    );
+    expect(Object.keys(baked).sort()).toEqual(["bg", "shot", "title"]);
+    expect((baked.title as any).text).toBe("Ada");
+    expect((baked.title as any).key).toBe(templateDoc().title.key);
+  });
+
+  it("hands an unfilled element through by reference", () => {
+    const source = data();
+    const baked = bakeFills(source, placed());
+    expect(baked.bg).toBe(source.elements.bg);
+    expect(baked.shot).toBe(source.elements.shot);
+  });
+
+  it("leaves a nested template out", () => {
+    const baked = bakeFills(
+      data({
+        elements: {
+          ...templateDoc(),
+          inner: placed({ templateId: "other" }),
+        } as unknown as Timeline,
+      }),
+      placed(),
+    );
+    expect(baked.inner).toBeUndefined();
+  });
+
+  it("is what composeTemplate namespaces, element for element", () => {
+    const element = placed({
+      fills: {
+        hero: {
+          kind: "media",
+          localpath: "file:///me/mine.mp4",
+          offsetMs: 500,
+          sourceDurationMs: 9000,
+        },
+      },
+    });
+    const baked = bakeFills(data(), element);
+    const composed = composeTemplate(data(), "o", element);
+    for (const key of Object.keys(baked)) {
+      expect({ ...(composed[`o::${key}`] as any), key: undefined }).toEqual({
+        ...(baked[key] as any),
+        key: undefined,
+      });
+    }
+  });
+});
+
+describe("expandTemplates cuts the contents at the bar", () => {
+  const resolve = () => data();
+
+  it("trims a clip that runs past the end of a shorter bar", () => {
+    // The template runs 6s; its bar on the timeline only 4s.
+    const expanded = expandTemplates(
+      { tpl: placed({ startTime: 1000, duration: 4000 }) } as unknown as Timeline,
+      resolve,
+    );
+    const title = expanded["tpl::title"] as any;
+    // 3000..6000 inside, so 4000..7000 placed; the bar ends at 5000.
+    expect(title.startTime).toBe(4000);
+    expect(title.duration).toBe(1000);
+  });
+
+  it("leaves out a clip that starts after the bar ends", () => {
+    const expanded = expandTemplates(
+      { tpl: placed({ startTime: 0, duration: 2500 }) } as unknown as Timeline,
+      resolve,
+    );
+    expect(expanded["tpl::title"]).toBeUndefined();
+    // The video slot, 0..3000, is cut to the bar's 2500 through its trim.
+    const shot = expanded["tpl::shot"] as any;
+    expect(shot.duration).toBe(2500);
+    expect(shot.trim.endTime - shot.trim.startTime).toBe(2500);
+  });
+
+  it("leaves a clip that fits alone", () => {
+    const expanded = expandTemplates(
+      { tpl: placed({ startTime: 0, duration: 6000 }) } as unknown as Timeline,
+      resolve,
+    );
+    expect((expanded["tpl::title"] as any).duration).toBe(3000);
+    expect((expanded["tpl::shot"] as any).duration).toBe(3000);
+  });
+});
+

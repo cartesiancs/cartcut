@@ -1439,6 +1439,12 @@ export type TemplateFill =
       offsetMs: number;
       /** The replacement's full length, probed once when it was chosen. */
       sourceDurationMs: number;
+      /**
+       * Whether the file carries sound, probed with its length. Absent on a
+       * fill chosen before the field existed, which `compose.ts#filled`
+       * reads as "keep the placeholder's answer" when the kinds match.
+       */
+      hasAudio?: boolean;
     }
   | { kind: "text"; text: string };
 

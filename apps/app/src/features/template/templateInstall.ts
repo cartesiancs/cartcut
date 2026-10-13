@@ -17,6 +17,7 @@
 import JSZip from "jszip";
 import { readArchiveLayout } from "./archive";
 import {
+  forgetTemplate,
   refreshTemplateLibrary,
   templateListing,
   type TemplateListing,
@@ -180,6 +181,9 @@ export async function installTemplateArchive(
     };
   }
 
+  // Before the refresh: a re-install keeps the folder and the path, so the
+  // library alone cannot tell that the document behind them changed.
+  forgetTemplate(id);
   await refreshTemplateLibrary();
 
   const listing = templateListing(id);

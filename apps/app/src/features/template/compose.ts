@@ -36,6 +36,12 @@ import type {
   Timeline,
   TimelineElement,
 } from "../../@types/timeline";
+import mime from "../../functions/mime";
+import type { TimelineTrack } from "../timeline/tracks";
+import { emptyAnimation } from "../animation/keyframes";
+import { trimEnd } from "../timeline/clipEdit";
+import { renameElementRefs } from "../timeline/elementRefs";
+import { spanOf } from "../timeline/geometry";
 import { slotKindOf, type TemplateSlot } from "./slots";
 
 /** One installed template, as the registry resolves it. */
@@ -48,6 +54,12 @@ export type TemplateData = {
   durationMs: number;
   /** The document, with absolute paths — already through `relinkAssets`. */
   elements: Timeline;
+  /**
+   * The document's rows. Nothing draws from them; expanding a template into
+   * an editable composition (`composition/fork.ts`) does. Optional so a
+   * hand-built `TemplateData` in a suite need not invent any.
+   */
+  tracks?: TimelineTrack[];
   /** Derived once at load by `slotsOf`, so every read is a lookup. */
   slots: TemplateSlot[];
 };
@@ -93,41 +105,122 @@ function isUsable(fill: unknown): fill is TemplateFill {
 }
 
 /**
+ * The fields only a video carries, dropped when a fill turns one into a still.
+ *
+ * Against `@types/timeline.ts#VideoElementType`: its own block, plus
+ * `Leveled`'s `volumeDb`. Everything else a video has an image has too.
+ */
+const VIDEO_ONLY_FIELDS = [
+  "reversed",
+  "trim",
+  "sourceDuration",
+  "isExistAudio",
+  "audioDetached",
+  "codec",
+  "speed",
+  "speedCurve",
+  "filter",
+  "origin",
+  "volumeDb",
+] as const;
+
+type PictureKind = "video" | "image" | "gif";
+
+/**
+ * What the fill's file is, by its extension, or `null` when that says nothing
+ * a picture slot can use (the element keeps its own kind).
+ *
+ * `<option-template>` offers one picker for every media slot, so a photo can
+ * land in a slot authored as a video. Kept as a video, that element named a
+ * `.png` as its `<video>` source and drew nothing, and claimed the
+ * placeholder's sound for a file that has none.
+ */
+function pictureKindOf(localpath: string): PictureKind | null {
+  const type = mime.lookup(localpath)?.type;
+  return type === "video" || type === "image" || type === "gif" ? type : null;
+}
+
+/** A video's source window over a fill, clamped as `filled` describes. */
+function windowOver(
+  span: number,
+  fill: Extract<TemplateFill, { kind: "media" }>,
+): { trim: { startTime: number; endTime: number }; sourceDuration: number } {
+  const source = Number(fill.sourceDurationMs) || 0;
+  const offset = clamp(Number(fill.offsetMs) || 0, 0, Math.max(0, source - span));
+  return {
+    trim: { startTime: offset, endTime: offset + span },
+    sourceDuration: source,
+  };
+}
+
+/**
  * One element with the user's replacement in it.
  *
  * The trim window is `[offset, offset + duration)` in the **source**, with the
  * offset clamped so it cannot start past the point where the slot's length
  * still fits. A source shorter than the slot pins the offset to zero and lets
- * the window overrun — the window has to span the slot for the duration
+ * the window overrun: the window has to span the slot for the duration
  * invariant to hold, and the picture simply runs out inside it, which is what
  * every editor does with a clip trimmed past its end.
+ *
+ * A fill whose file is a different kind of picture from the slot's element
+ * changes the element's kind with it. Position, size, keyframes and the rest
+ * of the author's work stay, because image and video share every one of
+ * those fields; a still loses the video's source window, speed and sound, and
+ * a video gains a window over the fill at 1x. Whether a filled video has
+ * sound is the fill's `hasAudio`, read when it was chosen; a fill from before
+ * that field keeps the placeholder's answer when the kinds match and says no
+ * sound when they do not, so an export never asks FFmpeg for an audio stream
+ * a still cannot have.
  */
 function filled(element: TimelineElement, fill: TemplateFill): TimelineElement {
   if (fill.kind === "text") {
     return { ...element, text: fill.text } as TimelineElement;
   }
 
-  const next = { ...element, localpath: fill.localpath } as TimelineElement & {
-    trim?: { startTime: number; endTime: number };
-    sourceDuration?: number;
-  };
+  const from = element.filetype;
+  const to =
+    from === "video" || from === "image" || from === "gif"
+      ? (pictureKindOf(fill.localpath) ?? from)
+      : from;
+  const span = Number(element.duration) || 0;
+  const next = {
+    ...element,
+    filetype: to,
+    localpath: fill.localpath,
+  } as Record<string, unknown>;
 
-  // Only a clip with a source window has an in-point to choose. An image and a
-  // GIF have none, and inventing a `trim` on them would put a field on an
-  // element type that has no reader for it.
-  if (
-    (element as { trim?: unknown }).trim == null ||
-    typeof (element as { trim?: unknown }).trim !== "object"
-  ) {
+  if (from === "video" && to !== "video") {
+    for (const field of VIDEO_ONLY_FIELDS) {
+      delete next[field];
+    }
+    const animation = next.animation as Record<string, unknown> | undefined;
+    if (animation != null && "volumeDb" in animation) {
+      const { volumeDb: _sound, ...rest } = animation;
+      next.animation = rest;
+    }
+  }
+
+  if (to === "image" && next.animation == null) {
+    next.animation = emptyAnimation("image");
+  }
+
+  if (to !== "video") {
     return next as TimelineElement;
   }
 
-  const span = Number(element.duration) || 0;
-  const source = Number(fill.sourceDurationMs) || 0;
-  const offset = clamp(Number(fill.offsetMs) || 0, 0, Math.max(0, source - span));
-
-  next.trim = { startTime: offset, endTime: offset + span };
-  next.sourceDuration = source;
+  Object.assign(next, windowOver(span, fill));
+  if (from !== "video") {
+    const width = Number((element as { width?: unknown }).width) || 0;
+    const height = Number((element as { height?: unknown }).height) || 0;
+    next.speed = 1;
+    next.codec = { video: "default", audio: "default" };
+    next.filter = { enable: false, list: [] };
+    next.origin = { width, height };
+    next.isExistAudio = fill.hasAudio === true;
+  } else if (typeof fill.hasAudio === "boolean") {
+    next.isExistAudio = fill.hasAudio;
+  }
   return next as TimelineElement;
 }
 
@@ -141,15 +234,20 @@ function fillTargets(data: TemplateData): Map<string, TemplateSlot> {
 }
 
 /**
- * The elements one placed template draws, in the template's own time.
+ * The template's own elements with this instance's fills applied, under their
+ * **original** keys, nested templates left out.
  *
- * Keys are namespaced against `outerId`, which is the element's id in the
- * **outer** document rather than its `key` field — the two are normally equal
- * and nothing guarantees it, and the asset store indexes by the map id.
+ * The half of `composeTemplate` that is about content rather than naming.
+ * Forking a placed template into the project (`composition/fork.ts`) needs
+ * exactly this: what the instance shows, as an editable document with keys of
+ * its own, which is why it is not namespaced here.
+ *
+ * Nesting is capped at one level, here and at export. A depth counter would
+ * have to be threaded through a render path with no other reason to know
+ * recursion exists.
  */
-export function composeTemplate(
+export function bakeFills(
   data: TemplateData,
-  outerId: string,
   element: TemplateElementType,
 ): Timeline {
   const slots = fillTargets(data);
@@ -174,44 +272,54 @@ export function composeTemplate(
   }
 
   const out: Timeline = {};
-
   for (const innerKey of Object.keys(data.elements)) {
     const source = data.elements[innerKey];
     if (source == null || typeof source !== "object") {
       continue;
     }
-    // Nesting is capped at one level, here and at export. A depth counter would
-    // have to be threaded through a render path with no other reason to know
-    // recursion exists.
     if (source.filetype === "template") {
       continue;
     }
-
-    const id = namespacedKey(outerId, innerKey);
     const fill = replacements.get(innerKey);
-    const base = fill != null ? filled(source, fill) : source;
-
-    const next = { ...base, key: id } as TimelineElement;
-
-    // A parent inside the template moves into the namespace with its child. One
-    // naming an element that is not here — a hand-edited file, or a group that
-    // was itself a stripped template — is dropped rather than left dangling,
-    // which is what `repairHierarchy` would do to it anyway.
-    const parentId = (source as { parentId?: unknown }).parentId;
-    if (typeof parentId === "string" && parentId !== "") {
-      if (data.elements[parentId] != null) {
-        (next as { parentId?: string }).parentId = namespacedKey(
-          outerId,
-          parentId,
-        );
-      } else {
-        delete (next as { parentId?: string }).parentId;
-      }
-    }
-
-    out[id] = next;
+    out[innerKey] = fill != null ? filled(source, fill) : source;
   }
+  return out;
+}
 
+/**
+ * The elements one placed template draws, in the template's own time.
+ *
+ * Keys are namespaced against `outerId`, which is the element's id in the
+ * **outer** document rather than its `key` field: the two are normally equal,
+ * nothing guarantees it, and the asset store indexes by the map id.
+ *
+ * Every reference between them moves into the namespace too, through
+ * `timeline/elementRefs.ts`: a parent, a property link's source and a
+ * transition's two clips. One naming an element that is not here (a
+ * hand-edited file, or a group that was itself a stripped template) is
+ * dropped rather than left dangling, which is what `repairHierarchy` would do
+ * to a parent anyway. A link left on its bare key found nothing in this map
+ * and fell back to the static value, so a link authored inside a template
+ * worked in the template's own project and silently stopped working once
+ * placed.
+ */
+export function composeTemplate(
+  data: TemplateData,
+  outerId: string,
+  element: TemplateElementType,
+): Timeline {
+  const baked = bakeFills(data, element);
+  const rename = (innerKey: string) =>
+    baked[innerKey] != null ? namespacedKey(outerId, innerKey) : null;
+
+  const out: Timeline = {};
+  for (const innerKey of Object.keys(baked)) {
+    const id = namespacedKey(outerId, innerKey);
+    out[id] = renameElementRefs(
+      { ...baked[innerKey], key: id } as TimelineElement,
+      rename,
+    );
+  }
   return out;
 }
 
@@ -219,14 +327,22 @@ export function composeTemplate(
  * Every element in the project, with each template's contents flattened in and
  * rebased onto the real timeline.
  *
- * **For the asset layer and the export's audio planner only.** The picture is
- * drawn from the nested composition, so handing this to the renderer would draw
- * every inner clip twice — once inside its template's layer and once loose on
- * the project. What it is for is everything that answers "which files does this
- * project need decoded, and when": `loadEntireTimeline`,
- * `loadAssetsNeededAtTime`, `syncPlayback`, `seek`, `releaseUnusedVideos`, and
- * `ffmpegArgs`'s audio half, which is what makes a template's music reach the
+ * **For the asset layer and the export's sound only.** The picture is drawn
+ * from the nested composition, so handing this to the renderer would draw
+ * every inner clip twice: once inside its template's layer and once loose on
+ * the project. What it is for is everything that answers "which files does
+ * this project need decoded, and when, and what does it sound like":
+ * `loadEntireTimeline`, `loadAssetsNeededAtTime`, `syncPlayback`, `seek`,
+ * `releaseUnusedVideos`, and the map the export hands FFmpeg for the audio mix
+ * (`export/exportSession.ts`), which is what makes a template's music reach the
  * delivered file rather than only the preview.
+ *
+ * **An inner clip is cut at its template's bar.** A clip shorter than its
+ * template's contents (a composition grown into a neighbour, an installed
+ * template re-installed longer) shows nothing past its end, so nothing past
+ * its end may be decoded or heard either: a clip that starts after the bar
+ * ends is left out, and one running past it is trimmed back to it with the
+ * same `clipEdit.ts#trimEnd` a drag of its right edge uses.
  *
  * Returns its input **by identity** when there is nothing to expand, so the
  * WeakMap caches downstream of it keep working on an ordinary project.
@@ -256,13 +372,20 @@ export function expandTemplates(
 
     const composed = composeTemplate(data, outerId, element);
     const offset = Number(element.startTime) || 0;
+    const length = Number(element.duration);
+    const barEnd = length > 0 ? offset + length : Infinity;
 
     for (const id of Object.keys(composed)) {
       const inner = composed[id];
-      out[id] = {
+      const placed = {
         ...inner,
         startTime: (Number(inner.startTime) || 0) + offset,
       } as TimelineElement;
+      const span = spanOf(placed);
+      if (span.start >= barEnd) {
+        continue;
+      }
+      out[id] = span.end > barEnd ? trimEnd(placed, barEnd - span.end) : placed;
       added = true;
     }
   }

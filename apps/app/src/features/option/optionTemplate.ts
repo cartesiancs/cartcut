@@ -5,6 +5,7 @@ import type {
   TemplateFill,
 } from "../../@types/timeline";
 import { useTimelineStore } from "../../states/timelineStore";
+import type { MediaProbe } from "../element/mediaElement";
 import { probeMedia } from "../element/mediaProbe";
 import { slotKindOf, type TemplateSlot } from "../template/slots";
 import { templateFor, subscribeTemplates } from "../template/templateRegistry";
@@ -142,7 +143,7 @@ export class OptionTemplate extends LitElement {
       return;
     }
 
-    let probe: any;
+    let probe: MediaProbe;
     try {
       probe = await probeMedia(chosen);
     } catch (error) {
@@ -157,7 +158,14 @@ export class OptionTemplate extends LitElement {
       kind: "media",
       localpath: probe.localpath ?? chosen,
       offsetMs: 0,
-      sourceDurationMs: Number(probe.duration) || 0,
+      // `durationMs`: `probeMedia` answers a `MediaProbe`, which has no
+      // `duration`, so reading that stored 0 for every fill and left the
+      // in-point slider with no range to move in.
+      sourceDurationMs: Number(probe.durationMs) || 0,
+      // Recorded so a filled video's sound is the file's rather than the
+      // placeholder's: `compose.ts#filled` reads it, and the export asks
+      // FFmpeg for an audio stream only when it is true.
+      hasAudio: probe.hasAudio === true,
     };
     this.commit((doc) =>
       setTemplateFill(doc, this.elementId, slot.slotId, fill),

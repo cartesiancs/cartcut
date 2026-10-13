@@ -204,7 +204,8 @@ function sameFill(a: TemplateFill | undefined, b: TemplateFill | null): boolean 
     b.kind === "media" &&
     a.localpath === b.localpath &&
     a.offsetMs === b.offsetMs &&
-    a.sourceDurationMs === b.sourceDurationMs
+    a.sourceDurationMs === b.sourceDurationMs &&
+    a.hasAudio === b.hasAudio
   );
 }
 
