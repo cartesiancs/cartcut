@@ -128,6 +128,40 @@ Two things about time that are easy to get wrong:
 `priority` is derived from track order, never authored. Layering is track order:
 index 0 is the top row and the front of the composite.
 
+### Several timelines: main and the templates it owns
+
+"Expand Template" forks a placed template into the project as a
+**composition** (`features/composition/`): a timeline of its own, edited in a
+tab in the row above the timeline with the same timeline UI, named from the
+clip as
+`templateId: "project:<id>"`. Code says composition; the UI says Template.
+Three rules keep the data flow from tangling:
+
+- **The store holds the timeline being edited, and only that one, in
+  `timeline`/`tracks`.** Every other timeline is in `parked`, which never holds
+  the active id (`states/timelineWorkspace.ts`). Nothing that reads the store
+  had to learn timelines exist. Anything that means **the project** (save,
+  Auto Save, the dirty digest, recovery's emptiness, the export) reads
+  `composition/projectSnapshot.ts`, never the store's live fields, and the
+  render options' `previewSize` is the frame being edited, with main's kept in
+  `mainFrame.ts` while a template shows.
+- **One undo history for the whole project.** An entry snapshots every
+  timeline by reference. An edit inside a composition re-fits the main clips
+  naming it (`reconcile.ts`: shrink always, grow only into free space) in the
+  same step; an undo keeps the tab unless the composition is gone. Switching is
+  never a step, but it first commits anything previewed and uncommitted.
+- **What follows a switch follows the switch, whatever caused it.** The store
+  swaps each timeline's playhead, zoom and scroll and stops playback inside the
+  switch's own `set` (`timelineStore.ts#viewSwap`: a write from inside its own
+  listener reaches later listeners with the older state last). Everything in
+  other stores (selection, frame size, preview pan, the playback loop) is
+  `switchEffects.ts`, one subscriber. Gestures holding a document are ended
+  first (`editor/gestureCancel.ts`) and check `switchEpoch`; work that awaits
+  commits with `withCheckpointOn(timelineId)`, the timeline it started in.
+
+A composition cannot hold a template; the placement paths refuse with a
+message rather than the store declining.
+
 ## Conventions that repeat across every feature
 
 Learn these five once and most of the codebase stops needing explanation.
@@ -139,11 +173,14 @@ back to its default **deletes the key** rather than storing it. A project nobody
 has used the feature on saves byte-identically to one written before it existed.
 `blend`, `lut`, `adjust`, `mask`, `reveal`, `geometry`, `reversed`, `mirror`,
 `cornerRadius`, `replaceable` and the conditional keyframe tracks all follow
-this. **A new filetype is the one exception**, because an older build would
+this. **A new filetype is one exception**, because an older build would
 throw on it mid-paint rather than ignore it: the two writers stamp
 `tracks.ts#schemaVersionFor(elements)`, which is 3 only while a `graphic`
-exists, and the readers accept 2 and 3 (`isReadableSchemaVersion`). Delete the
-last graphic and the project saves as 2 again.
+exists, and the readers accept 2 to 4 (`isReadableSchemaVersion`). Delete the
+last graphic and the project saves as 2 again. **A project owning a template
+is the other** (4, `projectSchemaVersionFor`): an older build would ignore
+`compositions.json` and its next save would delete the user's edited
+template for good, so it is refused instead.
 
 **`normalizeX` guards reads, `coerceX` validates writes.** The first runs on
 every draw and must never throw; the second runs once, where a value is stored,
@@ -244,8 +281,8 @@ Things that bite:
   (`renderer/backdrop.ts`), so the shape's mask, opacity and blend apply to it.
   Any frame holding one takes the scratch pass, because preset sizes are
   project pixels. It **fails closed**: a backdrop that cannot land (no WebGL,
-  preset missing or of the wrong kind, a template's inner timeline) draws the
-  fill solid whatever `fillOpacity` says, so a face mosaic never fails
+  preset missing or of the wrong kind) draws the fill solid whatever
+  `fillOpacity` says, so a face mosaic never fails
   see-through. Inside a transition it reads `outerBackdrop`, the frame the
   transition is drawn over.
 - **A hidden track reaches the renderer as a derived `trackHidden` on each of
@@ -287,10 +324,12 @@ Things that bite:
 
 A `.ngt` is a zip of five JSON entries, read and written entirely in the renderer
 by `functions/project.ts`: `project.json`, `timeline.json`, `tracks.json`,
-`renderOptions.json`, `assetPaths.json`. Two optional entries ride beside them
-and are absent when empty, so neither moves `SCHEMA_VERSION`: `extensions.json`
-(see Extensions) and `timelineView.json`, the height of every resized timeline
-row and the timeline notes (`noteStore`, same rules). Row heights are view state
+`renderOptions.json`, `assetPaths.json`. Optional entries ride beside them
+and are absent when empty: `extensions.json` (see Extensions),
+`timelineView.json`, the height of every resized timeline row and the timeline
+notes (`noteStore`, same rules), over every timeline's rows, and
+`compositions.json`, the templates main names, each with its own asset paths
+(`project/compositionsFile.ts`; the schema exception above). Row heights are view state
 (`timeline/trackHeights.ts`): keyed by track id in `trackHeightStore`, never in
 `TimelineDocument`, so they are saved and make the project dirty but are never
 undone, and the caption lock does not stop a resize. Anything asking where a row
@@ -380,6 +419,8 @@ features/shape/        parametric outlines, over mask/geometry.ts unchanged; the
 features/lut/          .cube reading, tetrahedral sampling, atlas, 80 built-ins
 features/adjust/       15 sliders: tone bakes into a LUT, effects run a finish pass
 features/template/     a whole edit standing in for one clip (.cttpl)
+features/composition/  a template expanded into the project: fork, reconcile,
+                       switch effects, tabs, the project snapshot
 features/graphic/      layers drawn by a program: HTML typography (sanitise, split,
                        contract, host, prepare) and the clock that survives a split;
                        presets in assets/presets/graphics, contract in the skill's
@@ -451,9 +492,15 @@ The handful of facts inside those that are worth stating up front:
   matrix is composed at draw time and the child's curves are never written again.
 - **A template stores a reference, not a copy** (`templateId` + `fills`),
   resolved at draw time from `templateRegistry`, exactly as `lut.presetId`
-  resolves. A template that is not installed draws nothing and reports nothing.
-  Composed keys are namespaced `outerId::innerKey` or two copies share one
-  decoder. `expandTemplates` is for the asset layer, never the renderer.
+  resolves; a `project:` id resolves to a composition in the store. A template
+  that is not installed draws nothing and reports nothing. Composed keys are
+  namespaced `outerId::innerKey` or two copies share one decoder, and every
+  reference between them moves too (`timeline/elementRefs.ts`). Its effects,
+  transitions and backdrops draw through the compositor's child
+  (`FxCompositor#child`). `expandTemplates` is for the asset layer and the
+  export's audio, never the picture, and cuts the contents at the clip's bar.
+  An export and a contact sheet resolve templates from what they captured at
+  the start (`withTemplateResolver`), the `withVideoScope` rule.
 - **A missing preset, LUT or template renders as a pass-through**, silently.
   That is the contract; do not make one of them throw.
 - **Called a LUT, never a "filter".** `VideoElementType.filter` already owns that
