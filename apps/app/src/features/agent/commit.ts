@@ -43,6 +43,16 @@ export type EditResult = {
   clips?: unknown[];
 };
 
+/**
+ * What an agent is told while the caption session holds the timeline.
+ *
+ * Shared with `commands/meta.ts`, whose undo and redo are refused for the same
+ * reason the editor's own are (`editor/actions.ts#undo`): the session's writes
+ * record no history, so an undo would jump past the whole session.
+ */
+export const LOCKED_REASON =
+  "The timeline is locked while a caption session is live. Press Apply in the caption panel, or close it, and try again.";
+
 export function commit(
   fn: (doc: TimelineDocument) => TimelineDocument,
   declineReason: string,
@@ -52,9 +62,7 @@ export function commit(
   // difference between "that does nothing" and "not while the caption panel is
   // open". Every mutating MCP tool goes through here, so this is all of them.
   if (isTimelineLocked()) {
-    return declined(
-      "The timeline is locked while a caption session is live. Press Apply in the caption panel, or close it, and try again.",
-    );
+    return declined(LOCKED_REASON);
   }
 
   // Inside a batch the edit goes into the working document instead of the

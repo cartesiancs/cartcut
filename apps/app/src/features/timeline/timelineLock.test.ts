@@ -173,6 +173,31 @@ describe("the agent's commands", () => {
   });
 });
 
+describe("the agent's undo and redo", () => {
+  // The editor's undo was gated and the agent's was not, so an MCP `undo`
+  // during a caption session stepped the store back while the session went on
+  // painting its projection over the result.
+  it("are refused while it is locked, with the reason", async () => {
+    await import("../agent/commands/meta");
+    const { getCommand } = await import("../agent/registry");
+    useTimelineStore.getState().checkPointTimeline();
+    splitSelection();
+    const after = elementIds();
+
+    timelineLockStore.getState().lock("captionSession");
+    const undone: any = await getCommand("undo")!({});
+    expect(undone.ok).toBe(false);
+    expect(undone.reason).toMatch(/caption/i);
+    const redone: any = await getCommand("redo")!({});
+    expect(redone.ok).toBe(false);
+    expect(elementIds()).toEqual(after);
+
+    timelineLockStore.getState().unlock();
+    expect(((await getCommand("undo")!({})) as any).ok).toBe(true);
+    expect(elementIds()).toEqual(["clip", "other"]);
+  });
+});
+
 describe("what the lock does not take", () => {
   // The user is meant to go on watching the edit the session is making.
   it("leaves the playhead alone", () => {

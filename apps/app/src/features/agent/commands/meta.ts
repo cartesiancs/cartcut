@@ -7,7 +7,9 @@
  * do imperfectly, and which is how an agent turns one bad edit into three.
  */
 
+import { isTimelineLocked } from "../../../states/timelineLockStore";
 import { useTimelineStore } from "../../../states/timelineStore";
+import { LOCKED_REASON } from "../commit";
 import { documentDuration } from "../serialize";
 import { registerCommands } from "../registry";
 
@@ -36,8 +38,15 @@ registerCommands({
     return { playheadMs: at, timelineDurationMs: duration };
   },
 
+  // Refused while the caption session holds the timeline, as the editor's own
+  // undo is: the session's writes record no history, so stepping back would
+  // land on a state from before the session while the session went on
+  // writing its projection over it.
   undo: () => {
     const before = historyDepths();
+    if (isTimelineLocked()) {
+      return { ok: false, reason: LOCKED_REASON, ...before };
+    }
     if (before.undoDepth <= 0) {
       return { ok: false, reason: "Nothing to undo.", ...before };
     }
@@ -49,6 +58,9 @@ registerCommands({
 
   redo: () => {
     const before = historyDepths();
+    if (isTimelineLocked()) {
+      return { ok: false, reason: LOCKED_REASON, ...before };
+    }
     if (before.redoDepth <= 0) {
       return { ok: false, reason: "Nothing to redo.", ...before };
     }
