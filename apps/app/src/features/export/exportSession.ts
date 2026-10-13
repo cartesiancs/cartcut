@@ -31,7 +31,11 @@ import {
   projectSnapshot,
 } from "../composition/projectSnapshot";
 import { snapshotTemplateResolver } from "../../states/timelineWorkspace";
-import { templateFor } from "../template/templateRegistry";
+import {
+  preloadTemplatesForDocument,
+  templateFor,
+} from "../template/templateRegistry";
+import { assetTimeline } from "../template/assetTimeline";
 
 /**
  * How long a cancel may sit unconfirmed before the button frees itself.
@@ -147,6 +151,9 @@ export async function startExport(): Promise<void> {
   controller = running;
 
   try {
+    // Read before the sound is planned: an installed template is loaded on
+    // first use, and one not read yet would contribute no sound at all.
+    await preloadTemplatesForDocument(timeline);
     await requestIPCVideoExport(
       timeline,
       exportElementRenderers,
@@ -155,6 +162,9 @@ export async function startExport(): Promise<void> {
         exportProgress.onFrame(currentFrame, totalFrames),
       running.signal,
       resolveTemplate,
+      // A template's own sound, as the preview plays it. Hidden rows are not
+      // left out: the eye hides picture, never sound.
+      assetTimeline(timeline, resolveTemplate),
     );
 
     // The frame loop is done; FFmpeg is not. `finishStream` only closes its

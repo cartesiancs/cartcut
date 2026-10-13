@@ -12,6 +12,12 @@ export async function requestIPCVideoExport(
   progressCallback: (currentFrame: number, totalFrames: number) => void,
   signal?: AbortSignal,
   resolveTemplate?: TemplateResolver,
+  /**
+   * What FFmpeg mixes the sound from: `timeline` with every template's own
+   * clips flattened in (`template/compose.ts#expandTemplates`). The picture is
+   * still drawn from `timeline`, where a template is one clip.
+   */
+  audioTimeline: Timeline = timeline,
 ): Promise<void> {
   const assetStore = loadedAssetStore.getState();
 
@@ -20,7 +26,7 @@ export async function requestIPCVideoExport(
   // ordering. It is also where a failure to launch now surfaces.
   const { sessionId } = await window.electronAPI.req.render.v2.start(
     options,
-    timeline,
+    audioTimeline,
   );
 
   const cancel = () => {
