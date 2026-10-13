@@ -53,6 +53,7 @@ import { mirrorToggleTarget, type MirrorAxis } from "../timeline/mirrorOps";
 import { isReversed, isReversible } from "../timeline/reverseOps";
 import { mirrorClips } from "../editor/actions";
 import { refusesEdit } from "../editor/timelineLock";
+import { CANCEL_GESTURES_EVENT } from "../editor/gestureCancel";
 import { afterPaint } from "../../functions/afterPaint";
 import {
   canReverseHere,
@@ -384,6 +385,8 @@ export class elementTimelineCanvas extends LitElement {
   private dragState: DragState = idleDrag;
   /** The document as it stood when the drag began. */
   private dragBase: TimelineDocument | null = null;
+  /** `timelineStore.switchEpoch` when the drag began. */
+  private dragEpoch = 0;
   /**
    * The selection the drag is carrying.
    *
@@ -493,6 +496,7 @@ export class elementTimelineCanvas extends LitElement {
     window.addEventListener("mousemove", this.handleWindowMouseMove);
     window.addEventListener("mouseup", this.handleWindowMouseUp);
     window.addEventListener("blur", this.handleCancelGesture);
+    window.addEventListener(CANCEL_GESTURES_EVENT, this.handleCancelGesture);
   }
 
   /** Bound so `this` survives the listener call. */
@@ -566,6 +570,7 @@ export class elementTimelineCanvas extends LitElement {
     window.removeEventListener("mousemove", this.handleWindowMouseMove);
     window.removeEventListener("mouseup", this.handleWindowMouseUp);
     window.removeEventListener("blur", this.handleCancelGesture);
+    window.removeEventListener(CANCEL_GESTURES_EVENT, this.handleCancelGesture);
     window.clearTimeout(this.longPressTimer);
     this.edgeScroller.stop();
     super.disconnectedCallback();
@@ -1570,6 +1575,7 @@ export class elementTimelineCanvas extends LitElement {
 
     if (ev.type === "down" && state.phase !== "idle") {
       this.dragBase = this.currentDoc();
+      this.dragEpoch = useTimelineStore.getState().switchEpoch;
       this.dragIds = [...this.targetId];
       this.dragScrollOrigin = this.currentScroll();
       this.edgeArm = { x: UNARMED, y: UNARMED };
@@ -1600,7 +1606,12 @@ export class elementTimelineCanvas extends LitElement {
         case "commit": {
           const pending = this.pendingDoc;
           this.pendingDoc = null;
-          if (pending) {
+          // `pending` is a whole document of the timeline the drag began in.
+          // Committed after a switch, it would replace the other timeline.
+          if (
+            pending &&
+            useTimelineStore.getState().switchEpoch === this.dragEpoch
+          ) {
             this.commit(() => pending);
           }
           break;

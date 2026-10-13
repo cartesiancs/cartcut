@@ -299,4 +299,74 @@ describe("GestureCommit", () => {
     expect(store().history.timelineHistory.length).toBe(before + 2);
     expect((store().timeline.a as any).opacity).toBe(2);
   });
+
+  describe("across a switch to another timeline", () => {
+    /** A second timeline to switch to, as an Expand would leave one. */
+    function withComposition() {
+      useTimelineStore.setState({
+        compositions: { c1: { id: "c1", name: "c", size: { w: 1, h: 1 } } },
+        parked: {
+          c1: {
+            tracks: [createTrack("cv", "video", 0)],
+            elements: { z: imageElement({ trackId: "cv" }) },
+          },
+        },
+      });
+    }
+
+    afterEach(() => {
+      if (store().activeTimelineId !== "main") {
+        store().switchTimeline("main");
+      }
+      useTimelineStore.setState({ compositions: {}, parked: {} });
+    });
+
+    it("does not commit into the timeline it did not start in", () => {
+      withComposition();
+      const gesture = new GestureCommit();
+      bump(gesture, 7);
+      store().switchTimeline("c1");
+      // The switch recorded the preview, once.
+      const length = store().history.timelineHistory.length;
+      win.fire("mouseup");
+      expect(store().history.timelineHistory.length).toBe(length);
+      expect(Object.keys(store().timeline)).toEqual(["z"]);
+    });
+
+    it("does not commit twice when the user comes back inside the idle window", () => {
+      withComposition();
+      const gesture = new GestureCommit();
+      bump(gesture, 7);
+      store().switchTimeline("c1");
+      store().switchTimeline("main");
+      const length = store().history.timelineHistory.length;
+      vi.advanceTimersByTime(GESTURE_IDLE_MS + 1);
+      expect(store().history.timelineHistory.length).toBe(length);
+      expect((store().timeline.a as any).opacity).toBe(7);
+    });
+
+    it("does not put its timeline's document over the other's on cancel", () => {
+      withComposition();
+      const gesture = new GestureCommit();
+      bump(gesture, 7);
+      store().switchTimeline("c1");
+      gesture.cancel();
+      expect(Object.keys(store().timeline)).toEqual(["z"]);
+    });
+
+    it("starts afresh in the new timeline", () => {
+      withComposition();
+      const gesture = new GestureCommit();
+      bump(gesture, 7);
+      store().switchTimeline("c1");
+      const length = store().history.timelineHistory.length;
+      gesture.apply((doc) => ({
+        ...doc,
+        elements: { ...doc.elements, z: { ...doc.elements.z, opacity: 3 } },
+      }));
+      win.fire("mouseup");
+      expect(store().history.timelineHistory.length).toBe(length + 1);
+      expect((store().timeline.z as any).opacity).toBe(3);
+    });
+  });
 });

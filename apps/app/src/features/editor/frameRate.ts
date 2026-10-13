@@ -26,9 +26,9 @@
  * Clips off the new grid are pulled onto it the next time they are dragged or
  * trimmed, which is where the user is looking when it happens.
  *
- * The rebake goes through `withCheckpoint`, and `rebakeAnimations` declines by
- * identity — so a project with no animation, or one already baked at this rate,
- * records no undo step at all.
+ * The rebake goes through `withProjectCheckpoint`, and `rebakeProject` declines
+ * by identity, so a project with no animation, or one already baked at this
+ * rate, records no undo step at all.
  *
  * **One asymmetry, stated rather than discovered: the rate is outside the undo
  * history.** It lives on `renderOptionStore`, which keeps none, while the lanes
@@ -48,7 +48,7 @@
 import { renderOptionStore } from "../../states/renderOptionStore";
 import { useTimelineStore } from "../../states/timelineStore";
 import { bakeRateFor } from "../animation/keyframes";
-import { rebakeAnimations } from "../animation/keyframeOps";
+import { rebakeProject } from "../composition/rebake";
 import { coerceFps, normalizeFps, snapMsToFrame } from "../timeline/frames";
 import { clampRange } from "../timeline/zoom";
 
@@ -96,7 +96,20 @@ export function setProjectFps(requested: number): number {
     timeline.setCursor(cursor);
   }
 
-  timeline.withCheckpoint((doc) => rebakeAnimations(doc, bakeRateFor(fps)));
+  // And every timeline not showing, so a template's tab does not come back
+  // zoomed past the new ceiling or parked between two frames.
+  timeline.reframeParkedViews((view) => ({
+    ...view,
+    range: clampRange(view.range, fps),
+    cursor: snapMsToFrame(view.cursor, fps),
+  }));
+
+  // Every timeline, not only the one showing: a composition parked beside
+  // main bakes at the project's rate too, and would otherwise keep the old
+  // one until it was next loaded.
+  timeline.withProjectCheckpoint((project) =>
+    rebakeProject(project, bakeRateFor(fps)),
+  );
 
   return fps;
 }

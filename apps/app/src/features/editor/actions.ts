@@ -35,6 +35,7 @@ import { toggleMirror, type MirrorAxis } from "../timeline/mirrorOps";
 import { isCroppable } from "../timeline/cropOps";
 import { projectBakeHz } from "./frameRate";
 import { refusesEdit } from "./timelineLock";
+import { cancelActiveGestures } from "./gestureCancel";
 import { canDetachAudio } from "../timeline/audio";
 import { detachAudioFrom } from "../timeline/audioOps";
 import { normalizeFps, snapMsToFrame } from "../timeline/frames";
@@ -345,6 +346,10 @@ export function undo(): void {
   if (refusesEdit()) {
     return;
   }
+  // A drag still held would write its document back on release, over the
+  // state the undo just restored, and an undo can also change which timeline
+  // is showing. See `gestureCancel.ts`.
+  cancelActiveGestures();
   useTimelineStore.getState().rollbackTimelineFromCheckPoint(-1);
 }
 
@@ -352,6 +357,7 @@ export function redo(): void {
   if (refusesEdit()) {
     return;
   }
+  cancelActiveGestures();
   useTimelineStore.getState().rollbackTimelineFromCheckPoint(1);
 }
 

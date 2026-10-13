@@ -41,6 +41,15 @@ export class GestureCommit {
   /** Whether any step actually changed the document. */
   private changed = false;
   private timer = 0;
+  /**
+   * `switchEpoch` when the gesture opened. A switch to another timeline
+   * commits what the gesture had previewed (`timelineStore.switchTimeline`),
+   * so a flush or a cancel after one has nothing left to do in the timeline it
+   * started in, and must not write into the one now showing: `flush` would
+   * record a step there, and `cancel` would put this timeline's document in
+   * its place.
+   */
+  private epoch = 0;
   private readonly idleMs: number | null;
   private readonly flushBound = () => this.flush();
 
@@ -74,10 +83,15 @@ export class GestureCommit {
 
     const store = useTimelineStore.getState();
 
+    if (this.active && store.switchEpoch !== this.epoch) {
+      this.drop();
+    }
+
     if (!this.active) {
       this.active = true;
       this.changed = false;
       this.base = store.getDocument();
+      this.epoch = store.switchEpoch;
       // A scrub ends with a mouseup wherever the pointer happens to be.
       //
       // Registered here, on the first change, and therefore *after* the one
@@ -106,6 +120,10 @@ export class GestureCommit {
 
   /** End the gesture, recording a single undo step if anything changed. */
   flush(): void {
+    if (this.switchedAway()) {
+      this.drop();
+      return;
+    }
     window.clearTimeout(this.timer);
     this.timer = 0;
     window.removeEventListener("mouseup", this.flushBound);
@@ -128,12 +146,23 @@ export class GestureCommit {
 
   /** Drop a gesture in progress, restoring what was there before it. */
   cancel(): void {
+    if (this.base != null && !this.switchedAway()) {
+      useTimelineStore.getState().previewDocument(this.base);
+    }
+    this.drop();
+  }
+
+  private switchedAway(): boolean {
+    return (
+      this.active && useTimelineStore.getState().switchEpoch !== this.epoch
+    );
+  }
+
+  /** Forget the gesture without touching the store. */
+  private drop(): void {
     window.clearTimeout(this.timer);
     this.timer = 0;
     window.removeEventListener("mouseup", this.flushBound);
-    if (this.base != null) {
-      useTimelineStore.getState().previewDocument(this.base);
-    }
     this.base = null;
     this.active = false;
     this.changed = false;

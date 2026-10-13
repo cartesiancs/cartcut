@@ -9,6 +9,7 @@
 
 import { isTimelineLocked } from "../../../states/timelineLockStore";
 import { useTimelineStore } from "../../../states/timelineStore";
+import { cancelActiveGestures } from "../../editor/gestureCancel";
 import { LOCKED_REASON } from "../commit";
 import { documentDuration } from "../serialize";
 import { registerCommands } from "../registry";
@@ -51,6 +52,7 @@ registerCommands({
       return { ok: false, reason: "Nothing to undo.", ...before };
     }
 
+    cancelActiveGestures();
     useTimelineStore.getState().rollbackTimelineFromCheckPoint(-1);
 
     return { ok: true, ...historyDepths() };
@@ -65,6 +67,7 @@ registerCommands({
       return { ok: false, reason: "Nothing to redo.", ...before };
     }
 
+    cancelActiveGestures();
     useTimelineStore.getState().rollbackTimelineFromCheckPoint(1);
 
     return { ok: true, ...historyDepths() };

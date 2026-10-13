@@ -1,6 +1,7 @@
 import { LitElement, PropertyValues, html } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
+import { CANCEL_GESTURES_EVENT } from "../editor/gestureCancel";
 import { millisecondsToPx } from "../../utils/time";
 import { IUIStore, uiStore } from "../../states/uiStore";
 import { ImageElementType } from "../../@types/timeline";
@@ -121,6 +122,7 @@ export class KeyframeEditor extends LitElement {
     window.addEventListener("keydown", this.boundKeydown);
     window.addEventListener("mouseup", this._handleMouseUp);
     window.addEventListener("blur", this.handleCancelDrag);
+    window.addEventListener(CANCEL_GESTURES_EVENT, this.handleCancelDrag);
 
     // try {
     //   // position이면 2개 나머지는 1개
@@ -876,6 +878,7 @@ export class KeyframeEditor extends LitElement {
         this.dragTarget(),
         hit,
       );
+      this.dragEpoch = useTimelineStore.getState().switchEpoch;
       this.pendingDoc = null;
       this.requestUpdate();
       return;
@@ -904,7 +907,9 @@ export class KeyframeEditor extends LitElement {
     this.pendingDoc = null;
     this.drag = null;
 
-    if (drag == null) {
+    // `originDoc` and `pending` belong to the timeline the drag began in;
+    // after a switch, writing either would replace the one now showing.
+    if (drag == null || this.switchedSinceDrag()) {
       return;
     }
 
@@ -917,9 +922,16 @@ export class KeyframeEditor extends LitElement {
     }
   };
 
+  /** `timelineStore.switchEpoch` when the drag began. */
+  private dragEpoch = 0;
+
+  private switchedSinceDrag(): boolean {
+    return useTimelineStore.getState().switchEpoch !== this.dragEpoch;
+  }
+
   /** Abandon a drag that ended somewhere this component never hears about. */
   private handleCancelDrag = () => {
-    if (this.drag != null) {
+    if (this.drag != null && !this.switchedSinceDrag()) {
       useTimelineStore.getState().previewDocument(this.drag.originDoc);
     }
     this.isDrag = false;
@@ -960,6 +972,7 @@ export class KeyframeEditor extends LitElement {
     window.removeEventListener("keydown", this.boundKeydown);
     window.removeEventListener("mouseup", this._handleMouseUp);
     window.removeEventListener("blur", this.handleCancelDrag);
+    window.removeEventListener(CANCEL_GESTURES_EVENT, this.handleCancelDrag);
     if (this.drawRequest) {
       cancelAnimationFrame(this.drawRequest);
       this.drawRequest = 0;

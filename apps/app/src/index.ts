@@ -11,6 +11,7 @@ import {
 import { useTimelineStore } from "./states/timelineStore";
 import { installProxyBridge } from "./features/proxy/proxyBridge";
 import { installAutosave } from "./features/project/autosaveBridge";
+import { installTimelineSwitchEffects } from "./features/composition/installSwitchEffects";
 import { initProjectBaseline } from "./features/project/projectDirty";
 import { installHoverMotion } from "./features/motion/hoverSpring";
 import {
@@ -155,6 +156,8 @@ installProxyBridge();
 // not. See `projectDirty.ts` for what happens without it.
 initProjectBaseline();
 installAutosave();
+// What follows a change of the timeline being edited, from whatever caused it.
+installTimelineSwitchEffects();
 
 // One more subscriber, to count the subscribers.
 //

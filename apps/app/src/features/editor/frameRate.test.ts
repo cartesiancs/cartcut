@@ -154,6 +154,39 @@ describe("setProjectFps", () => {
     expect(opacityOf("a").ax.length).toBeGreaterThan(before);
   });
 
+  it("re-bakes a composition parked beside the timeline showing", () => {
+    // Every timeline in the project shares the frame rate; the one showing is
+    // not the only one with lanes.
+    useTimelineStore.getState().clearTimeline();
+    useTimelineStore.getState().loadProject(
+      {
+        main: {
+          tracks: [createTrack("v1", "video", 0)],
+          elements: { a: animated() },
+        },
+        compositions: {
+          c1: {
+            id: "c1",
+            name: "c",
+            size: { w: 10, h: 10 },
+            tracks: [createTrack("v1", "video", 0)],
+            elements: { b: animated() },
+          },
+        },
+      },
+      { bakeHz: projectBakeHz() },
+    );
+    const before = historyLength();
+
+    setProjectFps(120);
+
+    const parked = (useTimelineStore.getState().parked.c1.elements.b as any)
+      .animation.opacity;
+    expect(parked.ax).toEqual(bakeTrack(parked.x, 120));
+    expect(opacityOf("a").ax).toEqual(bakeTrack(opacityOf("a").x, 120));
+    expect(historyLength()).toBe(before + 1);
+  });
+
   it("records exactly one undo step for a rebake", () => {
     loadDocument({ a: animated() });
     const before = historyLength();
