@@ -61,8 +61,24 @@ function toPosix(value: string): string {
 }
 
 /** Whether this name is a folder name we are willing to use as an id. */
+/**
+ * The `templateId` prefix a project's own templates use
+ * (`features/composition/project.ts#PROJECT_TEMPLATE_PREFIX`). A hand copy,
+ * because `electron/` may not import from the renderer, and pinned against the
+ * original by `templateScan.test.ts`.
+ *
+ * An installed folder named with it is refused: its id would be routed to the
+ * project's compositions and the folder would never be read.
+ */
+export const RESERVED_TEMPLATE_ID_PREFIX = "project:";
+
 function isUsableId(name: string): boolean {
-  return name !== "" && !name.startsWith(".") && name !== "__MACOSX";
+  return (
+    name !== "" &&
+    !name.startsWith(".") &&
+    name !== "__MACOSX" &&
+    !name.startsWith(RESERVED_TEMPLATE_ID_PREFIX)
+  );
 }
 
 async function firstPresent(

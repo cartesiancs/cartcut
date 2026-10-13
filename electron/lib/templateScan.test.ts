@@ -2,7 +2,9 @@ import * as fsp from "fs/promises";
 import os from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { PROJECT_TEMPLATE_PREFIX } from "../../apps/app/src/features/composition/project";
 import {
+  RESERVED_TEMPLATE_ID_PREFIX,
   readTemplateDir,
   scanTemplateRoot,
   TEMPLATE_DOCUMENT,
@@ -105,6 +107,19 @@ describe("readTemplateDir", () => {
     expect(await readTemplateDir(await makeTemplate("__MACOSX"), "user")).toBeNull();
   });
 
+  it("refuses a folder named with the project-template prefix", async () => {
+    // Its id would route to the project's own compositions, so the folder
+    // could never be read. Windows forbids the colon in a folder name; macOS
+    // and Linux do not.
+    if (process.platform === "win32") {
+      return;
+    }
+    expect(
+      await readTemplateDir(await makeTemplate("project:neon"), "user"),
+    ).toBeNull();
+    expect(await readTemplateDir(await makeTemplate("project-neon"), "user")).not.toBeNull();
+  });
+
   it("ignores an absurdly large manifest rather than reading it", async () => {
     const dir = await makeTemplate("neon", {
       [TEMPLATE_MANIFEST]: "x".repeat(70 * 1024),
@@ -157,6 +172,10 @@ describe("scanTemplateRoot", () => {
 });
 
 describe("the boundary constants", () => {
+  it("reserve the same prefix the renderer routes to compositions", () => {
+    expect(RESERVED_TEMPLATE_ID_PREFIX).toBe(PROJECT_TEMPLATE_PREFIX);
+  });
+
   it("name the same files the renderer's archive reader does", async () => {
     // `electron/` cannot import `apps/app/src`, so these are hand-copied and
     // this is the guard — the arrangement `presetScan.test.ts` already uses for
