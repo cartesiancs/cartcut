@@ -34,6 +34,8 @@ import {
   type ExportSettings,
   audioOutputArgs,
   containerOutputArgs,
+  gifFilterGraph,
+  gifPlan,
   resolveExportSettings,
   videoOutputArgs,
 } from "./exportSettings";
@@ -543,6 +545,25 @@ export function buildFFmpegArgs(
       "-i",
       "pipe:0",
     );
+  }
+
+  if (settings.container === "gif") {
+    // A GIF has no sound: no clip is opened, no audio graph built, and the
+    // frames go through a palette instead of an encoder's rate control.
+    const durationSec = outputDurationSec(options.videoDuration, inputFps);
+    const plan = gifPlan(settings, {
+      fps: inputFps,
+      size: frameFormatFor(options) === "rawvideo" ? options.previewSize! : null,
+      durationSec,
+    });
+    args.push("-filter_complex", gifFilterGraph(plan));
+    args.push("-map", "[vout]", "-an");
+    args.push(...videoOutputArgs(settings));
+    args.push("-r", `${plan.fps}`, "-fps_mode", "cfr");
+    args.push("-t", `${durationSec}`);
+    args.push(...containerOutputArgs(settings));
+    args.push(options.videoDestination);
+    return args;
   }
 
   const inputs = collectAudioInputs(timeline, rendered);

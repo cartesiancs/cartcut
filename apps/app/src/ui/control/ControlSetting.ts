@@ -30,11 +30,14 @@ import {
   CRF_RANGE,
   ENCODE_PRESETS,
   EXPORT_PRESETS,
+  GIF_FPS,
+  GIF_WIDTHS,
   PRESET_NAMES,
   PRORES_PROFILES,
   VIDEO_CODEC_LABELS,
   describeExportSettings,
   detectPreset,
+  gifWidthLabel,
   type Container,
   type ExportSettings,
   type PresetName,
@@ -566,6 +569,10 @@ export class ControlSetting extends LitElement {
   private renderVideoSection() {
     const settings = this.settings;
     const isProRes = settings.videoCodec === "prores";
+    const isGif = settings.videoCodec === "gif";
+    // Neither has a rate to control: ProRes is fixed per profile, and a GIF's
+    // size is its frame rate, its width and its 256 colours.
+    const hasRateControl = !isProRes && !isGif;
     const crfRange = CRF_RANGE[settings.videoCodec];
     // VideoToolbox is a macOS facility, and VP9 has no encoder on it. Where
     // neither holds the toggle is not shown at all rather than shown inert.
@@ -603,7 +610,7 @@ export class ControlSetting extends LitElement {
             (e) => this.patch({ qualityMode: e.target.value }),
           )
         : ""}
-      ${!isProRes && settings.qualityMode === "crf"
+      ${hasRateControl && settings.qualityMode === "crf"
         ? html`
             <div class="opt-field">
               <div class="opt-row">
@@ -629,7 +636,7 @@ export class ControlSetting extends LitElement {
             </div>
           `
         : ""}
-      ${!isProRes && settings.qualityMode === "bitrate"
+      ${hasRateControl && settings.qualityMode === "bitrate"
         ? html`
             <div class="opt-field">
               <div class="opt-row">
@@ -674,6 +681,27 @@ export class ControlSetting extends LitElement {
             (e) => this.patch({ preset: e.target.value }),
           )
         : ""}
+      ${isGif
+        ? html`
+            ${this.renderSelect(
+              "gifFps",
+              this.lc.t("setting.gif_fps"),
+              GIF_FPS.map((fps) => ({ value: fps, label: `${fps} fps` })),
+              (e) => this.patch({ gifFps: Number(e.target.value) }),
+            )}
+            ${this.renderSelect(
+              "gifWidth",
+              this.lc.t("setting.gif_width"),
+              GIF_WIDTHS.map((width) => ({
+                value: width,
+                label:
+                  width === 0 ? this.lc.t("setting.gif_width_original") : gifWidthLabel(width),
+              })),
+              (e) => this.patch({ gifWidth: Number(e.target.value) }),
+              this.lc.t("setting.gif_hint"),
+            )}
+          `
+        : ""}
       ${isProRes
         ? this.renderSelect(
             "proresProfile",
@@ -691,6 +719,10 @@ export class ControlSetting extends LitElement {
 
   private renderAudioSection() {
     const settings = this.settings;
+
+    if (CONTAINER_AUDIO_CODECS[settings.container].length === 0) {
+      return html`<div class="opt-hint proj-hint">${this.lc.t("setting.gif_no_audio")}</div>`;
+    }
 
     return html`
       ${this.renderSelect(

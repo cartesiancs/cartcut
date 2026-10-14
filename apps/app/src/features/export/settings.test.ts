@@ -8,6 +8,8 @@ import {
   CRF_RANGE,
   DEFAULT_EXPORT_SETTINGS,
   EXPORT_PRESETS,
+  GIF_DEFAULT_FPS,
+  GIF_DEFAULT_WIDTH,
   PRESET_NAMES,
   VIDEO_CODECS,
   describeExportSettings,
@@ -23,10 +25,15 @@ describe("the compatibility matrix", () => {
     }
   });
 
-  it("gives every container at least one video and one audio codec", () => {
+  it("gives every container a video codec, and every one but GIF an audio codec", () => {
     for (const container of CONTAINERS) {
       expect(CONTAINER_VIDEO_CODECS[container].length).toBeGreaterThan(0);
-      expect(CONTAINER_AUDIO_CODECS[container].length).toBeGreaterThan(0);
+      if (container === "gif") {
+        // A GIF has no sound to encode.
+        expect(CONTAINER_AUDIO_CODECS[container]).toEqual([]);
+      } else {
+        expect(CONTAINER_AUDIO_CODECS[container].length).toBeGreaterThan(0);
+      }
     }
   });
 
@@ -124,13 +131,16 @@ describe("normalizeExportSettings", () => {
     ).toBe(DEFAULT_EXPORT_SETTINGS.crf);
   });
 
-  it("forces ProRes out of constant-quality mode", () => {
-    const prores = normalizeExportSettings({
-      videoCodec: "prores",
-      qualityMode: "crf",
-    });
-    expect(prores.qualityMode).toBe("bitrate");
-    expect(prores.container).toBe("mov");
+  it("keeps the rate settings through ProRes and GIF, which ignore them", () => {
+    // Pinning them used to send h264 -> ProRes -> h264 back as CRF 0, lossless.
+    for (const codec of ["prores", "gif"] as const) {
+      const h264 = normalizeExportSettings({ videoCodec: "h264", qualityMode: "crf", crf: 21 });
+      const away = normalizeExportSettings({ ...h264, videoCodec: codec });
+      const back = normalizeExportSettings({ ...away, videoCodec: "h264", container: "mp4" });
+      expect(back.qualityMode).toBe("crf");
+      expect(back.crf).toBe(21);
+    }
+    expect(normalizeExportSettings({ videoCodec: "prores", qualityMode: "crf" }).container).toBe("mov");
   });
 
   it("clamps the ProRes profile to the six that exist", () => {
@@ -229,5 +239,59 @@ describe("describeExportSettings", () => {
     expect(describeExportSettings(settings)).toBe(
       "ProRes MOV 422 HQ PCM (16-bit)",
     );
+  });
+});
+
+describe("GIF", () => {
+  it("follows the GIF codec to the GIF container with its own defaults", () => {
+    const gif = normalizeExportSettings({ videoCodec: "gif" });
+    expect(gif.container).toBe("gif");
+    expect(gif.gifFps).toBe(GIF_DEFAULT_FPS);
+    expect(gif.gifWidth).toBe(GIF_DEFAULT_WIDTH);
+  });
+
+  it("keeps the audio settings as they were, unused, for the way back", () => {
+    const gif = normalizeExportSettings({
+      videoCodec: "gif",
+      audioCodec: "mp3",
+      sampleRate: 44100,
+    });
+    expect(gif.audioCodec).toBe("mp3");
+    const back = normalizeExportSettings({ ...gif, videoCodec: "h264", container: "mp4" });
+    expect(back.audioCodec).toBe("mp3");
+    expect(back.sampleRate).toBe(44100);
+  });
+
+  it("stores the GIF options only while the container is GIF", () => {
+    // A project that never exported a GIF has to save byte-identically to one
+    // written before GIF existed, so the keys are not merely undefined.
+    expect(Object.keys(DEFAULT_EXPORT_SETTINGS)).not.toContain("gifFps");
+    const gif = normalizeExportSettings({ videoCodec: "gif", gifFps: 25, gifWidth: 640 });
+    expect(gif).toMatchObject({ gifFps: 25, gifWidth: 640 });
+    const back = normalizeExportSettings({ ...gif, videoCodec: "vp9" });
+    expect(Object.keys(back)).not.toContain("gifFps");
+    expect(Object.keys(back)).not.toContain("gifWidth");
+  });
+
+  it("snaps a frame rate or width it does not offer to the default", () => {
+    const gif = normalizeExportSettings({ videoCodec: "gif", gifFps: 60, gifWidth: 333 });
+    expect(gif.gifFps).toBe(GIF_DEFAULT_FPS);
+    expect(gif.gifWidth).toBe(GIF_DEFAULT_WIDTH);
+    expect(normalizeExportSettings({ videoCodec: "gif", gifWidth: 0 }).gifWidth).toBe(0);
+  });
+
+  it("is idempotent and is never a preset", () => {
+    const gif = normalizeExportSettings({ videoCodec: "gif", gifFps: 10 });
+    expect(normalizeExportSettings(gif)).toEqual(gif);
+    expect(detectPreset(gif)).toBe("custom");
+  });
+
+  it("summarises size and rate, and no sound", () => {
+    expect(describeExportSettings(normalizeExportSettings({ videoCodec: "gif" }))).toBe(
+      "GIF 480px 15 fps",
+    );
+    expect(
+      describeExportSettings(normalizeExportSettings({ videoCodec: "gif", gifWidth: 0, gifFps: 30 })),
+    ).toBe("GIF Original 30 fps");
   });
 });

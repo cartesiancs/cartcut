@@ -240,6 +240,13 @@ is a change to `renderElement` and to nothing in `electron/render/`. Audio is
 the exception: the filter graph does real work there (`atempo`, the volume
 envelope expression, `adelay`, in that order).
 
+**A GIF export is the other exception, and has no audio branch at all.** Its
+video branch resamples, resizes and quantises to a palette
+(`exportSettings.ts#gifFilterGraph`): one palette for the whole clip while the
+frames it must hold fit `GIF_PALETTE_BUDGET_BYTES`, one per frame after, since
+the first holds every frame until the last. Its options (`gifFps`, `gifWidth`)
+exist only while the container is GIF, so other projects save as before.
+
 The order inside `renderElement`'s isolation layer:
 
 ```

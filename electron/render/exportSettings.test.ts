@@ -13,6 +13,9 @@ import {
   VIDEO_CODECS,
   audioOutputArgs,
   containerOutputArgs,
+  GIF_PALETTE_BUDGET_BYTES,
+  gifFilterGraph,
+  gifPlan,
   normalizeExportSettings,
   pixelFormatFor,
   resolveExportSettings,
@@ -39,6 +42,10 @@ describe("the main-process mirror", () => {
     expect(main.VIDEO_CODECS).toEqual(renderer.VIDEO_CODECS);
     expect(main.AUDIO_CODECS).toEqual(renderer.AUDIO_CODECS);
     expect(main.ENCODE_PRESETS).toEqual(renderer.ENCODE_PRESETS);
+    expect(main.GIF_FPS).toEqual(renderer.GIF_FPS);
+    expect(main.GIF_DEFAULT_FPS).toEqual(renderer.GIF_DEFAULT_FPS);
+    expect(main.GIF_WIDTHS).toEqual(renderer.GIF_WIDTHS);
+    expect(main.GIF_DEFAULT_WIDTH).toEqual(renderer.GIF_DEFAULT_WIDTH);
   });
 
   it("normalizes identically to the renderer copy", () => {
@@ -49,6 +56,10 @@ describe("the main-process mirror", () => {
       { videoCodec: "prores", qualityMode: "crf", proresProfile: 9 },
       { videoCodec: "h264", crf: 99, channels: 1, sampleRate: 12345 },
       { videoCodec: "av1", preset: "turbo" },
+      { videoCodec: "gif" },
+      { videoCodec: "gif", gifFps: 25, gifWidth: 0, audioCodec: "opus" },
+      { videoCodec: "gif", gifFps: 60, gifWidth: 333 },
+      { container: "gif", videoCodec: "h264", gifFps: 10 },
     ];
 
     for (const input of inputs) {
@@ -409,5 +420,65 @@ describe("containerOutputArgs", () => {
     expect(
       containerOutputArgs(normalizeExportSettings({ videoCodec: "vp9" })),
     ).toEqual(["-f", "webm"]);
+  });
+});
+
+describe("GIF output", () => {
+  const gif = (patch: object = {}) => normalizeExportSettings({ videoCodec: "gif", ...patch });
+
+  it("hands the palette's frames to the GIF encoder with no rate control", () => {
+    expect(videoOutputArgs(gif())).toEqual(["-c:v", "gif"]);
+    expect(videoOutputArgs(gif({ hardwareAccel: true }), { platform: "darwin", arch: "arm64" })).toEqual([
+      "-c:v",
+      "gif",
+    ]);
+  });
+
+  it("loops forever", () => {
+    expect(containerOutputArgs(gif())).toEqual(["-loop", "0", "-f", "gif"]);
+  });
+
+  it("never plays faster than the project, nor grows wider than its frames", () => {
+    const slow = gifPlan(gif({ gifFps: 50 }), { fps: 24, size: { w: 1920, h: 1080 }, durationSec: 2 });
+    expect(slow.fps).toBe(24);
+    const small = gifPlan(gif({ gifWidth: 1280 }), { fps: 30, size: { w: 640, h: 360 }, durationSec: 2 });
+    expect(small.size).toEqual({ w: 640, h: 360 });
+    const original = gifPlan(gif({ gifWidth: 0 }), { fps: 30, size: { w: 1080, h: 1920 }, durationSec: 2 });
+    expect(original.size).toEqual({ w: 1080, h: 1920 });
+  });
+
+  it("keeps the frame's shape when it shrinks it", () => {
+    const plan = gifPlan(gif({ gifWidth: 480 }), { fps: 30, size: { w: 1920, h: 1080 }, durationSec: 2 });
+    expect(plan.size).toEqual({ w: 480, h: 270 });
+    const portrait = gifPlan(gif({ gifWidth: 320 }), { fps: 30, size: { w: 1080, h: 1920 }, durationSec: 2 });
+    expect(portrait.size).toEqual({ w: 320, h: 569 });
+  });
+
+  it("uses one palette while the frames fit the budget, and one per frame after", () => {
+    const short = gifPlan(gif(), { fps: 30, size: { w: 1920, h: 1080 }, durationSec: 10 });
+    expect(short.globalPalette).toBe(true);
+    // 480x270 at 15 fps is 518,400 bytes a frame: the budget holds about 1,035.
+    const frameBytes = 480 * 270 * 4;
+    const longest = Math.floor(GIF_PALETTE_BUDGET_BYTES / frameBytes / 15);
+    expect(gifPlan(gif(), { fps: 30, size: { w: 1920, h: 1080 }, durationSec: longest }).globalPalette).toBe(true);
+    expect(gifPlan(gif(), { fps: 30, size: { w: 1920, h: 1080 }, durationSec: longest + 1 }).globalPalette).toBe(false);
+    // With no frame size to count, it cannot know, and streams.
+    expect(gifPlan(gif(), { fps: 30, size: null, durationSec: 1 }).globalPalette).toBe(false);
+  });
+
+  it("builds the palette after the resample and the resize", () => {
+    const graph = gifFilterGraph(
+      gifPlan(gif(), { fps: 30, size: { w: 1920, h: 1080 }, durationSec: 5 }),
+    );
+    expect(graph).toBe(
+      "[0:v]fps=15,scale=480:270:flags=lanczos,split[gifa][gifb];" +
+        "[gifa]palettegen=reserve_transparent=0[gifp];" +
+        "[gifb][gifp]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle[vout]",
+    );
+    const streamed = gifFilterGraph(
+      gifPlan(gif(), { fps: 30, size: { w: 1920, h: 1080 }, durationSec: 100_000 }),
+    );
+    expect(streamed).toContain("palettegen=reserve_transparent=0:stats_mode=single");
+    expect(streamed).toContain("diff_mode=rectangle:new=1[vout]");
   });
 });

@@ -15,10 +15,10 @@
  * from the Electron tsc pass, so they may reach across freely.
  */
 
-export const CONTAINERS = ["mp4", "mov", "webm"] as const;
+export const CONTAINERS = ["mp4", "mov", "webm", "gif"] as const;
 export type Container = (typeof CONTAINERS)[number];
 
-export const VIDEO_CODECS = ["h264", "h265", "vp9", "prores"] as const;
+export const VIDEO_CODECS = ["h264", "h265", "vp9", "prores", "gif"] as const;
 export type VideoCodec = (typeof VIDEO_CODECS)[number];
 
 export const AUDIO_CODECS = ["aac", "mp3", "opus", "vorbis", "pcm_s16le"] as const;
@@ -52,25 +52,36 @@ export type ExportSettings = {
   sampleRate: number;
   channels: 1 | 2;
   hardwareAccel: boolean;
+  /** GIF only, and absent otherwise; see the renderer copy. */
+  gifFps?: number;
+  gifWidth?: number;
 };
+
+export const GIF_FPS = [10, 15, 20, 25, 30, 50] as const;
+export const GIF_DEFAULT_FPS = 15;
+export const GIF_WIDTHS = [320, 480, 640, 800, 1280, 0] as const;
+export const GIF_DEFAULT_WIDTH = 480;
 
 export const CODEC_CONTAINERS: Record<VideoCodec, readonly Container[]> = {
   h264: ["mp4", "mov"],
   h265: ["mp4", "mov"],
   vp9: ["webm"],
   prores: ["mov"],
+  gif: ["gif"],
 };
 
 export const CONTAINER_VIDEO_CODECS: Record<Container, readonly VideoCodec[]> = {
   mp4: ["h264", "h265"],
   mov: ["h264", "h265", "prores"],
   webm: ["vp9"],
+  gif: ["gif"],
 };
 
 export const CONTAINER_AUDIO_CODECS: Record<Container, readonly AudioCodec[]> = {
   mp4: ["aac", "mp3"],
   mov: ["aac", "pcm_s16le"],
   webm: ["opus", "vorbis"],
+  gif: [],
 };
 
 export const AUDIO_SAMPLE_RATES: Record<AudioCodec, readonly number[]> = {
@@ -89,6 +100,7 @@ export const CRF_RANGE: Record<
   h265: { min: 0, max: 51, default: 28 },
   vp9: { min: 0, max: 63, default: 31 },
   prores: { min: 0, max: 0, default: 0 },
+  gif: { min: 0, max: 0, default: 0 },
 };
 
 export const CODEC_SUPPORTS_CRF: Record<VideoCodec, boolean> = {
@@ -96,6 +108,7 @@ export const CODEC_SUPPORTS_CRF: Record<VideoCodec, boolean> = {
   h265: true,
   vp9: true,
   prores: false,
+  gif: false,
 };
 
 export const PRESET_NAMES = ["high", "medium", "low"] as const;
@@ -181,7 +194,10 @@ export function normalizeExportSettings(
     ? (raw.container as Container)
     : allowedContainers[0];
 
-  const allowedAudio = CONTAINER_AUDIO_CODECS[container];
+  const allowedAudio =
+    CONTAINER_AUDIO_CODECS[container].length > 0
+      ? CONTAINER_AUDIO_CODECS[container]
+      : AUDIO_CODECS;
   const audioCodec = allowedAudio.includes(raw.audioCodec as AudioCodec)
     ? (raw.audioCodec as AudioCodec)
     : allowedAudio[0];
@@ -193,17 +209,17 @@ export function normalizeExportSettings(
 
   const range = CRF_RANGE[videoCodec];
 
-  const qualityMode: QualityMode = !CODEC_SUPPORTS_CRF[videoCodec]
-    ? "bitrate"
-    : raw.qualityMode === "crf"
-      ? "crf"
-      : "bitrate";
+  // See the renderer copy: kept, not pinned, for the codecs without one.
+  const rateControl = CODEC_SUPPORTS_CRF[videoCodec];
+  const qualityMode: QualityMode = raw.qualityMode === "crf" ? "crf" : "bitrate";
 
   return {
     container,
     videoCodec,
     qualityMode,
-    crf: clampInt(raw.crf, range.min, range.max, range.default),
+    crf: rateControl
+      ? clampInt(raw.crf, range.min, range.max, range.default)
+      : clampInt(raw.crf, 0, 63, base.crf),
     preset: pick(raw.preset, ENCODE_PRESETS, base.preset),
     videoBitrate: positive(raw.videoBitrate, base.videoBitrate),
     proresProfile: clampInt(raw.proresProfile, 0, 5, base.proresProfile),
@@ -215,6 +231,12 @@ export function normalizeExportSettings(
     // normalizes to software encoding rather than to `undefined`, which would
     // then reach the arg builder and read as falsy anyway — but only by luck.
     hardwareAccel: raw.hardwareAccel === true,
+    ...(container === "gif"
+      ? {
+          gifFps: pick<number>(Number(raw.gifFps), GIF_FPS, GIF_DEFAULT_FPS),
+          gifWidth: pick<number>(Number(raw.gifWidth), GIF_WIDTHS, GIF_DEFAULT_WIDTH),
+        }
+      : {}),
   };
 }
 
@@ -227,6 +249,7 @@ export const VIDEO_ENCODERS: Record<VideoCodec, string> = {
   h265: "libx265",
   vp9: "libvpx-vp9",
   prores: "prores_ks",
+  gif: "gif",
 };
 
 /**
@@ -381,6 +404,11 @@ export function videoOutputArgs(
   settings: ExportSettings,
   target: EncodeTarget = HOST_TARGET,
 ): string[] {
+  if (settings.videoCodec === "gif") {
+    // Rate, preset and pixel format are all the palette's business
+    // (`gifFilterGraph`), which hands the encoder `pal8` frames.
+    return ["-c:v", "gif"];
+  }
   const hardware = usesHardwareEncoder(settings, target);
 
   const args: string[] = [
@@ -464,10 +492,96 @@ export function containerOutputArgs(settings: ExportSettings): string[] {
     // finished downloading; harmless locally, required for a served file.
     args.push("-movflags", "+faststart");
   }
+  if (settings.container === "gif") {
+    // Loop forever, which is what anyone sharing a GIF expects of it.
+    args.push("-loop", "0");
+  }
 
   // The muxer is inferrable from the extension, but the save dialog does not
   // guarantee one, so pin it.
   args.push("-f", settings.container);
 
   return args;
+}
+
+// ---------------------------------------------------------------------------
+// GIF: a palette, not an encoder setting.
+// ---------------------------------------------------------------------------
+
+/**
+ * Frames a single palette may hold before a GIF switches to one palette per
+ * frame.
+ *
+ * The best GIF has one palette for the whole clip, and ffmpeg can only build
+ * it from every frame, so it holds every frame (after the resize) until the
+ * last one arrives. Measured on 20 s of 1080p30 at 480px and 15 fps: one
+ * palette made 3.4 MB in 298 MB of memory, one per frame 6.0 MB in 139 MB,
+ * and only the first grows with the length. Past this budget the export
+ * stays in constant memory and pays in size instead.
+ */
+export const GIF_PALETTE_BUDGET_BYTES = 512 * 1024 * 1024;
+
+export type GifPlan = {
+  fps: number;
+  /** The output size, or `null` where the frame size is not known (the PNG pipe). */
+  size: { w: number; h: number } | null;
+  /** The target width when `size` is unknown; 0 keeps the source's. */
+  width: number;
+  /** One palette for the whole clip, or one per frame. */
+  globalPalette: boolean;
+};
+
+/**
+ * What a GIF export will do, from its settings and the frames it is fed.
+ *
+ * Never faster than the project (the `fps` filter would only repeat frames)
+ * and never wider than the frames, which it would only blur.
+ */
+export function gifPlan(
+  settings: ExportSettings,
+  source: { fps: number; size: { w: number; h: number } | null; durationSec: number },
+): GifPlan {
+  const fps = Math.min(settings.gifFps ?? GIF_DEFAULT_FPS, source.fps);
+  const width = settings.gifWidth ?? GIF_DEFAULT_WIDTH;
+  if (source.size == null) {
+    return { fps, size: null, width, globalPalette: false };
+  }
+  const { w, h } = source.size;
+  const outW = width > 0 && width < w ? width : w;
+  const outH = Math.max(1, Math.round((h * outW) / w));
+  const frames = Math.ceil(Math.max(0, source.durationSec) * fps);
+  return {
+    fps,
+    size: { w: outW, h: outH },
+    width,
+    globalPalette: frames * outW * outH * 4 <= GIF_PALETTE_BUDGET_BYTES,
+  };
+}
+
+/**
+ * The video graph of a GIF export, from the frame pipe to `[vout]`.
+ *
+ * Resampled to the GIF's rate and resized first, so the palette is built
+ * from, and the budget counts, the frames that are actually kept. Ordered
+ * dither, because error diffusion makes every frame's noise different and
+ * the GIF then stores the noise as change. `diff_mode=rectangle` re-dithers
+ * only what moved. The frames are opaque (the composite fills its
+ * background), so no palette entry is spent on transparency.
+ */
+export function gifFilterGraph(plan: GifPlan): string {
+  let scale = "";
+  if (plan.size == null) {
+    if (plan.width > 0) {
+      scale = `,scale='min(${plan.width},iw)':-1:flags=lanczos`;
+    }
+  } else {
+    scale = `,scale=${plan.size.w}:${plan.size.h}:flags=lanczos`;
+  }
+  const perFrame = plan.globalPalette ? "" : ":stats_mode=single";
+  const newPalette = plan.globalPalette ? "" : ":new=1";
+  return (
+    `[0:v]fps=${plan.fps}${scale},split[gifa][gifb];` +
+    `[gifa]palettegen=reserve_transparent=0${perFrame}[gifp];` +
+    `[gifb][gifp]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle${newPalette}[vout]`
+  );
 }

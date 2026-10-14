@@ -55,7 +55,7 @@ export const ipcDialog = {
   // `ipcMain.handle` puts the event first, so the container arrives second —
   // same shape as `openFile` above.
   exportVideo: async (event, container: string = "mp4") => {
-    const extension = ["mp4", "mov", "webm"].includes(container)
+    const extension = ["mp4", "mov", "webm", "gif"].includes(container)
       ? container
       : "mp4";
 
@@ -64,7 +64,7 @@ export const ipcDialog = {
       buttonLabel: "Export",
       filters: [
         {
-          name: "Export Video",
+          name: extension === "gif" ? "Export GIF" : "Export Video",
           extensions: [extension],
         },
       ],

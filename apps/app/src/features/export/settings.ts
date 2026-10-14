@@ -9,10 +9,10 @@
  * the tables agree, so the pair cannot drift apart silently.
  */
 
-export const CONTAINERS = ["mp4", "mov", "webm"] as const;
+export const CONTAINERS = ["mp4", "mov", "webm", "gif"] as const;
 export type Container = (typeof CONTAINERS)[number];
 
-export const VIDEO_CODECS = ["h264", "h265", "vp9", "prores"] as const;
+export const VIDEO_CODECS = ["h264", "h265", "vp9", "prores", "gif"] as const;
 export type VideoCodec = (typeof VIDEO_CODECS)[number];
 
 export const AUDIO_CODECS = [
@@ -71,7 +71,32 @@ export type ExportSettings = {
    * and it spends noticeably more bitrate for the same picture.
    */
   hardwareAccel: boolean;
+  /**
+   * GIF only: frames a second, one of `GIF_FPS`.
+   *
+   * Present only while the container is GIF and deleted otherwise, so a
+   * project that never exported a GIF saves byte-identically to one written
+   * before GIF existed (the optional-field rule in CLAUDE.md).
+   */
+  gifFps?: number;
+  /** GIF only: output width in pixels, one of `GIF_WIDTHS`; 0 keeps the project's. */
+  gifWidth?: number;
 };
+
+/**
+ * A GIF's frame rates. A GIF counts time in hundredths of a second, and a
+ * frame of 0.01s or less is shown for 0.1s by browsers, so 60 would play at a
+ * crawl; 50 (0.02s) is the fastest that plays as asked.
+ */
+export const GIF_FPS = [10, 15, 20, 25, 30, 50] as const;
+export const GIF_DEFAULT_FPS = 15;
+
+/**
+ * A GIF's widths. 256 colours and no inter-frame prediction make a GIF large
+ * at video sizes, so it defaults small; 0 is the project's own width.
+ */
+export const GIF_WIDTHS = [320, 480, 640, 800, 1280, 0] as const;
+export const GIF_DEFAULT_WIDTH = 480;
 
 /**
  * Which containers can mux each video codec. The first entry is the fallback
@@ -82,6 +107,7 @@ export const CODEC_CONTAINERS: Record<VideoCodec, readonly Container[]> = {
   h265: ["mp4", "mov"],
   vp9: ["webm"],
   prores: ["mov"],
+  gif: ["gif"],
 };
 
 /** The inverse of `CODEC_CONTAINERS`, kept explicit so the UI can read it directly. */
@@ -90,13 +116,16 @@ export const CONTAINER_VIDEO_CODECS: Record<Container, readonly VideoCodec[]> =
     mp4: ["h264", "h265"],
     mov: ["h264", "h265", "prores"],
     webm: ["vp9"],
+    gif: ["gif"],
   };
 
+/** A GIF carries no sound, so it offers no audio codec; the audio settings ride along unused. */
 export const CONTAINER_AUDIO_CODECS: Record<Container, readonly AudioCodec[]> =
   {
     mp4: ["aac", "mp3"],
     mov: ["aac", "pcm_s16le"],
     webm: ["opus", "vorbis"],
+    gif: [],
   };
 
 /** libopus refuses anything but its own rate list, so 48k is all we offer there. */
@@ -117,6 +146,8 @@ export const CRF_RANGE: Record<
   vp9: { min: 0, max: 63, default: 31 },
   // Unused: ProRes is profile-driven and has no rate-control knob at all.
   prores: { min: 0, max: 0, default: 0 },
+  // Unused: a GIF's size is set by its frame rate, width and 256 colours.
+  gif: { min: 0, max: 0, default: 0 },
 };
 
 /** ProRes is intra-only at fixed per-profile rates; `-crf` means nothing to it. */
@@ -125,6 +156,7 @@ export const CODEC_SUPPORTS_CRF: Record<VideoCodec, boolean> = {
   h265: true,
   vp9: true,
   prores: false,
+  gif: false,
 };
 
 /** The speed knob is `-preset` for x264/x265 and `-cpu-used` for VP9. */
@@ -133,6 +165,7 @@ export const CODEC_SUPPORTS_SPEED_PRESET: Record<VideoCodec, boolean> = {
   h265: true,
   vp9: true,
   prores: false,
+  gif: false,
 };
 
 /**
@@ -148,6 +181,7 @@ export const CODEC_SUPPORTS_HW_ACCEL: Record<VideoCodec, boolean> = {
   h265: true,
   vp9: false,
   prores: true,
+  gif: false,
 };
 
 export const PRORES_PROFILES = [
@@ -167,6 +201,7 @@ export const VIDEO_CODEC_LABELS: Record<VideoCodec, string> = {
   h265: "H.265 (HEVC)",
   vp9: "VP9",
   prores: "ProRes",
+  gif: "GIF",
 };
 
 export const AUDIO_CODEC_LABELS: Record<AudioCodec, string> = {
@@ -181,6 +216,7 @@ export const CONTAINER_LABELS: Record<Container, string> = {
   mp4: "MP4",
   mov: "MOV",
   webm: "WebM",
+  gif: "GIF",
 };
 
 export const PRESET_NAMES = ["high", "medium", "low"] as const;
@@ -279,7 +315,12 @@ export function normalizeExportSettings(
     ? (raw.container as Container)
     : allowedContainers[0];
 
-  const allowedAudio = CONTAINER_AUDIO_CODECS[container];
+  // A GIF offers no audio codec. The one already chosen is kept, unused, so
+  // switching back to a video container finds the sound as it was left.
+  const allowedAudio =
+    CONTAINER_AUDIO_CODECS[container].length > 0
+      ? CONTAINER_AUDIO_CODECS[container]
+      : AUDIO_CODECS;
   const audioCodec = allowedAudio.includes(raw.audioCodec as AudioCodec)
     ? (raw.audioCodec as AudioCodec)
     : allowedAudio[0];
@@ -291,19 +332,20 @@ export function normalizeExportSettings(
 
   const range = CRF_RANGE[videoCodec];
 
-  // ProRes is pinned to "bitrate" only to keep the type total — the arg builder
-  // ignores the mode for ProRes entirely, and the UI hides the control.
-  const qualityMode: QualityMode = !CODEC_SUPPORTS_CRF[videoCodec]
-    ? "bitrate"
-    : raw.qualityMode === "crf"
-      ? "crf"
-      : "bitrate";
+  // ProRes and GIF have no rate to control, and the arg builder ignores both
+  // fields for them. They are kept as handed in rather than pinned, so going
+  // to ProRes or GIF and back finds the quality where it was left; pinning
+  // them sent a round trip back as CRF 0, which is lossless.
+  const rateControl = CODEC_SUPPORTS_CRF[videoCodec];
+  const qualityMode: QualityMode = raw.qualityMode === "crf" ? "crf" : "bitrate";
 
   return {
     container,
     videoCodec,
     qualityMode,
-    crf: clampInt(raw.crf, range.min, range.max, range.default),
+    crf: rateControl
+      ? clampInt(raw.crf, range.min, range.max, range.default)
+      : clampInt(raw.crf, 0, 63, base.crf),
     preset: pick(raw.preset, ENCODE_PRESETS, base.preset),
     videoBitrate: positive(raw.videoBitrate, base.videoBitrate),
     proresProfile: clampInt(raw.proresProfile, 0, 5, base.proresProfile),
@@ -315,7 +357,18 @@ export function normalizeExportSettings(
     // normalizes to software encoding rather than to `undefined`, which would
     // then reach the arg builder and read as falsy anyway — but only by luck.
     hardwareAccel: raw.hardwareAccel === true,
+    ...(container === "gif"
+      ? {
+          gifFps: pick<number>(Number(raw.gifFps), GIF_FPS, GIF_DEFAULT_FPS),
+          gifWidth: pick<number>(Number(raw.gifWidth), GIF_WIDTHS, GIF_DEFAULT_WIDTH),
+        }
+      : {}),
   };
+}
+
+/** A GIF width as the UI and the summary say it. */
+export function gifWidthLabel(width: number): string {
+  return width === 0 ? "Original" : `${width}px`;
 }
 
 /**
@@ -335,6 +388,14 @@ export function detectPreset(settings: ExportSettings): PresetName | "custom" {
 
 /** One-line summary for the panel header, e.g. "H.264 · MP4 · CRF 23 · AAC 192k". */
 export function describeExportSettings(settings: ExportSettings): string {
+  if (settings.container === "gif") {
+    return [
+      "GIF",
+      gifWidthLabel(settings.gifWidth ?? GIF_DEFAULT_WIDTH),
+      `${settings.gifFps ?? GIF_DEFAULT_FPS} fps`,
+    ].join(" ");
+  }
+
   const parts: string[] = [
     VIDEO_CODEC_LABELS[settings.videoCodec],
     CONTAINER_LABELS[settings.container],

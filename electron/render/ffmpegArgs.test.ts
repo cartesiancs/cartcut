@@ -1412,3 +1412,34 @@ describe("a clip whose audio was retimed before the spawn", () => {
     expect(withMap).toEqual(buildFFmpegArgs(options, timeline));
   });
 });
+
+describe("buildFFmpegArgs, GIF", () => {
+  const gifOptions = {
+    ...rawOptions,
+    fps: 30,
+    videoDuration: 2,
+    videoDestination: "/out.gif",
+    exportSettings: { videoCodec: "gif" as const, gifFps: 15, gifWidth: 480 },
+  };
+
+  it("opens no clip and builds no audio, whatever is on the timeline", () => {
+    const args = buildFFmpegArgs(gifOptions, {
+      a: audioElement({ localpath: "/music.mp3" }),
+    });
+    // The frame pipe is the only input.
+    expect(args.filter((arg) => arg === "-i")).toHaveLength(1);
+    expect(args).not.toContain("/music.mp3");
+    expect(args).toContain("-an");
+    expect(args.join(" ")).not.toMatch(/anullsrc|amix|aresample|-c:a/);
+  });
+
+  it("maps the palette graph's output to the GIF muxer, looping", () => {
+    const args = buildFFmpegArgs(gifOptions, {});
+    const graph = args[args.indexOf("-filter_complex") + 1];
+    expect(graph).toMatch(/^\[0:v\]fps=15,scale=480:270:flags=lanczos,split/);
+    expect(graph).toMatch(/paletteuse=[^;]*\[vout\]$/);
+    expect(args.slice(args.indexOf("-map"), args.indexOf("-map") + 2)).toEqual(["-map", "[vout]"]);
+    expect(args.slice(-6)).toEqual(["2", "-loop", "0", "-f", "gif", "/out.gif"]);
+    expect(args[args.indexOf("-r", args.indexOf("pipe:0")) + 1]).toBe("15");
+  });
+});

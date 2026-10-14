@@ -100,7 +100,11 @@ export const ipcRenderV2 = {
     // timeline before anything notices. The report that eventually arrives is
     // "FFmpeg exited with code 1", one stack trace per frame still in flight,
     // and no mention of which file. See `missingInputs`.
-    const missing = missingInputs(timeline, existsSync);
+    // A GIF opens no clip at all (it has no sound), so neither a missing file
+    // nor a ramp's audio is any concern of it.
+    const settings = resolveExportSettings(options);
+    const silent = settings.container === "gif";
+    const missing = silent ? [] : missingInputs(timeline, existsSync);
     if (missing.length > 0) {
       const names = missing.map((path) => basename(path)).join(", ");
       throw new Error(
@@ -115,13 +119,15 @@ export const ipcRenderV2 = {
     // refusal to begin, with the clip named. There is deliberately no fallback
     // to a constant `atempo` at the ramp's mean rate, which would deliver a
     // file whose sound slides against its picture with nothing saying so.
-    const { sampleRate, channels } = resolveExportSettings(options);
-    const rendered = await prepareRenderedAudio(
-      ffmpegConfig.FFMPEG_PATH,
-      timeline,
-      { sampleRate, channels },
-      app.getPath("temp"),
-    );
+    const { sampleRate, channels } = settings;
+    const rendered = silent
+      ? EMPTY_RENDERED_AUDIO
+      : await prepareRenderedAudio(
+          ffmpegConfig.FFMPEG_PATH,
+          timeline,
+          { sampleRate, channels },
+          app.getPath("temp"),
+        );
 
     let started: ExportSession;
     try {
