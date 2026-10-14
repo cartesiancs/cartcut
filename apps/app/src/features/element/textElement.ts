@@ -20,6 +20,7 @@ import type {
   TextShadow,
 } from "../../@types/timeline";
 import { defaultTextHeight } from "../text/metrics";
+import { DEFAULT_BACKGROUND_PADDING } from "../text/style";
 
 export type TextElementOptions = {
   text?: string;
@@ -48,8 +49,18 @@ export type TextElementOptions = {
   isBold?: boolean;
   isItalic?: boolean;
   /** `enable` defaults to false, so passing a size alone does not turn it on. */
-  outline?: { enable?: boolean; size?: number; color?: string };
+  outline?: { enable?: boolean; size?: number; color?: string; opacity?: number };
   backgroundColor?: string;
+  /**
+   * The band's opacity (0-100), padding and corner radius. Each is written
+   * only when it differs from `features/text/style.ts`'s default, so a plain
+   * caption carries none of the three keys.
+   */
+  backgroundOpacity?: number;
+  backgroundPadding?: number;
+  backgroundRadius?: number;
+  /** Drawn case. `"none"` is the default and is never written. */
+  textTransform?: "none" | "uppercase" | "lowercase";
 
   /**
    * Text effects. Omitted means the element carries no such block at all
@@ -83,6 +94,10 @@ export function createTextElement({
   isItalic = false,
   outline,
   backgroundColor = "#000000",
+  backgroundOpacity,
+  backgroundPadding,
+  backgroundRadius,
+  textTransform,
   shadow,
   glow,
   fill,
@@ -112,6 +127,9 @@ export function createTextElement({
         enable: outline?.enable ?? false,
         size: outline?.size ?? 1,
         color: outline?.color ?? "#000000",
+        ...(outline?.opacity != null && outline.opacity !== 100
+          ? { opacity: outline.opacity }
+          : {}),
       },
       // Spread rather than defaulted: an element that uses no shadow carries no
       // `shadow` key, which `resolveTextStyle` reads as "off". Writing a
@@ -119,10 +137,23 @@ export function createTextElement({
       // project file and in all fifty undo snapshots.
       ...(shadow ? { shadow } : {}),
       ...(glow ? { glow } : {}),
+      ...(textTransform != null && textTransform !== "none"
+        ? { textTransform }
+        : {}),
     },
     background: {
       enable: backgroundEnable,
       color: backgroundColor,
+      ...(backgroundOpacity != null && backgroundOpacity !== 100
+        ? { opacity: backgroundOpacity }
+        : {}),
+      ...(backgroundPadding != null &&
+      backgroundPadding !== DEFAULT_BACKGROUND_PADDING
+        ? { padding: backgroundPadding }
+        : {}),
+      ...(backgroundRadius != null && backgroundRadius !== 0
+        ? { radius: backgroundRadius }
+        : {}),
     },
     ...(fill ? { fill } : {}),
     ...(textOpacity != null ? { textOpacity } : {}),

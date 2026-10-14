@@ -81,13 +81,16 @@ the user can reshuffle a random arrangement.
 
 **Fonts.** Never name a face in CSS directly: it exists only on the machine
 that wrote it. Use a `font` parameter. `bundled:<file>` names a face every
-install has: AbrilFatface-Regular.ttf, Anton-Regular.ttf,
-ArchivoBlack-Regular.ttf, BebasNeue-Regular.ttf, Caveat-Bold.ttf,
-Inter-Bold.ttf, Lobster-Regular.ttf, Lora-Bold.ttf, Merriweather-Bold.ttf,
-Montserrat-ExtraBold.ttf, Nunito-Bold.ttf, OpenSans-SemiBold.ttf,
-Oswald-Bold.ttf, Pacifico-Regular.ttf, PermanentMarker-Regular.ttf,
-PlayfairDisplay-Bold.ttf, Poppins-SemiBold.ttf, Raleway-SemiBold.ttf,
-Roboto-Bold.ttf, RobotoMono-Bold.ttf. These are Latin faces; Hangul falls back
+install has: AbrilFatface-Regular.ttf, AlfaSlabOne-Regular.ttf,
+Anton-Regular.ttf, ArchivoBlack-Regular.ttf, Bangers-Regular.ttf,
+BebasNeue-Regular.ttf, BlackOpsOne-Regular.ttf, Caveat-Bold.ttf,
+GreatVibes-Regular.ttf, Inter-Bold.ttf, Lobster-Regular.ttf, Lora-Bold.ttf,
+Merriweather-Bold.ttf, Monoton-Regular.ttf, Montserrat-ExtraBold.ttf,
+Nunito-Bold.ttf, OpenSans-SemiBold.ttf, Oswald-Bold.ttf,
+Pacifico-Regular.ttf, PermanentMarker-Regular.ttf, PlayfairDisplay-Bold.ttf,
+Poppins-SemiBold.ttf, PressStart2P-Regular.ttf, Raleway-SemiBold.ttf,
+Righteous-Regular.ttf, Roboto-Bold.ttf, RobotoMono-Bold.ttf,
+Shrikhand-Regular.ttf. These are Latin faces; Hangul falls back
 to the app's default face, which is behind every family list. The one literal
 family that is always present is `"Noto Sans KR"`, a variable face (weight 100
 to 900) with Hangul, which is what a weight animation should use.

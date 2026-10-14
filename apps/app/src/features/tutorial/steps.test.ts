@@ -129,11 +129,11 @@ describe("tutorial steps", () => {
       });
     }
 
-    // `addText` inserts at 0ms, not at the playhead, so saying otherwise would
-    // be a promise the click does not keep.
-    it("does not promise the text lands at the playhead", () => {
+    // The Text tile adds its clip at the playhead (`actions.ts#addTextClip`),
+    // the way a file does, so the step says where to look for it.
+    it("says the text lands at the playhead", () => {
       const body = lookup(locale("en"), "tutorial.steps.add_text.body") as string;
-      expect(body.toLowerCase()).not.toContain("playhead");
+      expect(body.toLowerCase()).toContain("playhead");
     });
   });
 

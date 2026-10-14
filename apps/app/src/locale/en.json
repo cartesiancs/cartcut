@@ -186,7 +186,7 @@
       },
       "add_text": {
         "title": "Add a text",
-        "body": "Click Text to add a default text clip to your timeline."
+        "body": "Click Text to add a default text clip at the playhead."
       }
     },
     "hints": {

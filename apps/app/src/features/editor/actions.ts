@@ -33,6 +33,7 @@ import { canMergeClips, mergeClips } from "../timeline/mergeOps";
 import { canRotateClips, rotateClips } from "../timeline/rotateOps";
 import { toggleMirror, type MirrorAxis } from "../timeline/mirrorOps";
 import { isCroppable } from "../timeline/cropOps";
+import { placeNewElement } from "../timeline/placement";
 import { projectBakeHz } from "./frameRate";
 import { refusesEdit } from "./timelineLock";
 import { cancelActiveGestures } from "./gestureCancel";
@@ -241,6 +242,33 @@ export function detachAudioFromSelection(): void {
  */
 export function addTrack(kind: TrackKind): void {
   commit((input) => appendTrackOfKind(input, kind, uuidv4()));
+}
+
+/**
+ * Put a new text clip at the playhead, and optionally dress it in the same
+ * undo step.
+ *
+ * The Text panel's tiles come here. `decorate` is how an animated tile writes
+ * its reveal onto the clip it just placed without a second step that an undo
+ * would peel off on its own, leaving a bare title behind. Through `commit`, so
+ * nothing is added while the caption panel holds the timeline.
+ *
+ * Answers the new clip's id, or `null` when the timeline is locked.
+ */
+export function addTextClip(
+  element: TimelineElement,
+  decorate?: (doc: TimelineDocument, elementId: string) => TimelineDocument,
+): string | null {
+  if (refusesEdit()) {
+    return null;
+  }
+  const elementId = uuidv4();
+  const start = playheadMs();
+  commit((input) => {
+    const placed = placeNewElement(input, elementId, element, start, uuidv4());
+    return decorate == null ? placed : decorate(placed, elementId);
+  });
+  return elementId;
 }
 
 /**

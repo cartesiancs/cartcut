@@ -3,7 +3,7 @@ Bundled Google Fonts
 
 Every font file in this directory comes from Google Fonts
 (https://fonts.google.com) and is distributed under the SIL Open Font License,
-Version 1.1 — with the exception noted below. The full licence text is at
+Version 1.1, with the exception noted below. The full licence text is at
 https://openfontlicense.org and in each family's page on Google Fonts.
 
 The files were fetched as TrueType instances from the Google Fonts CSS API:
@@ -40,6 +40,38 @@ Files and upstream families
 
 Roboto and Roboto Mono are licensed under the Apache License 2.0
 (https://www.apache.org/licenses/LICENSE-2.0), not the OFL.
+
+Display faces added for the text panel's designs. These eight have a single
+static instance upstream, so they were taken as-is from the google/fonts
+repository (https://github.com/google/fonts/tree/main/ofl/<family>/) rather
+than through the CSS API:
+
+  Bangers-Regular.ttf          Bangers, weight 400              OFL-1.1
+  Righteous-Regular.ttf        Righteous, weight 400            OFL-1.1
+  PressStart2P-Regular.ttf     Press Start 2P, weight 400       OFL-1.1
+  BlackOpsOne-Regular.ttf      Black Ops One, weight 400        OFL-1.1
+  Monoton-Regular.ttf          Monoton, weight 400              OFL-1.1
+  Shrikhand-Regular.ttf        Shrikhand, weight 400            OFL-1.1
+  GreatVibes-Regular.ttf       Great Vibes, weight 400          OFL-1.1
+  AlfaSlabOne-Regular.ttf      Alfa Slab One, weight 400        OFL-1.1
+
+Their copyright notices, as each family's OFL.txt states them:
+
+  Copyright 2010 The Bangers Project Authors
+    (https://github.com/googlefonts/bangers)
+  Copyright (c) 2011 by Brian J. Bonislawsky DBA Astigmatic (AOETI)
+    (astigma@astigmatic.com), with Reserved Font Names "Righteous"
+  Copyright 2012 The Press Start 2P Project Authors (cody@zone38.net),
+    with Reserved Font Name "Press Start 2P".
+  Copyright 2022 The Black-Ops Project Authors
+    (https://github.com/googlefonts/googlefonts-project-template)
+  Copyright (c) 2011 by vernon adams (vern@newtypography.co.uk),
+    with Reserved Font Names "Monoton"
+  Copyright (c) 2015 Jonny Pinhorn (jonpinhorn.typedesign@gmail.com)
+  Copyright 2015 The Great Vibes Pro Project Authors
+    (https://github.com/googlefonts/great-vibes)
+  Copyright 2016 The Alfa Slab One Project Authors
+    (http://www.jmsole.cl | info@jmsole.cl), with Reserved Font Name "Alfa Slab".
 
 Note on naming
 --------------

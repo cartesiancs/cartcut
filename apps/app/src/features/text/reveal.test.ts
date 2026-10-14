@@ -487,3 +487,93 @@ describe("revealPlan with an animator", () => {
     );
   });
 });
+
+describe("revealPlan with a settling animator", () => {
+  const WAVE = { offsetY: 30, window: 4 };
+  const SETTLE = { ...WAVE, settle: true as const };
+
+  /** Every unit's distance from rest, summed: 0 when the text is settled. */
+  const unsettled = (plan: ReturnType<typeof revealPlan>) =>
+    plan.reduce(
+      (sum, line) =>
+        sum + line.heads.reduce((acc, head) => acc + (1 - head.t), 0),
+      0,
+    );
+
+  it("is the old plan exactly when the flag is absent", () => {
+    // Clips animated before the flag existed must draw as they did.
+    for (let progress = 0; progress <= 100; progress += 3) {
+      expect(
+        revealPlan(["abc def", "ghi"], "character", progress, 0, WAVE),
+      ).toEqual(
+        revealPlan(["abc def", "ghi"], "character", progress, 0, {
+          ...WAVE,
+          settle: undefined,
+        }),
+      );
+    }
+  });
+
+  it("leaves units in flight at the last moment without it, and none with it", () => {
+    // The defect the flag exists for, shown first so the second half is known
+    // to measure something: just short of 100 the old plan still has the
+    // tail mid-move, and at 100 it draws them settled, a jump.
+    expect(unsettled(revealPlan(["abcdef"], "character", 99.9, 0, WAVE))).toBeGreaterThan(1);
+    expect(unsettled(revealPlan(["abcdef"], "character", 99.9, 0, SETTLE))).toBeLessThan(0.05);
+  });
+
+  it("settles a line before calling it whole, so a line break does not jump", () => {
+    // Two lines: the moment the reveal moves on to the second, the first's
+    // tail is still arriving, and it has to stay in the plan. A line jumps
+    // when one step has a head well short of rest and the next calls the
+    // line whole.
+    const jumps = (animate: typeof WAVE) => {
+      const steps = 400;
+      let previous = revealPlan(["abc", "def"], "character", 0, 0, animate);
+      for (let step = 1; step <= steps; step += 1) {
+        const plan = revealPlan(["abc", "def"], "character", (step / steps) * 100, 0, animate);
+        for (let index = 0; index < plan.length; index += 1) {
+          const wasMoving = previous[index].heads.some((head) => head.t < 0.9);
+          const nowWhole = plan[index].heads.length === 0 && plan[index].chars === 3;
+          if (wasMoving && nowWhole) {
+            return true;
+          }
+        }
+        previous = plan;
+      }
+      return false;
+    };
+
+    expect(jumps(WAVE)).toBe(true);
+    expect(jumps(SETTLE)).toBe(false);
+  });
+
+  it("starts from nothing and ends settled", () => {
+    expect(revealPlan(["abcdef"], "character", 0, 0, SETTLE)).toEqual([
+      { chars: 0, heads: [] },
+    ]);
+    expect(revealPlan(["abcdef"], "character", 100, 0, SETTLE)).toEqual([
+      { chars: 6, heads: [] },
+    ]);
+  });
+
+  it("is kept by the write guard as true and dropped as anything else", () => {
+    expect(coerceRevealAnimate({ ...WAVE, settle: true })).toEqual({
+      ...WAVE,
+      settle: true,
+    });
+    expect(coerceRevealAnimate({ ...WAVE, settle: false })).toEqual(WAVE);
+    expect(coerceRevealAnimate({ ...WAVE, settle: "yes" })).toEqual(WAVE);
+    // Timing, not movement: on its own it is no animator.
+    expect(coerceRevealAnimate({ settle: true })).toBeNull();
+  });
+
+  it("tells two reveals apart that differ only by it", () => {
+    expect(
+      sameReveal(
+        { unit: "character", progress: 50, animate: WAVE },
+        { unit: "character", progress: 50, animate: SETTLE },
+      ),
+    ).toBe(false);
+  });
+});

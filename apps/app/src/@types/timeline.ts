@@ -1206,6 +1206,17 @@ export type RevealAnimate = {
   opacity?: number;
   /** How the unit travels from its starting state to its settled one. */
   easing?: string;
+  /**
+   * Finish every move before the reveal counts as done.
+   *
+   * Without it, progress 100 is the moment the last unit *arrives*, and with a
+   * window above one the units still in flight at that instant jump to rest
+   * (a line's tail does the same when the next line starts). With it, the
+   * reveal travels `window - 1` units further over the same 0-100, so 100 is
+   * the moment the last unit settles and nothing jumps. Absent keeps the old
+   * timing exactly, so a clip animated before this field draws as it did.
+   */
+  settle?: true;
 };
 
 export type TextReveal = {

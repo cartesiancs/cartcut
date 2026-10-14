@@ -4,7 +4,8 @@
  * Extracted because there were **three** copies of this arithmetic:
  * `agent/commands/text.ts#defaultLayout` for `add_subtitles`,
  * `ui/control/ControlText.ts#layoutFor` for titles (the vertically-centred
- * variant), and the auto-caption panel's own hardcoded version. The first of
+ * variant, now `font/textPresetOptions.ts#presetLayout`), and the
+ * auto-caption panel's own hardcoded version. The first of
  * those even claimed in its doc comment to be "the same placement the
  * auto-caption panel computes" — which was not true: the panel worked in a
  * literal 1080 while this derived from the project, so the two disagreed on

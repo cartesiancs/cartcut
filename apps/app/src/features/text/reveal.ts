@@ -162,7 +162,7 @@ export const REVEAL_ANIMATE_RANGES = {
   blur: [0, 500],
   opacity: [0, 100],
 } as const satisfies Record<
-  Exclude<keyof RevealAnimate, "easing">,
+  Exclude<keyof RevealAnimate, "easing" | "settle">,
   readonly [number, number]
 >;
 
@@ -189,8 +189,11 @@ function clampNumber(value: unknown, min: number, max: number): number | null {
  * field is inert answers `null` rather than a no-op object: that is what keeps
  * a clip with `{ animate: {} }` on the same drawing path as one with none.
  */
-export function animateOf(raw: unknown): Required<Omit<RevealAnimate, "easing">> & {
+export function animateOf(
+  raw: unknown,
+): Required<Omit<RevealAnimate, "easing" | "settle">> & {
   easing: string | null;
+  settle: boolean;
 } | null {
   if (raw == null || typeof raw !== "object" || Array.isArray(raw)) {
     return null;
@@ -211,6 +214,9 @@ export function animateOf(raw: unknown): Required<Omit<RevealAnimate, "easing">>
     blur: read("blur") ?? ANIMATE_DEFAULTS.blur,
     opacity: read("opacity") ?? ANIMATE_DEFAULTS.opacity,
     easing: typeof source.easing === "string" ? source.easing : null,
+    // Timing, not movement: it is left out of `moves` below, so a settle with
+    // nothing to settle is still no animator at all.
+    settle: source.settle === true,
   };
 
   const moves =
@@ -254,6 +260,11 @@ export function coerceRevealAnimate(value: unknown): RevealAnimate | null {
 
   if (typeof source.easing === "string" && resolveEasing(source.easing) != null) {
     next.easing = source.easing;
+  }
+  // `true` or absent, never `false`: off is the default, and a default is a
+  // missing key.
+  if (source.settle === true) {
+    next.settle = true;
   }
 
   // An animator that would move nothing is not an animator. Answering `null`
@@ -559,7 +570,6 @@ export function revealPlan(
     return lines.map((line) => ({ chars: line.length, heads: [] }));
   }
 
-  const revealed = (clampRevealProgress(progress) / 100) * total;
   const softness = clampFade(fade);
   const moving = animateOf(animate);
 
@@ -570,6 +580,13 @@ export function revealPlan(
   // before the animator takes, unchanged. With one, `window` says, defaulting
   // to `fade` when there is one so the two never contradict each other.
   const span = moving == null ? softness : animatorSpan(moving.window, softness);
+
+  // With `settle`, 0-100 covers the last unit's whole move rather than ending
+  // at its arrival, and a line is whole only once its last unit has settled.
+  // `span - 1` is how much further that is: nothing for a window of one.
+  const settle = moving?.settle === true && span > 0;
+  const travel = settle ? total + span - 1 : total;
+  const revealed = (clampRevealProgress(progress) / 100) * travel;
 
   const curve = moving?.easing == null ? null : resolveEasing(moving.easing);
 
@@ -588,7 +605,7 @@ export function revealPlan(
       out.push({ chars: 0, heads: [] });
       continue;
     }
-    if (local >= count) {
+    if (local >= (settle ? count - 1 + span : count)) {
       out.push({ chars: line.length, heads: [] });
       continue;
     }

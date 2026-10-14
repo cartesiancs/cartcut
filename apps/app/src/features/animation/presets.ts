@@ -588,8 +588,13 @@ function timeOf(stop: { at: number }, startAt: number, length: number): number {
  * Handles are set in a second pass over the same stops for the reason
  * `commands/animation.ts` does it: a curve belongs to the segment, so both of
  * its anchors have to exist before it can be projected.
+ *
+ * A segment whose easing is `undefined` keeps `addKeyframe`'s default handles,
+ * which describe an ease-in-out; name `linear` to get a straight line.
+ * Exported for `text/textAnimations.ts`, which writes a reveal's progress
+ * this way.
  */
-function writeTrack(
+export function writeTrack(
   doc: TimelineDocument,
   elementId: string,
   property: AnimatableProperty,
