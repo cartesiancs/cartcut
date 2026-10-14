@@ -16,6 +16,7 @@
 import { emptyAnimation } from "../animation/keyframes";
 import { renderOptionStore } from "../../states/renderOptionStore";
 import mime from "../../functions/mime";
+import { defaultGifLengthMs } from "../gif/gifTiming";
 import type {
   AudioElementType,
   GifElementType,
@@ -142,6 +143,16 @@ function stillDurationMs(requested: number | undefined): number {
     : DEFAULT_STILL_MS;
 }
 
+/**
+ * A GIF's length: the one asked for, else whole loops of the probed animation
+ * (`gif/gifTiming.ts#defaultGifLengthMs`), else a still's.
+ */
+function gifDurationMs(requested: number | undefined, loopMs: number): number {
+  return requested != null && Number.isFinite(requested) && requested > 0
+    ? requested
+    : defaultGifLengthMs(loopMs, DEFAULT_STILL_MS);
+}
+
 function buildVideo(probe: MediaProbe, startTime: number): VideoElementType {
   const { width, height, durationMs } = probe;
 
@@ -230,7 +241,7 @@ function buildGif(
     priority: 0,
     blob: "",
     startTime,
-    duration: stillDurationMs(options.durationMs),
+    duration: gifDurationMs(options.durationMs, probe.durationMs),
     opacity: 100,
     location: { x: 0, y: 0 },
     rotation: 0,

@@ -5,6 +5,7 @@
  * userData/cloud/presets/<id>/    scanned by preset:list as origin "cloud"
  * userData/cloud/templates/<id>/  scanned by template:list as origin "cloud"
  * userData/cloud/assets/<id>/     media, listed by cloud:installedAssets
+ * userData/cloud/gifs/<id>/       GIFs, listed by cloud:installedGifs
  * userData/cloud/staging/         downloads in flight; scanned by nothing
  * ```
  *
@@ -15,7 +16,14 @@
 
 import path from "path";
 
-export type CloudKind = "effect" | "transition" | "graphic" | "lut" | "template" | "asset";
+export type CloudKind =
+  | "effect"
+  | "transition"
+  | "graphic"
+  | "lut"
+  | "template"
+  | "asset"
+  | "gif";
 
 export const CLOUD_KINDS: readonly CloudKind[] = [
   "effect",
@@ -24,6 +32,7 @@ export const CLOUD_KINDS: readonly CloudKind[] = [
   "lut",
   "template",
   "asset",
+  "gif",
 ];
 
 export function isCloudKind(value: unknown): value is CloudKind {
@@ -32,7 +41,7 @@ export function isCloudKind(value: unknown): value is CloudKind {
 
 /** Effects, transitions, graphics and LUTs are all presets to the app. */
 export function isPresetKind(kind: CloudKind): boolean {
-  return kind !== "template" && kind !== "asset";
+  return kind !== "template" && kind !== "asset" && kind !== "gif";
 }
 
 export function cloudRoot(userData: string): string {
@@ -51,6 +60,10 @@ export function cloudAssetRoot(userData: string): string {
   return path.join(cloudRoot(userData), "assets");
 }
 
+export function cloudGifRoot(userData: string): string {
+  return path.join(cloudRoot(userData), "gifs");
+}
+
 export function cloudStagingRoot(userData: string): string {
   return path.join(cloudRoot(userData), "staging");
 }
@@ -62,6 +75,9 @@ export function installRootFor(userData: string, kind: CloudKind): string {
   }
   if (kind === "asset") {
     return cloudAssetRoot(userData);
+  }
+  if (kind === "gif") {
+    return cloudGifRoot(userData);
   }
   return cloudPresetRoot(userData);
 }

@@ -21,6 +21,8 @@ use hyper::body::Bytes;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+use crate::gifs::{id_of, GifIndex, GifSource};
+
 /// What the server lists. `slug` is the URL segment, `folder` the directory
 /// under the content root.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -31,16 +33,19 @@ pub enum Kind {
     Lut,
     Template,
     Asset,
+    /// One `.gif` file per GIF, paged by `/v1/gifs` and never listed whole.
+    Gif,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 6] = [
+    pub const ALL: [Kind; 7] = [
         Kind::Effect,
         Kind::Transition,
         Kind::Graphic,
         Kind::Lut,
         Kind::Template,
         Kind::Asset,
+        Kind::Gif,
     ];
 
     pub fn slug(self) -> &'static str {
@@ -51,6 +56,7 @@ impl Kind {
             Kind::Lut => "lut",
             Kind::Template => "template",
             Kind::Asset => "asset",
+            Kind::Gif => "gif",
         }
     }
 
@@ -66,6 +72,7 @@ impl Kind {
             Kind::Lut => "luts",
             Kind::Template => "templates",
             Kind::Asset => "assets",
+            Kind::Gif => "gifs",
         }
     }
 }
@@ -118,11 +125,17 @@ pub struct Catalog {
     listings: HashMap<Kind, Bytes>,
     counts: HashMap<Kind, usize>,
     files: HashMap<(Kind, String, String), FileEntry>,
+    gifs: GifIndex,
 }
 
 impl Catalog {
-    pub fn listing(&self, kind: Kind) -> Bytes {
-        self.listings.get(&kind).cloned().unwrap_or_default()
+    /// `None` for a kind that is not listed whole, which is only `Gif`.
+    pub fn listing(&self, kind: Kind) -> Option<Bytes> {
+        self.listings.get(&kind).cloned()
+    }
+
+    pub fn gifs(&self) -> &GifIndex {
+        &self.gifs
     }
 
     pub fn count(&self, kind: Kind) -> usize {
@@ -164,7 +177,12 @@ pub fn load_catalog(root: &Path) -> (Catalog, Vec<String>) {
         ));
     }
 
+    load_gifs(&mut catalog, &root.join(Kind::Gif.folder()), &mut warnings);
+
     for kind in Kind::ALL {
+        if kind == Kind::Gif {
+            continue;
+        }
         let mut items: Vec<Item> = Vec::new();
         // Case-insensitively: two ids differing only in case are one folder on
         // macOS and Windows, so the second download would overwrite the first.
@@ -220,6 +238,7 @@ fn read_item(kind: Kind, dir: &Path, warnings: &mut Vec<String>) -> Result<Item,
     match kind {
         Kind::Template => read_template(dir, warnings),
         Kind::Asset => read_asset(dir, warnings),
+        Kind::Gif => Err("a GIF is a file, not a folder".into()),
         _ => read_preset(kind, dir, warnings),
     }
 }
@@ -396,6 +415,90 @@ fn read_asset(dir: &Path, warnings: &mut Vec<String>) -> Result<Item, String> {
         json,
         files,
     })
+}
+
+/// `gifs/*.gif`: every GIF is one file, named by its tags (`gifs.rs`).
+///
+/// Anything that is not a `.gif` is ignored without a word, so a `CREDITS.md`
+/// can sit beside them. A file whose first bytes are not a GIF's, a name
+/// Windows cannot hold, and a second name that hashes to an id already taken
+/// (the same name, once composed and once not) are skipped with a warning.
+fn load_gifs(catalog: &mut Catalog, dir: &Path, warnings: &mut Vec<String>) {
+    let mut sources: Vec<(String, GifSource)> = Vec::new();
+    let mut seen = HashSet::new();
+    for entry in sorted_entries(dir).unwrap_or_default() {
+        let Ok(file) = entry.file_name().into_string() else {
+            warnings.push(format!(
+                "{}: skipped a file whose name is not UTF-8",
+                dir.display()
+            ));
+            continue;
+        };
+        if is_noise(&file) || extension_of(&file) != "gif" {
+            continue;
+        }
+        let path = entry.path();
+        let skip = |reason: &str| format!("{}: skipped {file}: {reason}", dir.display());
+        if !entry
+            .file_type()
+            .map(|kind| kind.is_file())
+            .unwrap_or(false)
+        {
+            warnings.push(skip("not a plain file"));
+            continue;
+        }
+        if !is_portable_name(&file) {
+            warnings.push(skip("the name cannot be written on every platform"));
+            continue;
+        }
+        if !is_gif(&path) {
+            warnings.push(skip("not a GIF"));
+            continue;
+        }
+        // `.gif` and `.GIF` alike.
+        let stem = &file[..file.len() - 4];
+        let id = id_of(stem);
+        if !seen.insert(id.clone()) {
+            warnings.push(skip("another file has the same name"));
+            continue;
+        }
+        let (bytes, sha256) = match digest(&path) {
+            Ok(found) => found,
+            Err(error) => {
+                warnings.push(skip(&error.to_string()));
+                continue;
+            }
+        };
+        catalog.files.insert(
+            (Kind::Gif, id.clone(), file.clone()),
+            FileEntry {
+                path,
+                bytes,
+                content_type: content_type("gif"),
+            },
+        );
+        sources.push((
+            crate::gifs::compose_hangul(stem),
+            GifSource {
+                id,
+                file,
+                bytes,
+                sha256,
+            },
+        ));
+    }
+    // By name as people read it, whatever form the file system kept it in.
+    sources.sort_by(|a, b| a.0.cmp(&b.0));
+    catalog.counts.insert(Kind::Gif, sources.len());
+    catalog.gifs = GifIndex::build(sources.into_iter().map(|(_, source)| source).collect());
+}
+
+fn is_gif(path: &Path) -> bool {
+    let mut magic = [0u8; 6];
+    File::open(path)
+        .and_then(|mut file| file.read_exact(&mut magic))
+        .is_ok()
+        && (&magic == b"GIF89a" || &magic == b"GIF87a")
 }
 
 // ------------------------------------------------------------------ walking

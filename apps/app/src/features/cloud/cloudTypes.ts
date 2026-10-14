@@ -7,7 +7,7 @@
  * step by hand, as `PresetOrigin` is.
  */
 
-export type CloudKind = "effect" | "transition" | "graphic" | "lut" | "template" | "asset";
+export type CloudKind = "effect" | "transition" | "graphic" | "lut" | "template" | "asset" | "gif";
 
 /** The kinds the FX tab shows. All four are presets to the app. */
 export type FxCloudKind = "effect" | "transition" | "graphic" | "lut";
@@ -36,9 +36,11 @@ export type CloudItem = {
   schema: number | null;
   thumbnail: string | null;
   bytes: number;
-  /** Assets only: the media file's name. */
+  /** Assets and GIFs: the media file's name. */
   file: string | null;
   media: CloudMedia | null;
+  /** GIFs only: the file name's words, split on `_`. */
+  tags?: string[];
   /** Where to fetch the thumbnail while online, or `null`. */
   thumbnailUrl: string | null;
   installed: boolean;
@@ -46,6 +48,22 @@ export type CloudItem = {
   localPath: string | null;
   /** Installed items only: the thumbnail on disk, POSIX-separated. */
   localThumbnail: string | null;
+};
+
+/** `cloudSession.ts#GifPageParams`. Main fills in what is left out. */
+export type GifPageRequest = {
+  q?: string;
+  cursor?: string;
+  limit?: number;
+};
+
+/** `cloudSession.ts#PublicGifPage`: one page, and where the next one starts. */
+export type GifPage = {
+  status: CloudStatus;
+  items: CloudItem[];
+  next: string | null;
+  total: number;
+  rev: string | null;
 };
 
 export type CloudDownloadOutcome =

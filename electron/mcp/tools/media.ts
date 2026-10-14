@@ -48,7 +48,9 @@ export function registerMediaTools(define: Registrar) {
               durationMs: z
                 .number()
                 .optional()
-                .describe("Images and GIFs only. Default 1000."),
+                .describe(
+                  "Images and GIFs only. An image defaults to 1000; a GIF to whole loops of its animation lasting at least 3000.",
+                ),
               trackId: trackIdField.optional(),
             }),
           )

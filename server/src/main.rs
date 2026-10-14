@@ -12,12 +12,7 @@ async fn main() {
         PathBuf::from(env::var("CARTCUT_CLOUD_CONTENT").unwrap_or_else(|_| "content".into()));
 
     let (catalog, warnings) = load_catalog(&content);
-    for warning in &warnings {
-        eprintln!("warning: {warning}");
-    }
-    for kind in Kind::ALL {
-        println!("{:>10}: {}", kind.slug(), catalog.count(kind));
-    }
+    report(&catalog, &warnings);
 
     let listener = match TcpListener::bind(&bind).await {
         Ok(listener) => listener,
@@ -32,12 +27,48 @@ async fn main() {
         listener.local_addr().map(|a| a.to_string()).unwrap_or(bind)
     );
 
-    let state = Arc::new(State {
-        catalog,
-        log_requests: true,
-    });
+    let state = Arc::new(State::new(catalog, true));
     tokio::select! {
-        _ = serve(listener, state) => {}
+        _ = serve(listener, Arc::clone(&state)) => {}
+        _ = reload_on_hangup(Arc::clone(&state), content) => {}
         _ = tokio::signal::ctrl_c() => println!("shutting down"),
     }
+}
+
+fn report(catalog: &cartcut_cloud::Catalog, warnings: &[String]) {
+    for warning in warnings {
+        eprintln!("warning: {warning}");
+    }
+    for kind in Kind::ALL {
+        println!("{:>10}: {}", kind.slug(), catalog.count(kind));
+    }
+}
+
+/// `kill -HUP <pid>` scans the content folder again and serves the result,
+/// so a GIF copied into `content/gifs/` needs no restart.
+/// The scan reads and hashes every file, so it runs off the request threads.
+#[cfg(unix)]
+async fn reload_on_hangup(state: Arc<State>, content: PathBuf) {
+    use tokio::signal::unix::{signal, SignalKind};
+    let Ok(mut hangups) = signal(SignalKind::hangup()) else {
+        eprintln!("cannot listen for SIGHUP; restart to publish a change");
+        return std::future::pending().await;
+    };
+    while hangups.recv().await.is_some() {
+        let root = content.clone();
+        match tokio::task::spawn_blocking(move || load_catalog(&root)).await {
+            Ok((catalog, warnings)) => {
+                println!("reloaded {}", content.display());
+                report(&catalog, &warnings);
+                state.replace(catalog);
+            }
+            Err(error) => eprintln!("reload failed, still serving the old catalog: {error}"),
+        }
+    }
+}
+
+/// Windows has no SIGHUP. Restart to publish a change there.
+#[cfg(not(unix))]
+async fn reload_on_hangup(_state: Arc<State>, _content: PathBuf) {
+    std::future::pending().await
 }

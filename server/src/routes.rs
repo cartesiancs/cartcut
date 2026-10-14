@@ -1,6 +1,6 @@
 //! Turning a request into a response.
 //!
-//! The root, three read-only routes under `/v1/` and a CORS preflight. Nothing
+//! The root, the read-only routes under `/v1/` and a CORS preflight. Nothing
 //! here touches the disk except to open a file the catalog already indexed.
 
 use std::convert::Infallible;
@@ -15,6 +15,7 @@ use serde_json::{json, Map, Value};
 
 use crate::body::Body;
 use crate::catalog::{Catalog, Kind};
+use crate::gifs::{tokens_of, GifQuery, MAX_LIMIT};
 use crate::State;
 
 const CATALOG_CACHE: &str = "public, max-age=60";
@@ -28,7 +29,14 @@ pub async fn handle(
     request: Request<Incoming>,
 ) -> Result<Response<Body>, Infallible> {
     let started = Instant::now();
-    let response = route(&state.catalog, request.method(), request.uri().path()).await;
+    let catalog = state.catalog();
+    let response = route(
+        &catalog,
+        request.method(),
+        request.uri().path(),
+        request.uri().query(),
+    )
+    .await;
     if state.log_requests {
         println!(
             "{} {} {} {:.1}ms",
@@ -41,7 +49,12 @@ pub async fn handle(
     Ok(response)
 }
 
-async fn route(catalog: &Catalog, method: &Method, path: &str) -> Response<Body> {
+async fn route(
+    catalog: &Catalog,
+    method: &Method,
+    path: &str,
+    query: Option<&str>,
+) -> Response<Body> {
     let head = match *method {
         Method::GET => false,
         Method::HEAD => true,
@@ -59,15 +72,41 @@ async fn route(catalog: &Catalog, method: &Method, path: &str) -> Response<Body>
         return health(catalog, head);
     }
     if let Some(slug) = rest.strip_prefix("catalog/") {
-        return match Kind::from_slug(slug) {
-            Some(kind) => bytes(
+        return match Kind::from_slug(slug).map(|kind| catalog.listing(kind)) {
+            Some(Some(listing)) => bytes(
                 StatusCode::OK,
                 "application/json",
                 CATALOG_CACHE,
-                catalog.listing(kind),
+                listing,
                 head,
             ),
+            // GIFs are a page at a time, never the whole list.
+            Some(None) => error(StatusCode::NOT_FOUND, "listed by /v1/gifs"),
             None => error(StatusCode::NOT_FOUND, "unknown kind"),
+        };
+    }
+    if rest == "gifs" {
+        return match parse_gif_query(query) {
+            Ok(query) => bytes(
+                StatusCode::OK,
+                "application/json",
+                CATALOG_CACHE,
+                catalog.gifs().page(&query),
+                head,
+            ),
+            Err(message) => error(StatusCode::BAD_REQUEST, message),
+        };
+    }
+    if let Some(id) = rest.strip_prefix("gifs/item/") {
+        return match percent_decode(id).and_then(|id| catalog.gifs().item(&id)) {
+            Some(item) => bytes(
+                StatusCode::OK,
+                "application/json",
+                CATALOG_CACHE,
+                item,
+                head,
+            ),
+            None => not_found(),
         };
     }
     if let Some(tail) = rest.strip_prefix("files/") {
@@ -212,6 +251,46 @@ fn common(builder: Builder) -> Builder {
     builder
         .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+}
+
+/// `/v1/gifs`'s query string: `q`, `cursor`, `limit`.
+///
+/// A key it does not know is ignored and a repeated one is the last. A
+/// search that is too long is cut (`gifs.rs#tokens_of`) and a limit out of
+/// range is clamped, since both have an obvious meaning; a cursor it cannot
+/// read is refused, since guessing one hands back the wrong page.
+fn parse_gif_query(raw: Option<&str>) -> Result<GifQuery, &'static str> {
+    let mut query = GifQuery::default();
+    for pair in raw.unwrap_or("").split('&').filter(|pair| !pair.is_empty()) {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let value =
+            percent_decode(&value.replace('+', " ")).ok_or("the query is not valid UTF-8")?;
+        match key {
+            "q" => query.tokens = tokens_of(&value),
+            "cursor" => {
+                query.cursor = if value.is_empty() {
+                    0
+                } else if value.bytes().all(|b| b.is_ascii_digit()) && value.len() <= 9 {
+                    value.parse().map_err(|_| "cursor is not a page position")?
+                } else {
+                    return Err("cursor is not a page position");
+                };
+            }
+            "limit" => {
+                let limit: usize = if value.bytes().all(|b| b.is_ascii_digit())
+                    && !value.is_empty()
+                    && value.len() <= 9
+                {
+                    value.parse().map_err(|_| "limit is not a number")?
+                } else {
+                    return Err("limit is not a number");
+                };
+                query.limit = limit.clamp(1, MAX_LIMIT);
+            }
+            _ => {}
+        }
+    }
+    Ok(query)
 }
 
 /// `%XX` to bytes, then UTF-8. `None` for anything malformed, which names no file.

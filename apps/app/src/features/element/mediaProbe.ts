@@ -25,6 +25,7 @@ import { parseGIF, decompressFrames } from "gifuct-js";
 import { path as pathUtil } from "../../functions/path";
 import { getLocationEnv } from "../../functions/getLocationEnv";
 import { mediaKindOf, type MediaKind, type MediaProbe } from "./mediaElement";
+import { gifTiming, probedGifLengthMs } from "../gif/gifTiming";
 import { whileLoadingMedia } from "../../states/mediaLoadStore";
 
 /**
@@ -43,7 +44,8 @@ const DURATION_SEEK_TIMEOUT_MS = 5_000;
 
 export type MediaProber = {
   image: (src: string) => Promise<{ width: number; height: number }>;
-  gif: (src: string) => Promise<{ width: number; height: number }>;
+  /** `durationMs` is one loop of an animated GIF and 0 for a single frame. */
+  gif: (src: string) => Promise<{ width: number; height: number; durationMs?: number }>;
   video: (
     src: string,
   ) => Promise<{ width: number; height: number; durationMs: number; hasAudio: boolean }>;
@@ -194,12 +196,19 @@ export const domProber: MediaProber = {
           return response.arrayBuffer();
         })
         .then((buffer) => {
-          const frames = decompressFrames(parseGIF(buffer), true);
-          const dims = frames[0]?.dims;
-          if (dims == null) {
+          // The logical screen, not the first frame: an optimised GIF's
+          // first frame can be a patch smaller than the picture.
+          const parsed = parseGIF(buffer);
+          const frames = decompressFrames(parsed, false);
+          const first = frames[0]?.dims;
+          if (first == null) {
             throw new Error(`GIF has no frames: ${src}`);
           }
-          return { width: dims.width, height: dims.height };
+          return {
+            width: parsed.lsd.width > 0 ? parsed.lsd.width : first.width,
+            height: parsed.lsd.height > 0 ? parsed.lsd.height : first.height,
+            durationMs: probedGifLengthMs(gifTiming(frames.map((frame) => frame.delay))),
+          };
         }),
       src,
     ),
@@ -342,7 +351,14 @@ async function probeKind(
     }
     case "gif": {
       const probed = await prober.gif(localpath);
-      return { kind, localpath, durationMs: 0, ...probed, hasAudio: false };
+      return {
+        kind,
+        localpath,
+        width: probed.width,
+        height: probed.height,
+        durationMs: probed.durationMs ?? 0,
+        hasAudio: false,
+      };
     }
     case "image":
     default: {

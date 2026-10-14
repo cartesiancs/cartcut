@@ -9,6 +9,11 @@
  *
  * Offline, or with the server unreachable, it shows what is already
  * downloaded, read from disk (`cloud:installedAssets`), with a line saying so.
+ *
+ * GIFs follow the media, in `<cloud-gif-section>`, which pages its own list
+ * from the server and shares this search. So the media part says nothing when
+ * it has nothing to show: "no matches" above a section full of matching GIFs
+ * would be wrong, and the GIF section has empty states of its own.
  */
 
 import { LitElement, html } from "lit";
@@ -29,6 +34,7 @@ import {
 } from "./cloudStore";
 import type { CloudItem } from "./cloudTypes";
 import "./cloudBadge";
+import "./cloudGifSection";
 
 const SECTIONS = [
   { type: "video", label: "setting.cloud_video", icon: "movie" },
@@ -146,15 +152,6 @@ export class CloudAssetGrid extends LitElement {
     </div>`;
   }
 
-  private empty(icon: string, title: string) {
-    return html`<div class="browse-empty">
-      <div class="browse-empty-icon">
-        <span class="material-symbols-outlined">${icon}</span>
-      </div>
-      <div class="browse-empty-title">${title}</div>
-    </div>`;
-  }
-
   render() {
     const state = cloudStore.getState();
     const status = catalogStatus("asset", state);
@@ -170,13 +167,8 @@ export class CloudAssetGrid extends LitElement {
     })).filter((section) => section.items.length > 0);
 
     let body;
-    if (all.length === 0) {
-      body =
-        status === "loading"
-          ? this.empty("cloud_download", this.lc.t("setting.cloud_loading"))
-          : this.empty("cloud", this.lc.t("setting.cloud_empty"));
-    } else if (sections.length === 0) {
-      body = this.empty("search_off", this.lc.t("setting.cloud_no_matches"));
+    if (sections.length === 0) {
+      body = "";
     } else {
       body = sections.map(
         (section) => html`
@@ -197,6 +189,7 @@ export class CloudAssetGrid extends LitElement {
       ${offline ? this.notice(this.lc.t("setting.cloud_offline")) : ""}
       ${unreachable ? this.notice(this.lc.t("setting.cloud_unreachable")) : ""}
       ${body}
+      <cloud-gif-section .query=${this.query}></cloud-gif-section>
     `;
   }
 }

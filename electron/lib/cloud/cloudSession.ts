@@ -22,11 +22,21 @@ import path from "path";
 
 import config from "../../config.json";
 import { netFetch } from "../netFetch";
-import { isUsableCloudId, isSafeCloudPath, parseCatalog, type CloudItem, type CloudMedia } from "./cloudCatalog";
+import {
+  gifWordsOf,
+  isSafeCloudPath,
+  isUsableCloudId,
+  parseCatalog,
+  parseGifItem,
+  parseGifPage,
+  type CloudItem,
+  type CloudMedia,
+} from "./cloudCatalog";
 import { CloudDownloadCancelled, clearStaging, installCloudItem } from "./cloudDownload";
 import { removeCloudInstalls, summarizeCloudInstalls, type CloudInstallSummary } from "./cloudInstalled";
 import {
   cloudAssetRoot,
+  cloudGifRoot,
   cloudStagingRoot,
   installRootFor,
   type CloudKind,
@@ -56,6 +66,17 @@ export type PublicCloudItem = CloudItem & {
   localPath: string | null;
   /** Installed items only: the thumbnail on disk, POSIX-separated. */
   localThumbnail: string | null;
+};
+
+/** One `/v1/gifs` request, already checked by `ipcCloud.ts`. */
+export type GifPageParams = { q: string; cursor: string; limit: number };
+
+export type PublicGifPage = {
+  status: CloudStatus;
+  items: PublicCloudItem[];
+  next: string | null;
+  total: number;
+  rev: string | null;
 };
 
 export type CloudDownloadOutcome =
@@ -226,7 +247,7 @@ async function publicItem(item: CloudItem, base: string): Promise<PublicCloudIte
     thumbnailUrl: thumbnail == null ? null : fileUrl(base, item.kind, item.id, thumbnail),
     installed,
     localPath:
-      installed && item.kind === "asset" && item.file != null
+      installed && (item.kind === "asset" || item.kind === "gif") && item.file != null
         ? path.join(target, ...item.file.split("/"))
         : null,
     localThumbnail:
@@ -252,6 +273,57 @@ export async function cloudCatalog(
   } catch (error) {
     console.warn(`cloud: ${kind} catalog unavailable:`, error instanceof Error ? error.message : error);
     return { status: "unreachable", items: [] };
+  }
+}
+
+// ------------------------------------------------------------------ gifs
+
+/**
+ * One page of the server's GIFs.
+ *
+ * Not cached here, unlike a catalog: a page is small, the server marks it
+ * `max-age=60` and `net.fetch` keeps Chromium's HTTP cache. What this never
+ * does is hold the whole list, which is the point of paging it.
+ */
+export async function cloudGifPage(params: GifPageParams): Promise<PublicGifPage> {
+  const empty = { items: [], next: null, total: 0, rev: null };
+  const open = gate();
+  if (!open.ok) {
+    return { status: open.status, ...empty };
+  }
+  const query = new URLSearchParams();
+  if (params.q !== "") query.set("q", params.q);
+  if (params.cursor !== "") query.set("cursor", params.cursor);
+  query.set("limit", String(params.limit));
+  try {
+    const page = parseGifPage(await fetchJson(`${open.base}/v1/gifs?${query.toString()}`));
+    for (const reason of page.rejected) {
+      console.warn(`cloud: gif skipped: ${reason}`);
+    }
+    return {
+      status: "ok",
+      items: await Promise.all(page.items.map((item) => publicItem(item, open.base))),
+      next: page.next,
+      total: page.total,
+      rev: page.rev,
+    };
+  } catch (error) {
+    console.warn("cloud: gif page unavailable:", error instanceof Error ? error.message : error);
+    return { status: "unreachable", ...empty };
+  }
+}
+
+/**
+ * A GIF asked for by id, from the server rather than from any page the
+ * renderer saw: the file and digest a download verifies against have to be
+ * main's own, and there is no whole list to look it up in.
+ */
+async function gifItem(base: string, id: string): Promise<CloudItem | null> {
+  try {
+    const item = parseGifItem(await fetchJson(`${base}/v1/gifs/item/${encodeURIComponent(id)}`));
+    return typeof item === "string" || item.id !== id ? null : item;
+  } catch {
+    return null;
   }
 }
 
@@ -285,7 +357,10 @@ async function runDownload(
 ): Promise<CloudDownloadOutcome> {
   try {
     await clearStagingOnce();
-    const item = (await catalogItems(kind, base)).find((entry) => entry.id === id);
+    const item =
+      kind === "gif"
+        ? await gifItem(base, id)
+        : (await catalogItems(kind, base)).find((entry) => entry.id === id);
     if (item == null) {
       return { ok: false, reason: "missing", message: "This item is no longer offered." };
     }
@@ -303,7 +378,7 @@ async function runDownload(
     return {
       ok: true,
       path:
-        kind === "asset" && item.file != null
+        (kind === "asset" || kind === "gif") && item.file != null
           ? path.join(target, ...item.file.split("/"))
           : toPosix(target),
     };
@@ -525,6 +600,55 @@ export async function installedCloudAssets(): Promise<PublicCloudItem[]> {
     if (item != null) {
       found.push(item);
     }
+  }
+  return found.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * The GIFs already downloaded: each install folder holds the one file, and
+ * its name is its name and tags, as on the server.
+ */
+export async function installedCloudGifs(): Promise<PublicCloudItem[]> {
+  const root = cloudGifRoot(userData());
+  let entries;
+  try {
+    entries = await fsp.readdir(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const found: PublicCloudItem[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !isUsableCloudId(entry.name)) {
+      continue;
+    }
+    const dir = path.join(root, entry.name);
+    const file = (await fsp.readdir(dir).catch(() => [] as string[])).find(
+      (name) => name.toLowerCase().endsWith(".gif") && !name.startsWith("."),
+    );
+    if (file == null) {
+      continue;
+    }
+    const { name, tags } = gifWordsOf(file);
+    const localPath = path.join(dir, file);
+    found.push({
+      id: entry.name,
+      kind: "gif",
+      name,
+      category: null,
+      author: null,
+      version: null,
+      schema: null,
+      thumbnail: file,
+      files: [],
+      bytes: 0,
+      file,
+      media: null,
+      tags,
+      thumbnailUrl: null,
+      installed: true,
+      localPath,
+      localThumbnail: toPosix(localPath),
+    });
   }
   return found.sort((a, b) => a.name.localeCompare(b.name));
 }

@@ -14,6 +14,7 @@ import path from "path";
 
 import {
   cloudAssetRoot,
+  cloudGifRoot,
   cloudPresetRoot,
   cloudStagingRoot,
   cloudTemplateRoot,
@@ -23,7 +24,12 @@ export type CloudInstallSummary = { items: number; bytes: number };
 
 /** The roots a download installs into, one folder per item. */
 function installRoots(userData: string): string[] {
-  return [cloudPresetRoot(userData), cloudTemplateRoot(userData), cloudAssetRoot(userData)];
+  return [
+    cloudPresetRoot(userData),
+    cloudTemplateRoot(userData),
+    cloudAssetRoot(userData),
+    cloudGifRoot(userData),
+  ];
 }
 
 async function entriesOf(root: string) {

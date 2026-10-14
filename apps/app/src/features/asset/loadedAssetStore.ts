@@ -1,6 +1,5 @@
 import { createStore } from "zustand/vanilla";
 import { getLocationEnv } from "../../functions/getLocationEnv";
-import { decompressFrames, parseGIF, type ParsedFrame } from "gifuct-js";
 import {
   isVisualTimelineElement,
   type AudioElementType,
@@ -33,15 +32,11 @@ import {
   type VideoScope,
 } from "./videoScope";
 import { SCHEMA_VERSION, type TimelineTrack } from "../timeline/tracks";
+import { decodeGif, type LoadedGif } from "../gif/gifDecode";
 import { SEEK_DEADLINE_MS, seekAndWait } from "./seekWait";
 
 /** A scope's own handles (an export's, a contact sheet's): only a decoder that failed can stall one. */
 const SCOPE_SEEK_DEADLINE_MS = 30_000;
-
-type GifMetadata = {
-  imageData: ImageData;
-  parsedFrame: ParsedFrame;
-};
 
 /**
  * Re-exported so `renderer/filter/videoPipeline.ts` and the rest go on
@@ -80,7 +75,7 @@ export interface ILoadedAssetStore {
   _loadingImage: Set<string>;
 
   // path, gif
-  _loadedGif: Record<string, GifMetadata[]>;
+  _loadedGif: Record<string, LoadedGif>;
   _loadingGif: Set<string>;
 
   // elementId, video
@@ -111,7 +106,6 @@ export interface ILoadedAssetStore {
     element: AudioElementType,
   ) => Promise<void>;
 
-  gifCanvasCtx: CanvasRenderingContext2D;
   videoFilterCanvasCtx: WebGLRenderingContext;
   videoFilterPipeline: VideoFilterPipeline | null;
 
@@ -119,7 +113,7 @@ export interface ILoadedAssetStore {
   getImage: (localpath: string) => HTMLImageElement | null;
 
   loadGif: (localpath: string) => Promise<void>;
-  getGif: (localpath: string) => GifMetadata[] | null;
+  getGif: (localpath: string) => LoadedGif | null;
 
   loadElementVideo: (
     elementId: string,
@@ -254,9 +248,6 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
   _loadedElementAudio: {},
   _loadingElementAudio: new Set<string>(),
 
-  gifCanvasCtx: document
-    .createElement("canvas")
-    .getContext("2d") as CanvasRenderingContext2D,
   videoFilterCanvasCtx: document.createElement("canvas").getContext("webgl", {
     preserveDrawingBuffer: true,
     alpha: true,
@@ -295,20 +286,10 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
     const response = await fetch(getPath(localpath));
     const buffer = await response.arrayBuffer();
 
-    const gif = parseGIF(buffer);
-    const frames = decompressFrames(gif, true);
-    const drawnFrames = frames.map((frame) => {
-      const { width, height } = frame.dims;
-      const imageData = this.gifCanvasCtx.createImageData(width, height);
-      imageData.data.set(frame.patch);
-      return {
-        imageData,
-        parsedFrame: frame,
-      };
-    });
+    const loaded = decodeGif(buffer);
 
     set((state) => ({
-      _loadedGif: { ...state._loadedGif, [localpath]: drawnFrames },
+      _loadedGif: { ...state._loadedGif, [localpath]: loaded },
     }));
   },
   getGif(localpath) {

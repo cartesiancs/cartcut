@@ -1,8 +1,9 @@
 /**
  * The renderer's view of the cloud API.
  *
- * Arguments are checked here, at the boundary: a kind outside the six, an id
- * that is not one, a job id that is not a string. Downloads report on
+ * Arguments are checked here, at the boundary: a kind outside the seven, an id
+ * that is not one, a job id that is not a string, a GIF page request out of
+ * range. Downloads report on
  * `cloud:progress` to the window that asked, as `{ jobId, fraction }`, with
  * repeats of the same whole percent dropped (`ipcTts.ts#progressSender`).
  *
@@ -20,14 +21,34 @@ import {
   cloudCatalog,
   cloudDownload,
   cloudEnabled,
+  cloudGifPage,
   cloudInstallSummary,
   customCloudUrl,
   defaultCloudUrl,
   installedCloudAssets,
+  installedCloudGifs,
   setCloudEnabled,
   setCloudUrl,
   type CloudDownloadOutcome,
+  type GifPageParams,
 } from "../lib/cloud/cloudSession";
+
+/** The server's own limits (`server/src/gifs.rs`): a longer query it cuts, a larger page it clamps. */
+const MAX_QUERY_LENGTH = 100;
+const MAX_PAGE = 100;
+const DEFAULT_PAGE = 48;
+
+/** A page request made safe to put in a URL: anything unusable is its default. */
+export function gifPageParams(raw: unknown): GifPageParams {
+  const record = (raw ?? {}) as Record<string, unknown>;
+  const limit =
+    typeof record.limit === "number" && Number.isInteger(record.limit) ? record.limit : DEFAULT_PAGE;
+  return {
+    q: typeof record.q === "string" ? record.q.normalize("NFC").trim().slice(0, MAX_QUERY_LENGTH) : "",
+    cursor: typeof record.cursor === "string" && /^\d{1,9}$/.test(record.cursor) ? record.cursor : "",
+    limit: Math.min(MAX_PAGE, Math.max(1, limit)),
+  };
+}
 
 function progressSender(jobId: string, event: IpcMainInvokeEvent) {
   let lastPercent = -1;
@@ -62,8 +83,13 @@ export const ipcCloud = {
     ...serverState(),
   }),
 
+  // GIFs are never listed whole; `gifPage` is how they are read.
   catalog: async (_event: IpcMainInvokeEvent, kind: unknown) =>
-    isCloudKind(kind) ? cloudCatalog(kind) : { status: "unreachable", items: [] },
+    isCloudKind(kind) && kind !== "gif" ? cloudCatalog(kind) : { status: "unreachable", items: [] },
+
+  gifPage: async (_event: IpcMainInvokeEvent, params: unknown) => cloudGifPage(gifPageParams(params)),
+
+  installedGifs: async () => ({ items: await installedCloudGifs() }),
 
   download: async (
     event: IpcMainInvokeEvent,

@@ -257,6 +257,8 @@ ipcMain.handle("cloud:catalog", ipcCloud.catalog);
 ipcMain.handle("cloud:download", ipcCloud.download);
 ipcMain.handle("cloud:cancel", ipcCloud.cancel);
 ipcMain.handle("cloud:installedAssets", ipcCloud.installedAssets);
+ipcMain.handle("cloud:gifPage", ipcCloud.gifPage);
+ipcMain.handle("cloud:installedGifs", ipcCloud.installedGifs);
 ipcMain.handle("cloud:installedSummary", ipcCloud.installedSummary);
 ipcMain.handle("cloud:clearInstalled", ipcCloud.clearInstalled);
 

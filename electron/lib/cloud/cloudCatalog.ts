@@ -43,9 +43,11 @@ export type CloudItem = {
   thumbnail: string | null;
   files: CloudFile[];
   bytes: number;
-  /** Assets only: the media file among `files`. */
+  /** Assets and GIFs: the media file among `files`. */
   file: string | null;
   media: CloudMedia | null;
+  /** GIFs only: the file name's words (`gifWordsOf`). */
+  tags?: string[];
 };
 
 const VIDEO = [".mp4", ".webm", ".mov"];
@@ -54,6 +56,23 @@ const AUDIO = [".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"];
 const FONT = [".woff2", ".woff", ".ttf", ".otf"];
 const LUT_FILE = [".cube", ".3dl"];
 const THUMBNAILS = ["thumbnail.webp", "thumbnail.png", "thumbnail.jpg", "thumbnail.jpeg"];
+
+/**
+ * A GIF's name and tags, from its file name: `웃음_미소_smile.gif` is
+ * "웃음 미소 smile", tagged 웃음, 미소 and smile. The server's rule
+ * (`server/src/gifs.rs#tags_of`), repeated for a GIF read back from disk.
+ */
+export function gifWordsOf(file: string): { name: string; tags: string[] } {
+  const stem = file.normalize("NFC").replace(/\.gif$/i, "");
+  const tags: string[] = [];
+  for (const part of stem.split("_")) {
+    const tag = part.trim().replace(/^[#:]+|[#:]+$/g, "").trim().toLowerCase();
+    if (tag !== "" && !tags.includes(tag)) {
+      tags.push(tag);
+    }
+  }
+  return { name: stem.replace(/_/g, " ").trim(), tags };
+}
 
 /** `presetScan.ts#PRESET_SUBDIR_DEPTH` plus the file itself. */
 const PRESET_SEGMENTS = 2;
@@ -161,6 +180,9 @@ function allowsFile(kind: CloudKind, file: string, media: string | null): boolea
       [...IMAGE, ...VIDEO, ...AUDIO, ...FONT, ...LUT_FILE].includes(extension)
     );
   }
+  if (kind === "gif") {
+    return file === media;
+  }
   return (
     file === "asset.json" ||
     file === media ||
@@ -198,13 +220,22 @@ function readItem(kind: CloudKind, raw: unknown): CloudItem | string {
   if (record.kind !== kind) {
     return `${id}: listed under ${kind} but says ${String(record.kind)}`;
   }
-  const name = text(record.name);
+  // A GIF's name is its file name, read here by the same rule as on disk.
+  const name =
+    kind === "gif"
+      ? typeof record.file === "string"
+        ? gifWordsOf(record.file).name || null
+        : null
+      : text(record.name);
   if (name == null) {
     return `${id}: no name`;
   }
 
   const media = kind === "asset" ? readMedia(record.media) : null;
-  const mediaFile = kind === "asset" ? record.file : null;
+  const mediaFile = kind === "asset" || kind === "gif" ? record.file : null;
+  if (kind === "gif" && (!isSafeCloudPath(mediaFile, 1) || extensionOf(mediaFile) !== ".gif")) {
+    return `${id}: no usable GIF`;
+  }
   if (kind === "asset") {
     const allowed =
       media?.type === "video" ? VIDEO : media?.type === "image" ? IMAGE : AUDIO;
@@ -221,7 +252,11 @@ function readItem(kind: CloudKind, raw: unknown): CloudItem | string {
     return `${id}: no usable file list`;
   }
   const maxSegments =
-    kind === "template" ? TEMPLATE_SEGMENTS : kind === "asset" ? 1 : PRESET_SEGMENTS;
+    kind === "template"
+      ? TEMPLATE_SEGMENTS
+      : kind === "asset" || kind === "gif"
+        ? 1
+        : PRESET_SEGMENTS;
   const files: CloudFile[] = [];
   // Case-insensitively, because `Shader.frag` and `shader.frag` are one file
   // on the two filesystems most users have.
@@ -258,17 +293,23 @@ function readItem(kind: CloudKind, raw: unknown): CloudItem | string {
     files.push({ path: filePath, bytes, sha256 });
   }
 
-  const cap = isPresetKind(kind) ? MAX_PRESET_BYTES : MAX_ITEM_BYTES;
+  const cap = isPresetKind(kind) || kind === "gif" ? MAX_PRESET_BYTES : MAX_ITEM_BYTES;
   if (total > cap) {
     return `${id}: ${total} bytes is more than one item may be`;
   }
   const required =
-    kind === "template" ? "template.ngt" : kind === "asset" ? mediaFile : "manifest.json";
+    kind === "template"
+      ? "template.ngt"
+      : kind === "asset" || kind === "gif"
+        ? mediaFile
+        : "manifest.json";
   if (!files.some((file) => file.path === required)) {
     return `${id}: ${String(required)} is missing`;
   }
 
-  const thumbnail = typeof record.thumbnail === "string" ? record.thumbnail : null;
+  // A GIF is its own picture.
+  const thumbnail =
+    kind === "gif" ? (mediaFile as string) : typeof record.thumbnail === "string" ? record.thumbnail : null;
   return {
     id,
     kind,
@@ -284,7 +325,43 @@ function readItem(kind: CloudKind, raw: unknown): CloudItem | string {
     bytes: total,
     file: typeof mediaFile === "string" ? mediaFile : null,
     media,
+    ...(kind === "gif" ? { tags: gifWordsOf(mediaFile as string).tags } : {}),
   };
+}
+
+/** One GIF the server answered by id (`/v1/gifs/item/{id}`), or why not. */
+export function parseGifItem(json: unknown): CloudItem | string {
+  return readItem("gif", json);
+}
+
+export type GifPage = {
+  items: CloudItem[];
+  /** The cursor of the next page, or `null` at the end. */
+  next: string | null;
+  total: number;
+  /** Changes when the server's GIFs do; a scroll that sees it change starts again. */
+  rev: string | null;
+};
+
+/** A page of `/v1/gifs`. Never throws; a response that is not one reads as an empty last page. */
+export function parseGifPage(json: unknown): GifPage & { rejected: string[] } {
+  const record = json as Record<string, unknown> | null;
+  if (record == null || typeof record !== "object" || !Array.isArray(record.items)) {
+    return { items: [], next: null, total: 0, rev: null, rejected: ["the response is not a page"] };
+  }
+  const items: CloudItem[] = [];
+  const rejected: string[] = [];
+  for (const raw of record.items.slice(0, 100)) {
+    const item = readItem("gif", raw);
+    if (typeof item === "string") {
+      rejected.push(item);
+    } else {
+      items.push(item);
+    }
+  }
+  const next = typeof record.next === "string" && /^\d{1,9}$/.test(record.next) ? record.next : null;
+  const rev = typeof record.rev === "string" && /^[0-9a-f]{1,64}$/.test(record.rev) ? record.rev : null;
+  return { items, next, total: count(record.total) ?? items.length, rev, rejected };
 }
 
 /**

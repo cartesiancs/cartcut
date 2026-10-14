@@ -661,8 +661,127 @@ switch-showtype {
 }
 
 /* Inline by default, and an inline host of block sections measures nothing. */
-cloud-asset-grid {
+cloud-asset-grid,
+cloud-gif-section {
   display: block;
+}
+
+/* ------------------------------------------------------------------- gifs */
+
+/*
+ * The cloud view's GIFs: square wells, denser than the media tiles, because a
+ * sticker reads at a smaller size than a video frame and the list is long.
+ * A GIF that is not square is fitted inside its well, so the grid's rows stay
+ * even whatever shapes arrive on the next page.
+ */
+.gif-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 2px;
+  align-content: start;
+  padding: 4px 0 2px;
+}
+
+.gif-tile {
+  display: flex;
+  padding: 4px;
+  cursor: pointer;
+}
+
+/*
+ * The well is the tile's own element (`<cloud-gif-tile>`), so it needs the
+ * block box `.asset-thumb` assumes, and a square in place of 16:9.
+ */
+.gif-tile > .asset-thumb.gif-thumb {
+  display: flex;
+  aspect-ratio: 1 / 1;
+  background-color: #121416;
+}
+
+.gif-thumb > .gif-thumb-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/*
+ * Every GIF starts in the cloud, so a badge on each of 881 tiles marks none
+ * of them apart and covers the corner of every face. It shows on the tile
+ * under the pointer, and stays for a download in progress, whose ring is
+ * the only news it carries.
+ */
+.gif-tile .asset-thumb-cloud {
+  opacity: 0;
+  transition: opacity 140ms ease-out;
+}
+
+.gif-tile:hover .asset-thumb-cloud,
+.gif-tile .asset-thumb-cloud:has(.cloud-ring) {
+  opacity: 1;
+}
+
+.gif-tile.is-skeleton {
+  cursor: default;
+}
+
+.gif-tile.is-skeleton > .gif-thumb {
+  animation: gif-skeleton 1.2s ease-in-out infinite;
+}
+
+@keyframes gif-skeleton {
+  50% {
+    background-color: #1b1e22;
+  }
+}
+
+/* Where the next page is asked for: a line with no height under the grid. */
+.gif-sentinel {
+  height: 1px;
+}
+
+.gif-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 5px;
+  color: #5c646d;
+  font-size: 10px;
+}
+
+.gif-retry {
+  appearance: none;
+  padding: 2px 8px;
+  margin: 0;
+  border: 1px solid $opt-line-strong;
+  border-radius: 6px;
+  background-color: transparent;
+  color: $opt-text;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.gif-retry:hover {
+  color: $opt-bright;
+}
+
+.gif-credit {
+  padding: 2px 5px 10px;
+  color: #5c646d;
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.gif-credit a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.gif-credit a:hover {
+  color: $opt-text;
 }
 
 .asset-thumb-cloud > .cloud-ring.is-spinning {

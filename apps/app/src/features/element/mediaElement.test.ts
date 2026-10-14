@@ -147,10 +147,25 @@ describe("buildMediaElement", () => {
       expect(
         buildMediaElement(probe({ kind: "image" }), { durationMs: bad }).duration,
       ).toBe(DEFAULT_STILL_MS);
+      // A GIF falls back to its own default, whole loops of the probed
+      // animation, which for a probe that knows no length is a still's.
       expect(
-        buildMediaElement(probe({ kind: "gif" }), { durationMs: bad }).duration,
+        buildMediaElement(probe({ kind: "gif", durationMs: 0 }), { durationMs: bad }).duration,
       ).toBe(DEFAULT_STILL_MS);
     }
+  });
+
+  it("gives a GIF placed without a length whole loops lasting at least 3s", () => {
+    expect(buildMediaElement(probe({ kind: "gif", durationMs: 1_800 })).duration).toBe(3_600);
+    expect(buildMediaElement(probe({ kind: "gif", durationMs: 4_500 })).duration).toBe(4_500);
+    // A single frame probes as 0 and is placed like a still.
+    expect(buildMediaElement(probe({ kind: "gif", durationMs: 0 })).duration).toBe(
+      DEFAULT_STILL_MS,
+    );
+    // A length asked for is a length given.
+    expect(
+      buildMediaElement(probe({ kind: "gif", durationMs: 1_800 }), { durationMs: 2_000 }).duration,
+    ).toBe(2_000);
   });
 
   it("takes video length from the file, ignoring durationMs", () => {

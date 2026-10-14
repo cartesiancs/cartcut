@@ -114,6 +114,9 @@ const request = {
     download: (kind, id, jobId) => ipcRenderer.invoke("cloud:download", kind, id, jobId),
     cancel: (jobId) => ipcRenderer.invoke("cloud:cancel", jobId),
     installedAssets: () => ipcRenderer.invoke("cloud:installedAssets"),
+    /** One page of GIFs: `{ q, cursor, limit }`, all optional. */
+    gifPage: (params) => ipcRenderer.invoke("cloud:gifPage", params),
+    installedGifs: () => ipcRenderer.invoke("cloud:installedGifs"),
     installedSummary: () => ipcRenderer.invoke("cloud:installedSummary"),
     clearInstalled: () => ipcRenderer.invoke("cloud:clearInstalled"),
     onProgress: (handler) => {

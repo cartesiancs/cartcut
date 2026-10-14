@@ -6,7 +6,14 @@
  * user who turned the setting off sees.
  */
 
-import type { CloudDownloadOutcome, CloudItem, CloudKind, CloudStatus } from "./cloudTypes";
+import type {
+  CloudDownloadOutcome,
+  CloudItem,
+  CloudKind,
+  CloudStatus,
+  GifPage,
+  GifPageRequest,
+} from "./cloudTypes";
 
 /** The server in use, the default it falls back to, and whether Settings named one. */
 export type CloudServer = { url: string | null; defaultUrl: string | null; custom: boolean };
@@ -20,6 +27,10 @@ export type CloudPort = {
   download: (kind: CloudKind, id: string, jobId: string) => Promise<CloudDownloadOutcome>;
   cancel: (jobId: string) => Promise<unknown>;
   installedAssets: () => Promise<{ items: CloudItem[] }>;
+  /** One page of the server's GIFs. Never the whole list. */
+  gifPage: (request: GifPageRequest) => Promise<GifPage>;
+  /** The GIFs on disk, for offline. */
+  installedGifs: () => Promise<{ items: CloudItem[] }>;
   /** How many items are installed from the cloud, and their size in bytes. */
   installedSummary: () => Promise<{ items: number; bytes: number }>;
   /** Delete everything installed from the cloud. `failed` counts items that could not go. */

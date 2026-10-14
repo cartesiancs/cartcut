@@ -262,6 +262,12 @@ Things that bite:
   before the mirror and the crop**: its border, shadow and `cornerRadius`. A
   per-type renderer runs under the crop's scale and clip, so an outline traced
   there lands on the uncropped frame and the crop's clip cuts it away.
+- **A GIF frame is a patch, not a picture.** An encoder stores the rectangle
+  that changed and a disposal for it (58 of 59 frames in a Noto emoji), so
+  `renderer/gif.ts` builds each clip's picture on a stage of its own through
+  `gif/gifCompose.ts`, forward one patch per frame, and holds each frame for
+  its own delay (`gif/gifTiming.ts`). `gif.test.ts` checks every frame
+  against ffmpeg's own decoder.
 - **`timeline/transform.ts#sampledBoxOf` is the only way to ask how big a clip
   is** at a cursor. Renderer, mask, selection outline, grips, hit test and resize
   origin all go through it; one left reading `element.width` puts the picture in
@@ -437,8 +443,10 @@ features/note/         timeline notes: a pin drawn by the canvas, a card in the 
                        pinned to a time and a track, outside the document and undo
 features/speed/        the ramp's graph editor; the curve is timeline/speedCurve.ts
 features/update/       the update card; main's half is electron/lib/updateSession.ts
-features/cloud/        cloud content: store, merge rule, badge, the asset view; main's
+features/cloud/        cloud content: store, merge rule, badge, the asset view, and the
+                       paged GIF section the asset panel shows by default; main's
                        half is electron/lib/cloud/, the server is server/
+features/gif/          a GIF's frames: decode, per-frame timing, disposal compositing
 features/settings/     the settings dialog behind the gear beside Export: sections
                        down the left (General's language, cloud, storage); labels
                        only. Storage's disk work is main's, electron/lib/storage/
@@ -766,6 +774,18 @@ renderer have no cloud path of their own. Four rules carry it:
 
 The server serves only files its startup scan indexed, looked up by
 `(kind, id, path)`, never by joining the request onto the content folder.
+
+**GIFs are the one kind never listed whole, and a GIF is one file.** Its name
+is its tags split on `_` (`server/src/gifs.rs`), its id a hash of that name,
+and nothing sits beside it: adding one is copying a `.gif` into
+`server/content/gifs/` and sending the server SIGHUP. `/v1/catalog/gif` is a
+404; the GIF section (under the user's own files in the asset panel, no
+cloud button needed, and nothing asked until it first scrolls into reach)
+reads `/v1/gifs` a page at a time (`q`, `cursor`, and a
+`rev` that changes with the catalogue, on which a scroll starts over), and a
+download looks its item up by id (`/v1/gifs/item/{id}`), never in a cached
+list. `scripts/cloud/gifs/fetchNoto.ts` writes the Noto Animated Emoji this
+way (CC BY 4.0, credited under the grid).
 
 `server/content/` is the live catalogue and is **never in this repository**:
 `.gitignore` drops `/server/content/` (anchored, so `server/tests/fixtures/

@@ -7,9 +7,10 @@
 
 pub mod body;
 pub mod catalog;
+pub mod gifs;
 mod routes;
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use hyper::server::conn::http1;
@@ -23,9 +24,39 @@ pub use catalog::{load_catalog, Catalog, Kind};
 const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct State {
-    pub catalog: Catalog,
+    /// Swapped whole by `replace`. A request takes the `Arc` once and answers
+    /// from it to the end, so a reload never shows it half of each catalog.
+    catalog: RwLock<Arc<Catalog>>,
     /// One line per request on stdout. Off in the test suite.
     pub log_requests: bool,
+}
+
+impl State {
+    pub fn new(catalog: Catalog, log_requests: bool) -> State {
+        State {
+            catalog: RwLock::new(Arc::new(catalog)),
+            log_requests,
+        }
+    }
+
+    pub fn catalog(&self) -> Arc<Catalog> {
+        // A poisoned lock still holds a whole catalog: the writer only ever
+        // assigns one.
+        let guard = self
+            .catalog
+            .read()
+            .unwrap_or_else(|poison| poison.into_inner());
+        Arc::clone(&guard)
+    }
+
+    /// Serve `catalog` from the next request on. What SIGHUP calls.
+    pub fn replace(&self, catalog: Catalog) {
+        let mut guard = self
+            .catalog
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        *guard = Arc::new(catalog);
+    }
 }
 
 /// Accept connections on `listener` until the task is dropped.

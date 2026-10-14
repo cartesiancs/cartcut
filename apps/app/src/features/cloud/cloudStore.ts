@@ -265,6 +265,21 @@ function markInstalled(kind: CloudKind, id: string, installedPath: string): void
   });
 }
 
+type InstalledListener = (kind: CloudKind, id: string, installedPath: string) => void;
+const installedListeners = new Set<InstalledListener>();
+
+/**
+ * Told of every download that installed, after this store has marked it.
+ *
+ * For a list this store does not hold: GIFs arrive a page at a time into
+ * `cloudGifStore.ts`, and their tiles would otherwise go on showing a cloud
+ * badge for a GIF that is on disk.
+ */
+export function onCloudInstalled(listener: InstalledListener): () => void {
+  installedListeners.add(listener);
+  return () => installedListeners.delete(listener);
+}
+
 /**
  * Download and install one item. Resolves once it is on disk, or with why not.
  *
@@ -303,6 +318,9 @@ export function downloadCloudItem(kind: CloudKind, id: string): Promise<CloudDow
     .then((outcome) => {
       if (outcome.ok) {
         markInstalled(kind, id, outcome.path);
+        for (const listener of installedListeners) {
+          listener(kind, id, outcome.path);
+        }
       }
       return outcome;
     })
@@ -397,6 +415,14 @@ export async function cloudInstallSummary(): Promise<{ items: number; bytes: num
  * asset view re-read. The preset and template registries are the caller's to
  * reload, as they are after a download (`fxPresetBrowser.ts`).
  */
+const clearedListeners = new Set<() => void>();
+
+/** Told when every download was deleted, for a list this store does not hold. */
+export function onCloudDownloadsCleared(listener: () => void): () => void {
+  clearedListeners.add(listener);
+  return () => clearedListeners.delete(listener);
+}
+
 export async function clearCloudDownloads(): Promise<{
   ok: boolean;
   removed: number;
@@ -416,6 +442,9 @@ export async function clearCloudDownloads(): Promise<{
     return null;
   } finally {
     cloudStore.setState({ catalogs: {} });
+    for (const listener of clearedListeners) {
+      listener();
+    }
     await refreshInstalledAssets();
   }
 }

@@ -69,6 +69,20 @@ export function setSurfaceFactory(next: SurfaceFactory): SurfaceFactory {
   return previous;
 }
 
+/**
+ * A new canvas of the given size from the installed factory, or `null`.
+ *
+ * Not cached and not cleared on reuse: the caller owns it. For a GIF's
+ * decoded patches and its stage, which have to be drawable by the node suites
+ * exactly as they are in the app.
+ */
+export function makeSurface(width: number, height: number): Surface | null {
+  if (!(width > 0) || !(height > 0)) {
+    return null;
+  }
+  return factory(width, height);
+}
+
 let layers = new WeakMap<object, Surface>();
 
 /**
