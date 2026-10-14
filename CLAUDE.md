@@ -784,8 +784,9 @@ cloud button needed, and nothing asked until it first scrolls into reach)
 reads `/v1/gifs` a page at a time (`q`, `cursor`, and a
 `rev` that changes with the catalogue, on which a scroll starts over), and a
 download looks its item up by id (`/v1/gifs/item/{id}`), never in a cached
-list. `scripts/cloud/gifs/fetchNoto.ts` writes the Noto Animated Emoji this
-way (CC BY 4.0, credited under the grid).
+list. `scripts/cloud/gifs/` writes the bundled set this way: Noto Animated
+Emoji (CC BY 4.0), Fluent Emoji (MIT) and Meteocons (MIT), credited under the
+grid and in `gifs/CREDITS.md`.
 
 `server/content/` is the live catalogue and is **never in this repository**:
 `.gitignore` drops `/server/content/` (anchored, so `server/tests/fixtures/

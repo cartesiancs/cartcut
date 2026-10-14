@@ -68,8 +68,11 @@ content/
   Its id is a hash of the name, since a name is Korean as often as not; a
   renamed GIF is a new GIF. A `.gif` that is not a GIF is skipped with a
   warning, and any other file there (a `CREDITS.md`) is ignored.
-  `npx jiti scripts/cloud/gifs/fetchNoto.ts` writes the 881 Noto Animated
-  Emoji this way.
+  Three scripts write the bundled set this way, each crediting its source in
+  `gifs/CREDITS.md`: `fetchNoto.ts` (881 Noto Animated Emoji, CC BY 4.0),
+  `fetchFluent.ts` (746 Fluent Emoji, MIT, tagged `fluent`) and
+  `fetchMeteocons.ts` (447 Meteocons weather icons, MIT, tagged `weather`
+  and `날씨`), all under `scripts/cloud/gifs/`.
 - Only files the app reads are indexed (the extension lists in
   `electron/lib/presetScan.ts`). A `.js` is skipped, as is a text source over
   512 KB, a symbolic link, and a name Windows cannot hold.

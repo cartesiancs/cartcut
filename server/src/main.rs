@@ -11,6 +11,9 @@ async fn main() {
     let content =
         PathBuf::from(env::var("CARTCUT_CLOUD_CONTENT").unwrap_or_else(|_| "content".into()));
 
+    // Every file is read and hashed before the first request is answered,
+    // which takes seconds for a large folder: say so, or it looks hung.
+    println!("scanning {} ...", content.display());
     let (catalog, warnings) = load_catalog(&content);
     report(&catalog, &warnings);
 

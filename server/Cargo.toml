@@ -15,3 +15,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "fs", "
 [dev-dependencies]
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
+
+# Every file is SHA-256 hashed at startup, and unoptimised `sha2` took about
+# 50 s over 1.8 GB of content where a release build takes about 2 s. Only the
+# dependencies are optimised, so this crate still builds and debugs as usual.
+[profile.dev.package."*"]
+opt-level = 3

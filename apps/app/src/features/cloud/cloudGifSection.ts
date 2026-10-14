@@ -39,15 +39,30 @@ const REACH_PX = 600;
 const SKELETONS = 12;
 
 /**
- * The bundled catalogue's emoji are Google's Noto Emoji Animation, licensed
- * CC BY 4.0, which asks for this credit where they are offered.
+ * Where the catalogue's GIFs come from, credited where they are offered: CC
+ * BY 4.0 asks for it, and the MIT licence travels with the files
+ * (`server/content/gifs/CREDITS.md`, written by `scripts/cloud/gifs/`).
  */
-const CREDIT = {
-  label: "Noto Emoji Animation, Google",
-  url: "https://googlefonts.github.io/noto-emoji-animation/",
-  license: "CC BY 4.0",
-  licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
-};
+const CREDITS = [
+  {
+    label: "Noto Emoji Animation, Google",
+    url: "https://googlefonts.github.io/noto-emoji-animation/",
+    license: "CC BY 4.0",
+    licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
+  },
+  {
+    label: "Fluent Emoji, Microsoft",
+    url: "https://github.com/microsoft/fluentui-emoji-animated",
+    license: "MIT",
+    licenseUrl: "https://github.com/microsoft/fluentui-emoji-animated/blob/main/LICENSE",
+  },
+  {
+    label: "Meteocons, Bas Milius",
+    url: "https://meteocons.com",
+    license: "MIT",
+    licenseUrl: "https://github.com/basmilius/meteocons/blob/main/LICENSE",
+  },
+];
 
 function openUrl(url: string) {
   (window as any).electronAPI?.req?.url?.openUrl?.(url);
@@ -219,7 +234,10 @@ export class CloudGifSection extends LitElement {
         >${text}</a
       >`;
     return html`<div class="gif-credit">
-      ${link(CREDIT.url, CREDIT.label)}, ${link(CREDIT.licenseUrl, CREDIT.license)}
+      ${CREDITS.map(
+        (credit) =>
+          html`<div>${link(credit.url, credit.label)}, ${link(credit.licenseUrl, credit.license)}</div>`,
+      )}
     </div>`;
   }
 
