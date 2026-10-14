@@ -13,6 +13,17 @@ import {
 } from "./directoryEntries";
 import { AssetSort, sortAssetEntries } from "./assetSort";
 import { cloudStore, subscribeCloudListing } from "../cloud/cloudStore";
+import {
+  cascade,
+  prefersReducedMotion,
+  viewOf,
+  type CascadeRun,
+} from "../motion/cascade";
+import {
+  BROWSE_MOTION,
+  hideStep,
+  revealStep,
+} from "../motion/browseMotion";
 import "./switchShowType";
 import "./assetList";
 import "./assetSortMenu";
@@ -96,9 +107,33 @@ export class AssetBrowser extends LitElement {
    * Showing the cloud's free media instead of the folder. Never remembered:
    * the panel always opens on the user's own files, and the folder view stays
    * mounted underneath so its tutorial targets and its scroll survive.
+   *
+   * This is what the cloud button asks for, and it flips on the click. The
+   * two after it are where the panel has got to: a switch takes them one step
+   * at a time (`browseMotion.ts` has the order), so for its length the three
+   * disagree on purpose.
    */
   @state()
   private cloudView = false;
+
+  /** The bar in its cloud shape: the search open, the folder's controls away. */
+  @state()
+  private cloudBar = false;
+
+  /** The folder's controls and list out of the layout, and the cloud grid in it. */
+  @state()
+  private cloudShown = false;
+
+  /** When the cloud grid's first tiles may show, on `performance.now()`'s clock. */
+  private revealFrom = 0;
+
+  /** Bumped by every switch, so a step still waiting knows it was overtaken. */
+  private switchEpoch = 0;
+  private swapTimer = 0;
+  /** The fade on the folder's controls and list, entering or leaving. */
+  private localFade: Animation[] = [];
+  /** The cloud's tiles leaving, while they are. */
+  private cloudHide: CascadeRun | null = null;
 
   @state()
   private cloudQuery = "";
@@ -151,8 +186,8 @@ export class AssetBrowser extends LitElement {
     // The cloud button follows the setting, and turning the setting off from
     // inside the cloud view puts the folder back.
     this.unsubscribeCloud = subscribeCloudListing(() => {
-      if (this.cloudView && !this.cloudOffered()) {
-        this.cloudView = false;
+      if ((this.cloudView || this.cloudBar) && !this.cloudOffered()) {
+        this.resetCloud();
       }
       this.requestUpdate();
     });
@@ -167,8 +202,170 @@ export class AssetBrowser extends LitElement {
   }
 
   private handleToggleCloud() {
-    this.cloudView = !this.cloudView;
+    if (this.cloudView) {
+      void this.switchToLocal();
+    } else {
+      this.switchToCloud();
+    }
+  }
+
+  /**
+   * Into the cloud: the folder fades where it stands while the field starts
+   * opening (`_browse.scss`, on `is-cloud`), then the folder leaves the layout
+   * and the cloud grid arrives in its place, its tiles cascading in as the
+   * field finishes.
+   */
+  private switchToCloud() {
+    const epoch = ++this.switchEpoch;
+    this.cloudView = true;
+
+    // Caught on the way out, with the cloud's tiles still leaving: they turn
+    // round where they are, and nothing else has moved yet.
+    if (this.cloudHide != null) {
+      this.cloudHide.reverse();
+      this.cloudHide = null;
+      return;
+    }
+
+    const reduced = prefersReducedMotion();
+    this.cloudBar = true;
+    this.fadeLocal("out", reduced ? 0 : BROWSE_MOTION.outMs, 0);
+
+    window.clearTimeout(this.swapTimer);
+    this.swapTimer = window.setTimeout(
+      () => {
+        this.swapTimer = 0;
+        if (epoch != this.switchEpoch) {
+          return;
+        }
+        // Before the swap, so the grid measures its tiles against the top of
+        // the pane it will be seen at.
+        this.closest(".tab-content")?.scrollTo({ top: 0 });
+        this.revealFrom =
+          performance.now() + (reduced ? 0 : BROWSE_MOTION.revealLeadMs);
+        this.cloudShown = true;
+        // `display: none` from this render on, so the faded-out frame the
+        // fade holds has nothing left to hold.
+        void this.updateComplete.then(() => {
+          if (epoch == this.switchEpoch) {
+            this.dropLocalFade();
+          }
+        });
+      },
+      reduced ? 0 : BROWSE_MOTION.outMs,
+    );
+  }
+
+  /**
+   * Back to the folder, in the reverse order: the cloud's tiles leave up the
+   * panel, then the field closes into the button as the folder fades back.
+   */
+  private async switchToLocal() {
+    const epoch = ++this.switchEpoch;
+    this.cloudView = false;
+    const reduced = prefersReducedMotion();
+
+    // Caught while the folder was still fading out: nothing of the cloud is
+    // on screen yet, so the folder fades back from where it got to.
+    if (!this.cloudShown) {
+      window.clearTimeout(this.swapTimer);
+      this.swapTimer = 0;
+      this.cloudBar = false;
+      this.fadeLocal("in", reduced ? 0 : BROWSE_MOTION.inMs, 0);
+      return;
+    }
+
+    const grid = this.querySelector("cloud-asset-grid");
+    const run = cascade(
+      grid?.querySelectorAll<HTMLElement>("[data-cascade]") ?? [],
+      viewOf(this.closest(".tab-content")),
+      hideStep(reduced),
+    );
+    this.cloudHide = run;
+    await run.finished;
+
+    // Turned round by a click on the way out (`switchToCloud` reversed the
+    // run): the tiles are back, and the cloud view stays.
+    if (epoch != this.switchEpoch) {
+      run.cancel();
+      return;
+    }
+
+    this.cloudHide = null;
     this.closest(".tab-content")?.scrollTo({ top: 0 });
+    this.cloudBar = false;
+    this.cloudShown = false;
+    await this.updateComplete;
+    if (epoch != this.switchEpoch) {
+      return;
+    }
+    // From nothing: until this render they were `display: none`, so what
+    // they show now is their resting opacity, not where a fade left them.
+    this.fadeLocal(
+      "in",
+      reduced ? 0 : BROWSE_MOTION.inMs,
+      reduced ? 0 : BROWSE_MOTION.inDelayMs,
+      "0",
+    );
+  }
+
+  /** Straight to the folder, with nothing animated: the cloud went away under us. */
+  private resetCloud() {
+    ++this.switchEpoch;
+    window.clearTimeout(this.swapTimer);
+    this.swapTimer = 0;
+    this.cloudHide?.cancel();
+    this.cloudHide = null;
+    this.dropLocalFade();
+    this.cloudView = false;
+    this.cloudBar = false;
+    this.cloudShown = false;
+  }
+
+  /**
+   * Fade the folder's controls and list out, or back to their resting
+   * opacity, from wherever each one is now (`from` overrides that).
+   *
+   * Back to *resting*, not to 1: the up button at the root is `:disabled` at
+   * 0.4, so the way in is one keyframe at the start and the end left to the
+   * stylesheet, and nothing is held once it is there. The way out is held at
+   * 0 until the swap takes the elements out of the layout.
+   */
+  private fadeLocal(
+    direction: "out" | "in",
+    durationMs: number,
+    delayMs: number,
+    from?: string,
+  ) {
+    const targets = Array.from(
+      this.querySelectorAll<HTMLElement>("[data-browse-local]"),
+    );
+    // Every read before the first write, so the previous fade is still
+    // applied when its current value is taken.
+    const starts = targets.map(
+      (element) => from ?? getComputedStyle(element).opacity,
+    );
+    this.dropLocalFade();
+    this.localFade = targets.map((element, i) =>
+      element.animate(
+        direction == "out"
+          ? [{ opacity: starts[i] }, { opacity: 0 }]
+          : [{ opacity: starts[i], offset: 0 }],
+        {
+          duration: durationMs,
+          delay: delayMs,
+          easing: "ease-out",
+          fill: direction == "out" ? "forwards" : "backwards",
+        },
+      ),
+    );
+  }
+
+  private dropLocalFade() {
+    for (const animation of this.localFade) {
+      animation.cancel();
+    }
+    this.localFade = [];
   }
 
   connectedCallback(): void {
@@ -195,6 +392,9 @@ export class AssetBrowser extends LitElement {
     this.unsubscribeCloud?.();
     this.observer?.disconnect();
     this.observer = undefined;
+    ++this.switchEpoch;
+    window.clearTimeout(this.swapTimer);
+    this.swapTimer = 0;
   }
 
   private async loadDirectory(dir: string, revision: number) {
@@ -253,18 +453,52 @@ export class AssetBrowser extends LitElement {
     if (changed.has("sort") && changed.get("sort") !== undefined) {
       this.closest(".tab-content")?.scrollTo({ top: 0 });
     }
+
+    // A folder that has just been read, and only that: a new order or the
+    // other view of the same folder moves tiles that were already there.
+    if (changed.has("entries") && this.status == "loaded") {
+      void this.revealEntries();
+    }
+  }
+
+  /**
+   * Cascade the folder's tiles in, top first.
+   *
+   * After the list *and* every tile in it have rendered: until a tile has, it
+   * is a host with no well in it, a few pixels tall, and every row below the
+   * first measures at the wrong height. All of it is microtasks, so the tiles
+   * are hidden for their turn before any frame paints them.
+   */
+  private async revealEntries() {
+    const list = this.querySelector<LitElement>("asset-list");
+    if (list == null) {
+      return;
+    }
+    await list.updateComplete;
+    const tiles = Array.from(
+      list.querySelectorAll<LitElement>("asset-file, asset-folder"),
+    );
+    await Promise.all(tiles.map((tile) => tile.updateComplete));
+    cascade(
+      tiles,
+      viewOf(this.closest(".tab-content")),
+      revealStep(prefersReducedMotion()),
+    );
   }
 
   render() {
-    // The folder's own controls, hidden rather than removed in the cloud view.
-    const local = this.cloudView ? "d-none" : "";
+    // The folder's own controls and list, hidden rather than removed in the
+    // cloud view. Out of the layout only once their fade is over, and inert
+    // from the click, so a control fading out cannot be pressed on its way.
+    const local = this.cloudShown ? "d-none" : "";
+    const away = this.cloudBar;
     const cloudLabel = this.cloudView
       ? this.lc.t("setting.local_assets")
       : this.lc.t("setting.cloud_assets");
 
-    return html`<div class="browse-bar is-floating">
-        ${this.cloudView
-          ? html`<label class="browse-field">
+    return html`<div class="browse-bar is-floating ${this.cloudBar ? "is-cloud" : ""}">
+        ${this.cloudOffered()
+          ? html`<label class="browse-field browse-search" ?inert=${!this.cloudBar}>
               <span class="material-symbols-outlined browse-field-icon">search</span>
               <input
                 type="search"
@@ -281,6 +515,8 @@ export class AssetBrowser extends LitElement {
         <button
           type="button"
           class="browse-btn ${local}"
+          data-browse-local
+          ?inert=${away}
           title=${this.lc.t("setting.parent_folder")}
           aria-label=${this.lc.t("setting.parent_folder")}
           ?disabled=${parentDirectory(this.nowDirectory) == null}
@@ -289,11 +525,13 @@ export class AssetBrowser extends LitElement {
           <span class="material-symbols-outlined">arrow_upward</span>
         </button>
 
-        ${this.templatePath(local)}
+        ${this.templatePath(local, away)}
 
         <button
           type="button"
           class="browse-btn ${getLocationEnv() == "demo" ? "d-none" : local}"
+          data-browse-local
+          ?inert=${away}
           data-tutorial="asset-change-folder"
           title=${this.lc.t("setting.change_project_folder")}
           aria-label=${this.lc.t("setting.change_project_folder")}
@@ -302,14 +540,22 @@ export class AssetBrowser extends LitElement {
           <span class="material-symbols-outlined">folder_open</span>
         </button>
 
-        <asset-sort-menu class=${local}></asset-sort-menu>
+        <asset-sort-menu
+          class=${local}
+          data-browse-local
+          ?inert=${away}
+        ></asset-sort-menu>
 
-        <switch-showtype class=${local}></switch-showtype>
+        <switch-showtype
+          class=${local}
+          data-browse-local
+          ?inert=${away}
+        ></switch-showtype>
 
         ${this.cloudOffered()
           ? html`<button
               type="button"
-              class="browse-btn"
+              class="browse-btn browse-cloud"
               aria-pressed=${this.cloudView ? "true" : "false"}
               title=${cloudLabel}
               aria-label=${cloudLabel}
@@ -322,14 +568,17 @@ export class AssetBrowser extends LitElement {
 
       <div
         class=${local}
+        data-browse-local
+        ?inert=${away}
         @asset-navigate=${this.handleNavigate}
         @asset-open=${this.handleOpen}
       >
         ${this.templateBody()}
       </div>
-      ${this.cloudView
+      ${this.cloudShown
         ? html`<cloud-asset-grid
             .query=${this.cloudQuery.trim().toLowerCase()}
+            .revealFrom=${this.revealFrom}
           ></cloud-asset-grid>`
         : ""}`;
   }
@@ -342,12 +591,16 @@ export class AssetBrowser extends LitElement {
    * name, and `_browse.scss#browse-path` clips the start instead. The whole
    * path is the tooltip.
    */
-  private templatePath(hidden = "") {
+  private templatePath(hidden = "", away = false) {
     // No folder yet: the shell alone, since the empty state under it already
     // says what to do and saying it twice reads as two different problems.
     const path = this.nowDirectory;
     if (path == "") {
-      return html`<div class="browse-field browse-field-path ${hidden}">
+      return html`<div
+        class="browse-field browse-field-path ${hidden}"
+        data-browse-local
+        ?inert=${away}
+      >
         <span class="material-symbols-outlined browse-field-icon">folder</span>
       </div>`;
     }
@@ -359,7 +612,12 @@ export class AssetBrowser extends LitElement {
     const leaf = cut < 0 ? path : trimmed.slice(cut + 1) || path;
     const parent = cut < 0 ? "" : trimmed.slice(0, cut + 1);
 
-    return html`<div class="browse-field browse-field-path ${hidden}" title=${path}>
+    return html`<div
+      class="browse-field browse-field-path ${hidden}"
+      data-browse-local
+      ?inert=${away}
+      title=${path}
+    >
       <span class="material-symbols-outlined browse-field-icon">folder</span>
       <span class="browse-path"
         ><bdi dir="ltr"

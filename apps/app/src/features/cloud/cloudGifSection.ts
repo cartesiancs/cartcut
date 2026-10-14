@@ -9,6 +9,11 @@
  *
  * Offline, with the setting off or the server unreachable, it shows the GIFs
  * already on disk, searched by the same rule (`gifSearch.ts`).
+ *
+ * A new list cascades in (`motion/cascade.ts`), and the pictures of the tiles
+ * that cascaded fade in as each one loads; a page the scroll asked for, and a
+ * tile first scrolled to, appear as they land. What counts as a new list is
+ * `listKeyOf`: the placeholders, then each search's first page.
  */
 
 import { LitElement, html, type PropertyValues } from "lit";
@@ -17,6 +22,8 @@ import { repeat } from "lit/directives/repeat.js";
 
 import { LocaleController } from "../../controllers/locale";
 import { ASSET_MIME } from "../asset/dropIntent";
+import { revealStep } from "../motion/browseMotion";
+import { cascade, prefersReducedMotion, viewOf } from "../motion/cascade";
 import { atPlayhead, importPathsAt } from "../asset/importDrop";
 import { createClickOrder, downloadThenApply } from "./cloudApply";
 import {
@@ -68,14 +75,45 @@ function openUrl(url: string) {
   (window as any).electronAPI?.req?.url?.openUrl?.(url);
 }
 
+/**
+ * Which list the tiles on screen belong to; a new one cascades in.
+ *
+ * Nothing to show is one list whatever the search, so the placeholders are
+ * shown once and not again when the request for them goes out. A search's
+ * pages share its `seq`, so the second page does not count as new, and the
+ * offline list is new with each search typed into it.
+ */
+function listKeyOf(local: boolean, items: readonly CloudItem[], seq: number, query: string): string {
+  if (items.length === 0) {
+    return "empty";
+  }
+  return local ? `local:${query}` : `feed:${seq}`;
+}
+
 @customElement("cloud-gif-section")
 export class CloudGifSection extends LitElement {
   /** The search box's text, lower-cased by `<asset-browser>`. */
   @property({ type: String })
   query = "";
 
+  /** See `<cloud-asset-grid>`'s. */
+  @property({ attribute: false })
+  revealFrom = 0;
+
   /** `query` once the typing has paused; what the server is asked. */
   private settledQuery = "";
+
+  /** The list on screen, and the last one that cascaded in. */
+  private listKey = "";
+  private revealedKey: string | null = null;
+  /** The heading cascades in with the first list only, and then stays. */
+  private headRevealed = false;
+  /**
+   * The GIFs that cascaded in, whose pictures fade in as they load. Only
+   * those on screen at the time: a tile further down is reached by scrolling,
+   * and keeps the plain landing every scrolled-to tile has.
+   */
+  private batch: ReadonlySet<string> = new Set();
   private debounce: ReturnType<typeof setTimeout> | null = null;
 
   private lc = new LocaleController(this);
@@ -111,6 +149,9 @@ export class CloudGifSection extends LitElement {
   }
 
   protected willUpdate(changed: PropertyValues) {
+    const { local, items, feed } = this.listing();
+    this.listKey = listKeyOf(local, items, feed.seq, this.settledQuery);
+
     if (changed.has("query") && changed.get("query") !== undefined) {
       if (this.debounce != null) {
         clearTimeout(this.debounce);
@@ -135,6 +176,29 @@ export class CloudGifSection extends LitElement {
     if (this.sentinelInReach()) {
       loadMoreGifs();
     }
+    this.revealList();
+  }
+
+  private revealList() {
+    if (this.revealedKey === this.listKey) {
+      return;
+    }
+    this.revealedKey = this.listKey;
+    const blocks = Array.from(this.querySelectorAll<HTMLElement>("[data-cascade]")).filter(
+      (block) => !this.headRevealed || block.dataset.cascade !== "once",
+    );
+    this.headRevealed = true;
+    const run = cascade(
+      blocks,
+      viewOf(this.scroller()),
+      revealStep(prefersReducedMotion(), this.revealFrom - performance.now()),
+    );
+    // A microtask from here, so `arriving` is set before the tiles' own
+    // visibility reports put an `<img>` in them.
+    this.batch = new Set(
+      run.animated.flatMap((block) => (block.dataset.cloud ? [block.dataset.cloud] : [])),
+    );
+    this.requestUpdate();
   }
 
   private scroller(): Element | null {
@@ -201,6 +265,7 @@ export class CloudGifSection extends LitElement {
   private tile(item: CloudItem) {
     return html`<div
       class="asset gif-tile"
+      data-cascade
       draggable=${item.installed && item.localPath != null ? "true" : "false"}
       data-cloud=${item.id}
       title=${item.name}
@@ -208,12 +273,16 @@ export class CloudGifSection extends LitElement {
       @click=${() => this.open(item)}
       @dragstart=${(event: DragEvent) => this.dragStart(event, item)}
     >
-      <cloud-gif-tile class="asset-thumb gif-thumb" .item=${item}></cloud-gif-tile>
+      <cloud-gif-tile
+        class="asset-thumb gif-thumb"
+        .item=${item}
+        .arriving=${this.batch.has(item.id)}
+      ></cloud-gif-tile>
     </div>`;
   }
 
   private status(text: string, retry = false) {
-    return html`<div class="gif-status">
+    return html`<div class="gif-status" data-cascade>
       <span>${text}</span>
       ${retry
         ? html`<button type="button" class="gif-retry" @click=${() => retryGifs()}>
@@ -233,7 +302,7 @@ export class CloudGifSection extends LitElement {
         }}
         >${text}</a
       >`;
-    return html`<div class="gif-credit">
+    return html`<div class="gif-credit" data-cascade>
       ${CREDITS.map(
         (credit) =>
           html`<div>${link(credit.url, credit.label)}, ${link(credit.licenseUrl, credit.license)}</div>`,
@@ -241,7 +310,8 @@ export class CloudGifSection extends LitElement {
     </div>`;
   }
 
-  render() {
+  /** What the section shows, from the stores, for `willUpdate` and `render` alike. */
+  private listing() {
     const state = cloudGifStore.getState();
     const online = cloudUsable(cloudStore.getState());
     const { feed } = state;
@@ -249,6 +319,11 @@ export class CloudGifSection extends LitElement {
     // Offline, or the server never answered: what is on disk, searched here.
     const local = !online || (feed.status === "error" && feed.items.length === 0);
     const items = local ? searchGifs(state.installed, this.settledQuery) : feed.items;
+    return { state, online, feed, local, items };
+  }
+
+  render() {
+    const { state, online, feed, local, items } = this.listing();
     const total = local ? items.length : feed.total;
 
     let footer;
@@ -280,12 +355,15 @@ export class CloudGifSection extends LitElement {
       !local && (feed.status === "loading" || feed.status === "idle")
         ? Array.from(
             { length: SKELETONS },
-            () => html`<div class="gif-tile is-skeleton"><div class="asset-thumb gif-thumb"></div></div>`,
+            () =>
+              html`<div class="gif-tile is-skeleton" data-cascade>
+                <div class="asset-thumb gif-thumb"></div>
+              </div>`,
           )
         : "";
 
     return html`<section class="browse-section gif-section">
-      <div class="browse-section-head">
+      <div class="browse-section-head" data-cascade="once">
         <span class="browse-section-title">${this.lc.t("setting.cloud_gif")}</span>
         <span class="browse-section-count">${total}</span>
       </div>

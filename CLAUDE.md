@@ -459,7 +459,9 @@ features/settings/     the settings dialog behind the gear beside Export: sectio
                        only. Storage's disk work is main's, electron/lib/storage/
 features/mediaInfo/    Show Info: labels and layout here; the ffprobe call and its
                        parse are main's, electron/lib/mediaInfo*.ts
-features/motion/       a damped spring as a CSS linear(): the tour, the tile hover
+features/motion/       a damped spring as a CSS linear(): the tour, the tile hover,
+                       the asset browser's cloud switch; cascade (tiles in by
+                       screen position)
 features/tutorial/     the coachmarks after the tour: seven steps judged from
                        snapshots, a pure runner over ports; targets are data-tutorial
 features/editor/       actions, menuCommands, shortcuts, frameRate

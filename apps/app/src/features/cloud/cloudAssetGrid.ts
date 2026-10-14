@@ -14,6 +14,11 @@
  * from the server and shares this search. So the media part says nothing when
  * it has nothing to show: "no matches" above a section full of matching GIFs
  * would be wrong, and the GIF section has empty states of its own.
+ *
+ * Every block that cascades in, and back out when the browser leaves the
+ * cloud, carries `data-cascade` (`motion/cascade.ts`). The media cascade in
+ * once, the first time there are any: a search here filters what is already
+ * held, and a cascade per keystroke would be the list flickering.
  */
 
 import { LitElement, html } from "lit";
@@ -21,6 +26,8 @@ import { customElement, property } from "lit/decorators.js";
 
 import { LocaleController } from "../../controllers/locale";
 import { ASSET_MIME } from "../asset/dropIntent";
+import { revealStep } from "../motion/browseMotion";
+import { cascade, prefersReducedMotion, viewOf } from "../motion/cascade";
 import { atPlayhead, importPathsAt } from "../asset/importDrop";
 import { createClickOrder, downloadThenApply } from "./cloudApply";
 import { cloudAssetTiles, cloudItemMatches } from "./cloudMerge";
@@ -47,6 +54,17 @@ export class CloudAssetGrid extends LitElement {
   /** Lower-cased by the caller's search field. */
   @property({ type: String })
   query = "";
+
+  /**
+   * No tile shows before this `performance.now()`, so the browser can have
+   * the tiles start once its search field is partly open. Passed on to the
+   * GIF section.
+   */
+  @property({ attribute: false })
+  revealFrom = 0;
+
+  /** Whether the media have cascaded in since this grid was mounted. */
+  private revealed = false;
 
   private lc = new LocaleController(this);
   private clicks = createClickOrder();
@@ -77,6 +95,26 @@ export class CloudAssetGrid extends LitElement {
   updated() {
     // A no-op unless the catalog is missing or stale.
     ensureCatalog("asset");
+    this.revealOnce();
+  }
+
+  /** The media's first blocks, cascading in. The GIF section does its own. */
+  private revealOnce() {
+    if (this.revealed) {
+      return;
+    }
+    const blocks = Array.from(
+      this.querySelectorAll<HTMLElement>("[data-cascade]"),
+    ).filter((block) => block.closest("cloud-gif-section") == null);
+    if (blocks.length == 0) {
+      return;
+    }
+    this.revealed = true;
+    cascade(
+      blocks,
+      viewOf(this.closest(".tab-content")),
+      revealStep(prefersReducedMotion(), this.revealFrom - performance.now()),
+    );
   }
 
   /**
@@ -116,6 +154,7 @@ export class CloudAssetGrid extends LitElement {
     return html`
       <div
         class="asset asset-tile"
+        data-cascade
         draggable=${draggable ? "true" : "false"}
         data-cloud=${item.id}
         title=${item.name}
@@ -146,7 +185,7 @@ export class CloudAssetGrid extends LitElement {
   }
 
   private notice(text: string) {
-    return html`<div class="browse-alert">
+    return html`<div class="browse-alert" data-cascade>
       <span class="material-symbols-outlined">cloud_off</span>
       <span>${text}</span>
     </div>`;
@@ -173,7 +212,7 @@ export class CloudAssetGrid extends LitElement {
       body = sections.map(
         (section) => html`
           <section class="browse-section">
-            <div class="browse-section-head">
+            <div class="browse-section-head" data-cascade>
               <span class="browse-section-title">${this.lc.t(section.label)}</span>
               <span class="browse-section-count">${section.items.length}</span>
             </div>
@@ -189,7 +228,10 @@ export class CloudAssetGrid extends LitElement {
       ${offline ? this.notice(this.lc.t("setting.cloud_offline")) : ""}
       ${unreachable ? this.notice(this.lc.t("setting.cloud_unreachable")) : ""}
       ${body}
-      <cloud-gif-section .query=${this.query}></cloud-gif-section>
+      <cloud-gif-section
+        .query=${this.query}
+        .revealFrom=${this.revealFrom}
+      ></cloud-gif-section>
     `;
   }
 }

@@ -122,6 +122,73 @@ $browse-fade-h: 36px;
 }
 
 /*
+ * The asset browser's cloud search, opening out of the cloud button's side
+ * (`features/motion/browseMotion.ts` has the whole switch and its numbers).
+ *
+ * Absolute, over the row the folder's controls hold, so opening it moves
+ * nothing else in the bar: the controls fade where they stand underneath, and
+ * the cloud button, the one control both views share, stays put. The top and
+ * the right are the floating bar's padding and the button with the bar's gap.
+ *
+ * A transition rather than a timed animation, so a second click mid-way turns
+ * the field round from wherever it got to. Each state's rule times the way
+ * into it: open waits for the folder's fade to get going, and closed keeps
+ * the field visible until it has shrunk into the button.
+ */
+$browse-gap: 6px;
+
+.browse-bar.is-floating > .browse-search {
+  position: absolute;
+  top: $browse-pane-pad;
+  right: calc(#{$browse-pane-pad} + #{$browse-h + $browse-gap});
+  width: 0;
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    width var(--browse-shrink, 200ms) var(--browse-shrink-ease, ease-in),
+    opacity 120ms ease-in calc(var(--browse-shrink, 200ms) - 120ms),
+    visibility 0s linear var(--browse-shrink, 200ms),
+    border-color 140ms ease-out,
+    box-shadow 140ms ease-out;
+}
+
+.browse-bar.is-floating.is-cloud > .browse-search {
+  width: calc(100% - #{2 * $browse-pane-pad} - #{$browse-h + $browse-gap});
+  opacity: 1;
+  visibility: visible;
+  transition:
+    width var(--browse-grow, 363ms) var(--browse-grow-ease, ease-out)
+      var(--browse-grow-delay, 90ms),
+    opacity 120ms ease-out var(--browse-grow-delay, 90ms),
+    visibility 0s linear var(--browse-grow-delay, 90ms),
+    border-color 140ms ease-out,
+    box-shadow 140ms ease-out;
+}
+
+/*
+ * At the end of the bar whatever is beside it. With the folder's controls in
+ * the row the path field takes all the free space and this margin gets none;
+ * with them out of the layout it is what keeps the button from sliding left.
+ */
+.browse-bar > .browse-btn.browse-cloud {
+  margin-left: auto;
+}
+
+/* Reduced motion keeps the fade and lets the width jump. */
+@media (prefers-reduced-motion: reduce) {
+  .browse-bar.is-floating > .browse-search {
+    transition:
+      opacity 100ms linear,
+      visibility 0s linear 100ms;
+  }
+
+  .browse-bar.is-floating.is-cloud > .browse-search {
+    transition: opacity 100ms linear;
+  }
+}
+
+/*
  * The field. A `<label>` around the search box, so a click on the magnifier
  * focuses the input the way it would on any search field.
  *
@@ -704,6 +771,15 @@ cloud-gif-section {
   height: 100%;
   object-fit: contain;
   pointer-events: none;
+  transition: opacity 220ms ease-out;
+}
+
+/*
+ * A first page's GIF that has not loaded yet (`cloudGifTile.ts`). Dropping
+ * the class is what fades it in; a tile that never had it never transitions.
+ */
+.gif-thumb > .gif-thumb-img.is-waiting {
+  opacity: 0;
 }
 
 /*

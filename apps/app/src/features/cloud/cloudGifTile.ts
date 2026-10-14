@@ -11,6 +11,11 @@
  *
  * The picture only: the section wraps it in the clickable tile, so the click,
  * the drag and the download stay in one place.
+ *
+ * A tile that cascaded in is `arriving`: its picture fades in when it has
+ * loaded, the first time only. The tiles cascade in before their GIFs have
+ * downloaded, so without it each picture still lands in its tile in one
+ * frame. A tile reached by scrolling keeps the plain landing.
  */
 
 import { LitElement, html } from "lit";
@@ -32,6 +37,18 @@ export class CloudGifTile extends LitElement {
 
   @state()
   private near = false;
+
+  /** Fade the picture in when it first loads. See the file's comment. */
+  @property({ type: Boolean, attribute: false })
+  arriving = false;
+
+  /** Whether the picture has loaded once, after which it never fades again. */
+  @state()
+  private landed = false;
+
+  private handleLanded = () => {
+    this.landed = true;
+  };
 
   createRenderRoot() {
     return this;
@@ -58,7 +75,15 @@ export class CloudGifTile extends LitElement {
     const src = item.localThumbnail != null ? fileSrc(item.localThumbnail) : item.thumbnailUrl;
     return html`
       ${this.near && src != null
-        ? html`<img class="gif-thumb-img" src=${src} alt="" decoding="async" draggable="false" />`
+        ? html`<img
+            class="gif-thumb-img ${this.arriving && !this.landed ? "is-waiting" : ""}"
+            src=${src}
+            alt=""
+            decoding="async"
+            draggable="false"
+            @load=${this.handleLanded}
+            @error=${this.handleLanded}
+          />`
         : ""}
       ${item.installed
         ? ""

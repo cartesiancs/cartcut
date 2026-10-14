@@ -14,6 +14,7 @@ import { installAutosave } from "./features/project/autosaveBridge";
 import { installTimelineSwitchEffects } from "./features/composition/installSwitchEffects";
 import { initProjectBaseline } from "./features/project/projectDirty";
 import { installHoverMotion } from "./features/motion/hoverSpring";
+import { installBrowseMotion } from "./features/motion/browseMotion";
 import {
   SCROLLBAR_ALPHA,
   installScrollActivity,
@@ -126,6 +127,10 @@ installFrameStats();
 // spread across nine components and `_asset.scss` reads the same five names
 // for all of them.
 installHoverMotion(document.documentElement.style);
+
+// The asset browser's search field opens and closes on these, with the same
+// numbers `<asset-browser>` times the rest of the cloud switch by.
+installBrowseMotion(document.documentElement.style);
 
 // Vertical scrollbars fade in while their list is moving, or has just grown,
 // and out once it settles. Both watch the whole document, so a list added later
