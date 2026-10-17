@@ -211,7 +211,7 @@ export class ElementTimelineLeftOption extends LitElement {
   createRenderRoot() {
     // The fields above are copied from the stores' *initial* state, and a
     // subscription only hears later writes. The web demo seeds its timeline
-    // from `<warning-demo>`, which updates before this column (three levels
+    // from `<demo-timeline>`, which updates before this column (three levels
     // down) is even created, so the column showed no rows until some other
     // edit woke it. Reading the current state here closes that gap.
     const timelineNow = useTimelineStore.getState();

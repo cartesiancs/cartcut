@@ -4,7 +4,7 @@ import { customElement, property } from "lit/decorators.js";
 import { IUIStore, uiStore } from "./states/uiStore";
 import { playbackPreviewStore } from "./states/playbackPreviewStore";
 import { loadPresets } from "./features/fx/presetRegistry";
-import "./features/demo/warningDemoEnv";
+import "./features/demo/demoTimeline";
 import "./features/gpt/chatSidebar";
 import { installLutResolver } from "./features/lut/lutRegistry";
 import { installTemplateResolver } from "./features/renderer/template";
@@ -191,7 +191,7 @@ export class App extends LitElement {
              button. -->
         <ext-status-items></ext-status-items>
 
-        <warning-demo></warning-demo>
+        <demo-timeline></demo-timeline>
         <onboarding-overlay></onboarding-overlay>
         <!-- Starts when the tour above finishes, for first-run users only. -->
         <tutorial-coachmark></tutorial-coachmark>

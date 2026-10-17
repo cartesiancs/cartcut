@@ -320,7 +320,7 @@ function writeAssetPath(
  * Is this a project path we can anchor against?
  *
  * Empty in the demo and web builds, where `#projectFile` is never set and
- * `demo/warningDemoEnv.ts` uses values like `/sample/clip.mp4` that look like
+ * `demo/demoTimeline.ts` uses values like `/sample/clip.mp4` that look like
  * absolute paths. Both entry points refuse to do anything without a real one.
  */
 function anchorFlavour(projectFile: string): PathFlavour | null {
