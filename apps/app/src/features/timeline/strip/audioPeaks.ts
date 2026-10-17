@@ -11,6 +11,7 @@
  */
 
 import { getLocationEnv } from "../../../functions/getLocationEnv";
+import { mediaUrlFor } from "../../../functions/mediaUrl";
 import { sharedAudioContext } from "../../asset/audioContext";
 import { computePeaks, type PeakData } from "./peaks";
 
@@ -33,14 +34,9 @@ export type AudioPeakProvider = PeakProvider & {
   readonly decodedFiles: number;
 };
 
-/**
- * Mirrors `loadedAssetStore.getPath`: only the web build has an `/api/file`.
- * The demo is a static site serving its samples by their own path.
- */
+/** The URL to load from; `functions/mediaUrl.ts` holds the rule. */
 function resolvePath(localpath: string): string {
-  return getLocationEnv() === "web"
-    ? `/api/file?path=${localpath}`
-    : localpath;
+  return mediaUrlFor(localpath, getLocationEnv());
 }
 
 export function createAudioPeakProvider(): AudioPeakProvider {

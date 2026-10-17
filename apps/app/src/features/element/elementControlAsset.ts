@@ -2,6 +2,7 @@ import { html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
 import { getLocationEnv } from "../../functions/getLocationEnv";
+import { mediaUrlFor } from "../../functions/mediaUrl";
 
 @customElement("element-control-asset")
 export class ElementControlAsset extends LitElement {
@@ -185,10 +186,7 @@ export class ElementControlAsset extends LitElement {
   }
 
   getPath(path) {
-    const nowEnv = getLocationEnv();
-    const filepath = nowEnv == "electron" ? path : `/api/file?path=${path}`;
-
-    return filepath;
+    return mediaUrlFor(path, getLocationEnv());
   }
 
   // templateText() {

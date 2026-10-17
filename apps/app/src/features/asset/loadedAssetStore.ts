@@ -1,5 +1,6 @@
 import { createStore } from "zustand/vanilla";
 import { getLocationEnv } from "../../functions/getLocationEnv";
+import { mediaUrlFor } from "../../functions/mediaUrl";
 import {
   isVisualTimelineElement,
   type AudioElementType,
@@ -792,15 +793,5 @@ function releaseHandle(video: HTMLVideoElement): void {
 }
 
 function getPath(path: string) {
-  const nowEnv = getLocationEnv();
-  let filepath = path;
-  if (nowEnv == "electron") {
-    filepath = path;
-  } else if (nowEnv == "web") {
-    filepath = `/api/file?path=${path}`;
-  } else {
-    filepath = path;
-  }
-
-  return filepath;
+  return mediaUrlFor(path, getLocationEnv());
 }
