@@ -260,14 +260,6 @@ const request = {
         ipcRenderer.invoke("render:v2:start", options, timeline),
       cancel: (sessionId) => ipcRenderer.invoke("render:v2:cancel", sessionId),
     },
-    offscreen: {
-      readyToRender: () => ipcRenderer.invoke("render:offscreen:readyToRender"),
-      start: (options, timeline) =>
-        ipcRenderer.invoke("render:offscreen:start", options, timeline),
-      sendFrame: (frameBuffer, pers) =>
-        ipcRenderer.invoke("render:offscreen:sendFrame", frameBuffer, pers),
-      finishStream: () => ipcRenderer.invoke("render:offscreen:finishStream"),
-    },
   },
   url: {
     openUrl: (url) => ipcRenderer.send("OPEN_URL", url),
@@ -472,9 +464,6 @@ const response = {
     v2Cancelled: (callback) => ipcRenderer.on("render:v2:cancelled", callback),
     finishCombineFrame: (callback) =>
       ipcRenderer.on("FINISH_COMBINE_FRAME", callback),
-    offscreen: {
-      start: (callback) => ipcRenderer.on("render:offscreen:start", callback),
-    },
   },
   /**
    * Pushes from main.

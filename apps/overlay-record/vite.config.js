@@ -12,8 +12,7 @@ export default defineConfig({
       // bubble layout, the zoom planner, the settings schema. They live under
       // `apps/app/src/features/record/` rather than here because that is what
       // `vitest.config.ts` includes, and every one of them is arithmetic worth
-      // pinning with a test. `packages/render` reaches the renderer the same
-      // way and for the same reason.
+      // pinning with a test.
       "@app": fileURLToPath(new URL("../app/src", import.meta.url)),
     },
   },

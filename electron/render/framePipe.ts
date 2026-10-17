@@ -1,9 +1,10 @@
 /**
  * One FFmpeg export process and the stdin pipe feeding it.
  *
- * Both export paths — the in-app `render:v2` and the HTTP/offscreen
- * `render:offscreen` — spawn the same command and stream frames the same way,
- * and each used to hold its own bare `let ffmpegProcess`. That module-level
+ * The in-app `render:v2` export spawns its command and streams frames through
+ * here. Two export paths once did, the other an HTTP render the browser
+ * export has since replaced, and each used to hold its own bare
+ * `let ffmpegProcess`. That module-level
  * singleton meant a second export orphaned the first (its stdin was never
  * ended, so it never exited) and could route frames into the wrong process.
  *

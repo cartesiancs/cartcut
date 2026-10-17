@@ -2,8 +2,8 @@
  * Where the FFmpeg binaries are, on this machine, for this architecture.
  *
  * Every spawn site in the app reads `FFMPEG_PATH`/`FFPROBE_PATH` from here —
- * `render/framePipe.ts`, `render/renderMain.ts`, `server/controllers/render.ts`
- * and `mcp/transcribe.ts` — so this is the only file that has to know how the
+ * `render/framePipe.ts`, `render/renderMain.ts` and `mcp/transcribe.ts`, so
+ * this is the only file that has to know how the
  * binaries are laid out.
  *
  * The two modes see **different shapes**, which is the one thing to get right:

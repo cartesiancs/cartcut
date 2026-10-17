@@ -41,9 +41,9 @@ import {
 } from "../../apps/app/src/features/renderer/testing";
 
 /**
- * The pre-`exportSettings` shape. Kept exactly as it was on purpose: the
- * HTTP/offscreen path still builds this, so every assertion made against it here
- * doubles as the back-compatibility guarantee.
+ * The pre-`exportSettings` shape. Kept exactly as it was on purpose: every
+ * assertion made against it here doubles as the back-compatibility guarantee
+ * for an options object with no `exportSettings`.
  */
 const options = {
   videoDuration: 10,
@@ -560,7 +560,7 @@ describe("frameFormatFor", () => {
 
   it("falls back to PNG when no frame size is carried", () => {
     // rawvideo has no dimensions of its own, so `-s WxH` is mandatory and
-    // FFmpeg refuses to start without it. Legacy and HTTP/offscreen callers
+    // FFmpeg refuses to start without it. Legacy callers
     // build the flat shape, which has none — PNG is the runnable answer, not
     // an unrunnable command.
     expect(frameFormatFor(options)).toBe("png");

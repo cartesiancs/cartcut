@@ -18,11 +18,3 @@ export function connectSocket(cio) {
     });
   });
 }
-
-export function sendRenderProgress(per: number) {
-  io.emit("render:progress", per);
-}
-
-export function sendRenderDone(path: string) {
-  io.emit("render:done", path);
-}

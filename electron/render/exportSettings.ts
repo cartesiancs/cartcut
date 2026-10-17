@@ -339,8 +339,8 @@ export const VP9_CPU_USED: Record<EncodePreset, number> = {
 /**
  * What an options object that predates this feature meant.
  *
- * The HTTP/offscreen path (`electron/server/controllers/render.ts`) still builds
- * the flat `{videoDuration, videoBitrate, videoDestination}` shape, so "no
+ * The flat `{videoDuration, videoBitrate, videoDestination}` shape predates
+ * `exportSettings` (the HTTP render path that last built it is gone), so "no
  * exportSettings" has to keep meaning "H.264 at the given bitrate" rather than
  * "whatever the UI now defaults to".
  */

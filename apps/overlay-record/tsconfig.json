@@ -15,7 +15,7 @@
     "noEmit": true,
 
     /* The recorder shares the editor's pure modules. Same alias the Vite
-       config sets, and the same arrangement `packages/render` uses. */
+       config sets. */
     "baseUrl": ".",
     "paths": {
       "@app/*": ["../app/src/*"]

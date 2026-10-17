@@ -257,31 +257,6 @@ const window = {
     return engineWindow;
   },
 
-  createOffscreenRenderWindow: () => {
-    const indexFile = "packages/render/dist/index.html";
-
-    const renderWindow = new BrowserWindow({
-      width: 100,
-      height: 100,
-      webPreferences: {
-        backgroundThrottling: false,
-        preload: path.join(__dirname, "..", "preload.js"),
-      },
-      resizable: false,
-      transparent: true,
-      skipTaskbar: true,
-      maximizable: false,
-      fullscreenable: false,
-      frame: false,
-      movable: false,
-      show: false,
-    });
-
-    renderWindow.loadFile(indexFile);
-
-    return renderWindow;
-  },
-
   createAutomaticCaptionWindow: () => {
     const overlayWindow = new BrowserWindow({
       webPreferences: {

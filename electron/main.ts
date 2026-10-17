@@ -59,7 +59,6 @@ import { ipcStorage } from "./ipc/ipcStorage.js";
 import { ipcAnalyze } from "./ipc/ipcAnalyze.js";
 import { runServer } from "./webServer.js";
 import { ipcSelfhosted } from "./ipc/ipcSelfhosted.js";
-import { httpFFmpegRenderV2 } from "./server/controllers/render.js";
 import { ipcAi } from "./ipc/ipcAi.js";
 import { attachBridge } from "./mcp/bridge.js";
 import { initAutosave, onAutosaveChange, setMenuOpen } from "./lib/autosave.js";
@@ -338,19 +337,6 @@ ipcMain.handle("render:v2:start", ipcRenderV2.start);
 ipcMain.handle("render:v2:sendFrame", ipcRenderV2.sendFrame);
 ipcMain.handle("render:v2:finishStream", ipcRenderV2.finishStream);
 ipcMain.handle("render:v2:cancel", ipcRenderV2.cancel);
-
-ipcMain.handle(
-  "render:offscreen:readyToRender",
-  httpFFmpegRenderV2.readyToRender,
-);
-ipcMain.handle("render:offscreen:start", httpFFmpegRenderV2.start);
-// `handle`: `sendFrame` resolves only when the pipe has room, and that
-// resolution is what applies backpressure to the offscreen frame loop.
-ipcMain.handle("render:offscreen:sendFrame", httpFFmpegRenderV2.sendFrame);
-ipcMain.handle(
-  "render:offscreen:finishStream",
-  httpFFmpegRenderV2.finishStream,
-);
 
 if (process.defaultApp) {
   if (process.argv.length >= 2) {
