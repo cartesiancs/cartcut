@@ -1,6 +1,7 @@
 import { LitElement, PropertyValues, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { atPlayhead, importPathsAt } from "./importDrop";
+import { pickWebMedia } from "../mobile/deviceImport";
 import { getLocationEnv } from "../../functions/getLocationEnv";
 import { IAssetStore, assetStore } from "../../states/assetStore";
 import { projectStore } from "../../states/projectStore";
@@ -540,6 +541,20 @@ export class AssetBrowser extends LitElement {
           <span class="material-symbols-outlined">folder_open</span>
         </button>
 
+        ${getLocationEnv() == "electron"
+          ? ""
+          : html`<button
+              type="button"
+              class="browse-btn ${local}"
+              data-browse-local
+              ?inert=${away}
+              title="Import files"
+              aria-label="Import files"
+              @click=${pickWebMedia}
+            >
+              <span class="material-symbols-outlined">upload_file</span>
+            </button>`}
+
         <asset-sort-menu
           class=${local}
           data-browse-local
@@ -672,6 +687,15 @@ export class AssetBrowser extends LitElement {
       >
         ${this.lc.t("setting.select_project_folder")}
       </button>
+      ${getLocationEnv() == "electron"
+        ? ""
+        : html`<button
+            type="button"
+            class="browse-text-btn ${isDemo ? "is-primary" : ""}"
+            @click=${pickWebMedia}
+          >
+            Import files
+          </button>`}
     </div>`;
   }
 

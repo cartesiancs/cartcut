@@ -27,6 +27,7 @@ import { getLocationEnv } from "../../functions/getLocationEnv";
 import { mediaKindOf, type MediaKind, type MediaProbe } from "./mediaElement";
 import { gifTiming, probedGifLengthMs } from "../gif/gifTiming";
 import { whileLoadingMedia } from "../../states/mediaLoadStore";
+import { hasAudioTrack } from "../asset/webMedia/hasAudioTrack";
 
 /**
  * Long enough for a large file on a slow disk, short enough that a broken one
@@ -240,6 +241,12 @@ export const domProber: MediaProber = {
         // than rejecting. Treat that as "no audio" instead of throwing: the
         // picture already decoded, so the clip is usable.
         let hasAudio = false;
+        // A browser build has no ffprobe to ask: the page reads the
+        // container's track list itself.
+        const env = locationEnv();
+        if (env !== "electron") {
+          return { ...basic, hasAudio: await hasAudioTrack(src, env) };
+        }
         try {
           const result: any = await window.electronAPI.req.ffmpeg.getMetadata(
             src,

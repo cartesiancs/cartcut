@@ -21,6 +21,7 @@ import { v4 as uuidv4 } from "uuid";
 import { addTemplateToTimeline } from "../template/addTemplate";
 import { installTemplateFromPath } from "../template/templateInstall";
 import { templateFor } from "../template/templateRegistry";
+import { registerPickedFile } from "./webMedia/mediaRegistry";
 
 /** Where a drop lands when it did not land on the timeline itself. */
 export function atPlayhead(): DropTarget {
@@ -49,15 +50,16 @@ function toast(message: string) {
  */
 export function pathsFromDataTransfer(dataTransfer: DataTransfer | null): string[] {
   const resolve = (window as any).electronAPI?.req?.webUtils?.getPathForFile;
+  const files = dataTransfer ? Array.from(dataTransfer.files) : [];
 
   if (typeof resolve !== "function") {
-    // The web build has no preload. Nothing to import, but say so rather than
-    // failing the way the old handler did — silently.
-    toast("Dropping files is only available in the desktop app.");
-    return [];
+    // A browser build has no preload and no paths, only the `File`s. Each one
+    // becomes an object URL the media layer loads as it is, and the file is
+    // remembered so an export can read it. Taken here, synchronously, because
+    // the drop's `DataTransfer` is emptied once the handler returns.
+    return files.map((file) => registerPickedFile(file));
   }
 
-  const files = dataTransfer ? Array.from(dataTransfer.files) : [];
   const { paths, unresolved } = collectDroppedPaths(files as any, (f) =>
     resolve(f as unknown as File),
   );

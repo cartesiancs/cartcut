@@ -33,6 +33,8 @@ import { isTypingFocus } from "../../utils/typingTarget";
 import { selectionStore } from "../../states/selectionStore";
 import { useTimelineStore } from "../../states/timelineStore";
 import { atPlayhead, importPathsAt } from "../asset/importDrop";
+import { pickWebMedia } from "../mobile/deviceImport";
+import { getLocationEnv } from "../../functions/getLocationEnv";
 import { spanEnd } from "../timeline/geometry";
 import { rendererModal } from "../../utils/modal";
 import { runContributedCommand } from "../extension/bridge";
@@ -142,6 +144,11 @@ function endOfTimeline(): number {
  * batch.
  */
 async function importMedia(): Promise<void> {
+  // A browser build has no native dialog and no paths, only `File`s.
+  if (getLocationEnv() !== "electron") {
+    pickWebMedia();
+    return;
+  }
   const paths = await window.electronAPI.req.dialog.openFiles(["*"]);
   if (!Array.isArray(paths) || paths.length === 0) {
     return;
