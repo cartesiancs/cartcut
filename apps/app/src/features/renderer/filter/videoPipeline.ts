@@ -2,7 +2,7 @@ import type {
   VideoElementType,
   VideoFilterType,
 } from "../../../@types/timeline";
-import type { VideoMetadataPerElement } from "../../asset/loadedAssetStore";
+import type { FrameSurface } from "../../asset/videoScope";
 import { createTextureNPOT, drawToTexture } from "../gl/texture";
 import { Blur } from "./blur";
 import { ChromaKey } from "./chromaKey";
@@ -48,15 +48,15 @@ export class VideoFilterPipeline {
   render(
     ctx: CanvasRenderingContext2D,
     videoElement: VideoElementType,
-    videoMeta: VideoMetadataPerElement,
+    frame: FrameSurface,
     isBlocking: boolean,
   ): void {
     if (videoElement.filter.enable === false) {
       return;
     }
 
-    const frameWidth = videoMeta.object.videoWidth;
-    const frameHeight = videoMeta.object.videoHeight;
+    const frameWidth = frame.width;
+    const frameHeight = frame.height;
 
     // Assigning a canvas dimension reallocates and clears the drawing buffer
     // even when the value is identical, so this ran per frame for no reason.
@@ -81,7 +81,7 @@ export class VideoFilterPipeline {
       () => {
         normal.draw(
           {
-            source: videoMeta.object,
+            source: frame.source,
             flipY: true, // 비디오 좌표계는 WebGL 좌표계와 반대이므로 Y축을 뒤집어야 함
           },
           this.srcTexture,

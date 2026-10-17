@@ -14,9 +14,6 @@ import { decodersFor } from "./decoderWindow";
 import { previewSrcFor } from "./hoverPreviewOverlay";
 import { count as perfCount, gauge as perfGauge } from "../debug/frameStats";
 import { speedOf } from "../timeline/geometry";
-import { sourceTimeAtFrame } from "../timeline/frames";
-import { sourceBoundsSec } from "../timeline/playback";
-import { isVisibleThroughTransition } from "../timeline/transitionWindow";
 import {
   syncPlayback as syncPlaybackHandles,
   whenSeeksLand,
@@ -29,12 +26,15 @@ import { previewMuteStore } from "../../states/previewMuteStore";
 import { runAssetBatch, type AssetLoadTask } from "./assetBatch";
 import {
   activeVideoScope,
+  surfaceOfVideo,
+  type FrameSurface,
   type VideoMetadataPerElement,
   type VideoScope,
 } from "./videoScope";
 import { SCHEMA_VERSION, type TimelineTrack } from "../timeline/tracks";
 import { decodeGif, type LoadedGif } from "../gif/gifDecode";
 import { SEEK_DEADLINE_MS, seekAndWait } from "./seekWait";
+import { frameAddressSec, needsFrameAt } from "./frameAddress";
 
 /** A scope's own handles (an export's, a contact sheet's): only a decoder that failed can stall one. */
 const SCOPE_SEEK_DEADLINE_MS = 30_000;
@@ -123,6 +123,11 @@ export interface ILoadedAssetStore {
     scope?: VideoScope,
   ) => Promise<void>;
   getElementVideo: (elementId: string) => VideoMetadataPerElement | null;
+  /**
+   * What a video renderer draws for `elementId`: the active scope's decoded
+   * frame when it has one, else the `<video>` `getElementVideo` answers.
+   */
+  getElementFrame: (elementId: string) => FrameSurface | null;
 
   loadEntireTimeline: (
     timeline: Timeline,
@@ -164,6 +169,12 @@ export interface ILoadedAssetStore {
    * timeline sent at `render:v2:start`.
    */
   loadExportScope: (scope: VideoScope, timeline: Timeline) => Promise<void>;
+  /**
+   * The images and GIFs an export draws, without its videos: for the browser
+   * export, whose videos are decoded by WebCodecs rather than by `<video>`.
+   * Into the shared cache, as `loadExportScope` puts them.
+   */
+  loadExportStills: (scope: VideoScope, timeline: Timeline) => Promise<void>;
 
   /** `seek`, against a scope's handles rather than the shared ones. */
   seekScope: (
@@ -373,6 +384,14 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
       );
     });
   },
+  getElementFrame(elementId) {
+    const decoded = activeVideoScope()?.frames.get(elementId);
+    if (decoded != null) {
+      return decoded;
+    }
+    const meta = get().getElementVideo(elementId);
+    return meta == null ? null : surfaceOfVideo(meta.object);
+  },
   getElementVideo(elementId) {
     // **The seam that makes a background export safe.**
     //
@@ -553,6 +572,16 @@ export const loadedAssetStore = createStore<ILoadedAssetStore>((set, get) => ({
     });
   },
 
+  async loadExportStills(scope, timeline) {
+    // The scope is passed only so the pass skips its stale-handle sweep, which
+    // would otherwise release the preview's videos; no video is loaded here.
+    await get()._loadAssetsWithFilter(
+      timeline,
+      (element) => element.filetype !== "video",
+      { audio: false, scope },
+    );
+  },
+
   async seekScope(scope, timeline, time, fps) {
     await seekHandles(
       scope.videos,
@@ -707,50 +736,19 @@ async function seekHandles(
   fps: number,
   deadlineMs: number = SEEK_DEADLINE_MS,
 ): Promise<void> {
-  const metas = Object.values(videos).filter((meta) => {
-    const element = timeline[meta.elementId];
-    return (
-      element != null &&
-      isVisualTimelineElement(element) &&
-      // The *unbiased* instant. Visibility is a question about the timeline
-      // moment, and asking it half a frame late would let a clip appear or
-      // vanish one frame off. Only the address inside a visible clip moves.
-      isElementVisibleAtTime(time, timeline, element)
-    );
-  });
+  const metas = Object.values(videos).filter((meta) =>
+    needsFrameAt(timeline, meta.elementId, time),
+  );
 
   await Promise.all(
     metas.map(
       (meta) => {
           const element = timeline[meta.elementId] as VideoElementType;
           const video = meta.object;
-          // Deliberately NOT clamped to the trim window. Inside a transition
-          // this clip is being asked for frames past its out-point, or before
-          // its in-point, which is the whole mechanism. `sourceTimeAt`
-          // extrapolates there because a speed ramp holds its end values
-          // outside its outermost points and an unramped clip is linear
-          // everywhere; `maxTransitionMs` already guarantees the frames exist
-          // in the file.
-          //
-          // The half-frame goes in on the *timeline* side of `sourceTimeAt`,
-          // not after it. That is what makes it correct for a retimed clip: the
-          // conversion carries timeline ms into source ms, so a 2x clip needs
-          // two source frames of offset per timeline frame and a 0.25x clip a
-          // quarter of one. Adding a fixed offset to the source time instead
-          // would be right only at speed 1, and on a ramped clip it would be
-          // right nowhere, since the factor changes across the clip.
-          // Bounded exactly as `playback.ts#intentFor` bounds it, so the two
-          // paths cannot disagree about the last frame of a clip. Widened to
-          // the whole file while a transition is holding this clip, which is
-          // the case the unbounded version existed for.
-          const [low, high] = sourceBoundsSec(
-            element,
-            isVisibleThroughTransition(time, timeline, element),
-          );
-          const want = Math.min(
-            Math.max(sourceTimeAtFrame(element, time, fps) / 1000, low),
-            high,
-          );
+          // The rule is shared with the browser export's decoder; see
+          // `frameAddress.ts` for why it is neither clamped to the trim nor
+          // offset after the conversion.
+          const want = frameAddressSec(element, timeline, time, fps);
 
           // Decorative on this path: the handle is paused and placed by
           // `currentTime` for every frame, so nothing integrates this. Kept as

@@ -34,6 +34,7 @@ import { hasFxElements } from "../renderer/fx/planFrame";
 import { setLutBlocking } from "../renderer/lut/apply";
 import { frameCount, frameTimeMs, inFlightWindow } from "./frames";
 import { createFrameProfiler } from "./profile";
+import { videoElementFrameSource, type ExportFrameSource } from "./frameSource";
 
 /**
  * Extras the frame loop understands, none of which the older call sites pass.
@@ -52,6 +53,32 @@ export type RenderTimelineControls = {
    * when absent.
    */
   resolveTemplate?: TemplateResolver;
+  /**
+   * The decoders. The scope's own `<video>` handles when absent, which is the
+   * desktop export; the browser export passes WebCodecs
+   * (`webMedia/webFrameSource.ts`).
+   */
+  frameSource?: ExportFrameSource;
+  /**
+   * Where each finished frame goes, in place of `frameCallback`.
+   *
+   * The canvas itself rather than its pixels: the browser export encodes it
+   * directly (`new VideoFrame(canvas)` copies on the GPU), so the 8 MB
+   * `getImageData` readback a frame costs the desktop export is never paid.
+   * The frame must be taken before the promise is first awaited, because the
+   * next composite draws over the same canvas.
+   */
+  sink?: FrameSink;
+};
+
+export type FrameSink = {
+  accept(
+    canvas: HTMLCanvasElement,
+    index: number,
+    total: number,
+  ): void | Promise<void>;
+  /** Frames that may be outstanding at once; `inFlightWindow` when absent. */
+  readonly window?: number;
 };
 
 /**
@@ -93,7 +120,8 @@ export async function renderTimeline(
     previewSize: { w: width, h: height },
     backgroundColor,
   } = options;
-  const { signal } = controls;
+  const { signal, sink } = controls;
+  const frameSource = controls.frameSource ?? videoElementFrameSource(assetStore);
   const resolveTemplate = controls.resolveTemplate ?? templateFor;
   const expandTemplate = templateExpanderFor(resolveTemplate);
 
@@ -197,7 +225,7 @@ export async function renderTimeline(
   // Into the scope, not the shared cache. Images and gifs still go to the
   // shared one — they are keyed by path and immutable once decoded, so nothing
   // can move one under a frame loop.
-  await assetStore.loadExportScope(scope, assets);
+  await frameSource.load(scope, assets);
 
   /**
    * The export's graphic scope: its own blocking generator, and the HTML
@@ -226,7 +254,7 @@ export async function renderTimeline(
   // than one outstanding is what lets the next seek and composite overlap
   // FFmpeg's consumption of the last frame.
   const inFlight: Promise<void>[] = [];
-  const windowSize = inFlightWindow(width, height);
+  const windowSize = Math.max(1, sink?.window ?? inFlightWindow(width, height));
 
   // The first failure from any outstanding frame. They are caught as soon as
   // they are queued — an in-flight rejection nobody is awaiting yet would
@@ -257,7 +285,7 @@ export async function renderTimeline(
       const timeInMs = frameTimeMs(currentFrame, fps);
 
       await profiler.measureAsync("seek", () =>
-        assetStore.seekScope(scope, assets, timeInMs, fps),
+        frameSource.advance(scope, assets, timeInMs, fps),
       );
 
       if (html && graphics != null) {
@@ -303,11 +331,18 @@ export async function renderTimeline(
         ),
       );
 
-      const frameArrayBuffer = profiler.measure("capture", () =>
-        captureFrame(ctx, width, height),
-      );
-
-      queue(frameCallback(frameArrayBuffer, currentFrame, totalFrames));
+      if (sink != null) {
+        queue(
+          profiler.measure("capture", () =>
+            sink.accept(canvas, currentFrame, totalFrames),
+          ),
+        );
+      } else {
+        const frameArrayBuffer = profiler.measure("capture", () =>
+          captureFrame(ctx, width, height),
+        );
+        queue(frameCallback(frameArrayBuffer, currentFrame, totalFrames));
+      }
 
       // Only the wait counts as pipe time now. With a window wider than one,
       // a frame's own transport overlaps the next frame's seek, so timing the
@@ -332,7 +367,7 @@ export async function renderTimeline(
     // Every decoder this export opened, whether it finished, failed or was
     // cancelled. Nothing else can reach them, so nothing else would ever free
     // them.
-    assetStore.releaseVideoScope(scope);
+    await frameSource.release(scope);
     releaseOverlayScope(scope.id);
     // Compiled programs, render targets and uploaded textures all belong to
     // this export's context. An export that is cancelled halfway leaks every

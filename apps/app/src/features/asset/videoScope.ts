@@ -49,9 +49,39 @@ export type VideoMetadataPerElement = {
   object: HTMLVideoElement;
 };
 
+/**
+ * A picture a video renderer can draw and upload as a texture.
+ *
+ * The desktop export, the contact sheet and the preview hand over a `<video>`;
+ * the browser export hands over a frame its WebCodecs decoder produced (a
+ * `VideoFrame`, or a canvas for a rotated source). `width` and `height` are the
+ * displayed size, after rotation and pixel aspect, which is what `videoWidth`
+ * and `videoHeight` report for a `<video>`.
+ */
+export type FrameSurface = {
+  readonly source: CanvasImageSource & TexImageSource;
+  readonly width: number;
+  readonly height: number;
+};
+
+export function surfaceOfVideo(video: HTMLVideoElement): FrameSurface {
+  return { source: video, width: video.videoWidth, height: video.videoHeight };
+}
+
 export type VideoScope = {
   readonly id: string;
   readonly videos: Record<string, VideoMetadataPerElement>;
+  /**
+   * Frames decoded for this composite, by element id, when the decoder is not
+   * a `<video>`. Filled before every draw by the browser export
+   * (`webMedia/webFrameSource.ts`) and answered first by `getElementFrame`.
+   * Empty for every other scope.
+   *
+   * An entry exists exactly while its clip is on screen: the decoder deletes
+   * it in the same pass that closes the frame, because drawing a closed
+   * `VideoFrame` throws.
+   */
+  readonly frames: Map<string, FrameSurface>;
   /**
    * This scope's own in-flight set.
    *
@@ -69,6 +99,7 @@ export function createVideoScope(id: string): VideoScope {
   return {
     id,
     videos: {},
+    frames: new Map(),
     loading: new Set(),
     lastSeekRequests: new Map(),
   };

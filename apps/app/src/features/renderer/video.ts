@@ -29,8 +29,8 @@ const _renderVideo = (
   waitFilter: boolean,
 ) => {
   const store = loadedAssetStore.getState();
-  const loadedVideo = store.getElementVideo(elementId);
-  if (loadedVideo == null) {
+  const frame = store.getElementFrame(elementId);
+  if (frame == null) {
     // Can render skeleton here
     return;
   }
@@ -67,12 +67,12 @@ const _renderVideo = (
     store.videoFilterPipeline!.render(
       ctx,
       videoElement,
-      loadedVideo,
+      frame,
       waitFilter,
     );
   } else {
     ctx.drawImage(
-      loadedVideo.object,
+      frame.source,
       0,
       0,
       videoElement.width,

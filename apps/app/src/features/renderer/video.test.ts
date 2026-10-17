@@ -17,6 +17,14 @@ vi.mock("./filter/videoPipeline", () => ({
 
 const store: Record<string, any> = {
   getElementVideo: vi.fn<[string], unknown>(),
+  // The real store answers a scope's decoded frame first and falls back to
+  // the `<video>`; these tests drive the fallback through `getElementVideo`.
+  getElementFrame: (id: string) => {
+    const meta = store.getElementVideo(id);
+    return meta == null
+      ? null
+      : { source: meta.object, width: meta.object.width, height: meta.object.height };
+  },
   videoFilterPipeline: null,
   videoFilterCanvasCtx: {},
 };
