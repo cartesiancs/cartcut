@@ -2,12 +2,15 @@
 // renderer, and `import _ from "lodash"` would pull the whole library into the
 // bundle for one function. It used to be a global from a CDN <script>.
 
-import { announceDidExport } from "./features/extension/exportHooks";
 import { renderOptionStore } from "./states/renderOptionStore";
 import { rendererModal } from "./utils/modal";
 import { exportProgress } from "./features/export/exportProgress";
 import { exportStore } from "./states/exportStore";
-import { clearCancelTimeout } from "./features/export/exportSession";
+import {
+  clearCancelTimeout,
+  failExport,
+  finishExport,
+} from "./features/export/exportSession";
 import { runMenuCommand } from "./features/editor/menuCommands";
 import { installTextEditingShortcuts } from "./features/editor/textEditing";
 import { isProjectDirty } from "./features/project/projectDirty";
@@ -20,26 +23,14 @@ window.electronAPI.res.render.progressing((evt, prog) => {
 });
 
 window.electronAPI.res.render.finish((evt, detail) => {
-  // The end of the finalizing phase `exportSession` handed over — FFmpeg has
-  // finished muxing, which nothing before this point can know.
-  clearCancelTimeout();
-  // Main is authoritative about the file it actually wrote; the value set when
-  // the export began is only what we asked for. "Open Saved Folder" reads it.
-  if (detail?.destination) {
-    exportStore.getState().setDestination(detail.destination);
-  }
-  exportProgress.finish();
-  rendererModal.progressFinish.show();
-
-  // Extensions are told last, and only here. `exportSession`'s `finalizing`
-  // is not the end: FFmpeg is still muxing there, so a hook that ran at that
-  // point would be handed a path to a file that does not exist yet.
-  if (detail?.destination) {
-    announceDidExport(
-      detail.destination,
-      renderOptionStore.getState().options.exportSettings,
-    );
-  }
+  // The end of the finalizing phase `exportSession` handed over: FFmpeg has
+  // finished muxing, which nothing before this point can know. Main is
+  // authoritative about the file it actually wrote; the value set when the
+  // export began is only what we asked for. "Open Saved Folder" reads it.
+  finishExport(
+    detail?.destination ?? "",
+    renderOptionStore.getState().options.exportSettings,
+  );
 });
 
 window.electronAPI.res.render.error((evt, errormsg) => {
@@ -59,18 +50,8 @@ window.electronAPI.res.render.error((evt, errormsg) => {
  * file.
  */
 window.electronAPI.res.render.v2Error((evt, detail) => {
-  clearCancelTimeout();
-  exportProgress.stop();
-  rendererModal.progressError.show();
-
-  const message = detail?.message ?? "Export failed";
-  const tail = detail?.stderrTail ? `\n\n${detail.stderrTail}` : "";
-  const target = document.querySelector("#progressErrorMsg");
-  if (target != null) {
-    // `textContent`, not `innerHTML`: this carries raw FFmpeg stderr.
-    target.textContent = `${message}${tail}`;
-  }
-  console.error("[render:v2]", message, detail?.stderrTail);
+  failExport(detail?.message ?? "Export failed", detail?.stderrTail ?? "");
+  console.error("[render:v2]", detail?.message, detail?.stderrTail);
 });
 
 /**

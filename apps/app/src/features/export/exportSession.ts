@@ -12,10 +12,11 @@
  * an export outlives whatever started it.
  */
 
-import { askWillExport, vetoMessage } from "../extension/exportHooks";
-import axios from "axios";
-import { v4 as uuidv4 } from "uuid";
-import { io } from "socket.io-client";
+import {
+  announceDidExport,
+  askWillExport,
+  vetoMessage,
+} from "../extension/exportHooks";
 
 import { useTimelineStore } from "../../states/timelineStore";
 import { renderOptionStore } from "../../states/renderOptionStore";
@@ -36,6 +37,11 @@ import {
   templateFor,
 } from "../template/templateRegistry";
 import { assetTimeline } from "../template/assetTimeline";
+import { rendererModal } from "../../utils/modal";
+import { webExportAvailable } from "./web/codecSupport";
+import { browserDestinationHost, chooseDestination } from "./web/destination";
+import { encodePlanFor } from "./web/encodeSettings";
+import { runWebExport } from "./web/webExportSession";
 
 /**
  * How long a cancel may sit unconfirmed before the button frees itself.
@@ -81,18 +87,10 @@ export async function startExport(): Promise<void> {
     return;
   }
 
-  // The demo is a static site: there is no render server behind it, so the
-  // HTTP route below would ask `/api/path/temp`, get a 404 and reject with
-  // nothing on screen. Say what the welcome dialog already said instead.
-  if (getLocationEnv() === "demo") {
-    toast(
-      "Export is not available in the demo. Install the desktop app to export your edit.",
-    );
-    return;
-  }
-
+  // Every browser build, the static demo included, exports in the page:
+  // WebCodecs and Mediabunny in place of FFmpeg. See `web/webExportSession.ts`.
   if (getLocationEnv() !== "electron") {
-    await requestHttpRender();
+    await startWebExport();
     return;
   }
 
@@ -227,83 +225,141 @@ function armCancelTimeout(): void {
 }
 
 /**
- * The web build's export, which renders in a hidden window driven by the HTTP
- * API rather than in this page. Moved here wholesale from `ControlRender`.
+ * A finished export: the progress closes, the dialog opens, extensions hear.
+ *
+ * The desktop export reaches this from `event.ts`, when main reports FFmpeg
+ * has finished muxing; the browser export calls it itself once its muxer has
+ * finalized. Extensions are told last, and only here: before this point the
+ * file is still being written.
  */
-let socket: any;
-
-export function installHttpRenderListeners(): void {
-  if (getLocationEnv() !== "web" || socket != null) {
-    return;
+export function finishExport(destination: string, settings: unknown): void {
+  clearCancelTimeout();
+  if (destination !== "") {
+    exportStore.getState().setDestination(destination);
   }
-  socket = io();
+  exportProgress.finish();
 
-  socket.on("render:progress", (percent: number) => {
-    exportStore.getState().report(percent, null);
-  });
+  // A browser cannot reveal a file in its folder, so its dialog names the file
+  // instead of offering to.
+  const detail = document.querySelector("#progressFinishDetail");
+  if (detail != null) {
+    detail.textContent =
+      getLocationEnv() === "electron" || destination === ""
+        ? ""
+        : `Saved as ${destination}`;
+  }
+  rendererModal.progressFinish.show();
 
-  socket.on("render:done", (path: string) => {
-    exportStore.getState().setDestination(path);
-    exportProgress.finish();
-    document.dispatchEvent(
-      new CustomEvent("cartcut:http-render-done", { detail: { path } }),
-    );
-  });
+  if (destination !== "") {
+    announceDidExport(destination, settings);
+  }
 }
 
-async function requestHttpRender(): Promise<void> {
-  // Installed here rather than at startup, because this is the only thing that
-  // needs the socket and the dependency should be visible from it. It used to
-  // work only as a side effect of the export *settings* panel having been
-  // mounted, which is why it went missing when that panel moved. Idempotent and
-  // web-only, so calling it on every render costs nothing.
-  installHttpRenderListeners();
+/** A failed export: the progress stops and the error dialog says why. */
+export function failExport(message: string, detail = ""): void {
+  clearCancelTimeout();
+  exportProgress.stop();
+  rendererModal.progressError.show();
+  const target = document.querySelector("#progressErrorMsg");
+  if (target != null) {
+    // `textContent`, not `innerHTML`: this can carry raw FFmpeg stderr.
+    target.textContent = detail === "" ? message : `${message}\n\n${detail}`;
+  }
+}
 
-  const tempPath = await window.electronAPI.req.app.getTempPath();
-  const renderOptionState = projectRenderOptions();
-  const elementControlComponent: any =
-    document.querySelector("element-control");
+/** The file name the save dialog offers. */
+function suggestedName(extension: string): string {
+  return `cartcut-export.${extension}`;
+}
 
-  const projectFolder = tempPath.path;
-  if (projectFolder === "") {
-    toast("Select a project folder");
+/**
+ * The browser export, from the click to the finished file.
+ *
+ * The same order the desktop export keeps: destination, snapshot, the
+ * extensions' veto, then the phase. The save dialog comes first and before any
+ * other await, because it needs the click's user activation.
+ */
+async function startWebExport(): Promise<void> {
+  if (!webExportAvailable()) {
+    toast(
+      "This browser cannot export video. Use a recent Chrome, Edge or Safari, or the desktop app.",
+      "6000",
+    );
     return;
   }
 
-  const uuidKey = uuidv4();
-  const settings = renderOptionState.exportSettings;
-
-  // Spreading the store also carries `fps` and `duration`, which
-  // `renderTimeline` destructures — the hand-built object below used to omit
-  // them, leaving the offscreen render loop with an undefined frame count.
-  const options = {
-    ...renderOptionState,
-    videoDuration: renderOptionState.duration,
-    videoDestination: `${projectFolder}/${uuidKey}.${settings.container}`,
-    videoDestinationFolder: projectFolder,
-    videoBitrate: settings.videoBitrate,
-    previewRatio: elementControlComponent.previewRatio,
-    previewSize: {
-      w: renderOptionState.previewSize.w,
-      h: renderOptionState.previewSize.h,
-    },
-  };
-
-  // A snapshot, so the `file:/` rewrite below cannot reach the live document.
-  // It used to mutate the store's own elements in place.
-  const timeline: any = snapshotTimeline(
-    Object.fromEntries(
-      Object.entries(projectSnapshot().project.main.elements).sort(
-        ([, a]: any, [, b]: any) => a.priority - b.priority,
-      ),
-    ),
-  );
-
-  for (const key in timeline) {
-    if (Object.prototype.hasOwnProperty.call(timeline, key)) {
-      timeline[key].localpath = `file:/${timeline[key].localpath}`;
-    }
+  // Only the container is read from this plan, to name the file before the
+  // snapshot; the session builds the real one from the snapshot.
+  const live = renderOptionStore.getState().options;
+  const plan = encodePlanFor(live.exportSettings, {
+    width: live.previewSize.w,
+    height: live.previewSize.h,
+    fps: live.fps,
+  });
+  const destination = await chooseDestination(browserDestinationHost(), {
+    suggestedName: suggestedName(plan.extension),
+    mimeType: plan.mimeType,
+    extension: plan.extension,
+  });
+  if (destination == null) {
+    return;
   }
 
-  await axios.post("/api/render", { options, timeline });
+  const snapshot = projectSnapshot();
+  const timeline = snapshotTimeline(snapshot.project.main.elements);
+  const options = snapshotExportOptions(snapshot.options, destination.name);
+  const resolveTemplate = snapshotTemplateResolver(
+    useTimelineStore.getState(),
+    templateFor,
+  );
+
+  const objections = await askWillExport(options.exportSettings);
+  if (objections.vetoes.length > 0) {
+    await destination.discard();
+    toast(vetoMessage(objections.vetoes));
+    return;
+  }
+
+  exportProgress.begin(timeline, frameCount(options), options.fps);
+  exportStore.getState().begin(destination.name);
+
+  const running = new AbortController();
+  controller = running;
+  // A long export with nobody touching the machine should not stop for the
+  // screen going to sleep. Released however the export ends.
+  const wakeLock = await (navigator as any).wakeLock
+    ?.request?.("screen")
+    .catch(() => null);
+
+  try {
+    await preloadTemplatesForDocument(timeline);
+    await runWebExport({
+      timeline,
+      options,
+      resolveTemplate,
+      // A template's own sound, as the preview plays it. Hidden rows are not
+      // left out: the eye hides picture, never sound.
+      audioTimeline: assetTimeline(timeline, resolveTemplate),
+      destination,
+      signal: running.signal,
+      onFrame: (currentFrame, totalFrames) =>
+        exportProgress.onFrame(currentFrame, totalFrames),
+      onFinalizing: () => exportProgress.finalizing(),
+    });
+    finishExport(destination.name, options.exportSettings);
+  } catch (error) {
+    // Nothing runs elsewhere to be reaped, so a cancel is settled here, now.
+    if ((error as Error)?.name === "AbortError") {
+      clearCancelTimeout();
+      exportProgress.stop();
+      return;
+    }
+    console.error("[export] browser export failed", error);
+    failExport(`Export failed: ${(error as Error)?.message ?? error}`);
+  } finally {
+    void wakeLock?.release?.().catch(() => {});
+    if (controller === running) {
+      controller = null;
+    }
+  }
 }

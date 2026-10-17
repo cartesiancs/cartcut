@@ -247,6 +247,21 @@ frames it must hold fit `GIF_PALETTE_BUDGET_BYTES`, one per frame after, since
 the first holds every frame until the last. Its options (`gifFps`, `gifWidth`)
 exist only while the container is GIF, so other projects save as before.
 
+**A browser build exports with no FFmpeg at all** (`features/export/web/`):
+MP4 (H.264 + AAC) and WebM (VP9 + Opus) for now. The frame loop is
+`renderTimeline.ts` with two ports swapped (`frameSource.ts`): WebCodecs decodes
+through Mediabunny, one forward-walking cursor per clip
+(`asset/webMedia/frameCursor.ts`), at the addresses `asset/frameAddress.ts`
+gives the `<video>` seek too, and each canvas is encoded as it stands. The sound
+is the desktop graph rebuilt in TypeScript (`web/audio/mixer.ts`), checked
+against the bundled ffmpeg running the desktop chain (`mixer.parity.test.ts`).
+Two things bite. An H.264 CRF becomes a bitrate, because a quantizer sends
+Chrome to its software encoder, about 9x slower. And an AAC encoder's priming
+(2112 samples on macOS) is measured per export (`codecSupport.ts`) and trimmed
+by an edit list, or the sound plays 44ms late. WebCodecs needs a secure
+context: a self-hosted build over plain HTTP anywhere but localhost cannot
+export.
+
 The order inside `renderElement`'s isolation layer:
 
 ```
@@ -420,7 +435,8 @@ features/animation/    keyframes (bake), keyframeOps (mint/arm), presets (19 mov
 features/renderer/     element, video, image, text, shape, template, mask, blend,
                        fx/ (compositor, planFrame), lut/, adjust/
 features/project/      the .ngt, autosave, asset paths
-features/export/       exportSession, phases, snapshot, the ETA singleton
+features/export/       exportSession, phases, snapshot, the ETA singleton; web/,
+                       the browser export (its decoders in asset/webMedia/)
 features/agent/        commit, context, serialize, commands/, what MCP forwards to
 features/caption/      the auto-caption panel's every decision, and the session
                        that owns the timeline while it is open

@@ -43,6 +43,14 @@ import {
   type PresetName,
 } from "../../features/export/settings";
 import { IS_MAC } from "../../utils/platform";
+import { getLocationEnv } from "../../functions/getLocationEnv";
+import {
+  WEB_CONTAINERS,
+  WEB_CONTAINER_AUDIO_CODECS,
+  WEB_CONTAINER_VIDEO_CODECS,
+  webExportSettings,
+  type WebContainer,
+} from "../../features/export/web/encodeSettings";
 import { resetOnboardingAndTutorial } from "../../features/tutorial/tutorialFlag";
 
 /**
@@ -269,8 +277,18 @@ export class ControlSetting extends LitElement {
 
   // ------------------------------------------------------------- the encoder
 
+  /**
+   * The settings as this build will honour them. A browser writes only what
+   * WebCodecs can encode, so it shows a saved MOV or ProRes as the MP4 it will
+   * actually write (`web/encodeSettings.ts`), without changing what is saved.
+   */
   private get settings(): ExportSettings {
-    return this.renderOption.exportSettings;
+    const saved = this.renderOption.exportSettings;
+    return this.inBrowser ? webExportSettings(saved) : saved;
+  }
+
+  private get inBrowser(): boolean {
+    return getLocationEnv() !== "electron";
   }
 
   private patch(patch: Partial<ExportSettings>) {
@@ -292,7 +310,7 @@ export class ControlSetting extends LitElement {
       container,
     )
       ? this.settings.videoCodec
-      : CONTAINER_VIDEO_CODECS[container][0];
+      : (this.inBrowser ? WEB_CONTAINER_VIDEO_CODECS[container as WebContainer] : CONTAINER_VIDEO_CODECS[container])[0];
 
     this.patch({ container, videoCodec });
   }
@@ -576,15 +594,16 @@ export class ControlSetting extends LitElement {
     const crfRange = CRF_RANGE[settings.videoCodec];
     // VideoToolbox is a macOS facility, and VP9 has no encoder on it. Where
     // neither holds the toggle is not shown at all rather than shown inert.
+    // A browser picks its own encoder, hardware where it has one.
     const canHardwareAccel =
-      IS_MAC && CODEC_SUPPORTS_HW_ACCEL[settings.videoCodec];
+      !this.inBrowser && IS_MAC && CODEC_SUPPORTS_HW_ACCEL[settings.videoCodec];
     const hardwareActive = canHardwareAccel && settings.hardwareAccel;
 
     return html`
       ${this.renderSelect(
         "container",
         this.lc.t("setting.container"),
-        CONTAINERS.map((container) => ({
+        (this.inBrowser ? WEB_CONTAINERS : CONTAINERS).map((container) => ({
           value: container,
           label: CONTAINER_LABELS[container],
         })),
@@ -593,7 +612,10 @@ export class ControlSetting extends LitElement {
       ${this.renderSelect(
         "videoCodec",
         this.lc.t("setting.video_codec"),
-        CONTAINER_VIDEO_CODECS[settings.container].map((codec) => ({
+        (this.inBrowser
+          ? WEB_CONTAINER_VIDEO_CODECS[settings.container as WebContainer]
+          : CONTAINER_VIDEO_CODECS[settings.container]
+        ).map((codec) => ({
           value: codec,
           label: VIDEO_CODEC_LABELS[codec],
         })),
@@ -673,7 +695,7 @@ export class ControlSetting extends LitElement {
             ),
           )
         : ""}
-      ${CODEC_SUPPORTS_SPEED_PRESET[settings.videoCodec] && !hardwareActive
+      ${CODEC_SUPPORTS_SPEED_PRESET[settings.videoCodec] && !hardwareActive && !this.inBrowser
         ? this.renderSelect(
             "preset",
             this.lc.t("setting.encode_preset"),
@@ -728,7 +750,10 @@ export class ControlSetting extends LitElement {
       ${this.renderSelect(
         "audioCodec",
         this.lc.t("setting.audio_codec"),
-        CONTAINER_AUDIO_CODECS[settings.container].map((codec) => ({
+        (this.inBrowser
+          ? WEB_CONTAINER_AUDIO_CODECS[settings.container as WebContainer]
+          : CONTAINER_AUDIO_CODECS[settings.container]
+        ).map((codec) => ({
           value: codec,
           label: AUDIO_CODEC_LABELS[codec],
         })),
