@@ -27,6 +27,13 @@ export interface AssetEntry {
    * the disk rather than as one whose age is unknown.
    */
   createdMs?: number;
+  /**
+   * The file's whole path, for an entry that lives in no folder: a browser
+   * build's imported file, whose path is a `blob:` URL
+   * (`webMedia/importedMedia.ts`). Absent for a folder listing, whose path is
+   * the folder joined with `name`.
+   */
+  path?: string;
 }
 
 /**

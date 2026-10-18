@@ -144,7 +144,8 @@ function endOfTimeline(): number {
  * batch.
  */
 async function importMedia(): Promise<void> {
-  // A browser build has no native dialog and no paths, only `File`s.
+  // A browser build has no native dialog and no paths, only `File`s, and
+  // lists them in the asset panel rather than placing them.
   if (getLocationEnv() !== "electron") {
     pickWebMedia();
     return;

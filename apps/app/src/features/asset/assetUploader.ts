@@ -3,6 +3,8 @@ import { customElement, state } from "lit/decorators.js";
 import { dropIntent } from "./dropIntent";
 import { idleOverlay, reduceOverlay, type OverlayState } from "./dropOverlay";
 import { atPlayhead, importDroppedFiles } from "./importDrop";
+import { getLocationEnv } from "../../functions/getLocationEnv";
+import { importPickedFiles } from "../mobile/deviceImport";
 
 /**
  * The "Drop File" curtain, and the fallback target for OS file drops.
@@ -126,6 +128,16 @@ export class AssetDropUploader extends LitElement {
     }
 
     e.preventDefault();
+
+    // A browser build lists the files in the asset panel, as its Import does
+    // (`deviceImport.ts`); only a drop aimed at the timeline places them.
+    if (getLocationEnv() !== "electron") {
+      importPickedFiles(
+        Array.from(e.dataTransfer?.files ?? []).map((file) => ({ file })),
+      );
+      return;
+    }
+
     void importDroppedFiles(e.dataTransfer, atPlayhead());
   };
 }
