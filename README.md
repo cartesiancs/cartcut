@@ -25,7 +25,7 @@ English | <a href="./docs/README.ko.md">한국어</a>
 </p>
 
 <p align='center'>
-<a href="https://www.youtube.com/watch?v=Bh06VOYSMIM">View Demo</a> · <a href="https://github.com/cartesiancs/cartcut/issues">Report Bugs</a> · <a href="https://github.com/cartesiancs/cartcut/releases"><b>Download</b></a> · <a href="https://github.com/cartesiancs/cartcut/issues/new">Suggest Features </a>
+<a href="https://cartcut.cartesiancs.com/">View Demo</a> · <a href="https://github.com/cartesiancs/cartcut/issues">Report Bugs</a> · <a href="https://github.com/cartesiancs/cartcut/releases"><b>Download</b></a> · <a href="https://github.com/cartesiancs/cartcut/issues/new">Suggest Features </a>
 </p>
 
 #
@@ -68,7 +68,7 @@ You can check out a limited demo of the website at the [following link](https://
 
 |                            Kinetic typography                            |                            Launch video                            |
 | :----------------------------------------------------------------------: | :----------------------------------------------------------------: |
-| <img src=".github/result/r1.gif" alt="Kinetic typography" width="420" /> | <img src=".github/result/r2.gif" alt="Launch video" width="420" /> |
+| <img src=".github/result/r1.gif" alt="Kinetic typography" width="400" /> | <img src=".github/result/r2.gif" alt="Launch video" width="400" /> |
 
 </div>
 
