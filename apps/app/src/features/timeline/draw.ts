@@ -322,6 +322,13 @@ export function clipLabel(element: TimelineElement): string {
     return (element as any).presetId || "Effect";
   }
   const path = element.localpath ?? "";
+  // A browser build's file is `blob:<origin>/<uuid>#<name>`
+  // (`mediaRegistry.ts#pickedMediaPath`): its last segment is the uuid, and
+  // the name is the fragment.
+  const hash = path.startsWith("blob:") ? path.indexOf("#") : -1;
+  if (hash !== -1 && hash < path.length - 1) {
+    return path.slice(hash + 1);
+  }
   const name = path.split(/[\\/]/).pop() ?? "";
   return name || element.filetype;
 }

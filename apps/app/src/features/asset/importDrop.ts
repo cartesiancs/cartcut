@@ -21,7 +21,7 @@ import { v4 as uuidv4 } from "uuid";
 import { addTemplateToTimeline } from "../template/addTemplate";
 import { installTemplateFromPath } from "../template/templateInstall";
 import { templateFor } from "../template/templateRegistry";
-import { registerPickedFile } from "./webMedia/mediaRegistry";
+import { importedMediaStore } from "./webMedia/importedMedia";
 
 /** Where a drop lands when it did not land on the timeline itself. */
 export function atPlayhead(): DropTarget {
@@ -56,8 +56,10 @@ export function pathsFromDataTransfer(dataTransfer: DataTransfer | null): string
     // A browser build has no preload and no paths, only the `File`s. Each one
     // becomes an object URL the media layer loads as it is, and the file is
     // remembered so an export can read it. Taken here, synchronously, because
-    // the drop's `DataTransfer` is emptied once the handler returns.
-    return files.map((file) => registerPickedFile(file));
+    // the drop's `DataTransfer` is emptied once the handler returns. Listed in
+    // the asset panel too, so a file dropped on the timeline can be placed
+    // again without finding it a second time.
+    return importedMediaStore.getState().add(files.map((file) => ({ file })));
   }
 
   const { paths, unresolved } = collectDroppedPaths(files as any, (f) =>

@@ -95,7 +95,7 @@ export class AssetList extends LitElement {
     >
       ${repeat(
         this.entries,
-        (entry) => entry.name,
+        (entry) => entry.path ?? entry.name,
         (entry) =>
           // `data-tutorial` is what the tutorial's "click a file" step points
           // at: the first tile of each kind that is on screen.
@@ -111,6 +111,7 @@ export class AssetList extends LitElement {
                 data-tutorial="asset-file"
                 .name=${entry.name}
                 .directory=${this.directory}
+                .path=${entry.path ?? ""}
                 .showType=${this.showType}
                 .meta=${metaOf(entry)}
               ></asset-file>`,
@@ -252,6 +253,10 @@ export class AssetFile extends LitElement {
   @property()
   directory = "";
 
+  /** The whole path, overriding `directory` and `name`; "" for a folder's file. */
+  @property()
+  path = "";
+
   @property()
   showType: AssetShowType = "grid";
 
@@ -272,7 +277,8 @@ export class AssetFile extends LitElement {
     // moment would go on playing the previous folder's file.
     if (
       _changedProperties.has("name") ||
-      _changedProperties.has("directory")
+      _changedProperties.has("directory") ||
+      _changedProperties.has("path")
     ) {
       this.dispatchHover({ type: "cancel" });
       // The same reuse, from the thumbnail's side: the capture still on order
@@ -285,10 +291,16 @@ export class AssetFile extends LitElement {
   }
 
   private get fullPath(): string {
-    return joinPath(this.directory, this.name);
+    return this.path != "" ? this.path : joinPath(this.directory, this.name);
   }
 
   private get fileUrl(): string {
+    // A browser build's imported file is already a URL the page can load, and
+    // `path.encode` would escape the `#` that carries its name.
+    if (this.path.startsWith("blob:")) {
+      return this.path;
+    }
+
     const filepath =
       getLocationEnv() == "electron"
         ? `file://${this.fullPath}`

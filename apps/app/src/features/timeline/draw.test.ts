@@ -136,6 +136,20 @@ describe("clipLabel", () => {
   it("falls back to the type when there is no path", () => {
     expect(clipLabel(imageElement({ localpath: "" }))).toBe("image");
   });
+
+  it("uses a browser build's file name, not its object URL's uuid", () => {
+    expect(
+      clipLabel(
+        videoElement({
+          localpath: "blob:https://cartcut.cartesiancs.com/4f1c-77ab#IMG_0042.MOV",
+        }),
+      ),
+    ).toBe("IMG_0042.MOV");
+    // A `#` in a desktop file's name is part of the name.
+    expect(clipLabel(videoElement({ localpath: "/a/take#2.mp4" }))).toBe(
+      "take#2.mp4",
+    );
+  });
 });
 
 describe("canShowFilmstrip", () => {

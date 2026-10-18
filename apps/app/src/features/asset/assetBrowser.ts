@@ -1,4 +1,4 @@
-import { LitElement, PropertyValues, html } from "lit";
+import { LitElement, PropertyValues, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { atPlayhead, importPathsAt } from "./importDrop";
 import { pickWebMedia } from "../mobile/deviceImport";
@@ -13,6 +13,10 @@ import {
   readDirectory,
 } from "./directoryEntries";
 import { AssetSort, sortAssetEntries } from "./assetSort";
+import {
+  importedMediaStore,
+  type ImportedMedia,
+} from "./webMedia/importedMedia";
 import { cloudStore, subscribeCloudListing } from "../cloud/cloudStore";
 import {
   cascade,
@@ -147,6 +151,19 @@ export class AssetBrowser extends LitElement {
    */
   private sorted: AssetEntry[] = [];
 
+  /**
+   * A browser build's imported files (`importedMedia.ts`), shown above the
+   * folder in their own section. Always empty in Electron, where a picked
+   * file has a real path and lives in a real folder.
+   */
+  @state()
+  private imported: readonly ImportedMedia[] = importedMediaStore.getState().items;
+
+  /** `imported` in `sort`'s order, recomputed with `sorted`. */
+  private importedSorted: AssetEntry[] = [];
+
+  private unsubscribeImported?: () => void;
+
   private lc = new LocaleController(this);
   private unsubscribe?: () => void;
   private observer?: IntersectionObserver;
@@ -181,6 +198,18 @@ export class AssetBrowser extends LitElement {
         if (this.seen) {
           this.loadDirectory(state.nowDirectory, state.directoryRevision);
         }
+      }
+    });
+
+    this.unsubscribeImported = importedMediaStore.subscribe((state) => {
+      if (state.items === this.imported) {
+        return;
+      }
+      this.imported = state.items;
+      // What was just imported is what the user wants to see, and the cloud
+      // grid would be covering it.
+      if (this.cloudView) {
+        void this.switchToLocal();
       }
     });
 
@@ -391,6 +420,7 @@ export class AssetBrowser extends LitElement {
     super.disconnectedCallback();
     this.unsubscribe?.();
     this.unsubscribeCloud?.();
+    this.unsubscribeImported?.();
     this.observer?.disconnect();
     this.observer = undefined;
     ++this.switchEpoch;
@@ -443,6 +473,9 @@ export class AssetBrowser extends LitElement {
     if (changed.has("entries") || changed.has("sort")) {
       this.sorted = sortAssetEntries(this.entries, this.sort);
     }
+    if (changed.has("imported") || changed.has("sort")) {
+      this.importedSorted = sortAssetEntries([...this.imported], this.sort);
+    }
   }
 
   /**
@@ -471,7 +504,8 @@ export class AssetBrowser extends LitElement {
    * are hidden for their turn before any frame paints them.
    */
   private async revealEntries() {
-    const list = this.querySelector<LitElement>("asset-list");
+    // The folder's list, not the Imported section's above it.
+    const list = this.querySelector<LitElement>("asset-list[data-folder-list]");
     if (list == null) {
       return;
     }
@@ -642,13 +676,41 @@ export class AssetBrowser extends LitElement {
     </div>`;
   }
 
+  /**
+   * The Imported section, or nothing while there is nothing imported. Its
+   * tiles carry their own `blob:` paths, so a click and a drag out of it reach
+   * `handleOpen` and the timeline's asset drop exactly as a folder's do.
+   */
+  private templateImported() {
+    if (this.importedSorted.length == 0) {
+      return nothing;
+    }
+
+    return html`<section class="browse-section browse-imported">
+      <div class="browse-section-head">
+        <span class="browse-section-title">Imported</span>
+        <span class="browse-section-count">${this.importedSorted.length}</span>
+      </div>
+      <asset-list
+        .entries=${this.importedSorted}
+        .directory=${""}
+        .showType=${this.showType}
+        .sort=${this.sort}
+      ></asset-list>
+    </section>`;
+  }
+
   private templateBody() {
+    const imported = this.templateImported();
+
     if (this.status == "idle") {
-      return this.templateEmpty();
+      // Nothing to ask for while there are files to show: the empty state
+      // under them would read as though the import had not worked.
+      return imported === nothing ? this.templateEmpty() : imported;
     }
 
     if (this.status == "error") {
-      return html`<div class="browse-empty">
+      return html`${imported}<div class="browse-empty">
         <div class="browse-empty-icon">
           <span class="material-symbols-outlined">folder_off</span>
         </div>
@@ -657,7 +719,8 @@ export class AssetBrowser extends LitElement {
       </div>`;
     }
 
-    return html`<asset-list
+    return html`${imported}<asset-list
+      data-folder-list
       .entries=${this.sorted}
       .directory=${this.nowDirectory}
       .showType=${this.showType}
