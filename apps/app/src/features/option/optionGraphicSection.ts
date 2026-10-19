@@ -29,6 +29,7 @@ import { projectBakeHz } from "../editor/frameRate";
 import { resolvePreset } from "../fx/resolvePreset";
 import { renderParamControls, type FontChoice } from "../fx/fxParamControls";
 import { bundledFonts, loadFontLibrary, systemFonts } from "../font/fontLibrary";
+import { localFontStore } from "../font/localFonts";
 import { GestureCommit } from "./gestureCommit";
 import { section } from "./optionKit";
 import "./optionProgramSection";
@@ -49,20 +50,32 @@ export class OptionGraphicSection extends LitElement {
 
   createRenderRoot() {
     this.style.display = "block";
-    void loadFontLibrary().then(() => {
-      this.fonts = [
-        { value: "default", label: "Default" },
-        // By file name, so the project names a face every install has rather
-        // than this machine's path to it.
-        ...bundledFonts().map((entry) => ({
-          value: "bundled:" + (entry.path.split(/[\\/]/).pop() ?? entry.name),
-          label: entry.name,
-        })),
-        ...systemFonts().map((entry) => ({ value: entry.path, label: entry.name })),
-      ];
-      this.requestUpdate();
+    void loadFontLibrary().then(() => this.listFonts());
+    // A browser build's local fonts arrive whenever the user lets the browser
+    // list them, which can be long after the library loaded.
+    localFontStore.subscribe((state, previous) => {
+      if (state.fonts !== previous.fonts) {
+        this.listFonts();
+      }
     });
     return this;
+  }
+
+  private listFonts() {
+    this.fonts = [
+      { value: "default", label: "Default" },
+      // By file name, so the project names a face every install has rather
+      // than this machine's path to it.
+      ...bundledFonts().map((entry) => ({
+        value: "bundled:" + (entry.path.split(/[\\/]/).pop() ?? entry.name),
+        label: entry.name,
+      })),
+      ...systemFonts().map((entry) => ({
+        value: entry.path,
+        label: entry.label ?? entry.name,
+      })),
+    ];
+    this.requestUpdate();
   }
 
   /** The system's open dialog, limited to pictures. `null` when cancelled. */

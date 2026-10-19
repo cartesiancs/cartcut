@@ -23,8 +23,19 @@ import { installScrollerWatch } from "./features/ui/scrollerWatch";
 import { getLocationEnv } from "./functions/getLocationEnv";
 import { installNativeContextMenuGuard } from "./features/editor/nativeContextMenu";
 import { installMobile } from "./features/mobile/install";
+import {
+  browserLocalFontPort,
+  restoreLocalFonts,
+} from "./features/font/localFonts";
 
 enableIpcWrapper();
+
+// The browser builds only: the fonts installed on this computer, listed without
+// asking when the browser already holds the permission. The desktop app lists
+// them from main.
+if (getLocationEnv() !== "electron") {
+  void restoreLocalFonts(browserLocalFontPort());
+}
 
 // The browser builds only. Electron already shows no native right-click menu.
 installNativeContextMenuGuard(getLocationEnv(), window);
@@ -268,3 +279,6 @@ export { addTemplateToTimeline } from "./features/template/addTemplate";
 export { expandTemplate } from "./features/composition/expandTemplate";
 export { requestTimelineSwitch } from "./features/composition/navigation";
 export { projectSnapshot } from "./features/composition/projectSnapshot";
+// The browser build's list of the fonts on this computer, so a check in real
+// Chrome can wait for it to arrive instead of polling the font menu.
+export { localFontStore } from "./features/font/localFonts";

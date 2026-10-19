@@ -581,6 +581,15 @@ export class PreviewCanvas extends LitElement {
       this.scheduleDraw();
     });
 
+    // A face that finishes loading after a frame was drawn in the fallback.
+    // Nothing else would repaint for it: a project just opened, or a clip set
+    // in a face no menu row had loaded yet, stayed in the fallback until the
+    // next edit. The frame runs after `renderer/text.ts` has dropped the line
+    // metrics it measured in the fallback, on this same event.
+    document.fonts?.addEventListener?.("loadingdone", () => {
+      this.scheduleDraw();
+    });
+
     return this;
   }
 

@@ -9,6 +9,8 @@
  *    the file and not the path.
  *  - an absolute path: a face the user picked from the system, which travels
  *    the way a text clip's `fontpath` does (`project/assetsFile.ts`).
+ *  - `"local:<postscriptName>"`: a face installed on the machine a browser
+ *    build runs on (`font/localFonts.ts`), drawn wherever that font is installed.
  *
  * CSS sees `--<key>` as a family list with the default face behind it, so a
  * face that has not loaded yet falls back to something that has Hangul.
@@ -17,6 +19,7 @@
 import {
   DEFAULT_FONT,
   cssQuoted,
+  isLocalFontPath,
   parseFontPath,
   type FontEntry,
 } from "../font/fontFaces";
@@ -35,7 +38,7 @@ export function fontEntryFor(
     const path = bundledPath(value.slice(BUNDLED_PREFIX.length));
     return path == null ? { ...DEFAULT_FONT } : parseFontPath(path);
   }
-  if (value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value)) {
+  if (value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || isLocalFontPath(value)) {
     return parseFontPath(value);
   }
   return { ...DEFAULT_FONT };

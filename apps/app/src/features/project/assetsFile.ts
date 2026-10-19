@@ -43,6 +43,7 @@
  */
 
 import type { TimelineElement } from "../../@types/timeline";
+import { isLocalFontPath } from "../font/fontFaces";
 import {
   detectFlavour,
   mintLocalPath,
@@ -216,13 +217,19 @@ export function withGraphicAssetRef(
 
 const GRAPHIC_KEY = /^([^#]+)(#(?:param|asset):[\s\S]+)$/;
 
-/** Whether a field's value is something worth trying to locate on disk. */
+/**
+ * Whether a field's value is something worth trying to locate on disk.
+ *
+ * A `local:` font names an installed face by its postscript name, not a file:
+ * relinking it would report a missing file on every machine.
+ */
 function isRealAssetPath(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value !== "" &&
     !SENTINELS.has(value) &&
-    !FOREIGN_SCHEME.test(value)
+    !FOREIGN_SCHEME.test(value) &&
+    !isLocalFontPath(value)
   );
 }
 

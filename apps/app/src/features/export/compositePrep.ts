@@ -8,9 +8,15 @@
  *
  * Templates first: their contents are what the expanded map holds, and the
  * LUTs a template's clips name are only visible after expansion.
+ *
+ * Then every face a text clip names. A canvas asked for a family that has not
+ * loaded draws the fallback without a word, and the preview only ever loaded
+ * the faces at the playhead, so a clip later in the timeline came out of the
+ * export in the wrong typeface for its first frames.
  */
 
 import type { Timeline } from "../../@types/timeline";
+import { documentFontEntries, faceReady } from "../font/fontFaces";
 import { loadFontLibrary } from "../font/fontLibrary";
 import { preloadLutsForDocument } from "../lut/lutRegistry";
 import { assetTimeline } from "../template/assetTimeline";
@@ -26,6 +32,10 @@ export async function preloadForComposite(
 ): Promise<Timeline> {
   await preloadTemplatesForDocument(timeline);
   const expanded = assetTimeline(timeline, resolve);
-  await Promise.all([preloadLutsForDocument(expanded), loadFontLibrary()]);
+  await Promise.all([
+    preloadLutsForDocument(expanded),
+    loadFontLibrary(),
+    ...documentFontEntries(expanded).map(faceReady),
+  ]);
   return expanded;
 }

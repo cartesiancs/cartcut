@@ -581,6 +581,27 @@ describe("relinkAssets — counting and probing", () => {
     expect(probe).not.toHaveBeenCalled();
   });
 
+  it("never looks for a face installed on the machine, and never reports it missing", async () => {
+    // Named by its postscript name, not a file: probing it would report a
+    // missing file on every machine, including the one that chose it.
+    const probe = vi.fn(async () => false);
+    const elements = {
+      local: textElement({ fontpath: "local:Inter-Bold", fontname: "Inter-Bold", fonttype: "local" }),
+      file: textElement({ fontpath: "/elsewhere/Gone.ttf" }),
+    } as any;
+    const file = serializeAssetPaths(elements, PROJECT);
+    expect(file.entries.local).toBeUndefined();
+
+    const result = await relinkAssets(elements, JSON.parse(JSON.stringify(file)), PROJECT, probe);
+    // The file face beside it is still counted, so the check is not vacuous.
+    expect(result.missing).toBe(1);
+    expect(probe.mock.calls.map((call) => String((call as unknown[])[0]))).not.toContain(
+      "local:Inter-Bold",
+    );
+    expect(result.elements.local.fontpath).toBe("local:Inter-Bold");
+    expect(JSON.stringify(result.elements.local)).toBe(JSON.stringify(elements.local));
+  });
+
   it("counts an outside file that is genuinely gone", async () => {
     const elements = {
       inside: videoElement({ localpath: "file:///p/proj/a.mp4" }),

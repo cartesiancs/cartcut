@@ -229,6 +229,61 @@ export function parseFaceName(stem: string): ParsedFace {
   };
 }
 
+/**
+ * Read a style name ("Bold Italic", "SemiBold", "Condensed Bold") as a rung
+ * and a slant, with whatever words it could not read handed back as `rest`.
+ *
+ * For a face whose family arrives separately, which is the browser's local font
+ * list. Its family must not be run through `parseFaceName` together with the
+ * style: "Arial Black" + "Regular" would peel `Regular` and then `Black` and
+ * file the face under Arial at 900, a font that does not exist. So the family
+ * is taken as given and only the style is read, from the end like
+ * `parseFaceName`, trying two words as one first ("Semi Bold") and stopping at
+ * the first it does not know. A width such as "Condensed" stays in `rest`, so
+ * the caller can keep "Helvetica Neue Condensed" apart from "Helvetica Neue".
+ */
+export function parseStyleName(style: string): {
+  weight: number;
+  italic: boolean;
+  rest: string;
+} {
+  const text = typeof style === "string" ? style : "";
+  const whole = readStyleToken(text);
+  if (whole != null) {
+    return {
+      weight: whole.weight ?? DEFAULT_FONT_WEIGHT,
+      italic: whole.italic === true,
+      rest: "",
+    };
+  }
+
+  const parts = text.split(/[-_\s]+/).filter((part) => part !== "");
+  let weight: number | null = null;
+  let italic = false;
+  let end = parts.length;
+
+  while (end > 0) {
+    const pair = end > 1 ? readStyleToken(parts[end - 2] + parts[end - 1]) : null;
+    const parsed = pair ?? readStyleToken(parts[end - 1]);
+    if (parsed == null) {
+      break;
+    }
+    // The walk runs backwards, so the weight nearest the front is the one kept,
+    // as in `parseFaceName`.
+    if (parsed.weight != null) {
+      weight = parsed.weight;
+    }
+    italic = italic || parsed.italic === true;
+    end -= pair != null ? 2 : 1;
+  }
+
+  return {
+    weight: weight ?? DEFAULT_FONT_WEIGHT,
+    italic,
+    rest: parts.slice(0, end).join(" "),
+  };
+}
+
 // --------------------------------------------------------------- the grouping
 
 export type FontFace = ParsedFace & { entry: FontEntry };
@@ -241,6 +296,23 @@ export type FontFamily = {
   weights: number[];
   variable: boolean;
 };
+
+/**
+ * Where an entry sits: what it says about itself when it says anything (a local
+ * face, `FontEntry.face`), else what its file name says.
+ */
+function parsedFaceOf(entry: FontEntry): ParsedFace {
+  const face = entry.face;
+  if (face != null && typeof face.family === "string" && face.family !== "") {
+    return {
+      family: face.family,
+      weight: normalizeFontWeight(face.weight),
+      italic: face.italic === true,
+      variable: false,
+    };
+  }
+  return parseFaceName(entry.name);
+}
 
 /**
  * Fold a flat list of font files into families.
@@ -257,7 +329,7 @@ export function groupFontFamilies(entries: FontEntry[]): FontFamily[] {
       continue;
     }
 
-    const parsed = parseFaceName(entry.name);
+    const parsed = parsedFaceOf(entry);
     const key = parsed.family.toLowerCase();
     const existing = families.get(key);
     const face: FontFace = { ...parsed, entry };
@@ -295,6 +367,27 @@ export function groupFontFamilies(entries: FontEntry[]): FontFamily[] {
 
   grouped.sort((a, b) => a.family.localeCompare(b.family));
   return grouped;
+}
+
+/**
+ * Each family by the CSS name of every face in it.
+ *
+ * What a text clip stores is one face's name, and for a local face that is a
+ * postscript name ("NotoSansKR-Bold") whose own spelling no longer says which
+ * family it was filed under ("Noto Sans KR"). Looking the family up by face
+ * answers that for every entry, and `parseFaceName` remains the fallback for a
+ * face that is not in the list at all. The first family to claim a name keeps it.
+ */
+export function familyIndex(families: readonly FontFamily[]): Map<string, FontFamily> {
+  const index = new Map<string, FontFamily>();
+  for (const family of families) {
+    for (const face of family.faces) {
+      if (!index.has(face.entry.name)) {
+        index.set(face.entry.name, family);
+      }
+    }
+  }
+  return index;
 }
 
 /**

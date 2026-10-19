@@ -164,6 +164,18 @@ describe("staging", () => {
     );
   });
 
+  it("stages nothing for a face installed on the machine, and keeps its value", () => {
+    const result = plan({
+      t: textElement({ fontpath: "local:Inter-Bold", fontname: "Inter-Bold", fonttype: "local" }),
+      v: videoElement({ localpath: "file:///me/a.mp4" }),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The video beside it is staged, so the plan did run over both clips.
+    expect(result.assets.map((asset) => asset.entry)).toEqual(["assets/a.mp4"]);
+    expect((result.elements.t as any).fontpath).toBe("local:Inter-Bold");
+  });
+
   it("stages audio", () => {
     const result = plan({
       a: audioElement({ localpath: "file:///me/music.mp3" }),

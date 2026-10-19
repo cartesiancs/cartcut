@@ -10,6 +10,7 @@
  */
 
 import { parseFontPath, type FontEntry } from "./fontFaces";
+import { localFontStore } from "./localFonts";
 
 type Listing = { path: string; name: string; type: string };
 
@@ -53,9 +54,17 @@ export function bundledFonts(): FontEntry[] {
   return bundled ?? [];
 }
 
-/** The system's faces, or `[]` before `loadFontLibrary` has finished. */
+/**
+ * The system's faces, or `[]` before `loadFontLibrary` has finished.
+ *
+ * In a browser build that is the fonts on this computer, once the user has let
+ * the browser list them (`localFonts.ts`). They arrive after startup, so this
+ * is read from their store on every call rather than cached with the rest;
+ * subscribe to `localFontStore` to hear of them.
+ */
 export function systemFonts(): FontEntry[] {
-  return system ?? [];
+  const local = localFontStore.getState().fonts;
+  return local.length === 0 ? system ?? [] : [...(system ?? []), ...local];
 }
 
 /** The absolute path of a bundled face by file name, or `null`. */

@@ -12,13 +12,13 @@
  * The one thing the canvas will not do for it is wait for a face. A canvas
  * given a family that has not loaded draws in the fallback and says nothing,
  * and nothing redraws it when the face arrives. So each family is loaded
- * before its first tile is drawn, the way `graphic/htmlHost.ts` waits for a
- * graphic's fonts, and a crop is only measured after that, since the fallback
- * has other widths. The frame itself is `textTileDraw.ts`.
+ * before its first tile is drawn (`font/fontFaces.ts#faceReady`), the way
+ * `graphic/htmlHost.ts` waits for a graphic's fonts, and a crop is only
+ * measured after that, since the fallback has other widths. The frame itself is `textTileDraw.ts`.
  */
 
 import { exportElementRenderers } from "../export/renderers";
-import { DEFAULT_FONT, cssQuoted, ensureFontFace, type FontEntry } from "../font/fontFaces";
+import { DEFAULT_FONT, faceReady, type FontEntry } from "../font/fontFaces";
 import { windowScheduler, type FrameScheduler } from "../caption/previewLoop";
 import { loopClipTime, type TileSpec, type TileView } from "./textTile";
 import { drawTile as drawTileWith, measureTileView } from "./textTileDraw";
@@ -31,33 +31,6 @@ function drawTile(
   timeMs: number,
 ): void {
   drawTileWith(canvas, spec, view, timeMs, exportElementRenderers);
-}
-
-/** Long enough for a local file; a face that takes longer draws in the fallback. */
-const LOAD_TIMEOUT_MS = 3000;
-
-const ready = new Map<string, Promise<void>>();
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | void> {
-  return Promise.race([
-    promise,
-    new Promise<void>((resolve) => setTimeout(resolve, ms)),
-  ]);
-}
-
-/** Resolves once `face` can be drawn, or once waiting stops being worth it. */
-export function faceReady(face: FontEntry): Promise<void> {
-  const known = ready.get(face.name);
-  if (known != null) {
-    return known;
-  }
-  ensureFontFace(face);
-  const loading = withTimeout(
-    document.fonts.load(`16px ${cssQuoted(face.name)}`).catch(() => []),
-    LOAD_TIMEOUT_MS,
-  ).then(() => undefined);
-  ready.set(face.name, loading);
-  return loading;
 }
 
 /** The face a tile's clip is set in, as `ensureFontFace` wants it. */

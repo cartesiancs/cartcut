@@ -15,6 +15,15 @@ describe("fontEntryFor", () => {
     expect(fontEntryFor("C:\\Fonts\\Brand.ttf", bundled).name).toBe("Brand");
   });
 
+  it("resolves a face installed on this machine by its postscript name", () => {
+    expect(fontEntryFor("local:Inter-Bold", bundled)).toEqual({
+      path: "local:Inter-Bold",
+      name: "Inter-Bold",
+      type: "local",
+    });
+    expect(fontEntryFor("local:", bundled).name).toBe("notosanskr");
+  });
+
   it("falls back to the default face for anything it cannot place", () => {
     expect(fontEntryFor("bundled:Missing.ttf", bundled).name).toBe("notosanskr");
     expect(fontEntryFor("Comic Sans", bundled).name).toBe("notosanskr");
@@ -32,6 +41,10 @@ describe("cssFamilyOf", () => {
 
 describe("fontValueOfPath", () => {
   const bundled = [{ path: "/app/assets/fonts/google/Anton-Regular.ttf", name: "Anton-Regular", type: "ttf" }];
+
+  it("keeps a local face as it is, since it is not a file on any path", () => {
+    expect(fontValueOfPath("local:Inter-Bold", bundled)).toBe("local:Inter-Bold");
+  });
 
   it("names a bundled face by its file", () => {
     expect(fontValueOfPath("/app/assets/fonts/google/Anton-Regular.ttf", bundled)).toBe(

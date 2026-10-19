@@ -4,12 +4,14 @@ import {
   FONT_WEIGHTS,
   coerceFontWeight,
   faceFor,
+  familyIndex,
   groupFontFamilies,
   labelForWeight,
   elementFontWeight,
   fontWeightToken,
   normalizeFontWeight,
   parseFaceName,
+  parseStyleName,
 } from "./fontWeight";
 import type { FontEntry } from "./fontFaces";
 
@@ -402,5 +404,90 @@ describe("elementFontWeight", () => {
 
   it("answers regular for an element with no font at all", () => {
     expect(elementFontWeight(undefined, undefined)).toBe(400);
+  });
+});
+
+describe("parseStyleName", () => {
+  it("reads the styles a font's name table spells out", () => {
+    expect(parseStyleName("Bold Italic")).toEqual({ weight: 700, italic: true, rest: "" });
+    expect(parseStyleName("Semi Bold")).toEqual({ weight: 600, italic: false, rest: "" });
+    expect(parseStyleName("SemiBold")).toEqual({ weight: 600, italic: false, rest: "" });
+    expect(parseStyleName("Extra Light")).toEqual({ weight: 200, italic: false, rest: "" });
+    expect(parseStyleName("Semi Bold Italic")).toEqual({ weight: 600, italic: true, rest: "" });
+    expect(parseStyleName("Regular")).toEqual({ weight: 400, italic: false, rest: "" });
+  });
+
+  it("reads a slant alone as the regular weight", () => {
+    expect(parseStyleName("Italic")).toEqual({ weight: 400, italic: true, rest: "" });
+  });
+
+  it("hands back the words it cannot read, so a width stays with the family", () => {
+    expect(parseStyleName("Condensed Bold")).toEqual({
+      weight: 700,
+      italic: false,
+      rest: "Condensed",
+    });
+    expect(parseStyleName("W3")).toEqual({ weight: 400, italic: false, rest: "W3" });
+  });
+
+  it("reads nothing as the regular weight", () => {
+    expect(parseStyleName("")).toEqual({ weight: 400, italic: false, rest: "" });
+    expect(parseStyleName(undefined as any)).toEqual({ weight: 400, italic: false, rest: "" });
+  });
+
+  it("leaves a style in another language whole", () => {
+    expect(parseStyleName("볼드")).toEqual({ weight: 400, italic: false, rest: "볼드" });
+  });
+});
+
+describe("groupFontFamilies with faces that know their family", () => {
+  function local(name: string, family: string, weight: number, italic = false): FontEntry {
+    return {
+      path: `local:${name}`,
+      name,
+      type: "local",
+      face: { family, weight, italic },
+    };
+  }
+
+  it("groups by the family the face names rather than by its postscript name", () => {
+    const families = groupFontFamilies([
+      local("HelveticaNeue", "Helvetica Neue", 400),
+      local("HelveticaNeue-Bold", "Helvetica Neue", 700),
+      local("HelveticaNeue-Italic", "Helvetica Neue", 400, true),
+    ]);
+    expect(families.map((family) => family.family)).toEqual(["Helvetica Neue"]);
+    expect(families[0].weights).toEqual([400, 700]);
+    expect(faceFor(families[0], 700)?.entry.name).toBe("HelveticaNeue-Bold");
+  });
+
+  it("keeps a family whose name holds a weight word apart from the one it contrasts with", () => {
+    // Parsing "Arial Black Regular" as one stem would peel to Arial at 900.
+    const families = groupFontFamilies([
+      local("ArialMT", "Arial", 400),
+      local("Arial-Black", "Arial Black", 400),
+    ]);
+    expect(families.map((family) => family.family)).toEqual(["Arial", "Arial Black"]);
+  });
+
+  it("still reads a file's name when an entry says nothing of itself", () => {
+    const families = groupFontFamilies([entry("Inter-Bold"), local("Inter-Regular", "Inter", 400)]);
+    expect(families).toHaveLength(1);
+    expect(families[0].weights).toEqual([400, 700]);
+  });
+});
+
+describe("familyIndex", () => {
+  it("finds a family by the name of any face in it", () => {
+    const families = groupFontFamilies([
+      { path: "local:NotoSansKR-Bold", name: "NotoSansKR-Bold", type: "local", face: { family: "Noto Sans KR", weight: 700, italic: false } },
+      { path: "local:NotoSansKR-Regular", name: "NotoSansKR-Regular", type: "local", face: { family: "Noto Sans KR", weight: 400, italic: false } },
+      entry("Georgia"),
+    ]);
+    const index = familyIndex(families);
+    expect(index.get("NotoSansKR-Bold")?.family).toBe("Noto Sans KR");
+    expect(index.get("Georgia")?.family).toBe("Georgia");
+    // The fallback to parsing is the caller's: an unknown name is not invented.
+    expect(index.get("NotoSansKR")).toBeUndefined();
   });
 });

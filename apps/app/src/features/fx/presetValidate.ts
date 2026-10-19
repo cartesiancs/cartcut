@@ -101,12 +101,21 @@ const HOST_VARIABLES = [
   "fit",
 ];
 
-/** A font parameter's value: the default face, a bundled one, or an absolute path. */
+/**
+ * A font parameter's value: the default face, a bundled one, an absolute path,
+ * or a face installed on this machine by its postscript name (`local:`). The
+ * last carries no quote, backslash or control character, the same rule
+ * `font/localFonts.ts` keeps for the names it lists.
+ */
 const FONT_VALUE = /^(default|bundled:[A-Za-z0-9][A-Za-z0-9._-]*\.(ttf|otf|woff2?))$/;
+const LOCAL_FONT_VALUE = /^local:[^"\\\u0000-\u001f\u007f]{1,127}$/;
 function isFontValue(value: unknown): boolean {
   return (
     typeof value === "string" &&
-    (FONT_VALUE.test(value) || value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value))
+    (FONT_VALUE.test(value) ||
+      LOCAL_FONT_VALUE.test(value) ||
+      value.startsWith("/") ||
+      /^[A-Za-z]:[\\/]/.test(value))
   );
 }
 
@@ -283,7 +292,7 @@ function validateHtmlParam(
   if (raw.type === "font") {
     if (!isFontValue(value)) {
       errors.push(
-        where + " (" + key + '): `default` must be "default", "bundled:<file>" or an absolute path',
+        where + " (" + key + '): `default` must be "default", "bundled:<file>", "local:<postscript name>" or an absolute path',
       );
       return null;
     }

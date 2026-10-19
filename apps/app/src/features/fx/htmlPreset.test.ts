@@ -157,6 +157,14 @@ describe("an html graphic preset", () => {
     expect(errorsOf(bound)).toMatch(/bindings.color: `title` is a text, and color needs color/);
   });
 
+  it("accepts a local face as a font default, and refuses one that is empty or breaks out of its string", () => {
+    const withDefault = (value: string) =>
+      validatePreset(payload({ params: [{ key: "font", label: "F", type: "font", default: value }] }));
+    expect(errorsOf(withDefault("local:Inter-Bold"))).toBe("");
+    expect(errorsOf(withDefault("local:"))).toMatch(/`default` must be/);
+    expect(errorsOf(withDefault('local:"x'))).toMatch(/`default` must be/);
+  });
+
   it("refuses a font default that is neither default, bundled nor a path", () => {
     const result = validatePreset(
       payload({ params: [{ key: "font", label: "F", type: "font", default: "Comic Sans" }] }),

@@ -20,6 +20,7 @@
  */
 
 import type { Timeline, TimelineElement } from "../../@types/timeline";
+import { isLocalFontPath } from "../font/fontFaces";
 import {
   detectFlavour,
   mintLocalPath,
@@ -108,7 +109,9 @@ function isRealAssetPath(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value !== "" &&
-    !/^(https?|blob|data):/i.test(value)
+    !/^(https?|blob|data):/i.test(value) &&
+    // An installed face named by its postscript name: there is no file to stage.
+    !isLocalFontPath(value)
   );
 }
 

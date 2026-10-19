@@ -2,7 +2,12 @@ import postcss from "postcss";
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_FONT,
+  documentFontEntries,
+  ensureFontFaces,
+  fontFaceRule,
+  isLocalFontPath,
   loadedFontFamilies,
+  localFontPath,
   parseFontPath,
   registerDocumentFonts,
 } from "./fontFaces";
@@ -56,40 +61,40 @@ describe("parseFontPath", () => {
   });
 });
 
-describe("registerDocumentFonts", () => {
-  /**
-   * The narrowest `document` `ensureFontFace` touches.
-   *
-   * It bails out entirely without one, so in the node environment the real
-   * function is a no-op and the thing under test here would report nothing
-   * whatever it did. Four members is the whole surface, which is small enough
-   * to fake honestly rather than to mock.
-   */
-  function withFakeDocument<T>(run: () => T, rules: string[] = []): T {
-    const style = {
-      id: "",
-      appendChild: (node: { text: string }) => rules.push(node.text),
-    };
-    const fake = {
-      querySelector: () => style,
-      createElement: () => style,
-      createTextNode: (text: string) => ({ text }),
-      head: { appendChild: () => undefined },
-    };
-    const had = "document" in globalThis;
-    const previous = (globalThis as { document?: unknown }).document;
-    (globalThis as { document?: unknown }).document = fake;
-    try {
-      return run();
-    } finally {
-      if (had) {
-        (globalThis as { document?: unknown }).document = previous;
-      } else {
-        delete (globalThis as { document?: unknown }).document;
-      }
+/**
+ * The narrowest `document` `ensureFontFace` touches.
+ *
+ * It bails out entirely without one, so in the node environment the real
+ * function is a no-op and the thing under test here would report nothing
+ * whatever it did. Four members is the whole surface, which is small enough
+ * to fake honestly rather than to mock.
+ */
+function withFakeDocument<T>(run: () => T, rules: string[] = []): T {
+  const style = {
+    id: "",
+    appendChild: (node: { text: string }) => rules.push(node.text),
+  };
+  const fake = {
+    querySelector: () => style,
+    createElement: () => style,
+    createTextNode: (text: string) => ({ text }),
+    head: { appendChild: () => undefined },
+  };
+  const had = "document" in globalThis;
+  const previous = (globalThis as { document?: unknown }).document;
+  (globalThis as { document?: unknown }).document = fake;
+  try {
+    return run();
+  } finally {
+    if (had) {
+      (globalThis as { document?: unknown }).document = previous;
+    } else {
+      delete (globalThis as { document?: unknown }).document;
     }
   }
+}
 
+describe("registerDocumentFonts", () => {
   it("registers a face only a run names", () => {
     // Without this the styled stretch alone draws in the fallback the next time
     // the project is opened, which is the silent failure this function exists
@@ -159,5 +164,146 @@ describe("registerDocumentFonts", () => {
       }),
     );
     expect(added).toBe(1);
+  });
+});
+
+describe("local faces", () => {
+  it("parse to the postscript name as the family, with the path kept whole", () => {
+    expect(parseFontPath("local:NotoSansKR-Bold")).toEqual({
+      path: "local:NotoSansKR-Bold",
+      name: "NotoSansKR-Bold",
+      type: "local",
+    });
+    expect(localFontPath("NotoSansKR-Bold")).toBe("local:NotoSansKR-Bold");
+    expect(isLocalFontPath("local:X")).toBe(true);
+    expect(isLocalFontPath("/fonts/local:X.ttf")).toBe(false);
+    expect(isLocalFontPath(undefined)).toBe(false);
+  });
+
+  it("with no name after the prefix are the built-in face", () => {
+    expect(parseFontPath("local:")).toEqual(DEFAULT_FONT);
+  });
+
+  it("register as local(), with the name inside its string", () => {
+    const rule = fontFaceRule(parseFontPath("local:Inter-Bold"));
+    const root = postcss.parse(rule);
+    expect(root.nodes).toHaveLength(1);
+    const face = root.nodes[0] as postcss.AtRule;
+    expect(face.name).toBe("font-face");
+    const decls = Object.fromEntries(
+      (face.nodes ?? [])
+        .filter((node): node is postcss.Declaration => node.type === "decl")
+        .map((decl) => [decl.prop, decl.value]),
+    );
+    expect(decls["font-family"]).toBe('"Inter-Bold"');
+    expect(decls.src).toBe('local("Inter-Bold")');
+  });
+
+  it("and a file face do not produce the same rule", () => {
+    // The harness check: a rule builder that ignored the scheme would pass the
+    // test above on its own and still point every local face at file://.
+    const local = fontFaceRule({ path: "local:Inter-Bold", name: "Inter-Bold", type: "local" });
+    const file = fontFaceRule({ path: "/fonts/Inter-Bold.ttf", name: "Inter-Bold", type: "ttf" });
+    expect(local).not.toBe(file);
+    expect(file).toContain('url("file:///fonts/Inter-Bold.ttf")');
+  });
+
+  it("are decided by the path, whatever `type` says", () => {
+    // `textTilePainter.faceOf` builds entries straight from element fields.
+    expect(fontFaceRule({ path: "local:A-Bold", name: "A-Bold", type: "otf" })).toContain(
+      'local("A-Bold")',
+    );
+  });
+
+  it("cannot end their string with a quote in the name", () => {
+    const rule = fontFaceRule(parseFontPath('local:Evil"} body{display:none} x{"'));
+    const root = postcss.parse(rule);
+    expect(root.nodes).toHaveLength(1);
+  });
+});
+
+describe("ensureFontFaces", () => {
+  it("writes every new face in one text node", () => {
+    const rules: string[] = [];
+    const added = withFakeDocument(
+      () =>
+        ensureFontFaces([
+          parseFontPath("local:BatchA-Regular"),
+          parseFontPath("local:BatchB-Regular"),
+          parseFontPath("/fonts/BatchC.ttf"),
+        ]),
+      rules,
+    );
+    expect(added).toBe(3);
+    expect(rules).toHaveLength(1);
+    expect(postcss.parse(rules[0]).nodes).toHaveLength(3);
+  });
+
+  it("skips faces already registered, the built-in one and repeats", () => {
+    const rules: string[] = [];
+    withFakeDocument(() => ensureFontFaces([parseFontPath("local:BatchD-Regular")]), rules);
+    const added = withFakeDocument(
+      () =>
+        ensureFontFaces([
+          parseFontPath("local:BatchD-Regular"),
+          DEFAULT_FONT,
+          parseFontPath("local:BatchE-Regular"),
+          parseFontPath("local:BatchE-Regular"),
+        ]),
+      rules,
+    );
+    expect(added).toBe(1);
+    expect(rules).toHaveLength(2);
+    expect(postcss.parse(rules[1]).nodes).toHaveLength(1);
+  });
+
+  it("writes nothing at all when nothing is new", () => {
+    const rules: string[] = [];
+    const added = withFakeDocument(() => ensureFontFaces([DEFAULT_FONT]), rules);
+    expect(added).toBe(0);
+    expect(rules).toHaveLength(0);
+  });
+});
+
+describe("documentFontEntries", () => {
+  it("lists a clip's face and its runs', once each, without the built-in face", () => {
+    const entries = documentFontEntries({
+      a: {
+        filetype: "text",
+        fontpath: "local:DocA-Bold",
+        runs: [
+          { from: 0, to: 1, style: { fontpath: "local:DocB-Regular" } },
+          { from: 1, to: 2, style: { fontpath: "local:DocA-Bold" } },
+        ],
+      },
+      b: { filetype: "text", fontpath: "default" },
+      c: { filetype: "text", fontpath: "/fonts/DocC.ttf" },
+      d: { filetype: "image", fontpath: "local:NotText-Regular" },
+    });
+    expect(entries.map((entry) => entry.name)).toEqual([
+      "DocA-Bold",
+      "DocB-Regular",
+      "DocC",
+    ]);
+  });
+
+  it("registers a local face on load, for the clip and for a run", () => {
+    const rules: string[] = [];
+    const added = withFakeDocument(
+      () =>
+        registerDocumentFonts({
+          a: {
+            filetype: "text",
+            fontpath: "local:LoadA-Bold",
+            runs: [{ from: 0, to: 1, style: { fontpath: "local:LoadB-Italic" } }],
+          },
+        }),
+      rules,
+    );
+    expect(added).toBe(2);
+    expect(loadedFontFamilies()).toEqual(
+      expect.arrayContaining(["LoadA-Bold", "LoadB-Italic"]),
+    );
+    expect(rules.join("\n")).toContain('local("LoadB-Italic")');
   });
 });

@@ -1,7 +1,7 @@
 import { LitElement, PropertyValues, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ITimelineStore, useTimelineStore } from "../../states/timelineStore";
-import { ensureFontFace } from "../font/fontFaces";
+import { cssQuoted, ensureFontFace, ensureFontFaces } from "../font/fontFaces";
 import { resolveTextStyle } from "../text/style";
 import { setIn } from "../../utils/immutable";
 import { rasterizeTextElements } from "../element/rasterizeText";
@@ -20,10 +20,18 @@ import {
   coerceFontWeight,
   elementFontWeight,
   faceFor,
+  familyIndex,
   groupFontFamilies,
   labelForWeight,
   parseFaceName,
 } from "../font/fontWeight";
+import {
+  localFontNotice,
+  localFontStore,
+  requestLocalFonts,
+  type LocalFontState,
+} from "../font/localFonts";
+import { getLocationEnv } from "../../functions/getLocationEnv";
 import "./animationPresetBrowser";
 import "./controlBlendMode";
 import "./optionLutSection";
@@ -159,9 +167,29 @@ export class OptionText extends LitElement {
    * The grouping walks four hundred filenames, and the store subscription in
    * `createRenderRoot` re-renders this panel on every cursor tick — so doing it
    * in `render` would run it sixty times a second during playback. The list is
-   * append-only and built once at startup, so its length is a sufficient key.
+   * append-only (the startup lists, then a browser build's local fonts when
+   * they arrive), so its length is a sufficient key.
    */
-  private familiesCache: { size: number; families: FontFamily[] } | null = null;
+  private familiesCache: {
+    size: number;
+    families: FontFamily[];
+    index: Map<string, FontFamily>;
+  } | null = null;
+
+  /**
+   * The browser build's list of the fonts on this computer, as the menu's
+   * notice row last saw it. `null` in the desktop app, which lists them from
+   * main and shows no such row. A `@property` so that the row changing re-places
+   * an open menu: its height is part of what `placeFontMenu` measures.
+   */
+  @property({ attribute: false })
+  localFonts: LocalFontState | null = null;
+
+  /** Read once: the desktop app never becomes a browser. */
+  private readonly inBrowser = getLocationEnv() !== "electron";
+
+  /** Paths of the local faces already in `fontList`, which only ever grows. */
+  private readonly localFontPaths = new Set<string>();
 
   /**
    * What has been typed into the font dropdown's search box.
@@ -216,7 +244,41 @@ export class OptionText extends LitElement {
     textRangeSelectionStore.subscribe(() => {
       this.syncRangeFields();
     });
+
+    if (this.inBrowser) {
+      localFontStore.subscribe((state) => this.takeLocalFonts(state));
+      this.takeLocalFonts(localFontStore.getState());
+    }
     return this;
+  }
+
+  /**
+   * Fold the browser's local font list into the picker.
+   *
+   * Appended, never replaced: `fontList` is append-only, which is what lets
+   * `familiesCache` key on its length. Only one face per family is registered
+   * here, the regular one each row is previewed in; registering every face of
+   * three thousand up front would load nothing (`local()` is lazy) but would
+   * still be three thousand rules to parse. The face a clip is set in is
+   * registered by `applyFace`, as on the desktop.
+   */
+  private takeLocalFonts(state: LocalFontState) {
+    const fresh = state.fonts.filter((entry) => !this.localFontPaths.has(entry.path));
+
+    if (fresh.length > 0) {
+      for (const entry of fresh) {
+        this.localFontPaths.add(entry.path);
+        this.fontList.push(entry);
+      }
+      ensureFontFaces(
+        this.fontFamilies()
+          .map((family) => faceFor(family, DEFAULT_FONT_WEIGHT, false)?.entry)
+          .filter((entry): entry is FontEntry => entry != null),
+      );
+      this.requestUpdate();
+    }
+
+    this.localFonts = state;
   }
 
   render() {
@@ -227,7 +289,10 @@ export class OptionText extends LitElement {
     const current = this.currentFamily();
     const fontListTemplate: any = [];
 
-    for (const family of families) {
+    // Only while the menu is open. The store subscription re-renders this
+    // panel on every cursor tick, and a row per family on a machine with
+    // hundreds of them is real work to throw away sixty times a second.
+    for (const family of this.fontMenuOpen ? families : []) {
       if (!this.matchesFontQuery(this.familyLabel(family))) {
         continue;
       }
@@ -238,8 +303,10 @@ export class OptionText extends LitElement {
       // the same one at a different weight.
       const preview = faceFor(family, DEFAULT_FONT_WEIGHT, false);
 
+      // `content-visibility` so a row scrolled out of the list is not laid out,
+      // and its preview face is not loaded until it is about to be seen.
       fontListTemplate.push(html`
-        <li>
+        <li style="content-visibility: auto; contain-intrinsic-size: auto 28px;">
           <a
             class="dropdown-item dropdown-item-sm text-truncate ${current?.family ===
             family.family
@@ -247,7 +314,7 @@ export class OptionText extends LitElement {
               : ""}"
             style=${preview == null
               ? ""
-              : `font-family: '${preview.entry.name}'`}
+              : `font-family: ${cssQuoted(preview.entry.name)}`}
             @click=${() => this.handleChangeFontFamily(family)}
             >${this.familyLabel(family)}</a
           >
@@ -397,6 +464,7 @@ export class OptionText extends LitElement {
                       @input=${this.handleSearchFont}
                     />
                   </div>
+                  ${this.localFontNoticeRow()}
                   <ul
                     aria-event="font-list"
                     class="list-unstyled mb-0"
@@ -1451,6 +1519,51 @@ export class OptionText extends LitElement {
     return query === "" || name.toLowerCase().includes(query);
   }
 
+  /**
+   * The browser build's line about the fonts on this computer: the button that
+   * asks for them, or why they cannot be listed. Nothing in the desktop app.
+   */
+  private localFontNoticeRow() {
+    const notice = this.localFonts == null ? null : localFontNotice(this.localFonts);
+    if (notice == null) {
+      return html``;
+    }
+    return html`
+      <div
+        aria-event="font-local-notice"
+        class="px-2 pb-2"
+        style="display: flex; flex-direction: column; gap: 4px;"
+      >
+        ${notice.action == null
+          ? html``
+          : html`<button
+              type="button"
+              aria-event="font-local-request"
+              class="opt-text-btn"
+              style="width: 100%; justify-content: center; height: 26px;"
+              @click=${this.handleRequestLocalFonts}
+            >
+              ${notice.action.label}
+            </button>`}
+        ${notice.message == null
+          ? html``
+          : html`<span
+              class="text-secondary"
+              style="font-size: 11px; line-height: 1.35; white-space: normal;"
+              >${notice.message}</span
+            >`}
+      </div>
+    `;
+  }
+
+  /**
+   * Ask the browser for the list. Nothing may come before the call: the
+   * permission prompt needs the gesture this click carries.
+   */
+  handleRequestLocalFonts = () => {
+    void requestLocalFonts();
+  };
+
   handleSearchFont(event: Event) {
     this.fontQuery = (event.target as HTMLInputElement).value;
   }
@@ -1463,6 +1576,18 @@ export class OptionText extends LitElement {
    * reason, and in the worst case an empty one.
    */
   handleToggleFontMenu() {
+    // The click that opens the menu is a gesture, which is all a browser that
+    // already holds the permission wanted from the silent restore at startup.
+    // First, while the gesture is certainly live; it shows no prompt.
+    const local = this.inBrowser ? localFontStore.getState() : null;
+    if (
+      !this.fontMenuOpen &&
+      local?.permission === "granted" &&
+      local.status === "needs-permission"
+    ) {
+      void requestLocalFonts();
+    }
+
     this.fontMenuOpen = !this.fontMenuOpen;
 
     if (!this.fontMenuOpen) {
@@ -1704,7 +1829,9 @@ export class OptionText extends LitElement {
     // tick, and `placeFontMenu` forces a synchronous layout four times over.
     if (
       this.fontMenuOpen &&
-      (changed.has("fontMenuOpen") || changed.has("fontQuery"))
+      (changed.has("fontMenuOpen") ||
+        changed.has("fontQuery") ||
+        changed.has("localFonts"))
     ) {
       this.placeFontMenu();
     }
@@ -1794,7 +1921,9 @@ export class OptionText extends LitElement {
     // row qualifies. Showing `AktivGrotesk-Bold` here beside a weight row
     // reading "Bold" says the same thing twice, and says it in two different
     // vocabularies.
-    const family = parseFaceName(this.selectedFont).family;
+    const family =
+      this.fontCatalog().index.get(this.selectedFont)?.family ??
+      parseFaceName(this.selectedFont).family;
 
     return family === DEFAULT_FONT_NAME ? DEFAULT_FONT_LABEL : family;
   }
@@ -1803,17 +1932,37 @@ export class OptionText extends LitElement {
 
   /** `fontList` grouped into families, recomputed only when the list grows. */
   private fontFamilies(): FontFamily[] {
-    if (this.familiesCache?.size !== this.fontList.length) {
-      this.familiesCache = {
-        size: this.fontList.length,
-        families: groupFontFamilies(this.fontList),
-      };
-    }
-    return this.familiesCache.families;
+    return this.fontCatalog().families;
   }
 
-  /** The family the selected clip's `fontname` belongs to, if it is installed. */
+  /** The families and, beside them, each one by the name of every face in it. */
+  private fontCatalog(): {
+    families: FontFamily[];
+    index: Map<string, FontFamily>;
+  } {
+    if (this.familiesCache?.size !== this.fontList.length) {
+      const families = groupFontFamilies(this.fontList);
+      this.familiesCache = {
+        size: this.fontList.length,
+        families,
+        index: familyIndex(families),
+      };
+    }
+    return this.familiesCache;
+  }
+
+  /**
+   * The family the selected clip's `fontname` belongs to, if it is installed.
+   *
+   * By face first: a local face is stored under its postscript name, which
+   * parses to a family ("NotoSansKR") that is not the one it is listed under
+   * ("Noto Sans KR"). Parsing remains the answer for a name the index lacks.
+   */
   private currentFamily(): FontFamily | null {
+    const indexed = this.fontCatalog().index.get(this.selectedFont ?? "");
+    if (indexed != null) {
+      return indexed;
+    }
     const family = parseFaceName(this.selectedFont ?? "").family.toLowerCase();
     return (
       this.fontFamilies().find(

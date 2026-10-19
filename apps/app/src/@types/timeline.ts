@@ -1317,6 +1317,13 @@ export type TextElementType = TimelinePlaced &
     text: string;
     textcolor: string;
     fontsize: number;
+    /**
+     * Which face: an absolute path to a font file, `"default"` for the built-in
+     * one, or `"local:<postscriptName>"` for a face installed on the machine a
+     * browser build ran on (`font/localFonts.ts`), drawn through CSS `local()`
+     * wherever that font is installed. `fontname` is the CSS family each form
+     * registers (`font/fontFaces.ts#parseFontPath`).
+     */
     fontpath: string;
     fontname: string;
     fontweight: string;
