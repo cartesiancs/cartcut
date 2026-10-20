@@ -10,6 +10,7 @@ import {
   markOnboardingComplete,
 } from "./onboardingFlag";
 import { FADE_MS, ONBOARDING_MOTION, onboardingMotionStyle } from "./motion";
+import { templateSlugFrom } from "../template/templateLink";
 
 /**
  * Every duration and curve is `motion.ts`, handed to the stylesheet as custom
@@ -134,6 +135,10 @@ export class OnboardingOverlay extends LitElement {
 
   /** Where the flag lives, and what a refused store means, is `onboardingFlag.ts`. */
   private async _decideVisibility() {
+    // A link that opens an example template is there to show that template;
+    // the tour waits for a visit without one. The flag is left alone, so it
+    // still runs then.
+    if (templateSlugFrom(window.location.search) != null) return;
     if (await isOnboardingComplete(browserOnboardingFlagPort)) return;
 
     // The scrim fades itself in: it carries a CSS animation that runs the

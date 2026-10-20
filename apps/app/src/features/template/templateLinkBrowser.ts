@@ -98,6 +98,13 @@ export async function openLinkedTemplate(
     place: (templateId) => addTemplateToTimeline(templateId, { startMs: 0 }),
     select(elementId) {
       selectionStore.getState().setIds([elementId]);
+      // The side column follows a click, not the store
+      // (`elementTimelineCanvas.ts#syncSideOption`), so open the template's
+      // options, its replaceable slots, the way a click on the clip does.
+      (document.querySelector("option-group") as any)?.showOption({
+        filetype: "template",
+        elementId,
+      });
     },
   });
 }
