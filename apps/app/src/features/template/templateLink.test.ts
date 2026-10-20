@@ -178,7 +178,8 @@ function port(overrides: Partial<TemplateLinkPort> = {}) {
       calls.push(`load ${id}`);
       return data();
     },
-    applyFrame: (size, fps) => calls.push(`frame ${size.w}x${size.h}@${fps}`),
+    applyFrame: (size, fps, durationMs) =>
+      calls.push(`frame ${size.w}x${size.h}@${fps} ${durationMs}ms`),
     place: async (id) => {
       calls.push(`place ${id}`);
       return { ok: true, elementId: "el" };
@@ -202,7 +203,7 @@ describe("openTemplateLink", () => {
       "text /examples/templates/teaser/template.json",
       "register example:teaser",
       "load example:teaser",
-      "frame 1920x1080@60",
+      "frame 1920x1080@60 30000ms",
       "place example:teaser",
       "select el",
     ]);
@@ -236,7 +237,7 @@ describe("openTemplateLink", () => {
       load: async () => data({ fps: undefined }),
     });
     await openTemplateLink("teaser", p);
-    expect(calls).toContain("frame 1920x1080@null");
+    expect(calls).toContain("frame 1920x1080@null 30000ms");
   });
 
   it("reports a placement that declined, and selects nothing", async () => {

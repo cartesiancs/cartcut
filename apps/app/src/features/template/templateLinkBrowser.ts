@@ -82,7 +82,7 @@ export async function openLinkedTemplate(
       ]);
     },
     load: loadTemplate,
-    applyFrame(size, fps) {
+    applyFrame(size, fps, durationMs) {
       const options = renderOptionStore.getState().options;
       if (options.previewSize.w !== size.w || options.previewSize.h !== size.h) {
         renderOptionStore.getState().updateOptions({
@@ -90,6 +90,15 @@ export async function openLinkedTemplate(
           previewSize: { w: size.w, h: size.h },
         });
         previewViewportStore.getState().fit(size.w, size.h);
+      }
+      // whole seconds, because the project's length is edited as minutes and
+      // seconds; never shorter than the template, or the export cuts it off
+      const seconds = Math.ceil(durationMs / 1000);
+      if (seconds > renderOptionStore.getState().options.duration) {
+        renderOptionStore.getState().updateOptions({
+          ...renderOptionStore.getState().options,
+          duration: seconds,
+        });
       }
       if (fps != null) {
         setProjectFps(fps);

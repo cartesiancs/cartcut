@@ -11,11 +11,22 @@ import {
   type TemplateListing,
 } from "./templateRegistry";
 import { isReadableSchemaVersion } from "../timeline/tracks";
+import { getLocationEnv } from "../../functions/getLocationEnv";
+import { mediaUrlFor } from "../../functions/mediaUrl";
 import { cloudItemsOf, ensureCatalog, subscribeCloudListing } from "../cloud/cloudStore";
 import { cloudItemMatches, cloudTemplateTiles, type TemplateTile } from "../cloud/cloudMerge";
 import { createClickOrder, downloadThenApply } from "../cloud/cloudApply";
 import type { CloudItem } from "../cloud/cloudTypes";
 import "../cloud/cloudBadge";
+
+/**
+ * A thumbnail's address. The desktop reads it from disk; a browser build's
+ * example template is served from the site, under the path it is listed by.
+ */
+function thumbnailUrl(thumbnailPath: string): string {
+  const env = getLocationEnv();
+  return env === "electron" ? `file://${thumbnailPath}` : mediaUrlFor(thumbnailPath, env);
+}
 
 /**
  * The template library: browse, add, import, remove.
@@ -240,7 +251,7 @@ export class TemplateBrowser extends LitElement {
               >`
             : html`<img
                 class="asset-thumb-img"
-                src=${`file://${listing.thumbnailPath}`}
+                src=${thumbnailUrl(listing.thumbnailPath)}
                 alt=""
                 decoding="async"
               />`}

@@ -155,8 +155,16 @@ export type TemplateLinkPort = {
   /** Adds the listing to whatever the registry already holds. */
   register(listing: InstalledTemplate): void;
   load(templateId: string): Promise<TemplateData | null>;
-  /** Sets the project's frame and rate, before anything is placed. */
-  applyFrame(size: { w: number; h: number }, fps: number | null): void;
+  /**
+   * Sets the project's frame, rate and length, before anything is placed. The
+   * length is the template's in ms; a project shorter than it would export
+   * only its opening seconds.
+   */
+  applyFrame(
+    size: { w: number; h: number },
+    fps: number | null,
+    durationMs: number,
+  ): void;
   place(
     templateId: string,
   ): Promise<{ ok: true; elementId: string } | { ok: false; message: string }>;
@@ -196,7 +204,7 @@ export async function openTemplateLink(
     };
   }
 
-  port.applyFrame(data.size, data.fps ?? null);
+  port.applyFrame(data.size, data.fps ?? null, data.durationMs);
 
   const placed = await port.place(listing.id);
   if (!placed.ok) {
