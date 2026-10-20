@@ -378,7 +378,16 @@ async function readNgt(ngtPath: string): Promise<NgtEntries> {
   if (data == null) {
     throw new Error("the template's template.ngt could not be read");
   }
+  return ngtEntriesOf(data);
+}
 
+/**
+ * The five entries of a `.ngt` held as bytes, wherever the bytes came from.
+ *
+ * Split from `readNgt` so a template fetched over HTTP (`templateLink.ts`)
+ * is unzipped by the same code as one read off disk.
+ */
+export async function ngtEntriesOf(data: unknown): Promise<NgtEntries> {
   const zip = await JSZip.loadAsync(data as never);
 
   const text = async (name: string) => {

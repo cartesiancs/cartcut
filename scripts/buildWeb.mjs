@@ -32,6 +32,11 @@ const copies = [
   ["apps/app/index.html", "index.html"],
 ];
 
+// Example templates, each a folder laid out as an extracted `.cttpl`. The app
+// opens one from `/?template=<folder name>` (`templateLink.ts`). Optional: a
+// checkout without any still builds, and every link then reports "not found".
+const optionalCopies = [["examples/templates", "examples/templates"]];
+
 const exists = async (p) => {
   try {
     await stat(p);
@@ -48,6 +53,13 @@ for (const [from, to] of copies) {
   const src = path.join(root, from);
   if (!(await exists(src))) throw new Error(`missing build input: ${from}`);
   await cp(src, path.join(out, to), { recursive: true });
+}
+
+for (const [from, to] of optionalCopies) {
+  const src = path.join(root, from);
+  if (await exists(src)) {
+    await cp(src, path.join(out, to), { recursive: true });
+  }
 }
 
 const bundle = path.join(out, "dist", "index.js");

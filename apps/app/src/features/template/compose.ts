@@ -62,6 +62,12 @@ export type TemplateData = {
   tracks?: TimelineTrack[];
   /** Derived once at load by `slotsOf`, so every read is a lookup. */
   slots: TemplateSlot[];
+  /**
+   * The frame rate the template was authored at, from its render options.
+   * Absent when they name none. Read only by a link that opens a template as
+   * the whole project (`templateLink.ts`), which matches the project to it.
+   */
+  fps?: number;
 };
 
 const SEPARATOR = "::";
