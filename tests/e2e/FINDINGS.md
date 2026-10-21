@@ -379,3 +379,21 @@ does not have.
 | ElementImage on another canvas | refused ("captured from a different canvas"); `drawImage` from the host canvas works, so rasters are copied |
 | Minimized window, throttling on | no `paint`, no `requestAnimationFrame`, "No cached paint record". With `webContents.setBackgroundThrottling(false)` it paints normally while minimized |
 | Hidden window (`show: false`, throttling off) | paints normally |
+
+### The shape Chrome ships, measured 2026-10-21
+
+Chrome turns html-in-canvas on by default in 157 (Intent to Ship approved
+2026-10-01), with the opt-in renamed. One red 8x8 child, drawn through a
+`clip-path: inset(50%)` canvas, then `getImageData` at its centre, in Chrome for
+Testing with no flags unless stated:
+
+| build | calls present | `layoutsubtree` only | `content="drawable"` + child `drawable` | both |
+|---|---|---|---|---|
+| Chrome 155.0.8059.85 | no | n/a | n/a | n/a |
+| Chrome 155 + `CanvasDrawElement` | yes | red | throws `InvalidStateError` | red |
+| Chrome 157.0.8103.6 (beta) | yes | throws `InvalidStateError` | red | red |
+| Chrome 158.0.8106.0 / 158.0.8114.0 | yes | throws `InvalidStateError` | red | red |
+
+`HTMLCanvasElement.prototype.layoutSubtree` is gone from 157, so a support check
+keyed on it reports no in a browser that draws. The host sets both opt-ins and
+decides support in a browser by drawing a pixel (`htmlHost.ts#htmlSupport`).

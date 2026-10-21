@@ -1,10 +1,11 @@
 // Origin-trial tokens for the web build, written into its index.html.
 //
 // HTML graphics draw through Chrome's html-in-canvas API (`CanvasDrawElement`).
-// The desktop app switches it on for its own window (electron/lib/window.ts);
-// a stock browser exposes it only to a page whose origin presents a token for
-// the trial, from https://developer.chrome.com/origintrials. Without one, every
-// HTML graphic in a browser build draws nothing.
+// The desktop app switches it on for its own window (electron/lib/window.ts),
+// and Chrome and Edge turn it on by default from 157. Chrome 155 and 156 expose
+// it only to a page whose origin presents a token for the trial, from
+// https://developer.chrome.com/origintrials; without one, every HTML graphic in
+// a browser build draws nothing there.
 //
 // A token is bound to one origin, so the site and its Cloudflare Pages
 // deployments each need their own; registering the Pages project's

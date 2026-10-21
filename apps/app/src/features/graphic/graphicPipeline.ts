@@ -18,6 +18,11 @@
  * an empty outro) until the playhead moved. A scope's host is made on its first
  * prepare and must be released with `releaseScopeGraphics`.
  *
+ * **Nothing is asked of a host before `htmlSupport` has answered.** In a
+ * browser that is a drawn pixel, decided once; where the answer is no, the host
+ * reports itself unsupported, nothing is drawn, and the preview says why once
+ * (`graphicSupportNotice.ts`).
+ *
  * Everything that decides anything is in the pure modules beside this; this
  * file only supplies them with the app.
  */
@@ -32,7 +37,9 @@ import { fileUrlOf } from "./fileUrl";
 import { cssFamilyOf, fontEntryFor } from "./fontParams";
 import type { GraphicScope } from "./graphicScope";
 import { previewMayPrepare, serialize, whenPreviewMayPrepare } from "./graphicQueue";
-import { HtmlHost, previewHtmlHost } from "./htmlHost";
+import { HtmlHost, htmlSupport, previewHtmlHost } from "./htmlHost";
+import { createSupportNotice } from "./graphicSupportNotice";
+import { getLocationEnv } from "../../functions/getLocationEnv";
 import type { HtmlRasterPort } from "./htmlRasterPort";
 import { mountSpecOf } from "./mountSpec";
 import {
@@ -180,6 +187,7 @@ export async function prepareScopeFrame(
   if (jobs.length === 0) {
     return true;
   }
+  await htmlSupport();
   const keys = new Map<string, string | null>();
   const deps = depsFor(hostOf(scope));
   const prepare = () =>
@@ -207,15 +215,28 @@ export function releaseScopeGraphics(scope: GraphicScope): void {
   }
 }
 
+const supportNotice = createSupportNotice({
+  // Read when asked, not at import: the node suites load this module.
+  desktop: () => getLocationEnv() === "electron",
+  supported: htmlSupport,
+  show: (message) =>
+    (document.querySelector("toast-box") as any)?.showToast({ message, delay: "8000" }),
+});
+
 const session = new PreviewRasterSession(
   {
     plan: (request, scaleOf) => {
       const input = planInput(request.elements, request.cursor, request.fps, scaleOf);
       const current = planGraphics(input);
+      if (current.length > 0) {
+        supportNotice.needed();
+      }
       return { current, ahead: planLookahead(input, current) };
     },
     prepare: (jobs, sink) =>
-      loadFontLibrary().then(() => serialize(() => prepareGraphics(previewDeps, jobs, sink))),
+      loadFontLibrary()
+        .then(() => htmlSupport())
+        .then(() => serialize(() => prepareGraphics(previewDeps, jobs, sink))),
     mayPrepare: previewMayPrepare,
     whenMayPrepare: whenPreviewMayPrepare,
     releaseMounts: (live) => previewHtmlHost().release(live),

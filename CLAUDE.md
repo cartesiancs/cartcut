@@ -344,6 +344,15 @@ Things that bite:
   on write *and* on read, and the host builds DOM from the tree, never from a
   string. `features/graphic/` holds all of it; `htmlHost.ts` is the only file
   that calls the canvas API, because its shape has changed once already.
+  **Both opt-ins are set on every mount**: Electron's Chromium 152 draws only
+  with `layoutsubtree`, and Chrome 157, which turns the API on by default, draws
+  only with `content="drawable"` plus `drawable` on the child (measured; the
+  old name throws there). **In a browser, support is a drawn pixel**
+  (`htmlSupport`), awaited before any prepare; Safari and Firefox answer no,
+  draw no graphics and say so once (`graphicSupportNotice.ts`, and a warning
+  before a browser export). A graphic's own pictures load through
+  `fileUrl.ts#installGraphicAssetUrlResolver` in a browser build, the
+  `installFontUrlResolver` rule for faces.
 - **`export/snapshot.ts` copies the element map and each element, one level
   deep and no further.** The document is immutable by convention, so `animation`
   (36,000 baked samples per lane) is safe to share and a deep clone would not be.

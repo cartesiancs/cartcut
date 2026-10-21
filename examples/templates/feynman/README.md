@@ -29,10 +29,11 @@ publish, and none of them is in this folder.
 
 ## Where the titles draw
 
-The titles are HTML graphics. They draw in the desktop app, and in a browser
-only where Chrome's html-in-canvas API is available: on a site that presents an
-origin-trial token (`apps/app/origin-trial.txt`), or with the feature switched
-on in `chrome://flags`. Anywhere else the template plays without its titles.
+The titles are HTML graphics, drawn live by the browser's html-in-canvas API:
+in the desktop app, and in Chrome and Edge 157 or later, which turn it on by
+default. Chrome 155 and 156 draw them on a site that presents an origin-trial
+token (`apps/app/origin-trial.txt`). Safari and Firefox do not have the API:
+there the template plays without its titles, and the editor says so once.
 
 ## Rebuilding
 
