@@ -100,6 +100,21 @@ export function parseFontPath(fontPath: string): FontEntry {
   return { path: fontPath, name, type };
 }
 
+/**
+ * How a face's path becomes the URL its `@font-face` loads.
+ *
+ * The desktop app reads the file straight off disk. A browser build has no
+ * `file://` to read, so it installs the rule its media already follows
+ * (`functions/mediaUrl.ts`): a site path for the demo, the file route for a
+ * self-hosted server. Without that, a font a template ships beside its media
+ * registers and never loads, and every clip set in it draws in the fallback.
+ */
+let fontUrl: (path: string) => string = (path) => "file://" + path;
+
+export function installFontUrlResolver(resolve: (path: string) => string): void {
+  fontUrl = resolve;
+}
+
 /** Families already injected, so a repeated call is free. */
 const registered = new Set<string>([DEFAULT_FONT.name]);
 
@@ -189,7 +204,7 @@ export function ensureFontFaces(entries: readonly FontEntry[]): number {
 export function fontFaceRule(entry: FontEntry): string {
   const src = isLocalFontPath(entry.path)
     ? `local(${cssQuoted(entry.path.slice(LOCAL_FONT_PREFIX.length))})`
-    : `url(${cssQuoted("file://" + entry.path)})`;
+    : `url(${cssQuoted(fontUrl(entry.path))})`;
   return `@font-face { font-family: ${cssQuoted(entry.name)}; src: ${src}; }`;
 }
 

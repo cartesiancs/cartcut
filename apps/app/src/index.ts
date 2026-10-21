@@ -27,6 +27,9 @@ import {
   browserLocalFontPort,
   restoreLocalFonts,
 } from "./features/font/localFonts";
+import { installFontUrlResolver } from "./features/font/fontFaces";
+import { installGraphicAssetUrlResolver } from "./features/graphic/fileUrl";
+import { mediaUrlFor } from "./functions/mediaUrl";
 
 enableIpcWrapper();
 
@@ -35,6 +38,11 @@ enableIpcWrapper();
 // them from main.
 if (getLocationEnv() !== "electron") {
   void restoreLocalFonts(browserLocalFontPort());
+  // A face, or a graphic's own picture, that a template or project names by
+  // path loads from where the site serves its media, not from a `file://` the
+  // page cannot read.
+  installFontUrlResolver((path) => mediaUrlFor(path, getLocationEnv()));
+  installGraphicAssetUrlResolver((path) => mediaUrlFor(path, getLocationEnv()));
 }
 
 // The browser builds only. Electron already shows no native right-click menu.

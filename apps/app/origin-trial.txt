@@ -1,0 +1,14 @@
+# Chrome origin-trial tokens for the web build, one per line.
+#
+# HTML graphics (titles made with the graphic tool, and every example
+# template's text) draw through Chrome's html-in-canvas API. Chrome and Edge
+# turn it on by default from 157, so a token only matters to visitors still on
+# Chrome 155 or 156. Register at
+# https://developer.chrome.com/origintrials/#/view_trial/3478467762190286849
+# (the trial runs through Chrome 160), one token per origin:
+#
+#   https://cartcut.cartesiancs.com
+#   https://<project>.pages.dev, with "match all subdomains" for previews
+#
+# scripts/buildWeb.mjs writes each token into dist-web/index.html. Tokens are
+# public by design, so this file is committed. See scripts/originTrial.mjs.

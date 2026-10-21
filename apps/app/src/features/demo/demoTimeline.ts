@@ -5,6 +5,10 @@ import { v4 as uuidv4 } from "uuid";
 import { getLocationEnv } from "../../functions/getLocationEnv";
 import { useTimelineStore } from "../../states/timelineStore";
 import { placeNewElement } from "../timeline/placement";
+import {
+  linkedTemplateSlug,
+  openLinkedTemplate,
+} from "../template/templateLinkBrowser";
 
 /**
  * How long `/sample/106366-673007941.mp4` is: 596 frames at 60fps, 9933.33ms
@@ -15,7 +19,8 @@ const SAMPLE_VIDEO_MS = 9933;
 
 /**
  * The public demo's starting timeline: a sample clip, a still and a title,
- * placed once on the first update. Draws nothing.
+ * placed once on the first update, or the example template the page address
+ * names (`template/templateLink.ts`). Draws nothing.
  */
 @customElement("demo-timeline")
 export class DemoTimeline extends LitElement {
@@ -24,8 +29,26 @@ export class DemoTimeline extends LitElement {
   }
 
   firstUpdated() {
-    if (getLocationEnv() == "demo") {
+    const env = getLocationEnv();
+    // A link naming an example template opens that instead of the preset, in
+    // either browser build: `/?template=<slug>`.
+    const slug = env === "electron" ? null : linkedTemplateSlug();
+    if (slug != null) {
+      void this.openTemplate(slug);
+      return;
+    }
+    if (env == "demo") {
       this.insertPresetTimeline();
+    }
+  }
+
+  private async openTemplate(slug: string) {
+    const result = await openLinkedTemplate(slug);
+    if (!result.ok) {
+      (document.querySelector("toast-box") as any)?.showToast({
+        message: result.message,
+        delay: "6000",
+      });
     }
   }
 

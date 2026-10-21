@@ -5,6 +5,7 @@ import {
   documentFontEntries,
   ensureFontFaces,
   fontFaceRule,
+  installFontUrlResolver,
   isLocalFontPath,
   loadedFontFamilies,
   localFontPath,
@@ -305,5 +306,22 @@ describe("documentFontEntries", () => {
       expect.arrayContaining(["LoadA-Bold", "LoadB-Italic"]),
     );
     expect(rules.join("\n")).toContain('local("LoadB-Italic")');
+  });
+});
+
+describe("installFontUrlResolver", () => {
+  it("points a face at whatever URL the build serves its files from", () => {
+    const entry = { path: "/examples/templates/t/fonts/A-Bold.ttf", name: "A-Bold", type: "ttf" };
+    expect(fontFaceRule(entry)).toContain('url("file:///examples/templates/t/fonts/A-Bold.ttf")');
+    installFontUrlResolver((path) => `/api/file?path=${path}`);
+    try {
+      expect(fontFaceRule(entry)).toContain(
+        'url("/api/file?path=/examples/templates/t/fonts/A-Bold.ttf")',
+      );
+      // a local face never goes through it
+      expect(fontFaceRule(parseFontPath("local:A-Bold"))).toContain('local("A-Bold")');
+    } finally {
+      installFontUrlResolver((path) => "file://" + path);
+    }
   });
 });

@@ -7,9 +7,10 @@
 //
 // Run after `webpack --mode=production`; see the "build:web" script.
 
-import { cp, mkdir, rm, readdir, stat } from "node:fs/promises";
+import { cp, mkdir, rm, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseTokens, withOriginTrials } from "./originTrial.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const out = path.join(root, "dist-web");
@@ -32,6 +33,11 @@ const copies = [
   ["apps/app/index.html", "index.html"],
 ];
 
+// Example templates, each a folder laid out as an extracted `.cttpl`. The app
+// opens one from `/?template=<folder name>` (`templateLink.ts`). Optional: a
+// checkout without any still builds, and every link then reports "not found".
+const optionalCopies = [["examples/templates", "examples/templates"]];
+
 const exists = async (p) => {
   try {
     await stat(p);
@@ -50,9 +56,25 @@ for (const [from, to] of copies) {
   await cp(src, path.join(out, to), { recursive: true });
 }
 
+for (const [from, to] of optionalCopies) {
+  const src = path.join(root, from);
+  if (await exists(src)) {
+    await cp(src, path.join(out, to), { recursive: true });
+  }
+}
+
 const bundle = path.join(out, "dist", "index.js");
 if (!(await exists(bundle))) {
   throw new Error("dist/index.js missing — run `webpack --mode=production` first");
+}
+
+// HTML graphics need a Chrome origin-trial token per origin; see originTrial.mjs.
+const tokenFile = path.join(root, "apps/app/origin-trial.txt");
+if (await exists(tokenFile)) {
+  const tokens = parseTokens(await readFile(tokenFile, "utf8"));
+  const page = path.join(out, "index.html");
+  await writeFile(page, withOriginTrials(await readFile(page, "utf8"), tokens));
+  console.log(`dist-web: ${tokens.length} origin-trial token(s)`);
 }
 
 const count = async (dir) => {

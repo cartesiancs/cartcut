@@ -10,6 +10,12 @@ import {
   markOnboardingComplete,
 } from "./onboardingFlag";
 import { FADE_MS, ONBOARDING_MOTION, onboardingMotionStyle } from "./motion";
+import { templateSlugFrom } from "../template/templateLink";
+import {
+  FIRST_ART_WAIT_MS,
+  NEXT_ART_WAIT_MS,
+  browserArtPreloader,
+} from "./artPreload";
 
 /**
  * Every duration and curve is `motion.ts`, handed to the stylesheet as custom
@@ -17,6 +23,8 @@ import { FADE_MS, ONBOARDING_MOTION, onboardingMotionStyle } from "./motion";
  * the transitions and the timers that wait for them cannot drift apart.
  */
 const MOTION_STYLE = onboardingMotionStyle();
+
+const ART_SRCS = ONBOARDING_STEPS.map((step) => step.art.src);
 
 /**
  * The first-run tour: five cards over a dimmed editor, shown once and then
@@ -61,6 +69,13 @@ export class OnboardingOverlay extends LitElement {
   private leaveTimer: number | null = null;
   private enterTimer: number | null = null;
 
+  /**
+   * Bumped by `_clearTimers`. A card that is waiting for its picture checks it
+   * before it arrives, so a restart or a removal cancels that wait the same
+   * way clearing `swapTimer` cancels the fade before it.
+   */
+  private epoch = 0;
+
   private boundKeydown = this._handleKeydown.bind(this);
 
   /**
@@ -79,10 +94,7 @@ export class OnboardingOverlay extends LitElement {
     this.leaving = false;
     this.entering = false;
     this.stepIndex = 0;
-    // From false, this re-inserts the scrim, which is what re-runs its
-    // fade-in animation.
-    this.visible = true;
-    this._beginEntrance();
+    void this._show();
   };
 
   createRenderRoot() {
@@ -108,6 +120,7 @@ export class OnboardingOverlay extends LitElement {
   }
 
   private _clearTimers() {
+    this.epoch++;
     if (this.swapTimer !== null) window.clearTimeout(this.swapTimer);
     if (this.leaveTimer !== null) window.clearTimeout(this.leaveTimer);
     if (this.enterTimer !== null) window.clearTimeout(this.enterTimer);
@@ -134,10 +147,28 @@ export class OnboardingOverlay extends LitElement {
 
   /** Where the flag lives, and what a refused store means, is `onboardingFlag.ts`. */
   private async _decideVisibility() {
+    // A link that opens an example template is there to show that template;
+    // the tour waits for a visit without one. The flag is left alone, so it
+    // still runs then.
+    if (templateSlugFrom(window.location.search) != null) return;
     if (await isOnboardingComplete(browserOnboardingFlagPort)) return;
 
-    // The scrim fades itself in: it carries a CSS animation that runs the
-    // moment it is inserted, which is right now.
+    await this._show();
+  }
+
+  /**
+   * Requests every card's picture, then puts the first card up once its own
+   * is decoded (or `FIRST_ART_WAIT_MS` has passed), so the tour never opens on
+   * an empty card. `artPreload.ts` says why.
+   */
+  private async _show() {
+    const epoch = this.epoch;
+    browserArtPreloader.warm(ART_SRCS);
+    await browserArtPreloader.ready(ART_SRCS[0], FIRST_ART_WAIT_MS);
+    if (epoch !== this.epoch) return;
+
+    // From false, this inserts the scrim, and its CSS animation fades it in
+    // from the moment it is inserted.
     this.visible = true;
     this._beginEntrance();
   }
@@ -146,6 +177,9 @@ export class OnboardingOverlay extends LitElement {
    * Fades the card's contents out, swaps the step underneath, and lets them
    * fade back in. Re-entrant clicks are dropped rather than queued — a fast
    * double-click on Next should not skip a card.
+   *
+   * The new card arrives when the fade is over and its picture is in,
+   * whichever is later: otherwise its entrance plays over an empty box.
    */
   private _goTo(index: number) {
     if (this.swapping || this.leaving || index === this.stepIndex) return;
@@ -153,11 +187,20 @@ export class OnboardingOverlay extends LitElement {
     this.swapping = true;
     // Cleared here, not on arrival: see the field's note.
     this.entering = false;
+    // Asked for now, so the fade-out is time the picture gets as well.
+    const art = browserArtPreloader.ready(
+      ONBOARDING_STEPS[index].art.src,
+      NEXT_ART_WAIT_MS,
+    );
+    const epoch = this.epoch;
     this.swapTimer = window.setTimeout(() => {
-      this.stepIndex = index;
-      this.swapping = false;
       this.swapTimer = null;
-      this._beginEntrance();
+      void art.then(() => {
+        if (epoch !== this.epoch) return;
+        this.stepIndex = index;
+        this.swapping = false;
+        this._beginEntrance();
+      });
     }, FADE_MS);
   }
 

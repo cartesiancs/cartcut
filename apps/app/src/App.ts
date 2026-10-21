@@ -13,9 +13,11 @@ import { IS_MAC } from "./utils/platform";
 import { exportElementRenderers } from "./features/export/renderers";
 import {
   installProjectTemplates,
+  installTemplatePreparer,
   refreshTemplateLibrary,
   templateFor,
 } from "./features/template/templateRegistry";
+import { documentFontEntries, faceReady } from "./features/font/fontFaces";
 import { useTimelineStore } from "./states/timelineStore";
 import { compositionDataOf } from "./states/timelineWorkspace";
 import { startCloud } from "./features/cloud/cloudStore";
@@ -82,6 +84,12 @@ export class App extends LitElement {
     installProjectTemplates((compositionId) =>
       compositionDataOf(useTimelineStore.getState(), compositionId),
     );
+
+    // A template's titles are set in faces nothing else registers: put them
+    // on the page and wait for them, as opening a project does.
+    installTemplatePreparer(async (data) => {
+      await Promise.all(documentFontEntries(data.elements).map(faceReady));
+    });
 
     // And the graphic renderer's: the preview's generator, the registry, the
     // latest HTML rasters. An export opens a scope of its own instead.

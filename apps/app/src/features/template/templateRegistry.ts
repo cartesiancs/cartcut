@@ -91,6 +91,20 @@ const listeners = new Set<() => void>();
 let projectTemplates: (compositionId: string) => TemplateData | null = () =>
   null;
 
+/**
+ * Work a template needs done before it can be drawn as authored: registering
+ * and loading the fonts its text clips name, which `functions/project.ts` does
+ * for a project and nothing did for a template. Injected for the reason
+ * `projectTemplates` is; `App.ts` installs it.
+ */
+let prepare: (data: TemplateData) => Promise<void> = async () => undefined;
+
+export function installTemplatePreparer(
+  next: (data: TemplateData) => Promise<void>,
+): void {
+  prepare = next;
+}
+
 export function installProjectTemplates(
   resolve: (compositionId: string) => TemplateData | null,
 ): void {
@@ -219,6 +233,10 @@ export async function loadTemplate(
   entries.set(templateId, { state: "loading" });
   try {
     const data = await reader(listing);
+    // Before "ready", so an export that preloads a template also waits for
+    // the faces its titles are set in. A face that never loads costs a
+    // fallback face, never the template.
+    await prepare(data).catch(() => undefined);
     entries.set(templateId, { state: "ready", data });
     return data;
   } catch (error) {
@@ -296,6 +314,7 @@ export function resetTemplateRegistry(): void {
   listeners.clear();
   reader = defaultReader;
   projectTemplates = () => null;
+  prepare = async () => undefined;
 }
 
 /** Test-only: put a document in directly, without touching the disk. */
@@ -378,7 +397,16 @@ async function readNgt(ngtPath: string): Promise<NgtEntries> {
   if (data == null) {
     throw new Error("the template's template.ngt could not be read");
   }
+  return ngtEntriesOf(data);
+}
 
+/**
+ * The five entries of a `.ngt` held as bytes, wherever the bytes came from.
+ *
+ * Split from `readNgt` so a template fetched over HTTP (`templateLink.ts`)
+ * is unzipped by the same code as one read off disk.
+ */
+export async function ngtEntriesOf(data: unknown): Promise<NgtEntries> {
   const zip = await JSZip.loadAsync(data as never);
 
   const text = async (name: string) => {

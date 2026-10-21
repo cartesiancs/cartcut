@@ -22,6 +22,7 @@
 import type { Timeline } from "../../@types/timeline";
 import type { ExistsFn } from "../project/assetsFile";
 import { relinkAssets } from "../project/assetsFile";
+import { coerceFps } from "../timeline/frames";
 import { spanEnd } from "../timeline/geometry";
 import {
   normalizeDocument,
@@ -175,5 +176,12 @@ export async function readTemplateDocument(
     // Derived once here rather than on every read, which is what lets
     // `composeTemplate` treat the slot list as a lookup.
     slots: slotsOf(document.elements),
+    ...fpsField(renderOptions),
   };
+}
+
+/** `{ fps }` when the render options name a usable rate, else nothing. */
+function fpsField(renderOptions: unknown): { fps?: number } {
+  const fps = positive((renderOptions as { fps?: unknown })?.fps);
+  return fps == null ? {} : { fps: coerceFps(fps) };
 }

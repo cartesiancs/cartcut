@@ -42,6 +42,9 @@ import { webExportAvailable } from "./web/codecSupport";
 import { browserDestinationHost, chooseDestination } from "./web/destination";
 import { encodePlanFor } from "./web/encodeSettings";
 import { runWebExport } from "./web/webExportSession";
+import { needsHtmlHost } from "../graphic/graphicPipeline";
+import { htmlSupport } from "../graphic/htmlHost";
+import { UNSUPPORTED_TITLES_EXPORT_MESSAGE } from "../graphic/graphicSupportNotice";
 
 /**
  * How long a cancel may sit unconfirmed before the button frees itself.
@@ -318,6 +321,13 @@ async function startWebExport(): Promise<void> {
     await destination.discard();
     toast(vetoMessage(objections.vetoes));
     return;
+  }
+
+  // Said before the frames are drawn, not after: the file is still worth
+  // having without its titles, and nothing in it would say they are missing.
+  // After the save dialog, which has to be the first thing awaited.
+  if (needsHtmlHost(timeline) && !(await htmlSupport())) {
+    toast(UNSUPPORTED_TITLES_EXPORT_MESSAGE, "8000");
   }
 
   exportProgress.begin(timeline, frameCount(options), options.fps);

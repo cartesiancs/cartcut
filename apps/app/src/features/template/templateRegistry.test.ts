@@ -5,6 +5,7 @@ import { createTemplateElement } from "../timeline/templateOps";
 import type { TemplateData } from "./compose";
 import {
   forgetTemplate,
+  installTemplatePreparer,
   installedTemplates,
   loadTemplate,
   preloadTemplatesForDocument,
@@ -263,5 +264,37 @@ describe("preloadTemplatesForDocument", () => {
     await expect(
       preloadTemplatesForDocument({ a: placed("ghost") } as unknown as Timeline),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("installTemplatePreparer", () => {
+  it("is ready only once the preparer has finished", async () => {
+    setTemplateReader(async (entry) => data({ id: entry.id }));
+    setTemplateLibrary([listing()]);
+    let release: () => void = () => undefined;
+    const seen: string[] = [];
+    installTemplatePreparer(async (d) => {
+      seen.push(d.id);
+      await new Promise<void>((resolve) => (release = resolve));
+    });
+
+    const loading = loadTemplate("neon");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(templateFor("neon")).toBeNull();
+    release();
+    expect(await loading).not.toBeNull();
+    expect(seen).toEqual(["neon"]);
+    expect(templateFor("neon")).not.toBeNull();
+  });
+
+  it("still serves the template when preparing it fails", async () => {
+    setTemplateReader(async (entry) => data({ id: entry.id }));
+    setTemplateLibrary([listing()]);
+    installTemplatePreparer(async () => {
+      throw new Error("no such face");
+    });
+    expect(await loadTemplate("neon")).not.toBeNull();
+    expect(templateFailures()).toEqual([]);
   });
 });

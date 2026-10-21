@@ -41,6 +41,10 @@
     // the specs; `tests/e2e/harness` and `tests/e2e/scenario` are not specs.
     // The suite is type-checked on its own, against Playwright's config.
     "tests",
+    // The scripts that rebuild an example template from its measurements. They
+    // run under jiti as ES modules with top-level await, which this program's
+    // `module: commonjs` refuses, and nothing in the bundle imports them.
+    "examples/templates-source",
     "**/*.test.ts",
     "**/*.spec.ts"
   ]
