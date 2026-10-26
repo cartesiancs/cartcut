@@ -1,5 +1,6 @@
 {
   "name": "Feynman",
   "author": "CartCut examples",
-  "thumbnail": "thumbnail.jpg"
+  "thumbnail": "thumbnail.jpg",
+  "schema": 3
 }

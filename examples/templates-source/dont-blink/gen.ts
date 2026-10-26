@@ -274,5 +274,5 @@ zip.file("tracks.json", JSON.stringify(doc.tracks));
 zip.file("renderOptions.json", JSON.stringify(renderOptions));
 zip.file("assetPaths.json", JSON.stringify(assetPaths));
 writeFileSync(`${outDir}/template.ngt`, await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 9 } }));
-writeFileSync(`${outDir}/template.json`, JSON.stringify({ name: spec.name, author: spec.author, thumbnail: "thumbnail.jpg" }, null, 2) + "\n");
+writeFileSync(`${outDir}/template.json`, JSON.stringify({ name: spec.name, author: spec.author, thumbnail: "thumbnail.jpg", schema: project.schemaVersion }, null, 2) + "\n");
 console.log("elements", Object.keys(doc.elements).length, "tracks", doc.tracks.length);

@@ -194,7 +194,8 @@ export async function writeTemplate(args: {
   // A fixed date, so a rebuild with nothing changed is byte-identical.
   const date = new Date("2026-01-01T00:00:00Z");
   const put = (file: string, value: unknown) => zip.file(file, JSON.stringify(value), { date });
-  put("project.json", { schemaVersion: schemaVersionFor(doc.elements) });
+  const schemaVersion = schemaVersionFor(doc.elements);
+  put("project.json", { schemaVersion });
   put("timeline.json", doc.elements);
   put("tracks.json", doc.tracks);
   put("renderOptions.json", renderOptions);
@@ -207,7 +208,13 @@ export async function writeTemplate(args: {
   );
   writeFileSync(
     path.join(outDir, "template.json"),
-    JSON.stringify({ name, author: "CartCut examples", thumbnail: "thumbnail.jpg" }, null, 2) + "\n",
+    // `schema` is what the cloud server lists, so the app can hide a template
+    // its build cannot open; the server refuses a folder without it.
+    JSON.stringify(
+      { name, author: "CartCut examples", thumbnail: "thumbnail.jpg", schema: schemaVersion },
+      null,
+      2,
+    ) + "\n",
   );
   return { elements: Object.keys(doc.elements).length, tracks: doc.tracks.length };
 }

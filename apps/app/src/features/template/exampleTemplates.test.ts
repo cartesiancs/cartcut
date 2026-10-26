@@ -83,6 +83,16 @@ describe("example templates", () => {
       expect(fs.existsSync(path.join(examplesDir, slug, manifest.thumbnail!))).toBe(true);
     });
 
+    // The cloud server refuses a template folder whose manifest has no
+    // numeric `schema`, and the app hides one whose `schema` it cannot read,
+    // so a stale value either drops the template or offers one that fails.
+    it("declares the schema its document is written at", async () => {
+      const manifest = JSON.parse(fs.readFileSync(path.join(examplesDir, slug, "template.json"), "utf8"));
+      const project = JSON.parse((await entriesOf(slug)).project ?? "{}");
+      expect(typeof manifest.schema).toBe("number");
+      expect(manifest.schema).toBe(project.schemaVersion);
+    });
+
     it("carries no path from its author's machine", async () => {
       for (const [name, text] of Object.entries(await entriesOf(slug))) {
         expect(text ?? "", name).not.toMatch(MACHINE_PATH);
