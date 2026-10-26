@@ -2,7 +2,7 @@ use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use cartcut_cloud::{load_catalog, serve, Kind, State};
+use cartcut_cloud::{load_catalog, serve, Kind, RequestLog, State};
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -10,6 +10,7 @@ async fn main() {
     let bind = env::var("CARTCUT_CLOUD_BIND").unwrap_or_else(|_| "127.0.0.1:8787".into());
     let content =
         PathBuf::from(env::var("CARTCUT_CLOUD_CONTENT").unwrap_or_else(|_| "content".into()));
+    let logs = PathBuf::from(env::var("CARTCUT_CLOUD_LOGS").unwrap_or_else(|_| "logs".into()));
 
     // Every file is read and hashed before the first request is answered,
     // which takes seconds for a large folder: say so, or it looks hung.
@@ -30,7 +31,20 @@ async fn main() {
         listener.local_addr().map(|a| a.to_string()).unwrap_or(bind)
     );
 
-    let state = Arc::new(State::new(catalog, true));
+    // Serving matters more than the log: one that cannot be written is
+    // reported and the server answers anyway.
+    let requests = match RequestLog::open(&logs) {
+        Ok(log) => {
+            println!("logging requests to {}", logs.display());
+            Some(log)
+        }
+        Err(error) => {
+            eprintln!("cannot log requests to {}: {error}", logs.display());
+            None
+        }
+    };
+
+    let state = Arc::new(State::new(catalog, requests));
     tokio::select! {
         _ = serve(listener, Arc::clone(&state)) => {}
         _ = reload_on_hangup(Arc::clone(&state), content) => {}

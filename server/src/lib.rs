@@ -8,6 +8,7 @@
 pub mod body;
 pub mod catalog;
 pub mod gifs;
+pub mod log;
 mod routes;
 
 use std::sync::{Arc, RwLock};
@@ -19,6 +20,7 @@ use hyper_util::rt::{TokioIo, TokioTimer};
 use tokio::net::TcpListener;
 
 pub use catalog::{load_catalog, Catalog, Kind};
+pub use log::RequestLog;
 
 /// A client that opens a connection and sends nothing holds a task until this.
 const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
@@ -27,15 +29,15 @@ pub struct State {
     /// Swapped whole by `replace`. A request takes the `Arc` once and answers
     /// from it to the end, so a reload never shows it half of each catalog.
     catalog: RwLock<Arc<Catalog>>,
-    /// One line per request on stdout. Off in the test suite.
-    pub log_requests: bool,
+    /// One line per request, to a file per day. `None` in the test suite.
+    pub requests: Option<RequestLog>,
 }
 
 impl State {
-    pub fn new(catalog: Catalog, log_requests: bool) -> State {
+    pub fn new(catalog: Catalog, requests: Option<RequestLog>) -> State {
         State {
             catalog: RwLock::new(Arc::new(catalog)),
-            log_requests,
+            requests,
         }
     }
 

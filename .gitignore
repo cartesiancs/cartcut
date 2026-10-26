@@ -9,6 +9,8 @@
 .DS_Store
 /even-terminal-*.log
 /server/target
+# The cloud server's daily request logs (server/src/log.rs).
+/server/logs/
 .claude/settings.local.json
 
 # E2E: downloaded/derived media fixtures and per-run diagnostic artifacts.

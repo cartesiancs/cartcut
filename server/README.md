@@ -18,6 +18,11 @@ cargo test                                             # the API tests
 |---|---|
 | `CARTCUT_CLOUD_BIND` | `127.0.0.1:8787` |
 | `CARTCUT_CLOUD_CONTENT` | `content` |
+| `CARTCUT_CLOUD_LOGS` | `logs` |
+
+Each request is one line in `logs/requests-<date>.log`, a new file every UTC
+day, and never on the console, which keeps only startup, reload and warning
+lines. Nothing deletes old files; prune them with cron or logrotate.
 
 The app picks its server in this order, the same in a development and a
 packaged build:

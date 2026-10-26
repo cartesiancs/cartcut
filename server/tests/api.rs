@@ -49,7 +49,7 @@ async fn start_on(root: &std::path::Path) -> (SocketAddr, Arc<State>) {
     let (catalog, _) = load_catalog(root);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = Arc::new(State::new(catalog, false));
+    let state = Arc::new(State::new(catalog, None));
     tokio::spawn(serve(listener, Arc::clone(&state)));
     (addr, state)
 }

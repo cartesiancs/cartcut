@@ -37,14 +37,14 @@ pub async fn handle(
         request.uri().query(),
     )
     .await;
-    if state.log_requests {
-        println!(
+    if let Some(log) = &state.requests {
+        log.record(format!(
             "{} {} {} {:.1}ms",
             request.method(),
             request.uri().path(),
             response.status().as_u16(),
             started.elapsed().as_secs_f64() * 1000.0
-        );
+        ));
     }
     Ok(response)
 }
