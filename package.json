@@ -1,6 +1,6 @@
 {
   "name": "cartcut-app",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Video Editor for AI Agents",
   "main": "main/main.js",
   "author": "cartesiancs",
