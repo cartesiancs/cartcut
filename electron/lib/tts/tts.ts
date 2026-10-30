@@ -17,7 +17,7 @@ import { app, utilityProcess, type UtilityProcess } from "electron";
 
 import { netFetch } from "../netFetch";
 
-import { MODEL_TOTAL_BYTES, isVoiceId } from "./ttsManifest";
+import { MODEL_TOTAL_BYTES } from "./ttsManifest";
 import {
   availability,
   modelDir,
@@ -29,7 +29,6 @@ import {
   type DownloadProgress,
 } from "./ttsDownload";
 import { seedFor, speechKey } from "./ttsCacheKey";
-import { coerceLang } from "./ttsText";
 import type {
   SynthesisRequest,
   TtsStage,
@@ -37,9 +36,9 @@ import type {
   WorkerEvent,
 } from "./ttsProtocol";
 
-/** Never below four: two denoising steps clip on a handful of samples. */
-const MIN_STEPS = 4;
-const MAX_STEPS = 8;
+// The request rule is shared with the browser build, so it lives in a file
+// that does not import Electron. `ipc/ipcTts.ts` still reaches it from here.
+export { coerceRequest } from "./ttsRequest";
 
 /**
  * How long the worker outlives its last job.
@@ -65,37 +64,6 @@ function userData(): string {
 
 export function ttsAvailability(): TtsAvailability {
   return availability(userData());
-}
-
-/**
- * Validate a request at the boundary, the `coerceX` half of the house rule.
- *
- * Everything downstream may then assume a usable voice, a known language and a
- * step count inside the range the model behaves in.
- */
-export function coerceRequest(raw: {
-  text?: unknown;
-  voice?: unknown;
-  lang?: unknown;
-  speed?: unknown;
-  steps?: unknown;
-}): Omit<SynthesisRequest, "seed"> {
-  const speed =
-    typeof raw.speed === "number" && Number.isFinite(raw.speed)
-      ? Math.min(2, Math.max(0.5, raw.speed))
-      : 1.05;
-  const steps =
-    typeof raw.steps === "number" && Number.isFinite(raw.steps)
-      ? Math.min(MAX_STEPS, Math.max(MIN_STEPS, Math.round(raw.steps)))
-      : MIN_STEPS;
-
-  return {
-    text: typeof raw.text === "string" ? raw.text : "",
-    voice: isVoiceId(raw.voice) ? raw.voice : "M1",
-    lang: coerceLang(raw.lang),
-    speed,
-    steps,
-  };
 }
 
 export function installModel(

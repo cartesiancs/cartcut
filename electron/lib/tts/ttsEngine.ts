@@ -283,6 +283,14 @@ async function synthesizeChunk(
   return toFloat32(voice.wav_tts);
 }
 
+/**
+ * Silence between the chunks of a long script, in seconds.
+ *
+ * Shared by the desktop worker and the browser's, so a script comes back
+ * with the same pauses whichever build spoke it.
+ */
+export const CHUNK_GAP_SECONDS = 0.3;
+
 export type SynthesisResult = {
   samples: Float32Array;
   sampleRate: number;

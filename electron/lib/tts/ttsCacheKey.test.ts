@@ -10,6 +10,7 @@
 import { describe, expect, it } from "vitest";
 
 import { seedFor, speechKey } from "./ttsCacheKey";
+import { keyFromDigest, speechKeyInput } from "./ttsKeyInput";
 import { ENGINE_VERSION, MODEL_REVISION } from "./ttsManifest";
 import type { SynthesisRequest } from "./ttsProtocol";
 
@@ -109,5 +110,32 @@ describe("seedFor", () => {
       expect(seed).toBeGreaterThanOrEqual(0);
       expect(seed).toBeLessThanOrEqual(0xffffffff);
     }
+  });
+});
+
+/**
+ * The browser build hashes the same input with SubtleCrypto
+ * (`apps/app/src/features/tts/web/browserTts.ts`). If the two hashes ever
+ * disagreed, a line would start from different noise in the two builds and
+ * sound different, with nothing failing.
+ */
+describe("the browser's key", () => {
+  const subtleKey = async (request: Request) => {
+    const digest = await globalThis.crypto.subtle.digest(
+      "SHA-1",
+      new TextEncoder().encode(speechKeyInput(request)),
+    );
+    return keyFromDigest(Buffer.from(digest).toString("hex"));
+  };
+
+  it("is the desktop's key, for ASCII and for Korean", async () => {
+    for (const text of ["Hello there.", "안녕하세요. 카트컷입니다.", "e\u0301 \u{1F600}"]) {
+      const request = { ...BASE, text, lang: "ko" as const };
+      expect(await subtleKey(request)).toBe(speechKey(request));
+    }
+  });
+
+  it("disagrees when the input does, so the comparison measures something", async () => {
+    expect(await subtleKey({ ...BASE, voice: "F1" })).not.toBe(speechKey(BASE));
   });
 });

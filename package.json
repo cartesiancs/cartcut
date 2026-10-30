@@ -145,7 +145,9 @@
       "!apps/automatic-caption/dist/**",
       "!apps/automatic-caption/public/**",
       "!apps/app/src/**",
-      "!apps/app/sample/**"
+      "!apps/app/sample/**",
+      "!apps/app/dist/ttsWorker.*",
+      "!apps/app/dist/ort-wasm-simd-threaded.*"
     ],
     "artifactBuildCompleted": "./scripts/checkArtifactSize.mjs",
     "publish": {
@@ -202,6 +204,7 @@
     "electron-reload": "^2.0.0-alpha.1",
     "eslint-config-airbnb": "^19.0.4",
     "mini-css-extract-plugin": "^2.6.1",
+    "onnxruntime-web": "1.30.0",
     "playwright": "^1.62.1",
     "sass": "^1.55.0",
     "sass-loader": "^13.0.2",

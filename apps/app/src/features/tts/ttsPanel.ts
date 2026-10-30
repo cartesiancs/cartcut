@@ -27,7 +27,13 @@ import { live } from "lit/directives/live.js";
 
 import { speak } from "./ttsSession";
 import { ttsBridge, type TtsAvailabilityReply, type TtsPort } from "./ttsPort";
-import { downloadPrompt, ttsPhaseView, type TtsPhaseName } from "./ttsPhase";
+import {
+  downloadPrompt,
+  placeOf,
+  ttsPhaseView,
+  type TtsPhaseName,
+} from "./ttsPhase";
+import { browserTtsUnavailableMessage } from "./web/browserTts";
 
 /** Denoising steps. Four never clips; two does, on a handful of samples. */
 const QUALITY = [
@@ -87,7 +93,7 @@ export class TtsPanel extends LitElement {
     const port = this.port();
     if (port == null) {
       this.phase = "failed";
-      this.message = "Speech synthesis is only available in the desktop app.";
+      this.message = browserTtsUnavailableMessage();
       return;
     }
     try {
@@ -216,6 +222,7 @@ export class TtsPanel extends LitElement {
       stage: this.stage,
       totalBytes: this.info?.totalBytes,
       message: this.message,
+      storage: this.info?.storage,
     });
     if (view == null) {
       return "";
@@ -276,7 +283,11 @@ export class TtsPanel extends LitElement {
       <div class="p-3">
         <p class="text-light mb-1">Voices are not installed yet</p>
         <p class="text-secondary" style="font-size: 0.75rem;">
-          ${downloadPrompt(info?.totalBytes ?? 0, info?.presentBytes ?? 0)}
+          ${downloadPrompt(
+            info?.totalBytes ?? 0,
+            info?.presentBytes ?? 0,
+            info?.storage,
+          )}
         </p>
         <button
           class="btn btn-sm btn-primary"
@@ -287,8 +298,8 @@ export class TtsPanel extends LitElement {
         </button>
         <p class="text-secondary mt-3" style="font-size: 0.7rem;">
           Model ${info?.repo ?? ""}, licensed ${info?.license ?? ""}. It is
-          downloaded from Hugging Face and never leaves this computer
-          afterwards.
+          downloaded from Hugging Face and never leaves
+          ${placeOf(info?.storage)} afterwards.
         </p>
       </div>
     `;

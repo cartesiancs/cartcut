@@ -1,8 +1,10 @@
 /**
  * The vocoder's float samples as a file the editor can import.
  *
- * No imports beyond `Buffer`, so this runs under `environment: "node"` and can
- * be checked against ffmpeg decoding the same bytes back.
+ * No imports, and written through a `DataView` rather than a `Buffer`, so the
+ * browser build's synthesis worker encodes with the same code the desktop
+ * does. Runs under `environment: "node"` and is checked against ffmpeg
+ * decoding the same bytes back.
  *
  * 44.1 kHz is the model's own rate (`tts.json#ae.sample_rate`) and is kept.
  * Resampling here would be a second approximation on top of the vocoder's, and
@@ -37,39 +39,54 @@ export function toPcm16(sample: number): number {
  * A complete RIFF/WAVE file holding `samples`.
  *
  * Written in one allocation rather than appended, because a minute of 44.1 kHz
- * speech is 2.6 million samples and growing a Buffer per sample is what makes
+ * speech is 2.6 million samples and growing a buffer per sample is what makes
  * a synthesis that took two seconds spend ten writing itself out.
  */
+export function encodeWavBytes(
+  samples: ArrayLike<number>,
+  sampleRate: number,
+): Uint8Array {
+  const rate = Math.max(1, Math.floor(sampleRate));
+  const dataBytes = samples.length * (BITS_PER_SAMPLE / 8);
+  const bytes = new Uint8Array(HEADER_BYTES + dataBytes);
+  const view = new DataView(bytes.buffer);
+  const ascii = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) {
+      view.setUint8(offset + i, text.charCodeAt(i));
+    }
+  };
+
+  ascii(0, "RIFF");
+  // Every RIFF size field counts the bytes that follow it, not the whole file.
+  view.setUint32(4, 36 + dataBytes, true);
+  ascii(8, "WAVE");
+
+  ascii(12, "fmt ");
+  view.setUint32(16, 16, true); // PCM fmt chunk length
+  view.setUint16(20, 1, true); // PCM, uncompressed
+  view.setUint16(22, CHANNELS, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, (rate * CHANNELS * BITS_PER_SAMPLE) / 8, true); // byte rate
+  view.setUint16(32, (CHANNELS * BITS_PER_SAMPLE) / 8, true); // block align
+  view.setUint16(34, BITS_PER_SAMPLE, true);
+
+  ascii(36, "data");
+  view.setUint32(40, dataBytes, true);
+
+  for (let i = 0; i < samples.length; i++) {
+    view.setInt16(HEADER_BYTES + i * 2, toPcm16(samples[i]), true);
+  }
+
+  return bytes;
+}
+
+/** `encodeWavBytes` as a `Buffer`, for the desktop worker's `writeFileSync`. */
 export function encodeWav(
   samples: ArrayLike<number>,
   sampleRate: number,
 ): Buffer {
-  const rate = Math.max(1, Math.floor(sampleRate));
-  const dataBytes = samples.length * (BITS_PER_SAMPLE / 8);
-  const buffer = Buffer.alloc(HEADER_BYTES + dataBytes);
-
-  buffer.write("RIFF", 0, "ascii");
-  // Every RIFF size field counts the bytes that follow it, not the whole file.
-  buffer.writeUInt32LE(36 + dataBytes, 4);
-  buffer.write("WAVE", 8, "ascii");
-
-  buffer.write("fmt ", 12, "ascii");
-  buffer.writeUInt32LE(16, 16); // PCM fmt chunk length
-  buffer.writeUInt16LE(1, 20); // PCM, uncompressed
-  buffer.writeUInt16LE(CHANNELS, 22);
-  buffer.writeUInt32LE(rate, 24);
-  buffer.writeUInt32LE((rate * CHANNELS * BITS_PER_SAMPLE) / 8, 28); // byte rate
-  buffer.writeUInt16LE((CHANNELS * BITS_PER_SAMPLE) / 8, 32); // block align
-  buffer.writeUInt16LE(BITS_PER_SAMPLE, 34);
-
-  buffer.write("data", 36, "ascii");
-  buffer.writeUInt32LE(dataBytes, 40);
-
-  for (let i = 0; i < samples.length; i++) {
-    buffer.writeInt16LE(toPcm16(samples[i]), HEADER_BYTES + i * 2);
-  }
-
-  return buffer;
+  const bytes = encodeWavBytes(samples, sampleRate);
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
 
 /** How long `sampleCount` frames last, in whole milliseconds. */

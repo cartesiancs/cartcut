@@ -20,8 +20,14 @@ export class ElementControlAsset extends LitElement {
   @property()
   timelineState: ITimelineStore = useTimelineStore.getInitialState();
 
+  /**
+   * The current map, not the initial one. This element is created while the
+   * store notifies about the clip it stands for, and the subscription below
+   * only hears later writes, so starting from the initial (empty) map rendered
+   * a new audio clip against a map without it.
+   */
   @property()
-  timeline = this.timelineState.timeline;
+  timeline = useTimelineStore.getState().timeline;
 
   /** Undoes the store subscription. See `disconnectedCallback`. */
   private unsubscribeTimeline?: () => void;
@@ -175,7 +181,7 @@ export class ElementControlAsset extends LitElement {
 
   templateAudio() {
     const element = this.timeline[this.elementId];
-    if (element.filetype !== "audio") {
+    if (element?.filetype !== "audio") {
       return ``;
     }
     return html`<audio

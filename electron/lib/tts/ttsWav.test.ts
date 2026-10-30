@@ -18,7 +18,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { durationMsOf, encodeWav, joinChunks, toPcm16 } from "./ttsWav";
+import {
+  durationMsOf,
+  encodeWav,
+  encodeWavBytes,
+  joinChunks,
+  toPcm16,
+} from "./ttsWav";
 
 const REPO_ROOT = path.resolve(__dirname, "../../..");
 
@@ -105,6 +111,15 @@ describe("encodeWav", () => {
     const wav = encodeWav(new Float32Array(0), SAMPLE_RATE);
     expect(wav.length).toBe(44);
     expect(wav.readUInt32LE(40)).toBe(0);
+  });
+
+  // The browser's worker writes with `encodeWavBytes` and the desktop's with
+  // `encodeWav`; the ffmpeg block below checks the bytes, so they must be one.
+  it("is the same file as the browser build's bytes", () => {
+    const samples = Float32Array.from({ length: 64 }, (_, i) => Math.sin(i) * 1.2);
+    const bytes = encodeWavBytes(samples, SAMPLE_RATE);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(Buffer.from(bytes).equals(encodeWav(samples, SAMPLE_RATE))).toBe(true);
   });
 });
 

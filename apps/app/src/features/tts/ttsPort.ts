@@ -7,8 +7,13 @@
  * is handed one of these and runs under `environment: "node"` against a fake.
  *
  * `reverse`, `transcribe` and `proxy` all reach their bridge this way rather
- * than through `functions/ipcWrapper.ts`, and this follows them.
+ * than through `functions/ipcWrapper.ts`, and this follows them. A browser
+ * build has no preload bridge, and gets `web/browserTts.ts` instead: the same
+ * shape, answered by Cache Storage and a worker.
  */
+
+import { getLocationEnv } from "../../functions/getLocationEnv";
+import { browserTtsPort } from "./web/browserTts";
 
 /** The ten preset voices. There is no cloning in this release of the model. */
 export type TtsVoice = string;
@@ -21,6 +26,11 @@ export type TtsAvailabilityReply = {
   voices: readonly TtsVoice[];
   repo: string;
   license: string;
+  /**
+   * Where the model is kept. Absent on the desktop, which keeps it on disk;
+   * `browser` in a browser build, which keeps it in Cache Storage.
+   */
+  storage?: "browser";
 };
 
 export type TtsStartRequest = {
@@ -54,9 +64,16 @@ export type TtsPort = {
   onProgress(handler: (payload: TtsProgress) => void): () => void;
 };
 
-/** The bridge, or `null` in the web build, which has no main process. */
+/**
+ * The desktop's bridge, or the browser's port in a browser build, or `null`
+ * when this browser cannot synthesise (`browserTts.ts#browserTtsBlocker`).
+ */
 export function ttsBridge(): TtsPort | null {
-  return (window as any).electronAPI?.req?.tts ?? null;
+  const desktop: TtsPort | undefined = (window as any).electronAPI?.req?.tts;
+  if (desktop != null) {
+    return desktop;
+  }
+  return getLocationEnv() === "electron" ? null : browserTtsPort();
 }
 
 /** Whether synthesis is available at all. The utility tile hides itself if not. */

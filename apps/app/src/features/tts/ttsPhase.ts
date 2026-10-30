@@ -17,6 +17,19 @@ export type TtsPhaseName =
   | "speaking"
   | "failed";
 
+/** Where the model is kept: on the desktop's disk, or in a browser's storage. */
+export type ModelStorage = "disk" | "browser";
+
+/** The place a sentence says the model stays: "this computer". */
+export function placeOf(storage: ModelStorage | undefined): string {
+  return storage === "browser" ? "this browser" : "this computer";
+}
+
+/** The same place with its preposition: "on this computer", "in this browser". */
+function keptOn(storage: ModelStorage | undefined): string {
+  return `${storage === "browser" ? "in" : "on"} ${placeOf(storage)}`;
+}
+
 export type TtsPhaseInput = {
   phase: TtsPhaseName;
   fraction?: number | null;
@@ -26,6 +39,7 @@ export type TtsPhaseInput = {
   presentBytes?: number;
   totalBytes?: number;
   message?: string;
+  storage?: ModelStorage;
 };
 
 export type TtsPhaseView = {
@@ -48,13 +62,17 @@ export function megabytes(bytes: number): number {
  * States the figure plainly, because the one thing a user must not discover
  * afterwards is that pressing a button cost them 400MB.
  */
-export function downloadPrompt(totalBytes: number, presentBytes = 0): string {
+export function downloadPrompt(
+  totalBytes: number,
+  presentBytes = 0,
+  storage?: ModelStorage,
+): string {
   const total = megabytes(totalBytes);
   if (presentBytes > 0) {
     const left = megabytes(Math.max(0, totalBytes - presentBytes));
     return `About ${left} MB left of ${total} MB. The download was interrupted; it picks up where it stopped.`;
   }
-  return `The voice model is about ${total} MB. It downloads once and stays on this computer.`;
+  return `The voice model is about ${total} MB. It downloads once and stays ${keptOn(storage)}.`;
 }
 
 /**
@@ -81,12 +99,10 @@ export function ttsPhaseView(input: TtsPhaseInput): TtsPhaseView | null {
 
     case "downloading": {
       const total = input.totalBytes ?? 0;
+      const stays = `This happens once, and the model stays ${keptOn(input.storage)}.`;
       return {
         title: "Downloading the voice model...",
-        note:
-          total > 0
-            ? `About ${megabytes(total)} MB. This happens once, and the model stays on this computer.`
-            : "This happens once, and the model stays on this computer.",
+        note: total > 0 ? `About ${megabytes(total)} MB. ${stays}` : stays,
         percent: percentOf(input.fraction),
         cancellable: true,
         failed: false,

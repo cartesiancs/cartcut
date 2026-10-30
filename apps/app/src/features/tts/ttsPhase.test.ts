@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { downloadPrompt, megabytes, ttsPhaseView } from "./ttsPhase";
+import { downloadPrompt, megabytes, placeOf, ttsPhaseView } from "./ttsPhase";
 
 describe("megabytes", () => {
   it("rounds to whole megabytes", () => {
@@ -33,6 +33,15 @@ describe("downloadPrompt", () => {
 
   it("does not claim a negative remainder", () => {
     expect(downloadPrompt(100, 500)).toContain("0 MB left");
+  });
+
+  it("says where the model stays: the computer, or the browser", () => {
+    expect(downloadPrompt(401_276_744)).toContain("stays on this computer.");
+    expect(downloadPrompt(401_276_744, 0, "browser")).toContain(
+      "stays in this browser.",
+    );
+    expect(placeOf(undefined)).toBe("this computer");
+    expect(placeOf("browser")).toBe("this browser");
   });
 });
 
@@ -92,5 +101,18 @@ describe("ttsPhaseView", () => {
       totalBytes: 401_276_744,
     })!;
     expect(view.note).toContain("401 MB");
+  });
+});
+
+describe("ttsPhaseView in a browser", () => {
+  it("does not promise the download stays on the computer", () => {
+    const view = ttsPhaseView({
+      phase: "downloading",
+      fraction: 0.2,
+      totalBytes: 401_276_744,
+      storage: "browser",
+    })!;
+    expect(view.note).toContain("stays in this browser");
+    expect(view.note).not.toContain("computer");
   });
 });

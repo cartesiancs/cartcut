@@ -20,6 +20,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import {
+  CHUNK_GAP_SECONDS,
   synthesize,
   seededRandom,
   type SessionLike,
@@ -146,7 +147,7 @@ async function handle(command: WorkerCommand): Promise<void> {
         lang: request.lang,
         totalStep: request.steps,
         speed: request.speed,
-        gapSeconds: 0.3,
+        gapSeconds: CHUNK_GAP_SECONDS,
       },
     );
 

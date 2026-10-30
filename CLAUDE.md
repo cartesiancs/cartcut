@@ -474,6 +474,10 @@ features/prompter/     the teleprompter window: a script, then a scroll paced in
 features/note/         timeline notes: a pin drawn by the canvas, a card in the DOM,
                        pinned to a time and a track, outside the document and undo
 features/speed/        the ramp's graph editor; the curve is timeline/speedCurve.ts
+features/tts/          Text to Speech. The desktop synthesises in electron/lib/tts
+                       (onnxruntime-node); a browser in tts/web (onnxruntime-web in
+                       ttsWorker.js, webpack's second entry, the model in Cache
+                       Storage) on the same engine, key and seed, so the same audio
 features/update/       the update card; main's half is electron/lib/updateSession.ts
 features/cloud/        cloud content: store, merge rule, badge, the asset view, and the
                        paged GIF section the asset panel shows by default; main's

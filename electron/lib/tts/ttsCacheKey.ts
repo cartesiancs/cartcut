@@ -1,51 +1,27 @@
 /**
  * Naming a generated clip after everything that decides how it sounds.
  *
- * Its own file, with no Electron and no filesystem, so the rule can be checked:
- * a key that forgot one of its inputs would serve the wrong audio from the
- * cache, and that is a defect no amount of listening to the happy path finds.
+ * Desktop half: hashes with `node:crypto`. What is hashed, and the seed taken
+ * from the result, live in `ttsKeyInput.ts`, which has no imports a browser
+ * lacks, so the browser build hashes the same string with SubtleCrypto and
+ * arrives at the same key, the same seed and therefore the same audio.
  */
 
 import { createHash } from "node:crypto";
 
-import { ENGINE_VERSION, MODEL_REVISION } from "./ttsManifest";
+import { keyFromDigest, speechKeyInput } from "./ttsKeyInput";
 import type { SynthesisRequest } from "./ttsProtocol";
+
+export { seedFor } from "./ttsKeyInput";
 
 /**
  * A stable file name for "this text, in this voice, at these settings".
  *
  * Hashed rather than spelled out because the text is the largest input and a
  * paragraph does not fit in a filename on any filesystem.
- *
- * The seed is deliberately **not** an input. It is derived *from* this key, so
- * the same request always starts from the same noise; folding it in as well
- * would be circular.
  */
 export function speechKey(request: Omit<SynthesisRequest, "seed">): string {
-  return createHash("sha1")
-    .update(
-      [
-        MODEL_REVISION,
-        ENGINE_VERSION,
-        request.voice,
-        request.lang,
-        request.speed.toFixed(3),
-        String(Math.round(request.steps)),
-        request.text,
-      ].join(" "),
-    )
-    .digest("hex")
-    .slice(0, 24);
-}
-
-/**
- * The noise seed for a request, taken from its key.
- *
- * Means a cache hit and a fresh run produce the same audio, which is what lets
- * the cache be an optimisation rather than a behaviour change.
- */
-export function seedFor(key: string): number {
-  // The low 32 bits of the key's first eight hex digits. Any stable reduction
-  // would do; this one is readable next to the filename it came from.
-  return Number.parseInt(key.slice(0, 8), 16) >>> 0;
+  return keyFromDigest(
+    createHash("sha1").update(speechKeyInput(request)).digest("hex"),
+  );
 }
