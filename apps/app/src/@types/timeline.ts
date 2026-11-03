@@ -470,11 +470,11 @@ export type ReversedFrom = {
 /**
  * The mask shapes a clip can be cut to.
  *
- * Three of them are built in and one is drawn: `pen` means "the path in
+ * Four of them are built in and one is drawn: `pen` means "the path in
  * `MaskType.path`", so the shape name stays a closed union while the geometry
  * behind it is open. Ordered as the panel shows them.
  */
-export const MASK_SHAPES = ["rectangle", "star", "heart", "pen"] as const;
+export const MASK_SHAPES = ["rectangle", "circle", "star", "heart", "pen"] as const;
 
 export type MaskShape = (typeof MASK_SHAPES)[number];
 

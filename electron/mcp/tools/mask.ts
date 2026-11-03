@@ -48,7 +48,7 @@ export function registerMaskTools(define: Registrar) {
           .min(0)
           .max(100)
           .optional()
-          .describe("Corner rounding, 0-100. No effect on a heart, which has no corners."),
+          .describe("Corner rounding, 0-100. No effect on a circle or a heart, which have no corners."),
         invert: z
           .boolean()
           .optional()

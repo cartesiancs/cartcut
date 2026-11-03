@@ -50,6 +50,7 @@ import "../../components/input/input";
 /** The icon for each shape. Material Symbols names. */
 const SHAPE_ICON: Record<MaskShape, string> = {
   rectangle: "crop_square",
+  circle: "circle",
   star: "star",
   heart: "favorite",
   pen: "stylus",

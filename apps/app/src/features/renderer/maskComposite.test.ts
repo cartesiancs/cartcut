@@ -130,7 +130,7 @@ describe("the shapes", () => {
   };
 
   it("covers the centre and clears the corners, for every built-in shape", () => {
-    for (const shape of ["rectangle", "star", "heart"] as const) {
+    for (const shape of ["rectangle", "circle", "star", "heart"] as const) {
       const mask = { ...defaultMask(shape), size: { width: 90, height: 90 } };
       expect(covers(mask, 20, 22), `${shape} centre`).toBe(true);
       expect(covers(mask, 1, 1), `${shape} corner`).toBe(false);

@@ -158,7 +158,7 @@ describe("transformNodes", () => {
 });
 
 describe("templateNodes", () => {
-  it.each(["rectangle", "star", "heart"] as const)(
+  it.each(["rectangle", "circle", "star", "heart"] as const)(
     "normalises %s onto the unit square",
     (shape) => {
       const bounds = boundsOf(templateNodes(shape))!;
@@ -181,6 +181,57 @@ describe("templateNodes", () => {
     const heart = templateNodes("heart");
     expect(heart.length).toBeGreaterThan(0);
     expect(heart.some(isCorner)).toBe(false);
+  });
+
+  it("gives the circle four anchors on the circle, every one with both handles", () => {
+    const circle = templateNodes("circle");
+    expect(circle).toHaveLength(4);
+    expect(circle.some(isCorner)).toBe(false);
+    expect(circle.every((node) => node.cs !== undefined && node.ce !== undefined)).toBe(true);
+    // First straight up, then clockwise in the y-down space, like the rectangle.
+    const at = (i: number) => circle[i].p.map((v) => Math.round(v * 1e9) / 1e9 + 0);
+    expect([at(0), at(1), at(2), at(3)]).toEqual([
+      [0, -0.5],
+      [0.5, 0],
+      [0, 0.5],
+      [-0.5, 0],
+    ]);
+  });
+
+  // Checked against the true circle rather than against our own constant: a
+  // handle of the wrong length still closes the path and still fits the unit
+  // square, and only the radius along each arc gives it away.
+  it("stays within 0.03% of the radius all the way round", () => {
+    const point = (s: ReturnType<typeof segmentsOf>[number], t: number) => {
+      const u = 1 - t;
+      const w = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
+      return {
+        x: w[0] * s.from.x + w[1] * s.c1.x + w[2] * s.c2.x + w[3] * s.to.x,
+        y: w[0] * s.from.y + w[1] * s.c1.y + w[2] * s.c2.y + w[3] * s.to.y,
+      };
+    };
+    let worst = 0;
+    for (const segment of segmentsOf(templateNodes("circle"))) {
+      for (let i = 0; i <= 64; i++) {
+        const p = point(segment, i / 64);
+        worst = Math.max(worst, Math.abs(Math.hypot(p.x, p.y) - 0.5));
+      }
+    }
+    expect(worst / 0.5).toBeLessThan(0.0003);
+    // And a handle off by a tenth would not pass, so the bound measures something.
+    const wrong = templateNodes("circle").map((node) => ({
+      p: node.p,
+      cs: [node.cs![0] * 1.1, node.cs![1] * 1.1] as [number, number],
+      ce: [node.ce![0] * 1.1, node.ce![1] * 1.1] as [number, number],
+    }));
+    let wrongWorst = 0;
+    for (const segment of segmentsOf(wrong)) {
+      for (let i = 0; i <= 64; i++) {
+        const p = point(segment, i / 64);
+        wrongWorst = Math.max(wrongWorst, Math.abs(Math.hypot(p.x, p.y) - 0.5));
+      }
+    }
+    expect(wrongWorst / 0.5).toBeGreaterThan(0.0003);
   });
 
   it("returns a fresh copy, so a caller cannot rewrite the shape for everyone", () => {
@@ -220,6 +271,11 @@ describe("roundCorners", () => {
   it("leaves a heart untouched, because it has no corners", () => {
     const heart = templateNodes("heart");
     expect(roundCorners(heart, 0.25)).toBe(heart);
+  });
+
+  it("leaves a circle untouched, for the same reason", () => {
+    const circle = templateNodes("circle");
+    expect(roundCorners(circle, 0.25)).toBe(circle);
   });
 
   it("is idempotent: a rounded corner is no longer a corner", () => {

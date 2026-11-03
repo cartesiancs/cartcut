@@ -1,5 +1,5 @@
 /**
- * The three built-in mask shapes, as node lists in the unit square.
+ * The four built-in mask shapes, as node lists in the unit square.
  *
  * Each is authored in whatever coordinates were natural to write it in and then
  * **normalised onto `[-0.5, 0.5]²` at module load**, against the same
@@ -81,6 +81,38 @@ const RECTANGLE: MaskNode[] = normalized([
 ]);
 
 /**
+ * The cubic handle length for a quarter circle, as a fraction of the radius:
+ * `4/3 * tan(π/8)`. The standard four-arc circle, never more than 0.03% of
+ * the radius off the true one.
+ */
+const QUARTER_ARC_HANDLE = (4 / 3) * Math.tan(Math.PI / 8);
+
+/**
+ * Four anchors, first straight up, clockwise like the rectangle.
+ *
+ * The ellipse inscribed in the mask box, as every shape here fills its box: a
+ * circle while the box is square on screen, and an oval as the size fields
+ * pull it apart.
+ *
+ * Every anchor carries both handles, along the tangent, so none is a corner
+ * and the roundness slider leaves a circle alone by `round.ts`'s one rule,
+ * exactly as it leaves the heart.
+ */
+const CIRCLE: MaskNode[] = normalized(
+  Array.from({ length: 4 }, (_unused, index) => {
+    const angle = -Math.PI / 2 + (index * Math.PI) / 2;
+    const reach = 0.5 * QUARTER_ARC_HANDLE;
+    const tangent: [number, number] = [-Math.sin(angle) * reach, Math.cos(angle) * reach];
+    const node: MaskNode = {
+      p: [0.5 * Math.cos(angle), 0.5 * Math.sin(angle)],
+      cs: [-tangent[0], -tangent[1]],
+      ce: [tangent[0], tangent[1]],
+    };
+    return node;
+  }),
+);
+
+/**
  * The ratio of a five-pointed star's inner radius to its outer one.
  *
  * `1/φ²`, the value at which the star's edges are collinear across each point —
@@ -144,11 +176,13 @@ export function templateNodes(
   const source =
     shape === "rectangle"
       ? RECTANGLE
-      : shape === "star"
-        ? STAR
-        : shape === "heart"
-          ? HEART
-          : (path ?? []);
+      : shape === "circle"
+        ? CIRCLE
+        : shape === "star"
+          ? STAR
+          : shape === "heart"
+            ? HEART
+            : (path ?? []);
 
   return source.map((node) => {
     const out: MaskNode = { p: [node.p[0], node.p[1]] };

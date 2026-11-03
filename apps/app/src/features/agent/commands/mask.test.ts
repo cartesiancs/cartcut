@@ -184,7 +184,7 @@ describe("set_mask", () => {
     it("refuses a shape it does not know", async () => {
       await expect(
         run("set_mask", { elementIds: ["clip"], shape: "octagon" }),
-      ).rejects.toThrow(/rectangle, star, heart, pen/);
+      ).rejects.toThrow(/rectangle, circle, star, heart, pen/);
     });
 
     it("refuses an unreadable number rather than storing it", async () => {

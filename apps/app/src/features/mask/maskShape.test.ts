@@ -123,7 +123,7 @@ describe("maskOf — the read guard", () => {
 
 describe("isMaskActive — whether the mask cuts anything", () => {
   it("is true for each built-in shape", () => {
-    for (const shape of ["rectangle", "star", "heart"] as const) {
+    for (const shape of ["rectangle", "circle", "star", "heart"] as const) {
       expect(isMaskActive(defaultMask(shape))).toBe(true);
     }
   });
@@ -193,11 +193,11 @@ describe("coerceMask — the write validator", () => {
 
 describe("coerceMaskShape", () => {
   it("accepts every member of the union and nothing else", () => {
-    for (const shape of ["rectangle", "star", "heart", "pen"] as const) {
+    for (const shape of ["rectangle", "circle", "star", "heart", "pen"] as const) {
       expect(coerceMaskShape(shape)).toBe(shape);
     }
     // Exact match only, like `coerceBlend`: a near miss is a bug upstream.
-    for (const junk of ["Rectangle", " star", "circle", 3, null, undefined]) {
+    for (const junk of ["Rectangle", " star", "Circle", "ellipse", 3, null, undefined]) {
       expect(coerceMaskShape(junk)).toBeNull();
     }
   });

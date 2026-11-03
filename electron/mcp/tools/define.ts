@@ -315,7 +315,7 @@ export const animatableProperty = z
   );
 
 /** The mask shapes a clip can be cut to. A copy of `MASK_SHAPES`. */
-export const MASK_SHAPES = ["rectangle", "star", "heart", "pen"] as const;
+export const MASK_SHAPES = ["rectangle", "circle", "star", "heart", "pen"] as const;
 
 /**
  * What one step of a text reveal counts.
