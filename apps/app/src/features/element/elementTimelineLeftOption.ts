@@ -26,9 +26,7 @@ import {
   TRACK_KIND_TITLE,
 } from "../timeline/trackKinds";
 import { setTrackHidden } from "../editor/actions";
-import { addEffectTrack as addEffectTrackOp } from "../timeline/effectOps";
 import { applyMenuPlacement } from "../menu/menuPlacement";
-import { v4 as uuidv4 } from "uuid";
 
 /**
  * The track header column.
@@ -503,16 +501,6 @@ export class ElementTimelineLeftOption extends LitElement {
         <li><hr class="dropdown-divider" /></li>
         <li>
           <button
-            class="dropdown-item dropdown-item-sm dropdown-item-icon"
-            @click=${() => this.addEffectTrack()}
-          >
-            <span class="material-symbols-outlined icon-xs">add</span>
-            Add effect track
-          </button>
-        </li>
-        <li><hr class="dropdown-divider" /></li>
-        <li>
-          <button
             class="dropdown-item dropdown-item-sm dropdown-item-icon text-danger"
             @click=${() => this.removeTrack(track.id)}
           >
@@ -522,24 +510,6 @@ export class ElementTimelineLeftOption extends LitElement {
         </li>
       </ul>
     `;
-  }
-
-  /**
-   * Add a row for full-frame effects, at the top of the stack.
-   *
-   * The only way to make one from the UI — until now nothing in the app added a
-   * track at all, and `addTrack` was reachable only from the agent.
-   *
-   * Index 0 is deliberate and is not merely "the top". An effect applies to
-   * everything painted beneath it, so a row at the bottom of the stack would
-   * apply to nothing; `addEffectTrack` puts it in front and the user narrows
-   * the scope afterwards by dragging it down.
-   */
-  private addEffectTrack() {
-    this.openMenu = null;
-    useTimelineStore
-      .getState()
-      .withCheckpoint((doc) => addEffectTrackOp(doc, uuidv4()));
   }
 
   /**
