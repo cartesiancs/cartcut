@@ -364,14 +364,19 @@ keyframe-editor {
   // symmetric padding would hide the export button on one platform and clip it
   // under the window controls on the other, and only on the machine you are
   // not developing on.
+  //
+  // Those controls are a fixed size in screen points, while everything here is
+  // scaled by the UI scale (the window's zoom, `electron/lib/uiScale.ts`), so
+  // the room kept for them is divided by it: at 75% a plain 146px would come
+  // out 110 points wide and put the export button under the window controls.
   &.top-bar-mac {
-    padding-left: 78px;
+    padding-left: calc(78px / var(--ui-scale, 1));
     padding-right: 10px;
   }
 
   &.top-bar-pc {
     padding-left: 10px;
-    padding-right: 146px;
+    padding-right: calc(146px / var(--ui-scale, 1));
   }
 
   // Centred on the window, not on the space left over between the insets.

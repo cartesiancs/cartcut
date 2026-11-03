@@ -4,6 +4,7 @@ import { installDisplayMediaHandler } from "./displayMedia.js";
 
 import isDev from "electron-is-dev";
 import path from "path";
+import { trafficLightPositionFor, type UiScale } from "./uiScale.js";
 
 let mainWindow;
 const WINDOW_BACKGROUND_COLOR = "#252729";
@@ -15,7 +16,10 @@ const SPLASH_WIDTH = 640;
 const SPLASH_HEIGHT = Math.round((SPLASH_WIDTH * 1037) / 1724);
 
 const window = {
-  createMainWindow: ({ show = true }: { show?: boolean } = {}) => {
+  createMainWindow: ({
+    show = true,
+    uiScale = 1,
+  }: { show?: boolean; uiScale?: UiScale } = {}) => {
     mainWindow = window.createWindow({
       width: 1400,
       height: 800,
@@ -30,9 +34,12 @@ const window = {
         // that calls it is behind `features/graphic/htmlHost.ts`, which checks
         // it is there before using it.
         enableBlinkFeatures: "CanvasDrawElement",
+        // The UI scale from Settings, from the first paint (`lib/uiScale.ts`).
+        zoomFactor: uiScale,
       },
       indexFile: "apps/app/index.html",
       show: show,
+      trafficLightPosition: trafficLightPositionFor(uiScale),
     });
 
     // The update check is `installUpdater` in `electron/main.ts`, which needs
@@ -54,7 +61,14 @@ const window = {
     return mainWindow;
   },
 
-  createWindow: ({ width, height, webPreferences, indexFile, show }: any) => {
+  createWindow: ({
+    width,
+    height,
+    webPreferences,
+    indexFile,
+    show,
+    trafficLightPosition = { x: 10, y: 10 },
+  }: any) => {
     const newWindow = new BrowserWindow({
       width: width,
       height: height,
@@ -65,7 +79,7 @@ const window = {
       titleBarStyle: "hidden",
       frame: false,
 
-      trafficLightPosition: { x: 10, y: 10 },
+      trafficLightPosition,
       ...(process.platform !== "darwin"
         ? {
             titleBarOverlay: {

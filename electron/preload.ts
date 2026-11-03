@@ -36,6 +36,10 @@ const request = {
   editor: {
     setBackgroundThrottling: (allowed) =>
       ipcRenderer.invoke("editor:setBackgroundThrottling", allowed === true),
+    /** The UI scale from Settings, as main has it (`lib/uiScale.ts`). */
+    uiScale: () => ipcRenderer.invoke("editor:uiScale"),
+    /** Applies at once; resolves `{ ok, scale }`, refused for anything not a choice. */
+    setUiScale: (scale) => ipcRenderer.invoke("editor:setUiScale", scale),
   },
   app: {
     forceClose: () => ipcRenderer.send("app:forceClose"),

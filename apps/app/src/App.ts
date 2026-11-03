@@ -23,6 +23,7 @@ import { compositionDataOf } from "./states/timelineWorkspace";
 import { startCloud } from "./features/cloud/cloudStore";
 import { MOBILE_LAYOUT } from "./features/mobile/install";
 import "./features/mobile/mobileShell";
+import { readUiScale, reflectUiScale } from "./features/settings/uiScalePort";
 
 @customElement("app-root")
 export class App extends LitElement {
@@ -103,6 +104,15 @@ export class App extends LitElement {
     // The cloud's setting and the connection events only. No catalog is asked
     // for here: each browser asks the first time it is on screen.
     void startCloud();
+
+    // The window is already at the UI scale (main creates it zoomed); this is
+    // the one CSS variable that undoes it for the window buttons' room. The
+    // editor is still hidden behind the splash when the answer lands.
+    void readUiScale().then((scale) => {
+      if (scale != null) {
+        reflectUiScale(document.documentElement, scale);
+      }
+    });
 
     return this;
   }

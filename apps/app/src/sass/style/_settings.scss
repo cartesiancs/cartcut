@@ -308,6 +308,23 @@ settings-button {
   color: $opt-bright;
 }
 
+// The web build's UI scale row, which has no window to zoom.
+.settings-seg-item:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+// The UI scale's six choices. At the usual 12px padding they come to 344px,
+// past the control's 260px and over the row's own label; at 8px they fit the
+// 310px the label leaves, once the control may be as wide as what it holds.
+.settings-row-control.is-wide {
+  flex-basis: auto;
+}
+
+.settings-seg.is-tight .settings-seg-item {
+  padding: 0 8px;
+}
+
 // A short note under a control, with the one action it asks for.
 .settings-note {
   display: flex;

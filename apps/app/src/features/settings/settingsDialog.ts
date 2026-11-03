@@ -7,8 +7,8 @@
  * the capture phase on `window`, and focus handed back on close. Added here: a
  * Tab trap (`automatic-caption/src/clipPicker.ts`), typing passed through so
  * copy and paste still work in the address field, and a sidebar of sections:
- * General (the language, which used to be a Bootstrap modal of its own) and
- * the cloud, which can also delete everything downloaded from it, and
+ * General (the language, which used to be a Bootstrap modal of its own, and
+ * the UI scale) and the cloud, which can also delete everything downloaded from it, and
  * storage: the temporary files, the screen recorder's takes, and the folders
  * where the app keeps its files.
  *
@@ -33,6 +33,12 @@ import {
 import { loadPresets } from "../fx/presetRegistry";
 import { refreshTemplateLibrary } from "../template/templateRegistry";
 import { criticalDamping, springDurationMs, springEasing, type Spring } from "../motion/spring";
+import {
+  UI_SCALES,
+  uiScaleLabel,
+  type UiScale,
+} from "../../../../../electron/lib/uiScale";
+import { readUiScale, reflectUiScale, requestUiScale, uiScalePort } from "./uiScalePort";
 import {
   clearRecordingFiles,
   clearTempFiles,
@@ -114,6 +120,11 @@ export class SettingsDialog extends LitElement {
    * in, and the two differ exactly while a restart is owed.
    */
   @state() private language: Language | null = null;
+  /**
+   * The UI scale, read from main when the dialog opens; `null` until it
+   * answers, and for good in the web build, which has no bridge to ask.
+   */
+  @state() private uiScale: UiScale | null = null;
   /** Whether main refused the last address typed into the server field. */
   @state() private urlError = false;
   /** What is downloaded from the cloud, counted when the dialog opens; `null` until main answers. */
@@ -164,6 +175,7 @@ export class SettingsDialog extends LitElement {
     this.recordingsError = null;
     this.openFailed = null;
     this.language ??= this.lc.value;
+    void this.readScale();
     void this.readDownloaded();
     void this.readStorage();
 
@@ -390,6 +402,27 @@ export class SettingsDialog extends LitElement {
     }
   };
 
+  private async readScale(): Promise<void> {
+    this.uiScale = await readUiScale();
+  }
+
+  /**
+   * Applied at once, no restart: main zooms the editor window, and this
+   * dialog scales with everything else, which is how the choice is previewed.
+   * Shown as picked before main answers, and put back if it refuses.
+   */
+  private onPickUiScale = async (scale: UiScale): Promise<void> => {
+    const before = this.uiScale;
+    this.uiScale = scale;
+    const applied = await requestUiScale(scale);
+    if (applied == null) {
+      this.uiScale = before;
+      return;
+    }
+    this.uiScale = applied;
+    reflectUiScale(document.documentElement, applied);
+  };
+
   private onPickLanguage = (language: Language): void => {
     this.language = language;
     void window.electronAPI?.req?.store?.set("LANG", language);
@@ -411,6 +444,10 @@ export class SettingsDialog extends LitElement {
     const t = (key: string) => this.lc.t(key);
     const chosen = this.language ?? this.lc.value;
     const owed = chosen !== this.lc.value;
+    // No bridge on the web build: the row stays, disabled at 100%, as the
+    // cloud rows do. A browser has its own zoom.
+    const noScale = uiScalePort() == null;
+    const shownScale = this.uiScale ?? 1;
 
     return html`
       <div class="settings-group">
@@ -447,6 +484,34 @@ export class SettingsDialog extends LitElement {
                   </button>
                 </div>`
               : nothing}
+          </div>
+        </div>
+
+        <div class="settings-row">
+          <span class="settings-label" id="settings-ui-scale-label">
+            ${t("setting.ui_scale")}
+          </span>
+          <div class="settings-row-control is-end is-wide">
+            <div
+              class="settings-seg is-tight"
+              role="radiogroup"
+              aria-labelledby="settings-ui-scale-label"
+            >
+              ${UI_SCALES.map(
+                (scale) => html`
+                  <button
+                    type="button"
+                    role="radio"
+                    class="settings-seg-item ${scale === shownScale ? "is-on" : ""}"
+                    aria-checked=${scale === shownScale ? "true" : "false"}
+                    ?disabled=${noScale}
+                    @click=${() => this.onPickUiScale(scale)}
+                  >
+                    ${uiScaleLabel(scale)}
+                  </button>
+                `,
+              )}
+            </div>
           </div>
         </div>
       </div>

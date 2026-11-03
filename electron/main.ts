@@ -66,6 +66,13 @@ import { installMenu } from "./lib/menu.js";
 import { startMcpServer, stopMcpServer } from "./mcp/server.js";
 import { hotReloadEnabled, watchRendererBundle } from "./lib/devReload.js";
 import { createThrottlingHold } from "./lib/throttlingHold.js";
+import {
+  DEFAULT_UI_SCALE,
+  UI_SCALE_STORE_KEY,
+  coerceUiScale,
+  normalizeUiScale,
+  trafficLightPositionFor,
+} from "./lib/uiScale.js";
 import Store from "electron-store";
 
 const store = new Store();
@@ -214,6 +221,29 @@ const throttlingHold = createThrottlingHold();
 ipcMain.handle("editor:setBackgroundThrottling", (event, allowed: boolean) => {
   throttlingHold(event.sender, allowed === true);
   return true;
+});
+
+// The UI scale (`lib/uiScale.ts`), applied at once and kept for the next
+// launch. The editor window's alone: any other page asking, an extension's
+// view included, is refused rather than zoomed and remembered as the editor's
+// choice. 100% deletes the key, so a user who never changes it keeps a config
+// with nothing in it about scale.
+ipcMain.handle("editor:uiScale", () => normalizeUiScale(store.get(UI_SCALE_STORE_KEY)));
+ipcMain.handle("editor:setUiScale", (event, value: unknown) => {
+  const scale = coerceUiScale(value);
+  if (scale == null || mainWindow == null || event.sender !== mainWindow.webContents) {
+    return { ok: false };
+  }
+  if (scale === DEFAULT_UI_SCALE) {
+    store.delete(UI_SCALE_STORE_KEY);
+  } else {
+    store.set(UI_SCALE_STORE_KEY, scale);
+  }
+  mainWindow.webContents.setZoomFactor(scale);
+  if (process.platform === "darwin") {
+    mainWindow.setWindowButtonPosition(trafficLightPositionFor(scale));
+  }
+  return { ok: true, scale };
 });
 
 // Enumeration only. `presetLib` never parses a manifest and never opens a path
@@ -379,7 +409,10 @@ if (!gotTheLock) {
     const splashWindow = window.createSplashWindow();
     splashWindow.once("ready-to-show", () => splashWindow.show());
 
-    mainWindow = window.createMainWindow({ show: false });
+    mainWindow = window.createMainWindow({
+      show: false,
+      uiScale: normalizeUiScale(store.get(UI_SCALE_STORE_KEY)),
+    });
 
     // A dropped file must never replace the editor.
     //
