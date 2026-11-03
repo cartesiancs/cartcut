@@ -16,6 +16,8 @@
  * stated in full.
  */
 
+@import "../var";
+
 $opt-card: #15171a;
 $opt-line: rgba(255, 255, 255, 0.07);
 $opt-line-strong: rgba(255, 255, 255, 0.12);
@@ -858,4 +860,82 @@ input[type="range"].opt-slider:active::-webkit-slider-thumb {
 
 .opt-tabs-few .opt-tab > .material-symbols-outlined {
   font-size: 14px;
+}
+
+/*
+ * The bar stays at the top of its column while the panes under it scroll, in
+ * the clip inspectors and in the project settings alike, so switching tabs
+ * never needs a scroll back up first.
+ *
+ * `display: block` because `position: sticky` does nothing to a custom
+ * element left at its default `display: inline`.
+ *
+ * Opaque, in `.bg-darker`'s colour, so the controls scrolling underneath are
+ * hidden by the bar. The 10px under the track is the host's margin, outside
+ * that background: the first block sits 10px below the bar at rest, and a
+ * stuck bar ends at the track's own edge, where the fade below takes over.
+ * `z-index` puts it over the panes' own positioned pieces (a slider's zero
+ * mark) and under Bootstrap's dropdowns at 1000.
+ *
+ * Chromium measures `top` from the scroll container's content edge, inside
+ * the columns' `p-2`, so with `top: 0` the controls showed through the 0.5rem
+ * of padding above a stuck bar. The host reaches up over that padding and
+ * fills it with its own background; the track stays exactly where it was.
+ */
+option-tab-bar {
+  display: block;
+  position: sticky;
+  top: -0.5rem;
+  margin-top: -0.5rem;
+  padding-top: 0.5rem;
+  margin-bottom: $opt-section-gap;
+  z-index: 5;
+  background-color: $background-color;
+}
+
+option-tab-bar > .opt-tabs {
+  margin-bottom: 0;
+}
+
+/*
+ * The Text tab's fade under its search bar (`.browse-bar.is-floating::after`
+ * in `_browse.scss`), with the same stops and the same height: the controls
+ * dim as they pass under the bar instead of being cut by a hard edge.
+ *
+ * Invisible at rest, where it would dim the first section of a column nobody
+ * has scrolled; its opacity follows the column's own scroll over the first
+ * `$opt-tabs-fade-h`. The resting `opacity: 0` is load-bearing for the reason
+ * `_browse.scss` records: a column too short to scroll has an inactive scroll
+ * timeline, which applies no value, and the fade would sit at full strength.
+ */
+$opt-tabs-fade-h: 36px;
+
+option-tab-bar::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: $opt-tabs-fade-h;
+  background: linear-gradient(
+    to bottom,
+    rgba($background-color, 0.6) 0%,
+    rgba($background-color, 0.35) 40%,
+    rgba($background-color, 0.12) 75%,
+    rgba($background-color, 0) 100%
+  );
+  pointer-events: none;
+  opacity: 0;
+  animation: opt-tabs-fade-in linear both;
+  animation-timeline: scroll(nearest block);
+  animation-range: 0 $opt-tabs-fade-h;
+}
+
+@keyframes opt-tabs-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }

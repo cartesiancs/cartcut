@@ -567,6 +567,25 @@ html.mobile-layout {
     background-color: $m-surface;
   }
 
+  // The inspector's tab bar is opaque so the panes scroll under it
+  // (`_option.scss`), painted in the desktop column's colour. A sheet is
+  // lighter, and the bar would read as a dark band across it.
+  #split_col_1 option-tab-bar,
+  #split_col_3 option-tab-bar {
+    background-color: $m-surface;
+  }
+
+  #split_col_1 option-tab-bar::after,
+  #split_col_3 option-tab-bar::after {
+    background: linear-gradient(
+      to bottom,
+      rgba($m-surface, 0.6) 0%,
+      rgba($m-surface, 0.35) 40%,
+      rgba($m-surface, 0.12) 75%,
+      rgba($m-surface, 0) 100%
+    );
+  }
+
   // Finger-sized controls inside the sheets. 16px text in a field is also what
   // keeps iOS from zooming the page when it takes focus.
   #split_col_1,
