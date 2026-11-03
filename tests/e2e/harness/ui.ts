@@ -35,7 +35,6 @@ export type SidebarTab =
   | "#nav-home"
   | "#nav-draft"
   | "#nav-text"
-  | "#nav-util"
   | "#nav-option"
   | "#nav-fx";
 
@@ -98,6 +97,35 @@ export async function setProjectFolder(session: AppSession, dir: string): Promis
   await picker.click();
 
   await expect(picker).toHaveCount(0, { timeout: 15_000 });
+}
+
+/**
+ * Choose an item from the application menu, the way a user would.
+ *
+ * Through Electron rather than the page, because a native menu is not in it
+ * (`autosave.spec.ts` reads the Auto Save submenu the same way). The click
+ * carries no event, so it is sent whatever `rendererOwnsKey` says, as a mouse
+ * choice is. What it starts runs in the renderer afterwards: wait for its
+ * effect, not for this.
+ */
+export async function clickMenuItem(
+  session: AppSession,
+  menu: string,
+  label: string,
+): Promise<void> {
+  await session.app.evaluate(
+    ({ Menu }, [menuLabel, itemLabel]) => {
+      const top = Menu.getApplicationMenu()?.items.find(
+        (item) => item.label === menuLabel,
+      );
+      const entry = top?.submenu?.items.find((item) => item.label === itemLabel);
+      if (entry == null) {
+        throw new Error(`No menu item ${menuLabel} > ${itemLabel}`);
+      }
+      entry.click();
+    },
+    [menu, label] as const,
+  );
 }
 
 /** Set the export length via the minute/second inputs. */

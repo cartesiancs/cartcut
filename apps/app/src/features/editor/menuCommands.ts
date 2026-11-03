@@ -49,6 +49,14 @@ import {
   runImportSubtitles,
 } from "../subtitle/subtitleCommands";
 import {
+  exportProjectAsTemplate,
+  openCaptionWindow,
+  openPrompterWindow,
+  openTextToSpeechWindow,
+  openToolPanel,
+  showScreenRecorder,
+} from "./utilityCommands";
+import {
   clearSelection,
   copySelection,
   cutSelection,
@@ -283,6 +291,22 @@ const COMMANDS: Record<MenuCommandId, (payload?: unknown) => void> = {
   "playback.goToStart": () => useTimelineStore.getState().setCursor(0),
   "playback.goToEnd": () =>
     useTimelineStore.getState().setCursor(endOfTimeline()),
+
+  // --------------------------------------------------------------- Utilities
+  "utilities.record": () => openToolPanel("record"),
+  "utilities.audioRecord": () => openToolPanel("audioRecord"),
+  "utilities.screenRecorder": () => showScreenRecorder(),
+  "utilities.automaticCaption": () => openCaptionWindow(),
+  "utilities.textToSpeech": () => openTextToSpeechWindow(),
+  "utilities.prompter": () => openPrompterWindow(),
+  "utilities.autoTrack": () => openToolPanel("autoTrack"),
+  "utilities.proxyMedia": () => openToolPanel("proxy"),
+  "utilities.exportTemplate": () => {
+    void exportProjectAsTemplate().catch((error) => {
+      console.error("[menu] could not export the template", error);
+      toast("The template could not be exported.");
+    });
+  },
 
   // -------------------------------------------------------------------- View
   "view.previewFit": () => previewCanvas()?.fitPreview(),

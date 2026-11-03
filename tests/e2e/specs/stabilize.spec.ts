@@ -39,7 +39,7 @@ import { decodeFrames } from "../harness/decode";
 import { writePng } from "../harness/artifacts";
 import { FFMPEG } from "../harness/paths";
 import {
-  openTab,
+  clickMenuItem,
   setProjectFolder,
   setDuration,
   setResolution,
@@ -396,8 +396,13 @@ async function trackInPanel(
   // The panel adopts a clip when the selection changes while it is open, so
   // it is opened first and the clip selected after.
   await setPlayhead(session, 0);
-  await openTab(page, "#nav-util");
-  await page.locator("control-ui-util .asset", { hasText: "Auto Track" }).click();
+  await clickMenuItem(session, "Utilities", "Auto Track");
+  // The panel is always mounted and shown by dropping `d-none` from its
+  // container. The menu reaches the renderer over IPC, so wait for that before
+  // selecting, or the selection lands while the panel is still closed.
+  await expect(page.locator("auto-track-panel").locator("xpath=..")).not.toHaveClass(/d-none/, {
+    timeout: 15_000,
+  });
   await selectClips(session, []);
   await selectClips(session, [clipId]);
 

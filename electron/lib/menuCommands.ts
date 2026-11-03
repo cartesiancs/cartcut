@@ -71,6 +71,16 @@ export type MenuCommandId =
   | "playback.previousFrame"
   | "playback.goToStart"
   | "playback.goToEnd"
+  // Utilities
+  | "utilities.record"
+  | "utilities.audioRecord"
+  | "utilities.screenRecorder"
+  | "utilities.automaticCaption"
+  | "utilities.textToSpeech"
+  | "utilities.prompter"
+  | "utilities.autoTrack"
+  | "utilities.proxyMedia"
+  | "utilities.exportTemplate"
   // View
   | "view.previewFit"
   | "view.previewZoomIn"
@@ -198,6 +208,21 @@ export const MENU_COMMANDS: readonly MenuCommand[] = [
   { id: "playback.previousFrame", label: "Previous Frame" },
   { id: "playback.goToStart", label: "Go to Start" },
   { id: "playback.goToEnd", label: "Go to End" },
+
+  // -------------------------------------------------------------- Utilities
+  //
+  // No accelerators. Each opens a panel or a window, which nobody does often
+  // enough to spend a combination on.
+  { id: "utilities.record", label: "Record" },
+  { id: "utilities.audioRecord", label: "Audio Record" },
+  { id: "utilities.screenRecorder", label: "Screen Recorder" },
+  { id: "utilities.automaticCaption", label: "Automatic Caption" },
+  { id: "utilities.textToSpeech", label: "Text to Speech" },
+  { id: "utilities.prompter", label: "Prompter" },
+  { id: "utilities.autoTrack", label: "Auto Track" },
+  { id: "utilities.proxyMedia", label: "Proxy Media" },
+  // An ellipsis because it opens a save dialog, as "Export Video…" does.
+  { id: "utilities.exportTemplate", label: "Export Template…" },
 
   // ------------------------------------------------------------------- View
   {

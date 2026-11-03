@@ -29,7 +29,7 @@
 import path from "node:path";
 
 import { test, expect } from "../harness/test";
-import { openTab } from "../harness/ui";
+import { clickMenuItem } from "../harness/ui";
 import { decodePng, crop, writePng, writeJson } from "../harness/artifacts";
 import { inkBounds, pixel, type FrameBuffer } from "../harness/compare";
 
@@ -342,14 +342,11 @@ test("the caption window docks beside the preview and is never clipped", async (
       WINDOW_ID,
     );
 
-  await test.step("the Utilities tile opens a window, and the preview stays put", async () => {
+  await test.step("Utilities > Automatic Caption opens a window, and the preview stays put", async () => {
     const previewBefore = (await measure()).previewCanvas!;
     expect(previewBefore.width).toBeGreaterThan(0);
 
-    await openTab(page, "#nav-util");
-    await page
-      .locator("control-ui-util .asset", { hasText: "Automatic Caption" })
-      .click();
+    await clickMenuItem(session, "Utilities", "Automatic Caption");
 
     await expect(page.locator("app-window")).toHaveCount(1, { timeout: 15_000 });
 

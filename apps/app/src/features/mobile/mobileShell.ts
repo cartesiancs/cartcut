@@ -51,7 +51,6 @@ const PANEL_TOOLS: PanelTool[] = [
   { pane: "nav-text", icon: "text_fields", label: "Text" },
   { pane: "nav-fx", icon: "auto_awesome", label: "Effects" },
   { pane: "nav-template", icon: "dashboard_customize", label: "Templates" },
-  { pane: "nav-util", icon: "page_info", label: "Tools" },
   { pane: "nav-option", icon: "extension", label: "Extensions" },
   { pane: "nav-home", icon: "aspect_ratio", label: "Project" },
 ];

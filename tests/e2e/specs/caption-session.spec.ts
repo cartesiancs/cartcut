@@ -135,7 +135,7 @@ function readState(page: import("@playwright/test").Page) {
 }
 
 /**
- * Open the window the way `ControlUtilities` does, through the store, so this
+ * Open the window the way the Utilities menu does, through the store, so this
  * does not depend on a tile's markup.
  */
 async function openCaptionWindow(page: import("@playwright/test").Page) {

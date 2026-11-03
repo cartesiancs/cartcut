@@ -41,6 +41,7 @@ import JSZip from "jszip";
 import { test, expect } from "../harness/test";
 import { agent } from "../harness/agent";
 import { runExport } from "../harness/export";
+import { clickMenuItem } from "../harness/ui";
 import {
   SENTINEL_PROGRAM,
   discardFrames,
@@ -114,8 +115,18 @@ for (const seed of SEEDS) {
       params: { text: "Inside a template" },
     });
     await session.answerSaveDialog(templateFile);
-    await ev(`document.querySelector("control-ui-util")._handleClickExportTemplate()`);
-    expect(fs.existsSync(templateFile)).toBe(true);
+    // The menu click returns before the export does, and the file is written
+    // in place rather than renamed into it, so wait until it reads as a zip.
+    await clickMenuItem(session, "Utilities", "Export Template…");
+    await expect
+      .poll(
+        () =>
+          fs.existsSync(templateFile)
+            ? JSZip.loadAsync(fs.readFileSync(templateFile)).then(() => true, () => false)
+            : false,
+        { timeout: 30_000 },
+      )
+      .toBe(true);
     const innerKey = await innerKeyOf(templateFile);
     await agent(session, "delete_clips", { elementIds: seedGraphic.created });
 

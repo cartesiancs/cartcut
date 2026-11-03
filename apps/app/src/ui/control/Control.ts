@@ -4,7 +4,6 @@ import { customElement, property } from "lit/decorators.js";
 import "./ControlSetting";
 import "./ControlText";
 import "./ControlExtension";
-import "./ControlUtilities";
 import "./ControlFilter";
 import "./ControlFx";
 import "./ControlTemplate";
@@ -369,7 +368,7 @@ export class Control extends LitElement {
    * Declared here rather than in the window system because only this component
    * can build the content and name it in the user's language. A panel listed
    * here is not open: opening one is a write to `windowStore`, which is what
-   * `ControlUtilities` does.
+   * the Utilities menu does (`features/editor/utilityCommands.ts`).
    */
   private _windowPanels(): WindowPanel[] {
     return [
@@ -505,17 +504,6 @@ export class Control extends LitElement {
               <button
                 class="btn-nav"
                 data-bs-toggle="pill"
-                data-bs-target="#nav-util"
-                type="button"
-                role="tab"
-                aria-selected="false"
-              >
-                <span class="material-symbols-outlined"> page_info</span>
-              </button>
-
-              <button
-                class="btn-nav"
-                data-bs-toggle="pill"
                 data-bs-target="#nav-option"
                 type="button"
                 role="tab"
@@ -586,10 +574,6 @@ export class Control extends LitElement {
 
               <div class="tab-pane fade" id="nav-option" role="tabpanel">
                 <control-ui-extension />
-              </div>
-
-              <div class="tab-pane fade" id="nav-util" role="tabpanel">
-                <control-ui-util />
               </div>
 
               <div class="tab-pane fade" id="nav-fx" role="tabpanel">

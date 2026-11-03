@@ -199,6 +199,23 @@ function buildTemplate(): any[] {
         item("playback.goToEnd"),
       ],
     },
+    {
+      label: "Utilities",
+      submenu: [
+        item("utilities.record"),
+        item("utilities.audioRecord"),
+        item("utilities.screenRecorder"),
+        separator,
+        item("utilities.automaticCaption"),
+        item("utilities.textToSpeech"),
+        item("utilities.prompter"),
+        separator,
+        item("utilities.autoTrack"),
+        item("utilities.proxyMedia"),
+        separator,
+        item("utilities.exportTemplate"),
+      ],
+    },
     // { role: 'viewMenu' }
     {
       label: "View",
