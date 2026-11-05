@@ -9,6 +9,7 @@ import {
   pickedSources,
   reconcilePick,
   removePick,
+  selectionPick,
   togglePick,
 } from "./clipPick";
 import { captionSources } from "./sources";
@@ -139,6 +140,18 @@ describe("initialPick", () => {
     expect(initialPick({ previous: [], timelineSelection: [], rows: rows() })).toEqual(
       [],
     );
+  });
+});
+
+describe("selectionPick", () => {
+  // The context menu hands over the selection in click order, titles and all.
+  it("keeps only clips that can be captioned, in timeline order", () => {
+    expect(selectionPick(["c", "title", "a"], rows())).toEqual(["a", "c"]);
+  });
+
+  it("answers an empty pick when nothing selected can be captioned", () => {
+    expect(selectionPick(["title"], rows())).toEqual([]);
+    expect(selectionPick([], rows())).toEqual([]);
   });
 });
 

@@ -118,10 +118,7 @@ export function initialPick(input: {
     return previous;
   }
 
-  const selected = new Set(input.timelineSelection);
-  const fromTimeline = input.rows
-    .filter((row) => selected.has(row.key))
-    .map((row) => row.key);
+  const fromTimeline = selectionPick(input.timelineSelection, input.rows);
   if (fromTimeline.length > 0) {
     return fromTimeline;
   }
@@ -130,6 +127,21 @@ export function initialPick(input: {
     return [input.rows[0].key];
   }
   return [];
+}
+
+/**
+ * The clips among `keys` that can be captioned, in timeline order.
+ *
+ * A timeline selection is in the order it was clicked and may hold titles and
+ * shapes as well, so the rows decide both what survives and the order. The
+ * picker opens on this, and the context menu starts a run on it directly.
+ */
+export function selectionPick(
+  keys: readonly string[],
+  rows: readonly CaptionSource[],
+): ClipPick {
+  const selected = new Set(keys);
+  return rows.filter((row) => selected.has(row.key)).map((row) => row.key);
 }
 
 /** The chosen rows, in the chosen order. Keys with no row are skipped. */

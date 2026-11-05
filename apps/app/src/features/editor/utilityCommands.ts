@@ -22,6 +22,7 @@ import { useTimelineStore } from "../../states/timelineStore";
 import { serializeRenderOptions } from "../project/renderOptionsFile";
 import { exportTemplate } from "../template/templateExport";
 import { renderTemplateThumbnail } from "../template/templateThumbnail";
+import { captionLaunch } from "../caption/captionLaunch";
 
 function toast(message: string) {
   (document.querySelector("toast-box") as any)?.showToast({
@@ -50,6 +51,19 @@ export function openCaptionWindow(): void {
     // fitting on one line. `caption/editorLayout.ts` states the derivation.
     minSize: { width: 320, height: 240 },
   });
+}
+
+/**
+ * Open the caption editor with these clips already chosen, on its setup
+ * screen, where the language is picked and Start begins the run. The
+ * timeline's context menu calls this.
+ *
+ * The request goes first: a panel that is already open takes it through its
+ * subscription, and one that is not takes it when it mounts.
+ */
+export function openCaptionWindowFor(ids: readonly string[]): void {
+  captionLaunch.request(ids);
+  openCaptionWindow();
 }
 
 /**

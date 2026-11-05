@@ -19,6 +19,7 @@ import "../../features/extension/viewPanel";
 import "../../features/extension/inspectorSections";
 
 import "../../../../automatic-caption/src/automaticCaption";
+import { captionLaunch } from "../../features/caption/captionLaunch";
 
 import { contributionStore } from "../../features/extension/contributions";
 import { extensionSidebarTabs, extensionWindowPanels } from "../../features/extension/views";
@@ -390,6 +391,7 @@ export class Control extends LitElement {
           .previewSize=${this.previewSize}
           .playhead=${this.captionPlayhead}
           .timelineSelection=${this.captionTimelineSelection}
+          .launch=${captionLaunch}
           .sessionPhase=${this.captionSessionPhase}
           .isDev=${false}
           @captionSessionStart=${this._handleCaptionSessionStart}

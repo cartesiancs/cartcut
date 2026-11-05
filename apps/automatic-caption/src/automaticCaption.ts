@@ -75,8 +75,10 @@ import {
   initialPick,
   pickedSources,
   reconcilePick,
+  selectionPick,
   type ClipPick,
 } from "../../app/src/features/caption/clipPick";
+import type { CaptionLaunchPort } from "../../app/src/features/caption/captionLaunch";
 import type { TimeRange } from "../../app/src/features/timeline/clipOps";
 import { TranscribeSession } from "../../app/src/features/caption/transcribeSession";
 import "./progress";
@@ -204,6 +206,8 @@ export class AutomaticCaption extends LitElement {
   private _session: TranscribeSession | null;
   private _unsubscribeProgress: (() => void) | null;
 
+  private _unsubscribeLaunch: (() => void) | null = null;
+
   constructor() {
     super();
 
@@ -263,6 +267,8 @@ export class AutomaticCaption extends LitElement {
     this._unsubscribeProgress = null;
     this._unsubscribePlayhead?.();
     this._unsubscribePlayhead = null;
+    this._unsubscribeLaunch?.();
+    this._unsubscribeLaunch = null;
     // Four window listeners, live only while a menu is open. Closing the window
     // with one open would otherwise leave them holding this panel.
     this._unbindMenuDismiss();
@@ -345,6 +351,14 @@ export class AutomaticCaption extends LitElement {
    */
   @property({ attribute: false })
   timelineSelection: (() => readonly string[]) | null = null;
+
+  /**
+   * Requests to caption particular clips, from the timeline's context menu,
+   * through `Control`. A port, because the request is usually made before
+   * this panel exists (`features/caption/captionLaunch.ts`).
+   */
+  @property({ attribute: false })
+  launch: CaptionLaunchPort | null = null;
 
   /**
    * What the session is doing, from `Control`.
@@ -431,6 +445,55 @@ export class AutomaticCaption extends LitElement {
       }
     }
     return lit;
+  }
+
+  // ------------------------------------------------------- the context menu
+
+  /**
+   * Take a request made before this panel mounted, and any made while it is
+   * open. Idempotent, for the reason `_watchPlayhead` is: the port arrives as
+   * a property, so this is asked on every update.
+   */
+  private _watchLaunch(): void {
+    if (this._unsubscribeLaunch != null || this.launch == null) {
+      return;
+    }
+    const port = this.launch;
+    this._unsubscribeLaunch = port.subscribe(() => this._takeLaunch());
+    this._takeLaunch();
+  }
+
+  private _takeLaunch(): void {
+    const keys = this.launch?.take();
+    if (keys != null) {
+      this.chooseClips(keys);
+    }
+  }
+
+  /**
+   * Choose these clips and wait on the setup screen, where the method and the
+   * language are picked and Start begins the run. Nothing is transcribed
+   * until then, because a run in the wrong language is a wasted transcript.
+   *
+   * A panel already at work keeps its run: the window was brought forward,
+   * which shows it, and replacing `_pick` under a run would leave the Clips
+   * badge naming clips nobody is captioning. A failure is put away first,
+   * since a new request is a newer wish than the error on screen.
+   */
+  chooseClips(keys: readonly string[]): void {
+    if (this.phase === "failed") {
+      this._endAnalysis();
+    }
+    if (this.phase !== "setup") {
+      return;
+    }
+    const pick = selectionPick(keys, captionSources(this.timeline));
+    if (pick.length === 0) {
+      return;
+    }
+    this._pick = pick;
+    this._pickerOpen = false;
+    this.requestUpdate();
   }
 
   // -------------------------------------------------------- the clip picker
@@ -901,6 +964,7 @@ export class AutomaticCaption extends LitElement {
     // constructor. `_watchPlayhead` is idempotent and cheap, so asking on every
     // update is simpler than a second flag to get wrong.
     this._watchPlayhead();
+    this._watchLaunch();
 
     // The panel cannot tell when the reveal has finished. It knows how many
     // captions there are, but not the pace, and re-deriving the pace here would
@@ -1903,7 +1967,13 @@ export class AutomaticCaption extends LitElement {
     `;
   }
 
-  /** Pick a method, pick a language, pick a clip. What the window opens on. */
+  /**
+   * Pick a method, pick a language, pick a clip. What the window opens on.
+   *
+   * Start shows once a clip is chosen: the timeline's context menu arrives
+   * here with its clip already chosen, and the picker's own Start is the
+   * other way in.
+   */
   renderSetup() {
     return html`<div class="caption-setup">
       <!--
@@ -1975,6 +2045,21 @@ export class AutomaticCaption extends LitElement {
           ? html`<span class="caption-clips-count">${this._pick.length}</span>`
           : nothing}
       </button>
+
+      <!--
+        Disabled until the language list lands: before then On-device has no
+        language chosen, and a run started then transcribes in none.
+      -->
+      ${this._pick.length > 0 && !this.isLoadVideo
+        ? html`<button
+            type="button"
+            class="btn btn-sm btn-primary text-light"
+            ?disabled=${this.sttMethod === "apple" && this.selectedLocale === ""}
+            @click=${() => void this.startChosenClips()}
+          >
+            Start
+          </button>`
+        : nothing}
     </div>`;
   }
 

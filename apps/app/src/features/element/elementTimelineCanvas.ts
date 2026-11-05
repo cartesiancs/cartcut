@@ -203,6 +203,10 @@ import {
 import { penCapturesKey } from "../mask/penSession";
 import { count as perfCount } from "../debug/frameStats";
 import { canShowMediaInfo, openMediaInfo } from "../mediaInfo/mediaInfoSession";
+import { canCaptionHere } from "../caption/captionLaunch";
+import { selectionPick } from "../caption/clipPick";
+import { captionSources } from "../caption/sources";
+import { openCaptionWindowFor } from "../editor/utilityCommands";
 import { targetForElement } from "../mediaInfo/mediaInfoView";
 import { timelineTouchMode } from "../mobile/timelineTouch";
 import type { SurfaceMode } from "../mobile/touchGesture";
@@ -1217,6 +1221,34 @@ export class elementTimelineCanvas extends LitElement {
     if (target != null) {
       openMediaInfo(target);
     }
+  }
+
+  // ----------------------------------------------------------------- caption
+
+  /**
+   * Open the caption editor with the right-clicked clips already chosen, so
+   * all that is left is the language and Start. The panel keeps only the
+   * clips it can caption and puts them in timeline order.
+   */
+  public captionSelected() {
+    openCaptionWindowFor([...this.targetIdDuringRightClick]);
+  }
+
+  /**
+   * "Automatic Caption", when at least one right-clicked clip is a video or a
+   * sound with a file behind it, and only where there is a transcription
+   * bridge to run it: an entry that could only decline is not offered.
+   */
+  private captionMenuTemplate(): string {
+    const ids = this.targetIdDuringRightClick;
+    if (ids.length === 0 || !canCaptionHere()) {
+      return "";
+    }
+    const rows = captionSources(this.currentDoc().elements);
+    if (selectionPick(ids, rows).length === 0) {
+      return "";
+    }
+    return `<menu-dropdown-item onclick="document.querySelector('element-timeline-canvas').captionSelected()" item-name="Automatic Caption" item-icon="subtitles"> </menu-dropdown-item>`;
   }
 
   // ------------------------------------------------------ template timelines
@@ -3013,6 +3045,7 @@ export class elementTimelineCanvas extends LitElement {
         <menu-dropdown-body top="${y}" left="${x}">
           ${this.templateMenuTemplate()}
           ${this.infoMenuTemplate()}
+          ${this.captionMenuTemplate()}
           ${this.animationMenuTemplate()}
           ${this.mediaMenuTemplate()}
           ${this.audioMenuTemplate()}
