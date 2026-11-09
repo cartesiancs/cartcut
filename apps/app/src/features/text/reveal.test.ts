@@ -16,6 +16,7 @@ import {
   DEFAULT_REVEAL_PROGRESS,
   MAX_REVEAL_WINDOW,
   animateOf,
+  approximateGraphemeEnds,
   clampRevealProgress,
   coerceReveal,
   coerceRevealAnimate,
@@ -575,5 +576,55 @@ describe("revealPlan with a settling animator", () => {
         { unit: "character", progress: 50, animate: SETTLE },
       ),
     ).toBe(false);
+  });
+});
+
+describe("approximateGraphemeEnds (Chrome before 87 has no Intl.Segmenter)", () => {
+  // The oracle is the engine's own segmenter, which shares no code with the
+  // approximation.
+  const segmenter = new (Intl as any).Segmenter("en", { granularity: "grapheme" });
+  const real = (line: string) =>
+    [...segmenter.segment(line)].map((piece: any) => piece.index + piece.segment.length);
+
+  const corpus = [
+    "Hello, world",
+    "e\u0301te\u0301",
+    "\u1100\u1161\u11a8\u1100\u1161",
+    "\ud55c\uae00 \uadf8\ub798\ud53d",
+    "\ud83d\udc4d\ud83c\udffd ok",
+    "\ud83d\udc68\u200d\ud83d\udc69\u200d\ud83d\udc67",
+    "\ud83c\uddf0\ud83c\uddf7\ud83c\uddef\ud83c\uddf5\ud83c\uddfa",
+    "#\ufe0f\u20e3 1\ufe0f\u20e3",
+    "\u2764\ufe0f fire",
+    "line\r\nnext",
+    "\u0915\u094d\u0937",
+    "\ud83c\udff4\udb40\udc67\udb40\udc62\udb40\udc73\udb40\udc63\udb40\udc74\udb40\udc7f",
+  ];
+
+  for (const line of corpus) {
+    it(`matches the segmenter on ${JSON.stringify(line)}`, () => {
+      // Devanagari conjuncts (U+094D virama joining) are the one case UAX 29
+      // extended rules (GB9c, Unicode 15.1) join and this does not; it splits
+      // after the virama, which still never halves a code point.
+      if (line === "\u0915\u094d\u0937") {
+        expect(approximateGraphemeEnds(line)).toEqual([2, 3]);
+        return;
+      }
+      expect(approximateGraphemeEnds(line)).toEqual(real(line));
+    });
+  }
+
+  it("is what code points alone could not do", () => {
+    const codePoints = (line: string) => {
+      const out: number[] = [];
+      let at = 0;
+      for (const ch of line) {
+        at += ch.length;
+        out.push(at);
+      }
+      return out;
+    };
+    const family = "\ud83d\udc68\u200d\ud83d\udc69\u200d\ud83d\udc67";
+    expect(codePoints(family)).not.toEqual(real(family));
   });
 });

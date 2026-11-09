@@ -443,13 +443,61 @@ function graphemeEnds(line: string): number[] {
     }
     return out;
   }
-  // Code points, not code units: this fallback still separates a combining mark
-  // from its base, but it never halves a surrogate pair — which is the failure
-  // that produces a replacement glyph rather than a slightly early cut.
+  return approximateGraphemeEnds(line);
+}
+
+const EXTEND = /^[\p{M}\u200C\u{1F3FB}-\u{1F3FF}\u{E0020}-\u{E007F}]$/u;
+const REGIONAL = /^[\u{1F1E6}-\u{1F1FF}]$/u;
+
+type Jamo = "L" | "V" | "T" | "LV" | "LVT" | null;
+
+function jamoOf(cp: number): Jamo {
+  if ((cp >= 0x1100 && cp <= 0x115f) || (cp >= 0xa960 && cp <= 0xa97c)) return "L";
+  if ((cp >= 0x1160 && cp <= 0x11a7) || (cp >= 0xd7b0 && cp <= 0xd7c6)) return "V";
+  if ((cp >= 0x11a8 && cp <= 0x11ff) || (cp >= 0xd7cb && cp <= 0xd7fb)) return "T";
+  if (cp >= 0xac00 && cp <= 0xd7a3) return (cp - 0xac00) % 28 === 0 ? "LV" : "LVT";
+  return null;
+}
+
+/**
+ * Where a browser without `Intl.Segmenter` (Chrome before 87) ends each
+ * letter: the grapheme cluster rules a title meets, approximated by code
+ * point. A combining or spacing mark, a variation selector, a skin tone or an
+ * emoji tag stays on the letter before it; anything after a zero-width joiner
+ * joins; regional indicators pair into a flag; decomposed Hangul jamo stay one
+ * syllable; CR LF is one. Never halves a surrogate pair, which is the failure
+ * that draws a replacement glyph rather than a slightly early cut.
+ */
+export function approximateGraphemeEnds(line: string): number[] {
+  const out: number[] = [];
   let at = 0;
-  for (const codePoint of line) {
-    at += codePoint.length;
-    out.push(at);
+  let prev = "";
+  let prevJamo: Jamo = null;
+  let regionalRun = 0;
+  for (const ch of line) {
+    const cp = ch.codePointAt(0) ?? 0;
+    const jamo = jamoOf(cp);
+    const regional = REGIONAL.test(ch);
+    const joins =
+      out.length > 0 &&
+      (EXTEND.test(ch) ||
+        ch === "\u200D" ||
+        prev === "\u200D" ||
+        (prev === "\r" && ch === "\n") ||
+        (regional && regionalRun % 2 === 1) ||
+        (prevJamo === "L" && (jamo === "L" || jamo === "V" || jamo === "LV" || jamo === "LVT")) ||
+        ((prevJamo === "LV" || prevJamo === "V") && (jamo === "V" || jamo === "T")) ||
+        ((prevJamo === "LVT" || prevJamo === "T") && jamo === "T"));
+    at += ch.length;
+    if (joins) {
+      out[out.length - 1] = at;
+    } else {
+      out.push(at);
+    }
+    regionalRun = regional ? regionalRun + 1 : 0;
+    // A mark on a jamo keeps the syllable open to nothing more.
+    prevJamo = EXTEND.test(ch) ? null : jamo;
+    prev = ch;
   }
   return out;
 }
