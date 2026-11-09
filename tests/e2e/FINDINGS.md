@@ -397,3 +397,117 @@ Testing with no flags unless stated:
 `HTMLCanvasElement.prototype.layoutSubtree` is gone from 157, so a support check
 keyed on it reports no in a browser that draws. The host sets both opt-ins and
 decides support in a browser by drawing a pixel (`htmlHost.ts#htmlSupport`).
+
+## 11. HTML graphics without html-in-canvas: the SVG snapshot
+
+Measured 2026-11-09 with `tests/spikes/snapshot/` (`run.mjs` drives `spike.html`;
+`boot.mjs` asks whether the editor itself starts) in Playwright 1.62's Chromium
+151, Firefox 153 and WebKit 26.5, and in real old Chrome builds: Chromium
+snapshots 85.0.4183, 86.0.4240, 88.0.4324 (x64 under Rosetta), 94.0.4606 and
+100.0.4896, and Chrome for Testing 113.0.5672. Playwright WebKit is not Safari;
+nothing here was measured in Safari itself. Every answer is a drawn pixel or a
+thrown error. The subject is an SVG holding one `<foreignObject>` of HTML,
+decoded through an `<img>` and drawn into a 2D canvas.
+
+**The oldest Chrome the editor boots on is 85.** 84 throws `Unexpected token
+'??='` and `<app-root>` never defines. 85 to 98 boot but throw
+`ctx.roundRect is not a function` (Chrome 99) from the timeline, the text band,
+the clip outline and the preview bar. WebCodecs, so browser export, starts at 94.
+
+| question | Chromium 151 | Firefox 153 | WebKit 26.5 | Chrome 85 to 113 |
+|---|---|---|---|---|
+| Taint, `data:` URL | none: `getImageData`, `new VideoFrame(canvas)` and WebGL `texImage2D` all work | none | none | none (VideoFrame from 94) |
+| Taint, `blob:` URL | **taints** (`SecurityError` on all three) | none | **taints** | **taints** |
+| A running CSS animation in the image | drawn at 0% and stays there (120 ms later too) | same | same | same |
+| `animation-delay: -0.5s` + `paused`, 1 s red to blue | `128,0,128`: exactly t | same | same | same |
+| The same on a `@property` colour, rule inside the image | `128,0,128` (and its `initial-value` applies) | same | same | same |
+| SMIL `<animate begin="-0.5s">` in the image | `128,0,128` | same | same | same |
+| `animVal` read synchronously after `setCurrentTime(0.5)` | radius 5, baseFrequency 0.03, startOffset 50 | same | same | same |
+| `getKeyframes()` lists an animated custom property | **no** | yes | **no** | 85 yes, 88 to 113 no |
+| A child whose animation appears when its parent's `display` returns: listed before a seek | **no** (1 of 2; the child stays at opacity 0) | yes | **no** | yes |
+| `filter:url(#svg-filter)` on HTML | drawn | drawn | drawn | drawn |
+| `mask-image` gradient, `mask-composite: exclude` | drawn | drawn | drawn | drawn |
+| `clip-path: polygon()`, `mix-blend-mode: screen` | drawn | drawn | drawn | drawn |
+| `background-clip: text` | drawn | **0 pixels**, in every variant tried | drawn | drawn |
+| ... masked by a nested SVG image of its own text instead | drawn | **drawn** (4656 vs 4752 for plain text) | drawn | drawn |
+| ... `-moz-element()` mask | n/a | 0 pixels | n/a | n/a |
+| `box-shadow` / `text-shadow` 30px down | below | below | **above (Y flipped)** | below |
+| `filter: drop-shadow()` 30px down | below | below | below | below |
+| Flipping the HTML with CSS and back with an SVG transform | n/a | n/a | still flipped | n/a |
+| Embedded `@font-face` (data: TTF) at the first draw after `decode()` | ready | ready | ready | ready |
+| `perspective` + `rotateY(60deg)` | foreshortened | foreshortened | **flat** (no perspective) | foreshortened |
+| `backface-visibility: hidden` past 90 degrees | **ignored** | hidden | **ignored** | **ignored** |
+| `preserve-3d` depth order | **DOM order** | by depth | **DOM order** | **DOM order** |
+| Text drawn at 4x: wrapper `transform: scale(4)` or `drawImage` to 4x | as crisp as `fillText` at 80px | same | same | n/a |
+| `data:` URL of 1 / 4 / 16 / 48 MB | decodes, about 9 ms per MB | about 14 ms per MB | about 9 ms per MB | n/a |
+| 1080p frame, 120 transformed letters, embedded font, drop-shadow | decode 10.6 ms, draw 1.2 ms | decode 6 ms, **draw 69 ms** | decode 5 ms, draw 1 ms | n/a |
+| `Intl.Segmenter` | yes | yes | yes | **from 87** |
+| `container-type` | yes | yes | yes | **from 105** |
+| `ctx.filter` | yes | yes | **no** | yes |
+
+So: a `data:` URL and never a `blob:` one; the image's own engine evaluates
+time t when every animation is paused with its delay shifted by `-t`, and
+every SMIL `begin` likewise, which needs no computed value copied out; Firefox
+rasterises at `drawImage`, so the draw belongs in the async step.
+
+**Font subsetting** (HarfBuzz `hb-subset`, harfbuzzjs 1.6.4's
+`harfbuzz-subset.wasm`, 683 KB with no imports), every layout feature, script
+and name kept, the drop-table set emptied, `PASSTHROUGH_UNRECOGNIZED` and
+`NOTDEF_OUTLINE`:
+
+| face | full | subset | ms | width after subset (Chromium / Firefox / WebKit) |
+|---|---|---|---|---|
+| notosanskr-medium.otf (CFF) | 4657 KB | 10.8 KB (283 KB with `RETAIN_GIDS`) | 13 | equal / equal / equal |
+| Pretendard-Medium.otf | 1547 KB | 12.8 KB | 2.4 | equal |
+| 28 Google TTFs | 66 to 500 KB | 7 to 18 KB | under 1 | equal, except below |
+| PermanentMarker, Righteous (legacy `kern`, no GPOS) | | | | **wrong in all three** without `RETAIN_GIDS` (the passed-through `kern` names old glyph ids); equal with it |
+| PlayfairDisplay-Bold | | | | Firefox only: 5 px wider over a line; its GPOS kerns against the space, and Firefox stops applying that after any subset |
+
+Equal means the same layout width to 0.01 px and the same canvas pixels.
+`@napi-rs/canvas` (Skia) is not a usable oracle for TrueType subsets: it draws
+the same advance but different edges for a subset glyph (208 pixels on one
+Anton "A"), where all three browsers draw them identically.
+
+### What the snapshot host draws, measured 2026-11-09
+
+`tests/spikes/snapshot/editor.mjs` opens an example template in the real web
+editor (served the way `buildWeb.mjs` lays it out, nothing built or written),
+seeks, and saves the preview canvas; `presetTemplate.ts` writes a template of
+all 25 bundled HTML presets, 3 s each, as inline programs; `grid.mjs` scores a
+browser against Chrome for Testing 157 drawing the same frames through
+html-in-canvas. Mean of the largest channel difference (0 to 255), at each
+clip's middle:
+
+| | Chromium 151 | Chrome 113 | WebKit 26.5 | Firefox 153 |
+|---|---|---|---|---|
+| presets under 1.0 | 24 of 25 | 22 of 25 | 17 of 25 | 15 of 25 |
+| worst | vertical-title 4.6 | vertical-title 4.6 | ruby-title 13.5 | circle-path 9.8 |
+
+Two instants of the same template differ by 1.3 (promo) to 102 (feynman), so
+the measure sees motion. What is left is the engine's own drawing, the same in
+its live DOM made visible: WebKit lays out ruby and flattens `perspective`
+inside an SVG image (extrude's tilt), Gecko ignores `textLength` on a
+`textPath` (circle-path) and lands the counter on its last value early.
+
+Engine faults found by the gallery and worked around only where the probe
+draws them (`snapshotSupport`):
+
+| fault | where | before | after | how |
+|---|---|---|---|---|
+| a `text-shadow` list draws only its first layer | WebKit | long-shadow 20.65 | 0.61 | the layers as an SVG filter, from computed style at t |
+| an outer `box-shadow` draws only alone and over a background; in a list every layer with a vertical offset is dropped | WebKit | (no shadow) | as Blink's own, 1208 of 1208 px | an SVG filter of the border box, in bounding-box units: user-space units land somewhere else in WebKit and cut the box away |
+| `background-clip: text` paints nothing | Gecko | gradient-sweep 8.85, image-fill 19.75 | 0.16, 0.32 | a mask made of a nested snapshot of the element's own text, the element and its ancestors untransformed |
+| an animated `<integer>` is not rounded, so `counter-reset` is invalid and stays 0 | WebKit (live DOM too) | counter 10.81 | 0.12 | the live value, rounded, pinned with `!important` |
+| `backface-visibility: hidden` ignored | Blink, WebKit | | | `visibility: hidden` where the composed matrix's `m33 < 0` |
+| `inset` unknown before Chrome 87 | Chrome 85, 86 | every preset against the top left | centred | `inset` written as its four longhands where `CSS.supports` says no |
+
+Chrome 94 and 85 still differ where a graphic uses CSS they do not have
+(`cos()` and `color-mix()` before 111, container units before 105): the
+graphic draws, without that part, as CSS degrades. Their editor also lays the
+preview out differently, which the scores include.
+
+**Export.** A 3-preset template exported from Playwright WebKit (WebCodecs,
+H.264) in 3 s has the titles in every frame. Its black comes out as 16 of
+255 where Chrome's is 0, on frames with no graphic too (checked at 6 s): video
+range in WebKit's encoder path, not the snapshot. Playwright Firefox fails every browser export, so
+Firefox export was not run.

@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>snapshot spike</title>
+<style>
+  body { margin: 0; background: #222; }
+</style>
+<style id="live">
+  @property --spk { syntax: '<color>'; inherits: false; initial-value: #ff0000; }
+  @keyframes spk-bg { from { background-color: #ff0000; } to { background-color: #0000ff; } }
+  @keyframes spk-var { from { --spk: #ff0000; } to { --spk: #0000ff; } }
+  @keyframes spk-show { from { display: none; } to { display: block; } }
+  .spk-bg { animation: spk-bg 1s linear; width: 10px; height: 10px; }
+  .spk-var { animation: spk-var 1s linear; background: var(--spk); width: 10px; height: 10px; }
+</style>
+</head>
+<body>
+<script>
+// The snapshot spike: what an SVG foreignObject image drawn into a 2D canvas
+// does in this engine. Every answer is a drawn pixel or a thrown error. Written
+// in ES2017 with no optional chaining and no `inset`, so it runs on old Chrome.
+var SVG_NS = "http://www.w3.org/2000/svg";
+var XHTML = "http://www.w3.org/1999/xhtml";
+
+function svgDoc(o) {
+  var w = o.w, h = o.h;
+  return '<svg xmlns="' + SVG_NS + '" width="' + w + '" height="' + h + '">' +
+    (o.extraSvg || "") +
+    '<foreignObject x="0" y="0" width="' + w + '" height="' + h + '">' +
+    '<div xmlns="' + XHTML + '" style="width:' + (o.innerW || w) + 'px;height:' + (o.innerH || h) +
+    'px;position:relative;margin:0;' + (o.wrapStyle || "") + '">' +
+    '<style><![CDATA[' + (o.css || "") + ']]></style>' + o.body + '</div></foreignObject></svg>';
+}
+function dataUrl(svg) { return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg); }
+function loadImg(url) {
+  var img = new Image();
+  return new Promise(function (resolve, reject) {
+    img.onload = function () { resolve(img); };
+    img.onerror = function () { reject(new Error("img error")); };
+    img.src = url;
+  }).then(function (i) {
+    return i.decode ? i.decode().then(function () { return i; }, function () { return i; }) : i;
+  });
+}
+function canvasOf(w, h) { var c = document.createElement("canvas"); c.width = w; c.height = h; return c; }
+async function draw(svg, w, h, opts) {
+  opts = opts || {};
+  var t0 = performance.now();
+  var url = opts.blob ? URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" })) : dataUrl(svg);
+  var t1 = performance.now();
+  var img = await loadImg(url);
+  var t2 = performance.now();
+  var c = canvasOf(opts.cw || w, opts.ch || h);
+  var ctx = c.getContext("2d");
+  ctx.drawImage(img, 0, 0, opts.cw || w, opts.ch || h);
+  var t3 = performance.now();
+  return { c: c, ctx: ctx, img: img, ms: { encode: t1 - t0, decode: t2 - t1, draw: t3 - t2 }, bytes: url.length };
+}
+function px(ctx, x, y) {
+  try { return Array.prototype.slice.call(ctx.getImageData(x, y, 1, 1).data); }
+  catch (e) { return "THROW:" + e.name; }
+}
+/** Pixels in a rect matching a predicate. */
+function count(ctx, x, y, w, h, pred) {
+  var d;
+  try { d = ctx.getImageData(x, y, w, h).data; } catch (e) { return "THROW:" + e.name; }
+  var n = 0;
+  for (var i = 0; i < d.length; i += 4) if (pred(d[i], d[i + 1], d[i + 2], d[i + 3])) n++;
+  return n;
+}
+var red = function (r, g, b, a) { return r > 200 && g < 60 && b < 60 && a > 200; };
+var green = function (r, g, b, a) { return g > 150 && r < 100 && b < 100 && a > 150; };
+var opaque = function (r, g, b, a) { return a > 128; };
+var edge = function (r, g, b, a) { return a > 10 && a < 245; };
+var full = function (_r, _g, _b, a) { return a >= 245; };
+function block(style) { return '<div style="position:absolute;' + style + '"></div>'; }
+var FILL = "left:0;top:0;right:0;bottom:0;";
+
+var fontB64 = null;
+async function font() {
+  if (fontB64 == null) {
+    var buf = await (await fetch("/assets/fonts/google/Anton-Regular.ttf")).arrayBuffer();
+    var bytes = new Uint8Array(buf), s = "";
+    for (var i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    fontB64 = btoa(s);
+  }
+  return "@font-face{font-family:SpikeFont;src:url(data:font/ttf;base64," + fontB64 + ") format('truetype');}";
+}
+
+var tests = {};
+
+tests.env = async function () {
+  return {
+    ua: navigator.userAgent,
+    videoFrame: typeof VideoFrame !== "undefined",
+    videoEncoder: typeof VideoEncoder !== "undefined",
+    getAnimations: typeof document.getAnimations === "function",
+    elementGetAnimations: typeof Element.prototype.getAnimations === "function",
+    adoptedStyleSheets: "adoptedStyleSheets" in Document.prototype,
+    replaceSync: typeof CSSStyleSheet !== "undefined" && typeof CSSStyleSheet.prototype.replaceSync === "function",
+    segmenter: typeof Intl !== "undefined" && typeof Intl.Segmenter === "function",
+    registerProperty: typeof CSS !== "undefined" && typeof CSS.registerProperty === "function",
+    ctxFilter: "filter" in CanvasRenderingContext2D.prototype,
+    drawElementImage: typeof CanvasRenderingContext2D.prototype.drawElementImage === "function",
+    containerType: CSS.supports("container-type", "size"),
+    colorMix: CSS.supports("color", "color-mix(in srgb, red, blue)"),
+    toWellFormed: typeof "".toWellFormed === "function",
+  };
+};
+
+tests.taint = async function () {
+  var svg = svgDoc({ w: 16, h: 16, body: block(FILL + "background:#ff0000") });
+  var out = {};
+  var kinds = ["data", "blob"];
+  for (var k = 0; k < kinds.length; k++) {
+    var kind = kinds[k];
+    try {
+      var r = await draw(svg, 16, 16, { blob: kind === "blob" });
+      var res = { pixel: px(r.ctx, 8, 8) };
+      if (typeof VideoFrame === "undefined") res.videoFrame = "absent";
+      else {
+        try { var vf = new VideoFrame(r.c, { timestamp: 0 }); vf.close(); res.videoFrame = "ok"; }
+        catch (e) { res.videoFrame = "THROW:" + e.name; }
+      }
+      try {
+        var gl = canvasOf(4, 4).getContext("webgl");
+        var tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, r.c);
+        res.webgl = gl.getError() === 0 ? "ok" : "glerror";
+      } catch (e) { res.webgl = "THROW:" + e.name; }
+      out[kind] = res;
+    } catch (e) { out[kind] = "THROW:" + e.name + ":" + e.message; }
+  }
+  return out;
+};
+
+var ANIM_CSS = "@keyframes k{from{background-color:#ff0000}to{background-color:#0000ff}}";
+tests.animInImage = async function () {
+  var out = {};
+  var variants = {
+    running: ".a{animation:k 1s linear}",
+    negDelayPaused: ".a{animation:k 1s linear -0.5s paused}",
+    negDelayPausedFillBoth: ".a{animation:k 1s linear -0.5s both paused}",
+    negDelayRunning: ".a{animation:k 1s linear -0.5s}",
+    longhands: ".a{animation-name:k;animation-duration:1s;animation-timing-function:linear;animation-delay:-0.25s;animation-play-state:paused}",
+  };
+  for (var name in variants) {
+    var svg = svgDoc({ w: 8, h: 8, css: ANIM_CSS + variants[name], body: '<div class="a" style="position:absolute;' + FILL + '"></div>' });
+    var r = await draw(svg, 8, 8);
+    out[name] = px(r.ctx, 4, 4);
+    await new Promise(function (res) { setTimeout(res, 120); });
+    r.ctx.clearRect(0, 0, 8, 8);
+    r.ctx.drawImage(r.img, 0, 0);
+    out[name + "_redraw120ms"] = px(r.ctx, 4, 4);
+  }
+  return out;
+};
+
+tests.propertyInImage = async function () {
+  var css = "@property --spk{syntax:'<color>';inherits:false;initial-value:#ff0000}" +
+    "@keyframes kv{from{--spk:#ff0000}to{--spk:#0000ff}}" +
+    ".v{animation:kv 1s linear -0.5s paused;background:var(--spk)}";
+  var r = await draw(svgDoc({ w: 8, h: 8, css: css, body: '<div class="v" style="position:absolute;' + FILL + '"></div>' }), 8, 8);
+  var staticCss = "@property --spk{syntax:'<color>';inherits:false;initial-value:#00ff00}.v{background:var(--spk)}";
+  var r2 = await draw(svgDoc({ w: 8, h: 8, css: staticCss, body: '<div class="v" style="position:absolute;' + FILL + '"></div>' }), 8, 8);
+  return { animatedNegDelay: px(r.ctx, 4, 4), initialValueOnly: px(r2.ctx, 4, 4) };
+};
+
+tests.liveFreeze = async function () {
+  var out = {};
+  var el = document.createElement("div");
+  el.className = "spk-bg";
+  document.body.appendChild(el);
+  var v = document.createElement("div");
+  v.className = "spk-var";
+  document.body.appendChild(v);
+  try {
+    if (typeof el.getAnimations !== "function") return { getAnimations: "absent" };
+    var a = el.getAnimations()[0];
+    a.pause(); a.currentTime = 500;
+    out.computedBg = getComputedStyle(el).backgroundColor;
+    out.bgKeyframeKeys = Object.keys(a.effect.getKeyframes()[0] || {});
+    var av = v.getAnimations()[0];
+    if (av) {
+      av.pause(); av.currentTime = 500;
+      out.computedVar = getComputedStyle(v).getPropertyValue("--spk").trim();
+      out.varKeyframeKeys = Object.keys(av.effect.getKeyframes()[0] || {});
+      out.varKeyframes = JSON.stringify(av.effect.getKeyframes());
+    } else out.varAnimation = "none listed";
+    var css = ".f{background-color:" + out.computedBg + " !important;animation:none!important}";
+    var r = await draw(svgDoc({ w: 8, h: 8, css: ANIM_CSS + ".f{animation:k 1s linear}" + css, body: '<div class="f" style="position:absolute;' + FILL + '"></div>' }), 8, 8);
+    out.frozenPixel = px(r.ctx, 4, 4);
+  } finally { el.remove(); v.remove(); }
+  return out;
+};
+
+tests.displayAnimation = async function () {
+  // A parent whose display animates back at t creates the child's animation
+  // during the style flush; is it listed after a single seek?
+  var css = document.createElement("style");
+  css.textContent = "@keyframes da-show{0%,49%{display:none}50%,100%{display:block}}" +
+    "@keyframes da-kid{from{opacity:0}to{opacity:1}}" +
+    ".da-p{animation:da-show 1s linear both}.da-k{animation:da-kid 1s linear both;width:4px;height:4px;background:#fff}";
+  document.head.appendChild(css);
+  var p = document.createElement("div"); p.className = "da-p";
+  var k = document.createElement("div"); k.className = "da-k";
+  p.appendChild(k); document.body.appendChild(p);
+  try {
+    if (typeof p.getAnimations !== "function") return "absent";
+    var first = p.getAnimations({ subtree: true });
+    first.forEach(function (a) { a.pause(); a.currentTime = 800; });
+    var second = p.getAnimations({ subtree: true });
+    return { listedBeforeSeek: first.length, listedAfterSeek: second.length, kidOpacity: getComputedStyle(k).opacity };
+  } finally { p.remove(); css.remove(); }
+};
+
+tests.smil = async function () {
+  var out = {};
+  var rect = '<svg xmlns="' + SVG_NS + '" width="8" height="8" style="position:absolute;left:0;top:0">' +
+    '<rect width="8" height="8" fill="#ff0000"><animate attributeName="fill" from="#ff0000" to="#0000ff" dur="1s" begin="BEGIN" fill="freeze"/></rect></svg>';
+  var r0 = await draw(svgDoc({ w: 8, h: 8, body: rect.replace("BEGIN", "0s") }), 8, 8);
+  out.beginZero = px(r0.ctx, 4, 4);
+  var r1 = await draw(svgDoc({ w: 8, h: 8, body: rect.replace("BEGIN", "-0.5s") }), 8, 8);
+  out.beginMinusHalf = px(r1.ctx, 4, 4);
+  // animVal in the live document after a seek.
+  var holder = document.createElement("div");
+  holder.innerHTML = '<svg xmlns="' + SVG_NS + '" width="10" height="10"><filter id="spkm"><feMorphology id="spkmo" radius="0">' +
+    '<animate attributeName="radius" from="0" to="10" dur="1s" fill="freeze"/></feMorphology>' +
+    '<feTurbulence id="spktu" baseFrequency="0.01"><animate attributeName="baseFrequency" from="0.01" to="0.05" dur="1s" fill="freeze"/></feTurbulence></filter>' +
+    '<text id="spkt"><textPath id="spktp" startOffset="0">x<animate attributeName="startOffset" from="0" to="100" dur="1s" fill="freeze"/></textPath></text></svg>';
+  document.body.appendChild(holder);
+  try {
+    var svg = holder.firstChild;
+    svg.pauseAnimations();
+    svg.setCurrentTime(0.5);
+    var mo = holder.querySelector("#spkmo"), tu = holder.querySelector("#spktu"), tp = holder.querySelector("#spktp");
+    out.radiusXAnimVal = mo.radiusX.animVal;
+    out.baseFrequencyXAnimVal = tu.baseFrequencyX.animVal;
+    out.startOffsetAnimVal = tp.startOffset.animVal.valueAsString;
+    out.radiusBaseVal = mo.radiusX.baseVal;
+  } catch (e) { out.animValError = e.name + ":" + e.message; }
+  finally { holder.remove(); }
+  return out;
+};
+
+tests.effects = async function () {
+  var out = {};
+  var filterSvg = '<svg xmlns="' + SVG_NS + '" width="0" height="0" style="position:absolute"><filter id="g">' +
+    '<feColorMatrix type="matrix" values="0 0 0 0 0  1 0 0 0 0  0 0 0 0 0  0 0 0 1 0"/></filter></svg>';
+  var r = await draw(svgDoc({ w: 8, h: 8, body: filterSvg + block(FILL + "background:#ff0000;filter:url(#g)") }), 8, 8);
+  out.filterUrlOnHtml = px(r.ctx, 4, 4);
+  r = await draw(svgDoc({ w: 20, h: 8, body: block(FILL + "background:#ff0000;-webkit-mask-image:linear-gradient(to right,#000 50%,transparent 50%);mask-image:linear-gradient(to right,#000 50%,transparent 50%)") }), 20, 8);
+  out.maskLeft = px(r.ctx, 4, 4); out.maskRight = px(r.ctx, 16, 4);
+  var mc = "background:#ff0000;mask-image:linear-gradient(#000,#000),linear-gradient(to right,#000 50%,transparent 50%);mask-composite:exclude;" +
+    "-webkit-mask-image:linear-gradient(#000,#000),linear-gradient(to right,#000 50%,transparent 50%);-webkit-mask-composite:xor;";
+  r = await draw(svgDoc({ w: 20, h: 8, body: block(FILL + mc) }), 20, 8);
+  out.maskCompositeLeft = px(r.ctx, 4, 4); out.maskCompositeRight = px(r.ctx, 16, 4);
+  r = await draw(svgDoc({ w: 20, h: 20, body: block(FILL + "background:#ff0000;clip-path:polygon(0 0,100% 0,0 100%)") }), 20, 20);
+  out.clipTopLeft = px(r.ctx, 3, 3); out.clipBottomRight = px(r.ctx, 17, 17);
+  r = await draw(svgDoc({ w: 8, h: 8, body: '<div style="position:absolute;' + FILL + 'background:#0000ff;isolation:isolate">' + block(FILL + "background:#ff0000;mix-blend-mode:screen") + "</div>" }), 8, 8);
+  out.blendScreen = px(r.ctx, 4, 4);
+  return out;
+};
+
+tests.clipText = async function () {
+  var out = {};
+  var text = "HHHH";
+  var base = "position:absolute;left:0;top:0;font:bold 60px sans-serif;line-height:70px;";
+  var grad = "background:linear-gradient(#00ff00,#00ff00);";
+  var variants = {
+    standard: base + grad + "-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;",
+    colorOnly: base + grad + "-webkit-background-clip:text;background-clip:text;color:transparent;",
+    inlineBlock: base + grad + "display:inline-block;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;",
+    willChange: base + grad + "will-change:transform;-webkit-background-clip:text;background-clip:text;color:transparent;-webkit-text-fill-color:transparent;",
+  };
+  for (var name in variants) {
+    var r = await draw(svgDoc({ w: 200, h: 80, body: '<div style="' + variants[name] + '">' + text + "</div>" }), 200, 80);
+    out[name] = count(r.ctx, 0, 0, 200, 80, green);
+  }
+  var plain = await draw(svgDoc({ w: 200, h: 80, body: '<div style="' + base + 'color:#00ff00">' + text + "</div>" }), 200, 80);
+  out.plainGreenText = count(plain.ctx, 0, 0, 200, 80, green);
+  // -moz-element mask of a text-only copy.
+  var moz = '<div id="mtxt" style="' + base + 'color:#000;left:-9999px">' + text + "</div>" +
+    '<div style="' + base + grad + 'color:transparent;mask-image:-moz-element(#mtxt);mask-repeat:no-repeat;mask-size:100% 100%">' + text + "</div>";
+  var rm = await draw(svgDoc({ w: 200, h: 80, body: moz }), 200, 80);
+  out.mozElementMask = count(rm.ctx, 0, 0, 200, 80, green);
+  // A mask from a nested SVG image holding the text.
+  var inner = '<svg xmlns="' + SVG_NS + '" width="200" height="80"><text x="0" y="60" font-family="sans-serif" font-weight="bold" font-size="60">' + text + "</text></svg>";
+  var nested = '<div style="' + base + 'width:200px;height:80px;' + grad +
+    "mask-image:url(&quot;" + dataUrl(inner).replace(/"/g, "%22") + "&quot;);-webkit-mask-image:url(&quot;" + dataUrl(inner).replace(/"/g, "%22") + '&quot;);mask-repeat:no-repeat"></div>';
+  var rn = await draw(svgDoc({ w: 200, h: 80, body: nested }), 200, 80);
+  out.nestedSvgMask = count(rn.ctx, 0, 0, 200, 80, green);
+  // SVG text with a gradient fill, inline in the HTML.
+  var svgText = '<svg xmlns="' + SVG_NS + '" width="200" height="80" style="position:absolute;left:0;top:0"><defs><linearGradient id="lg"><stop offset="0" stop-color="#00ff00"/><stop offset="1" stop-color="#00ff00"/></linearGradient></defs>' +
+    '<text x="0" y="60" font-family="sans-serif" font-weight="bold" font-size="60" fill="url(#lg)">' + text + "</text></svg>";
+  var rs = await draw(svgDoc({ w: 200, h: 80, body: svgText }), 200, 80);
+  out.svgTextGradient = count(rs.ctx, 0, 0, 200, 80, green);
+  return out;
+};
+
+tests.clipTextFixes = async function () {
+  // Firefox draws nothing for background-clip:text in an SVG image. Candidate:
+  // mask the element with a nested SVG image of its own HTML, text in black.
+  var out = {};
+  var text = "HHHH";
+  var fontCss = await font();
+  var base = "position:absolute;left:0;top:0;width:200px;height:80px;font:60px SpikeFont, sans-serif;line-height:70px;";
+  var glyphDoc = svgDoc({ w: 200, h: 80, css: fontCss, body: '<div style="' + base + 'color:#000">' + text + "</div>" });
+  var maskUrl = dataUrl(glyphDoc).replace(/'/g, "%27");
+  var css = fontCss + ".e{" + base + "background:linear-gradient(#00ff00,#00ff00);color:transparent;-webkit-text-fill-color:transparent;" +
+    "mask-image:url('" + maskUrl + "');-webkit-mask-image:url('" + maskUrl + "');mask-size:100% 100%;-webkit-mask-size:100% 100%;mask-repeat:no-repeat;-webkit-mask-repeat:no-repeat}";
+  var r = await draw(svgDoc({ w: 200, h: 80, css: css, body: '<div class="e">' + text + "</div>" }), 200, 80);
+  out.nestedForeignObjectMask = count(r.ctx, 0, 0, 200, 80, green);
+  var ref = await draw(svgDoc({ w: 200, h: 80, css: fontCss, body: '<div style="' + base + 'color:#00ff00">' + text + "</div>" }), 200, 80);
+  out.referencePlainText = count(ref.ctx, 0, 0, 200, 80, green);
+  out.maskBytes = maskUrl.length;
+  return out;
+};
+
+tests.shadowFix = async function () {
+  // WebKit flips box-shadow and text-shadow Y inside an SVG image. Candidate:
+  // flip the HTML with CSS and flip it back with an SVG transform.
+  var out = {};
+  var body = block("left:10px;top:40px;width:20px;height:20px;background:#0000ff;box-shadow:0 30px 0 #ff0000") +
+    '<div style="position:absolute;left:5px;top:0px;font:bold 30px sans-serif;line-height:30px;color:#0000ff;text-shadow:30px 0 0 #00ff00">H</div>';
+  var svg = '<svg xmlns="' + SVG_NS + '" width="40" height="100"><g transform="matrix(1 0 0 -1 0 100)">' +
+    '<foreignObject x="0" y="0" width="40" height="100"><div xmlns="' + XHTML + '" style="width:40px;height:100px;position:relative;transform:scaleY(-1)">' +
+    body + "</div></foreignObject></g></svg>";
+  var r = await draw(svg, 40, 100);
+  out.flipBoxBelow = count(r.ctx, 10, 70, 20, 20, red); out.flipBoxAbove = count(r.ctx, 10, 10, 20, 20, red);
+  out.flipBoxItself = count(r.ctx, 10, 40, 20, 20, function (r_, g, b, a) { return b > 200 && a > 200; });
+  return out;
+};
+
+tests.shadow = async function () {
+  var out = {};
+  // A blue box at y 40..60 with a red shadow 30px below: red belongs at y 70..90.
+  var body = block("left:10px;top:40px;width:20px;height:20px;background:#0000ff;box-shadow:0 30px 0 #ff0000");
+  var r = await draw(svgDoc({ w: 40, h: 100, body: body }), 40, 100);
+  out.boxBelow = count(r.ctx, 10, 70, 20, 20, red); out.boxAbove = count(r.ctx, 10, 10, 20, 20, red);
+  var r2 = await draw(svgDoc({ w: 40, h: 100, body: body }), 40, 100, { cw: 80, ch: 200 });
+  out.boxScaledDrawBelow = count(r2.ctx, 20, 140, 40, 40, red); out.boxScaledDrawAbove = count(r2.ctx, 20, 20, 40, 40, red);
+  var r3 = await draw(svgDoc({ w: 80, h: 200, innerW: 40, innerH: 100, wrapStyle: "transform:scale(2);transform-origin:0 0;", body: body }), 80, 200);
+  out.boxWrapperScaleBelow = count(r3.ctx, 20, 140, 40, 40, red); out.boxWrapperScaleAbove = count(r3.ctx, 20, 20, 40, 40, red);
+  var t = '<div style="position:absolute;left:5px;top:30px;font:bold 30px sans-serif;line-height:30px;color:#0000ff;text-shadow:0 30px 0 #ff0000">H</div>';
+  var r4 = await draw(svgDoc({ w: 40, h: 100, body: t }), 40, 100);
+  out.textBelow = count(r4.ctx, 0, 60, 40, 40, red); out.textAbove = count(r4.ctx, 0, 0, 40, 30, red);
+  var f = block("left:10px;top:40px;width:20px;height:20px;background:#0000ff;filter:drop-shadow(0 30px 0 #ff0000)");
+  var r5 = await draw(svgDoc({ w: 40, h: 100, body: f }), 40, 100);
+  out.dropBelow = count(r5.ctx, 10, 70, 20, 20, red); out.dropAbove = count(r5.ctx, 10, 10, 20, 20, red);
+  return out;
+};
+
+tests.lateFont = async function () {
+  var css = (await font()) + ".t{position:absolute;left:0;top:0;font:80px SpikeFont, monospace;line-height:90px;color:#000}";
+  var svg = svgDoc({ w: 300, h: 100, css: css, body: '<div class="t">HHHH</div>' });
+  var out = { coverage: [] };
+  var r = await draw(svg, 300, 100);
+  out.coverage.push(["0ms", count(r.ctx, 0, 0, 300, 100, opaque)]);
+  var waits = [16, 50, 150, 400];
+  for (var i = 0; i < waits.length; i++) {
+    await new Promise(function (res) { setTimeout(res, waits[i]); });
+    r.ctx.clearRect(0, 0, 300, 100); r.ctx.drawImage(r.img, 0, 0);
+    out.coverage.push([waits[i] + "ms same img", count(r.ctx, 0, 0, 300, 100, opaque)]);
+  }
+  var again = await draw(svg, 300, 100);
+  out.coverage.push(["second image 0ms", count(again.ctx, 0, 0, 300, 100, opaque)]);
+  var fb = await draw(svgDoc({ w: 300, h: 100, css: ".t{position:absolute;left:0;top:0;font:80px monospace;line-height:90px;color:#000}", body: '<div class="t">HHHH</div>' }), 300, 100);
+  out.fallbackCoverage = count(fb.ctx, 0, 0, 300, 100, opaque);
+  out.svgBytes = svg.length;
+  return out;
+};
+
+tests.threeD = async function () {
+  var out = {};
+  var body = '<div style="position:absolute;' + FILL + 'perspective:200px">' +
+    block("left:50px;top:50px;width:100px;height:100px;background:#ff0000;transform:rotateY(60deg)") + "</div>";
+  var r = await draw(svgDoc({ w: 200, h: 200, body: body }), 200, 200);
+  // Height of the red column near each projected edge: equal means no perspective.
+  function colHeight(x) { return count(r.ctx, x, 0, 1, 200, red); }
+  var xs = [];
+  for (var x = 0; x < 200; x++) if (colHeight(x) > 0) xs.push(x);
+  out.redColumns = xs.length ? [xs[0], xs[xs.length - 1]] : "none";
+  if (xs.length) { out.leftEdgeHeight = colHeight(xs[0] + 1); out.rightEdgeHeight = colHeight(xs[xs.length - 1] - 1); }
+  var back = '<div style="position:absolute;' + FILL + 'transform-style:preserve-3d">' +
+    block("left:0;top:0;width:20px;height:20px;background:#ff0000;transform:rotateY(180deg);backface-visibility:hidden") + "</div>";
+  var rb = await draw(svgDoc({ w: 20, h: 20, body: back }), 20, 20);
+  out.backfaceHiddenRedPixels = count(rb.ctx, 0, 0, 20, 20, red);
+  var sort = '<div style="position:absolute;' + FILL + 'perspective:300px"><div style="position:absolute;' + FILL + 'transform-style:preserve-3d">' +
+    block("left:20px;top:20px;width:40px;height:40px;background:#0000ff;transform:translateZ(50px)") +
+    block("left:20px;top:20px;width:40px;height:40px;background:#ff0000;transform:translateZ(-50px)") + "</div></div>";
+  var rs = await draw(svgDoc({ w: 80, h: 80, body: sort }), 80, 80);
+  out.preserve3dFrontPixel = px(rs.ctx, 40, 40);
+  return out;
+};
+
+tests.crisp = async function () {
+  var text = '<div style="position:absolute;left:0;top:0;font:bold 20px sans-serif;line-height:24px;color:#000">Hamburgefonstiv</div>';
+  var a = await draw(svgDoc({ w: 200, h: 30, body: text }), 200, 30, { cw: 800, ch: 120 });
+  var b = await draw(svgDoc({ w: 800, h: 120, innerW: 200, innerH: 30, wrapStyle: "transform:scale(4);transform-origin:0 0;", body: text }), 800, 120);
+  var ref = canvasOf(800, 120), rctx = ref.getContext("2d");
+  rctx.font = "bold 80px sans-serif"; rctx.textBaseline = "top"; rctx.fillText("Hamburgefonstiv", 0, 8);
+  function ratio(ctx) { var e = count(ctx, 0, 0, 800, 120, edge), f = count(ctx, 0, 0, 800, 120, full); return typeof e === "number" ? +(e / Math.max(1, f)).toFixed(3) : e; }
+  return { drawScaled4x: ratio(a.ctx), wrapperScale4x: ratio(b.ctx), canvasFillText80px: ratio(rctx) };
+};
+
+tests.urlSize = async function () {
+  var out = {};
+  var sizes = [1, 4, 16, 48];
+  for (var i = 0; i < sizes.length; i++) {
+    var pad = new Array(sizes[i] * 1024 * 1024 + 1).join("a");
+    var svg = svgDoc({ w: 8, h: 8, body: block(FILL + "background:#ff0000") + "<p style=\"display:none\">" + pad + "</p>" });
+    try { var r = await draw(svg, 8, 8); out[sizes[i] + "MB"] = { pixel: px(r.ctx, 4, 4), decodeMs: Math.round(r.ms.decode) }; }
+    catch (e) { out[sizes[i] + "MB"] = "THROW:" + e.message; }
+  }
+  return out;
+};
+
+tests.timing = async function () {
+  var fontCss = await font();
+  var spans = "";
+  for (var i = 0; i < 120; i++) {
+    spans += '<span style="display:inline-block;transform:translateY(' + (i % 7) * 3 + 'px) rotate(' + (i % 5) + 'deg);opacity:' + (0.5 + (i % 5) / 10) + '">' +
+      String.fromCharCode(65 + (i % 26)) + "</span>";
+  }
+  var css = fontCss + ".t{position:absolute;left:40px;top:40px;right:40px;font:72px SpikeFont, sans-serif;color:#fff;" +
+    "text-shadow:0 4px 12px rgba(0,0,0,.6);filter:drop-shadow(0 0 6px #f0f)}";
+  var times = [];
+  for (var k = 0; k < 8; k++) {
+    var t0 = performance.now();
+    var svg = svgDoc({ w: 1920, h: 1080, css: css, body: '<div class="t">' + spans.replace("A", String.fromCharCode(65 + k)) + "</div>" });
+    var t1 = performance.now();
+    var r = await draw(svg, 1920, 1080);
+    times.push({ build: t1 - t0, encode: r.ms.encode, decode: r.ms.decode, draw: r.ms.draw, kb: Math.round(r.bytes / 1024) });
+  }
+  times.sort(function (a, b) { return (a.decode + a.draw) - (b.decode + b.draw); });
+  var m = times[Math.floor(times.length / 2)];
+  return { median: { build: +m.build.toFixed(1), encode: +m.encode.toFixed(1), decode: +m.decode.toFixed(1), draw: +m.draw.toFixed(1), kb: m.kb } };
+};
+
+window.runSpike = async function (only) {
+  var results = {};
+  var names = only && only.length ? only : Object.keys(tests);
+  for (var i = 0; i < names.length; i++) {
+    var name = names[i];
+    try { results[name] = await tests[name](); }
+    catch (e) { results[name] = "THROW:" + (e && e.name) + ":" + (e && e.message); }
+  }
+  return results;
+};
+</script>
+</body>
+</html>
