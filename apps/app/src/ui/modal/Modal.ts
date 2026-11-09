@@ -124,8 +124,10 @@ export class ModalList extends LitElement {
 
       <dds-modal modal-id="progressFinish" modal-title="Rendering is complete">
         <dds-content>
-          <!-- The browser export's file name, set by exportSession#finishExport. -->
-          <div class="mb-3" id="progressFinishDetail"></div>
+          <!-- The browser export's file name, set by exportSession#finishExport.
+               Coloured here: left to inherit, it took Bootstrap's dark body
+               text and vanished into the dark dialog. -->
+          <div class="mb-3" id="progressFinishDetail" style="color: #ced4da"></div>
         </dds-content>
         ${getLocationEnv() === "electron"
           ? html`<dds-modal-button
