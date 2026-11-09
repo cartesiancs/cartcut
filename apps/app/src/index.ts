@@ -29,6 +29,8 @@ import {
 } from "./features/font/localFonts";
 import { installFontUrlResolver } from "./features/font/fontFaces";
 import { installGraphicAssetUrlResolver } from "./features/graphic/fileUrl";
+import { installSubsetWasmUrl } from "./features/graphic/snapshot/snapshotFonts";
+import subsetWasmUrl from "harfbuzzjs/dist/harfbuzz-subset.wasm";
 import { mediaUrlFor } from "./functions/mediaUrl";
 
 enableIpcWrapper();
@@ -43,6 +45,10 @@ if (getLocationEnv() !== "electron") {
   // page cannot read.
   installFontUrlResolver((path) => mediaUrlFor(path, getLocationEnv()));
   installGraphicAssetUrlResolver((path) => mediaUrlFor(path, getLocationEnv()));
+  // Where a graphic drawn as an SVG snapshot cuts its fonts down to the
+  // glyphs it shows. The desktop app draws graphics with html-in-canvas and
+  // never asks for it.
+  installSubsetWasmUrl(subsetWasmUrl);
 }
 
 // The browser builds only. Electron already shows no native right-click menu.

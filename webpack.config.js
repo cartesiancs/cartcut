@@ -37,6 +37,16 @@ module.exports = {
         exclude: /node_modules/,
       },
       {
+        // HarfBuzz's subsetter (683 KB, no imports), emitted beside the bundle
+        // and fetched only when a browser without html-in-canvas first draws
+        // a graphic whose font is too large to carry whole
+        // (`features/graphic/snapshot/snapshotFonts.ts`).
+        test: /harfbuzz-subset\.wasm$/,
+        include: /node_modules[\\/]harfbuzzjs[\\/]/,
+        type: "asset/resource",
+        generator: { filename: "[name][ext]" },
+      },
+      {
         // ONNX Runtime's WebAssembly (14 MB) and the script that loads it,
         // emitted beside the bundle under their own names and fetched only when
         // the speech worker first speaks (`features/tts/web/ttsWebWorker.ts`).

@@ -40,6 +40,12 @@ export type PrepareResult = {
   current: number;
   /** `false` when the paint did not come: a minimised, throttled window. */
   painted: boolean;
+  /**
+   * Jobs the host could not draw although it had painted: a snapshot that would
+   * not decode, a draw that threw. Their keys stay as they were, so the next
+   * request tries them again.
+   */
+  failed: string[];
 };
 
 export async function prepareGraphics(
@@ -49,7 +55,7 @@ export async function prepareGraphics(
 ): Promise<PrepareResult> {
   const { port } = deps;
   if (!port.supported()) {
-    return { drawn: 0, current: 0, painted: true };
+    return { drawn: 0, current: 0, painted: true, failed: [] };
   }
 
   const stale: Array<{ job: GraphicJob }> = [];
@@ -76,12 +82,13 @@ export async function prepareGraphics(
       timeMs: job.time.tMs,
       seed: job.seed,
       fonts: deps.fontsOf(job),
+      raster: job.raster,
     });
     stale.push({ job });
   }
 
   if (stale.length === 0) {
-    return { drawn: 0, current, painted: true };
+    return { drawn: 0, current, painted: true, failed: [] };
   }
 
   const painted = await port.settle();
@@ -91,15 +98,18 @@ export async function prepareGraphics(
     // canvas the preview is showing and then fail; filed under the new key,
     // that stale raster read as current for good. Every raster and its key
     // stay as they were, so the next request makes them again.
-    return { drawn: 0, current, painted: false };
+    return { drawn: 0, current, painted: false, failed: [] };
   }
   let drawn = 0;
+  const failed: string[] = [];
   for (const { job } of stale) {
     const raster = port.rasterize(job.instanceId, job.raster.width, job.raster.height);
     if (raster != null) {
       sink.put(job.instanceId, job.key, raster);
       drawn += 1;
+    } else {
+      failed.push(job.instanceId);
     }
   }
-  return { drawn, current, painted };
+  return { drawn, current, painted, failed };
 }

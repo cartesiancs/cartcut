@@ -18,10 +18,11 @@
  * an empty outro) until the playhead moved. A scope's host is made on its first
  * prepare and must be released with `releaseScopeGraphics`.
  *
- * **Nothing is asked of a host before `htmlSupport` has answered.** In a
- * browser that is a drawn pixel, decided once; where the answer is no, the host
- * reports itself unsupported, nothing is drawn, and the preview says why once
- * (`graphicSupportNotice.ts`).
+ * **Nothing is asked of a host before `graphicBackend` has answered** which
+ * host draws in this page (`graphicBackend.ts`): html-in-canvas where it draws,
+ * the snapshot host everywhere else it can. Both are drawn pixels, decided once.
+ * Only where neither draws does the host report itself unsupported, nothing is
+ * drawn, and the preview says why once (`graphicSupportNotice.ts`).
  *
  * Everything that decides anything is in the pure modules beside this; this
  * file only supplies them with the app.
@@ -37,7 +38,10 @@ import { fileUrlOf } from "./fileUrl";
 import { cssFamilyOf, fontEntryFor } from "./fontParams";
 import type { GraphicScope } from "./graphicScope";
 import { previewMayPrepare, serialize, whenPreviewMayPrepare } from "./graphicQueue";
-import { HtmlHost, htmlSupport, previewHtmlHost } from "./htmlHost";
+import { HtmlHost, htmlSupport } from "./htmlHost";
+import { createBackendDecision, type GraphicBackend } from "./graphicBackend";
+import { GraphicHost } from "./graphicHost";
+import { snapshotSupport, SnapshotHost } from "./snapshotHost";
 import { createSupportNotice } from "./graphicSupportNotice";
 import { getLocationEnv } from "../../functions/getLocationEnv";
 import type { HtmlRasterPort } from "./htmlRasterPort";
@@ -138,15 +142,58 @@ export function needsHtmlHost(
   return hasHtmlGraphics(elements, (element) => resolvePreset(element), expandTemplate);
 }
 
-const previewDeps = depsFor(previewHtmlHost());
+/** Which host draws in this page, asked once, by drawing. */
+const decision = createBackendDecision({
+  htmlInCanvas: htmlSupport,
+  snapshot: snapshotSupport,
+});
+
+/**
+ * Which host draws this page's graphics: html-in-canvas, the snapshot, or
+ * (where neither draws) none. Every prepare awaits it before asking a host
+ * for anything.
+ */
+export function graphicBackend(): Promise<GraphicBackend> {
+  return decision.backend();
+}
+
+// Said once, so a report from someone's browser says how its graphics were drawn.
+let announced = false;
+function announce(backend: GraphicBackend): void {
+  if (announced || getLocationEnv() === "electron") {
+    return;
+  }
+  announced = true;
+  if (backend === "snapshot") {
+    console.info("graphic: drawing with the SVG snapshot host " + JSON.stringify(decision.quirks()));
+  } else {
+    console.info("graphic: drawing with " + backend);
+  }
+}
+
+function newHost(): GraphicHost {
+  return new GraphicHost(decision.known, (backend) =>
+    backend === "html-in-canvas" ? new HtmlHost() : new SnapshotHost(decision.quirks()),
+  );
+}
+
+/**
+ * The preview's host, made at import but empty until the backend is known.
+ * Nothing else prepares on it: `rasterize` hands back the mount's own canvas
+ * and the preview keeps drawing that canvas, so an export or a contact sheet
+ * rasterising the same clip here redrew what the preview showed while the
+ * preview's key still called it current. They each make a host of their own.
+ */
+const previewHost = newHost();
+const previewDeps = depsFor(previewHost);
 
 /** Each scope's own host, made on its first prepare. */
-const scopeHosts = new WeakMap<GraphicScope, HtmlHost>();
+const scopeHosts = new WeakMap<GraphicScope, GraphicHost>();
 
-function hostOf(scope: GraphicScope): HtmlHost {
+function hostOf(scope: GraphicScope): GraphicHost {
   let host = scopeHosts.get(scope);
   if (host == null) {
-    host = new HtmlHost();
+    host = newHost();
     scopeHosts.set(scope, host);
   }
   return host;
@@ -184,10 +231,11 @@ export async function prepareScopeFrame(
     planInput(elements, timeInMs, scope.fps, () => 1, expandTemplate),
   );
   scope.rasters.clear();
+  scope.failed.clear();
   if (jobs.length === 0) {
     return true;
   }
-  await htmlSupport();
+  announce(await graphicBackend());
   const keys = new Map<string, string | null>();
   const deps = depsFor(hostOf(scope));
   const prepare = () =>
@@ -198,8 +246,17 @@ export async function prepareScopeFrame(
         scope.rasters.set(id, raster);
       },
     });
-  const result = await (queued ? serialize(prepare) : prepare());
-  return result.painted;
+  const run = () => (queued ? serialize(prepare) : prepare());
+  let result = await run();
+  // Once more for any the host could not draw: a decode can fail under load
+  // and succeed a moment later. Only the failed ones are still stale.
+  if (result.painted && result.failed.length > 0) {
+    result = await run();
+  }
+  for (const id of result.failed) {
+    scope.failed.add(id);
+  }
+  return result.painted && result.failed.length === 0;
 }
 
 /**
@@ -218,7 +275,7 @@ export function releaseScopeGraphics(scope: GraphicScope): void {
 const supportNotice = createSupportNotice({
   // Read when asked, not at import: the node suites load this module.
   desktop: () => getLocationEnv() === "electron",
-  supported: htmlSupport,
+  supported: () => graphicBackend().then((backend) => backend !== "none"),
   show: (message) =>
     (document.querySelector("toast-box") as any)?.showToast({ message, delay: "8000" }),
 });
@@ -235,11 +292,14 @@ const session = new PreviewRasterSession(
     },
     prepare: (jobs, sink) =>
       loadFontLibrary()
-        .then(() => htmlSupport())
-        .then(() => serialize(() => prepareGraphics(previewDeps, jobs, sink))),
+        .then(() => graphicBackend())
+        .then((backend) => {
+          announce(backend);
+          return serialize(() => prepareGraphics(previewDeps, jobs, sink));
+        }),
     mayPrepare: previewMayPrepare,
     whenMayPrepare: whenPreviewMayPrepare,
-    releaseMounts: (live) => previewHtmlHost().release(live),
+    releaseMounts: (live) => previewHost.release(live),
     warn: (message, error) => console.warn(message, error),
   },
   previewRasters,

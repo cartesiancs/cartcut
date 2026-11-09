@@ -1,9 +1,10 @@
 # Chrome origin-trial tokens for the web build, one per line.
 #
 # HTML graphics (titles made with the graphic tool, and every example
-# template's text) draw through Chrome's html-in-canvas API. Chrome and Edge
-# turn it on by default from 157, so a token only matters to visitors still on
-# Chrome 155 or 156. Register at
+# template's text) draw through Chrome's html-in-canvas API where it draws, and
+# as an SVG image of themselves everywhere else (features/graphic/snapshotHost.ts).
+# Chrome and Edge turn the API on by default from 157, so a token only moves
+# visitors on Chrome 155 or 156 from the snapshot to the API. Register at
 # https://developer.chrome.com/origintrials/#/view_trial/3478467762190286849
 # (the trial runs through Chrome 160), one token per origin:
 #

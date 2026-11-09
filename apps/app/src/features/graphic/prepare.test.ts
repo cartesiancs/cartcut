@@ -75,7 +75,7 @@ describe("prepareGraphics", () => {
     expect(calls.map((c) => c.split(" ")[0])).toEqual([
       "mount", "apply", "mount", "apply", "settle", "rasterize", "rasterize",
     ]);
-    expect(result).toEqual({ drawn: 2, current: 0, painted: true });
+    expect(result).toEqual({ drawn: 2, current: 0, painted: true, failed: [] });
     expect([...s.keys.entries()]).toEqual([["a", "k1"], ["b", "k2"]]);
   });
 
@@ -92,7 +92,7 @@ describe("prepareGraphics", () => {
     s.keys.set("a", "k1");
     const result = await prepareGraphics({ port, mountOf: () => ({ spec, removed: [] }), fontsOf: () => [] }, [job("a", "k1")], s);
     expect(calls).toEqual([]);
-    expect(result).toEqual({ drawn: 0, current: 1, painted: true });
+    expect(result).toEqual({ drawn: 0, current: 1, painted: true, failed: [] });
   });
 
   it("rasterises and files nothing from a paint that never came", async () => {
@@ -100,10 +100,35 @@ describe("prepareGraphics", () => {
     const s = sink();
     s.keys.set("a", "old");
     const result = await prepareGraphics({ port, mountOf: () => ({ spec, removed: [] }), fontsOf: () => [] }, [job("a", "k")], s);
-    expect(result).toEqual({ drawn: 0, current: 0, painted: false });
+    expect(result).toEqual({ drawn: 0, current: 0, painted: false, failed: [] });
     expect(calls.some((c) => c.startsWith("rasterize"))).toBe(false);
     // Left as it was, so the job is still stale and the next request redoes it.
     expect(s.keyOf("a")).toBe("old");
+  });
+
+  it("lists a graphic the host painted but could not draw, and files nothing for it", async () => {
+    const { port } = fakePort();
+    port.rasterize = (id: string) => (id === "b" ? null : ({ id } as unknown as CanvasImageSource));
+    const s = sink();
+    s.keys.set("b", "old");
+    const result = await prepareGraphics(
+      { port, mountOf: () => ({ spec, removed: [] }), fontsOf: () => [] },
+      [job("a", "k1"), job("b", "k2")],
+      s,
+    );
+    expect(result).toEqual({ drawn: 1, current: 0, painted: true, failed: ["b"] });
+    expect(s.keyOf("a")).toBe("k1");
+    // Still stale, so the next request tries it again.
+    expect(s.keyOf("b")).toBe("old");
+  });
+
+  it("tells the host the raster size it will ask for", async () => {
+    const { port } = fakePort();
+    const seen: Array<ApplyState["raster"]> = [];
+    port.apply = (_id: string, state: ApplyState) => void seen.push(state.raster);
+    const wide = { ...job("a", "k"), raster: { width: 640, height: 360 } };
+    await prepareGraphics({ port, mountOf: () => ({ spec, removed: [] }), fontsOf: () => [] }, [wide], sink());
+    expect(seen).toEqual([{ width: 640, height: 360 }]);
   });
 
   it("does nothing where html-in-canvas is not available", async () => {

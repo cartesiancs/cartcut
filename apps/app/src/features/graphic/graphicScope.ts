@@ -28,6 +28,12 @@ export type GraphicScope = {
    * nothing rather than a raster from some other frame.
    */
   readonly rasters: Map<string, CanvasImageSource>;
+  /**
+   * Graphics this frame needed and the host could not draw (a snapshot that
+   * would not decode). Cleared with `rasters`; an export reads it to say which
+   * graphic stopped it rather than blaming the window.
+   */
+  readonly failed: Set<string>;
 };
 
 let active: GraphicScope | null = null;
@@ -55,7 +61,7 @@ export function createGraphicScope(
   gl: GraphicGl | null,
   fps: number,
 ): GraphicScope {
-  return { id, gl, fps, rasters: new Map() };
+  return { id, gl, fps, rasters: new Map(), failed: new Set() };
 }
 
 /**

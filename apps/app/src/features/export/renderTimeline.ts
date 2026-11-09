@@ -296,7 +296,9 @@ export async function renderTimeline(
         // file is worse than an export that stops and says why.
         if (!painted) {
           throw new Error(
-            "A graphic could not be drawn: the editor window stopped painting. Keep it open and try again.",
+            graphics.failed.size > 0
+              ? "A graphic could not be drawn in this browser, so the export stopped rather than leave it out."
+              : "A graphic could not be drawn: the editor window stopped painting. Keep it open and try again.",
           );
         }
       }

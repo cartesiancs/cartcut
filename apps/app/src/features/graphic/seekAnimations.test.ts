@@ -5,7 +5,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { seekAnimations, type SeekableAnimation } from "./seekAnimations";
+import {
+  MAX_SEEK_PASSES,
+  seekAnimations,
+  seekUntilSettled,
+  type SeekableAnimation,
+} from "./seekAnimations";
 
 /** An animation shown during [delay, delay + duration), like `.wd { opacity: 0; animation: vis .6s linear .2s }`. */
 class FakeAnimation implements SeekableAnimation {
@@ -94,5 +99,47 @@ describe("seekAnimations", () => {
     expect(live([pop])).toEqual([pop]);
     seekAnimations(kept, live([pop]), 100);
     expect(pop.currentTime).toBe(100);
+  });
+});
+
+describe("seekUntilSettled", () => {
+  /**
+   * A parent whose animated `display` is none until 500ms, and a child whose
+   * own animation exists only while the parent is displayed, the way a style
+   * flush creates it: listed only after a seek has put the parent past 500ms.
+   */
+  function displayPair() {
+    const parent = new FakeAnimation(0, 1000, "both");
+    const child = new FakeAnimation(0, 1000, "both");
+    const list = () => ((parent.currentTime ?? 0) >= 500 ? [parent, child] : [parent]);
+    return { parent, child, list };
+  }
+
+  it("reaches an animation the first seek created", () => {
+    const { child, list } = displayPair();
+    const kept = new Set<FakeAnimation>();
+    const passes = seekUntilSettled(kept, list, 800);
+    expect(child.currentTime).toBe(800);
+    expect(passes).toBe(2);
+  });
+
+  it("is what one seek alone could not do", () => {
+    const { child, list } = displayPair();
+    const kept = new Set<FakeAnimation>();
+    seekAnimations(kept, list(), 800);
+    expect(child.currentTime).toBe(0);
+  });
+
+  it("seeks once when nothing new appears", () => {
+    const a = new FakeAnimation(0, 600, "both");
+    const kept = new Set<FakeAnimation>();
+    expect(seekUntilSettled(kept, () => [a], 300)).toBe(1);
+    expect(a.currentTime).toBe(300);
+  });
+
+  it("stops after a bounded number of passes when every flush makes a new animation", () => {
+    const kept = new Set<FakeAnimation>();
+    const list = () => [new FakeAnimation(0, 600)];
+    expect(seekUntilSettled(kept, list, 300)).toBe(MAX_SEEK_PASSES);
   });
 });

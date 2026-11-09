@@ -45,3 +45,35 @@ export function seekAnimations<A extends SeekableAnimation>(
     animation.currentTime = timeMs;
   }
 }
+
+/** Seeks one graphic may take before the answer stands. */
+export const MAX_SEEK_PASSES = 4;
+
+/**
+ * Seek, then ask again, until a pass turns up no animation it had not seen.
+ *
+ * A seek can create animations. An element whose parent's animated `display`
+ * comes back at the new time gets its own animation during the style flush
+ * that seek causes, and `list()` called before the seek could not have listed
+ * it. Measured in Chromium 151 and WebKit 26.5 (`tests/e2e/FINDINGS.md`
+ * section 11): one seek left such a child at its 0% keyframe. Bounded, because
+ * a style that recreates an animation on every flush would otherwise never
+ * settle. Returns the number of passes, for the tests.
+ */
+export function seekUntilSettled<A extends SeekableAnimation>(
+  kept: Set<A>,
+  list: () => readonly A[],
+  timeMs: number,
+  maxPasses = MAX_SEEK_PASSES,
+): number {
+  let passes = 0;
+  while (passes < maxPasses) {
+    const live = list();
+    if (passes > 0 && live.every((animation) => kept.has(animation))) {
+      break;
+    }
+    seekAnimations(kept, live, timeMs);
+    passes += 1;
+  }
+  return passes;
+}

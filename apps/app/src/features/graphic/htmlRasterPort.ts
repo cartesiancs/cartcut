@@ -1,11 +1,14 @@
 /**
  * The narrow port between the prepare step and the DOM.
  *
- * Everything that touches html-in-canvas lives behind this, in `htmlHost.ts`,
- * the one file that calls `drawElementImage`: the API is a proposal, and its
- * shape has already changed once upstream (`tests/e2e/FINDINGS.md` section 10).
- * Planning, keying, caching and the order of calls are on this side, where a
- * fake port tests them under `environment: "node"`.
+ * Two hosts implement it, over the live tree `graphicDom.ts` builds for both:
+ * `htmlHost.ts`, the one file that calls `drawElementImage` (the API is a
+ * proposal, and its shape has already changed once upstream,
+ * `tests/e2e/FINDINGS.md` section 10), and `snapshotHost.ts`, which draws an
+ * SVG image of the tree where html-in-canvas does not draw (section 11).
+ * `graphicHost.ts` answers for whichever `graphicBackend.ts` chose. Planning,
+ * keying, caching and the order of calls are on this side, where a fake port
+ * tests them under `environment: "node"`.
  */
 
 import type { FontEntry } from "../font/fontFaces";
@@ -40,10 +43,16 @@ export type ApplyState = {
   seed: number;
   /** Faces to register and wait for before the next paint. */
   fonts: FontEntry[];
+  /**
+   * The size `rasterize` will be asked for, in pixels. html-in-canvas replays
+   * vectors at whatever size it is drawn at and ignores this; the snapshot host
+   * decodes its image at exactly this size inside `settle`.
+   */
+  raster?: { width: number; height: number };
 };
 
 export interface HtmlRasterPort {
-  /** Whether html-in-canvas is available here at all. */
+  /** Whether this host can draw here at all. */
   supported(): boolean;
   /** Build or keep the DOM for an instance. Cheap when `spec.programKey` is unchanged. */
   mount(instanceId: string, spec: MountSpec): void;

@@ -42,8 +42,7 @@ import { webExportAvailable } from "./web/codecSupport";
 import { browserDestinationHost, chooseDestination } from "./web/destination";
 import { encodePlanFor } from "./web/encodeSettings";
 import { runWebExport } from "./web/webExportSession";
-import { needsHtmlHost } from "../graphic/graphicPipeline";
-import { htmlSupport } from "../graphic/htmlHost";
+import { graphicBackend, needsHtmlHost } from "../graphic/graphicPipeline";
 import { UNSUPPORTED_TITLES_EXPORT_MESSAGE } from "../graphic/graphicSupportNotice";
 
 /**
@@ -326,7 +325,7 @@ async function startWebExport(): Promise<void> {
   // Said before the frames are drawn, not after: the file is still worth
   // having without its titles, and nothing in it would say they are missing.
   // After the save dialog, which has to be the first thing awaited.
-  if (needsHtmlHost(timeline) && !(await htmlSupport())) {
+  if (needsHtmlHost(timeline) && (await graphicBackend()) === "none") {
     toast(UNSUPPORTED_TITLES_EXPORT_MESSAGE, "8000");
   }
 

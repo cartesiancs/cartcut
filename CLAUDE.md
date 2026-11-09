@@ -342,15 +342,31 @@ Things that bite:
   graphic for the rest of the session.
   The HTML is sanitised into a node tree (parse5) and the CSS filtered (postcss)
   on write *and* on read, and the host builds DOM from the tree, never from a
-  string. `features/graphic/` holds all of it; `htmlHost.ts` is the only file
-  that calls the canvas API, because its shape has changed once already.
-  **Both opt-ins are set on every mount**: Electron's Chromium 152 draws only
-  with `layoutsubtree`, and Chrome 157, which turns the API on by default, draws
-  only with `content="drawable"` plus `drawable` on the child (measured; the
-  old name throws there). **In a browser, support is a drawn pixel**
-  (`htmlSupport`), awaited before any prepare; Safari and Firefox answer no,
-  draw no graphics and say so once (`graphicSupportNotice.ts`, and a warning
-  before a browser export). A graphic's own pictures load through
+  string. `features/graphic/` holds all of it. **Two hosts sit behind the
+  port, and the live tree is the truth for both**: `graphicDom.ts` builds it,
+  applies a frame and settles fonts, `data-fit`, lines and the clock;
+  `htmlHost.ts` is the only file that calls html-in-canvas, because its shape
+  has changed once already. **Both opt-ins are set on every mount**: Electron's
+  Chromium 152 draws only with `layoutsubtree`, and Chrome 157, which turns the
+  API on by default, draws only with `content="drawable"` plus `drawable` on
+  the child (measured; the old name throws there).
+  **Which host draws is a drawn pixel, decided once per page**
+  (`graphicBackend.ts`), awaited before any prepare: html-in-canvas where it
+  draws, else `snapshotHost.ts`, which is Safari, Firefox and every Chrome down
+  to 85 (the oldest the editor boots on). The snapshot writes the live tree out
+  as an SVG `<foreignObject>` image and lets the browser's own engine paint it.
+  It must be a `data:` URL: a `blob:` one taints the canvas in Chrome and
+  Safari, and export and WebGL then throw. Time is carried, never copied: every
+  animation goes in paused with its delay shifted by `-t`, every SMIL `begin`
+  likewise, and the image evaluates them itself. Faces travel as `data:` URLs,
+  those over 256 KB cut by HarfBuzz `hb-subset` (wasm, `font/fontSubset.ts`).
+  Each engine's faults are worked around only where its probe drew them, never
+  by user agent: WebKit flips shadows and drops shadow layers (redrawn as SVG
+  filters in bounding-box units), Gecko paints no `background-clip: text`
+  (masked by a nested image of the text), Blink and WebKit draw back faces.
+  Only where neither host draws does the preview say so
+  (`graphicSupportNotice.ts`). `tests/e2e/FINDINGS.md` section 11 is the
+  measurement behind every one of these. A graphic's own pictures load through
   `fileUrl.ts#installGraphicAssetUrlResolver` in a browser build, the
   `installFontUrlResolver` rule for faces.
 - **`export/snapshot.ts` copies the element map and each element, one level
@@ -460,8 +476,9 @@ features/template/     a whole edit standing in for one clip (.cttpl)
 features/composition/  a template expanded into the project: fork, reconcile,
                        switch effects, tabs, the project snapshot
 features/graphic/      layers drawn by a program: HTML typography (sanitise, split,
-                       contract, host, prepare) and the clock that survives a split;
-                       presets in assets/presets/graphics, contract in the skill's
+                       contract, two hosts, prepare) and the clock that survives a
+                       split; snapshot/ is the SVG host's pure half; presets in
+                       assets/presets/graphics, contract in the skill's
                        references/html-typography.md
 features/record/       the recorder's pure logic and its auto-zoom: zoomPlan (when),
                        zoomCamera (how), recordFit (where); windows in apps/overlay-record
