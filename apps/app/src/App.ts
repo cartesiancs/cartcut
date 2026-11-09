@@ -24,6 +24,8 @@ import { startCloud } from "./features/cloud/cloudStore";
 import { MOBILE_LAYOUT } from "./features/mobile/install";
 import "./features/mobile/mobileShell";
 import { readUiScale, reflectUiScale } from "./features/settings/uiScalePort";
+import "./features/editor/webMenuBar";
+import { isBrowserBuild } from "./functions/getLocationEnv";
 
 @customElement("app-root")
 export class App extends LitElement {
@@ -40,6 +42,11 @@ export class App extends LitElement {
     uiStore.subscribe((state) => {
       this.resize = state.resize;
       this.topBarTitle = state.topBarTitle;
+      // A tab shows the project's name too, as the desktop's window title does;
+      // the top bar hides its copy where the menu bar needs the room.
+      if (isBrowserBuild() && document.title !== state.topBarTitle) {
+        document.title = state.topBarTitle;
+      }
     });
 
     // The playback preview's input block, as one class on the real document
@@ -142,9 +149,17 @@ export class App extends LitElement {
     `;
   }
 
+  /**
+   * A browser build has no system menu bar and no window controls in this
+   * strip, so it draws the desktop's menus at the left (`webMenuBar.ts`) and
+   * keeps no room for traffic lights or a title bar overlay.
+   */
   private desktopTopBar() {
+    const browser = isBrowserBuild();
+    const inset = browser ? "top-bar-web" : IS_MAC ? "top-bar-mac" : "top-bar-pc";
     return html`
-      <div class="top-bar ${IS_MAC ? "top-bar-mac" : "top-bar-pc"}">
+      <div class="top-bar ${inset}">
+        ${browser ? html`<web-menu-bar></web-menu-bar>` : ""}
         <b>${this.topBarTitle}</b>
         <settings-button></settings-button>
         <export-button></export-button>

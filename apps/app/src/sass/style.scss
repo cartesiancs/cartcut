@@ -379,6 +379,13 @@ keyframe-editor {
     padding-right: calc(146px / var(--ui-scale, 1));
   }
 
+  // A browser tab: no window controls to make room for, and the menu bar
+  // (`web-menu-bar`) at the left edge.
+  &.top-bar-web {
+    padding-left: 4px;
+    padding-right: 10px;
+  }
+
   // Centred on the window, not on the space left over between the insets.
   // Taken out of the flex line for exactly that reason: the two paddings are
   // deliberately asymmetric, so anything centred *within* them sits off-centre
@@ -392,6 +399,14 @@ keyframe-editor {
     transform: translateX(-50%);
     -webkit-app-region: drag;
     pointer-events: none;
+  }
+
+  // Where the menus would run under the centred title, the title gives way;
+  // the tab's own title carries the project's name (`App.ts`).
+  @media (max-width: 1080px) {
+    &.top-bar-web b {
+      display: none;
+    }
   }
 }
 

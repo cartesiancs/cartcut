@@ -692,6 +692,13 @@ The handful of facts inside those that are worth stating up front:
   it (`rendererOwnsKey`, tested against `event.triggeredByAccelerator`), or one
   ⌘Z is two undo steps. Space, the arrows and Delete are not registered at all:
   an accelerator is global to the window and would fire while someone types.
+- **The menus are one arrangement, `electron/lib/menuLayout.ts`**, drawn by
+  main as the system menu and by a browser build as `<web-menu-bar>` at the
+  left of the top bar (`editor/webMenuModel.ts`, less the four desktop-only
+  tools and the window's own items). Both run `runMenuCommand`. In a browser
+  nothing fires the accelerators, so `webMenuKeys.ts` binds the ones the page
+  does not (`!rendererOwnsKey`). The bar never takes focus and carries
+  `data-keeps-selection`, or the timeline drops the clips Edit ▸ Copy is for.
 
 ## Extensions
 

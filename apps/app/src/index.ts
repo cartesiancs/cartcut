@@ -13,6 +13,7 @@ import { installProxyBridge } from "./features/proxy/proxyBridge";
 import { installAutosave } from "./features/project/autosaveBridge";
 import { installTimelineSwitchEffects } from "./features/composition/installSwitchEffects";
 import { initProjectBaseline, isProjectDirty } from "./features/project/projectDirty";
+import { installWebMenuKeys } from "./features/editor/webMenuKeys";
 import { installUnloadGuard } from "./features/project/web/webAutosave";
 import { installHoverMotion } from "./features/motion/hoverSpring";
 import { installBrowseMotion } from "./features/motion/browseMotion";
@@ -50,6 +51,9 @@ if (getLocationEnv() !== "electron") {
   // glyphs it shows. The desktop app draws graphics with html-in-canvas and
   // never asks for it.
   installSubsetWasmUrl(subsetWasmUrl);
+  // The menu's own shortcuts (⌘S, ⌘O, ⌘I, ⌘E...), which the desktop's system
+  // menu fires and a browser would otherwise take as its own.
+  installWebMenuKeys();
   // The desktop asks before quitting on unsaved work; a tab asks before it
   // closes or reloads.
   installUnloadGuard(isProjectDirty);

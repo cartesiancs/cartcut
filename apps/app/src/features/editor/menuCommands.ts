@@ -103,6 +103,45 @@ export function runNativeEditing(command: NativeEditingCommand): boolean {
   return true;
 }
 
+/**
+ * The same command, run by the page where there is no main process to run it:
+ * a browser build's menu bar, clicked with the caret in a field. The menu bar
+ * keeps the field focused (it cancels its own `mousedown`), so the command
+ * lands where the caret is, and a click is the user activation `copy` and
+ * `cut` need.
+ *
+ * Paste is the one the page cannot ask for by name, since `execCommand("paste")`
+ * would read the clipboard; it reads it through the Clipboard API, which may
+ * ask the user first, and types the text in as `insertText` so the field's own
+ * undo holds it.
+ */
+async function browserEditing(command: NativeEditingCommand): Promise<void> {
+  if (command === "paste") {
+    try {
+      const text = await navigator.clipboard.readText();
+      document.execCommand("insertText", false, text);
+    } catch {
+      toast("This browser lets the menu paste only with permission. Use the keyboard to paste.");
+    }
+    return;
+  }
+  if (command === "selectAll") {
+    const field = document.activeElement;
+    if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+      field.select();
+      return;
+    }
+  }
+  document.execCommand(command);
+}
+
+/** A native editing command from the menu: through main on the desktop, by the page in a browser. */
+function editField(command: NativeEditingCommand): void {
+  if (!runNativeEditing(command)) {
+    void browserEditing(command);
+  }
+}
+
 /** Whether the caret is in a text field. Exported for `textEditing.ts`. */
 export function typingNow(): boolean {
   return isTypingFocus(document);
@@ -245,19 +284,19 @@ const COMMANDS: Record<MenuCommandId, (payload?: unknown) => void> = {
   },
 
   // -------------------------------------------------------------------- Edit
-  "edit.undo": () => (typingNow() ? runNativeEditing("undo") : undo()),
-  "edit.redo": () => (typingNow() ? runNativeEditing("redo") : redo()),
-  "edit.cut": () => (typingNow() ? runNativeEditing("cut") : cutSelection()),
-  "edit.copy": () => (typingNow() ? runNativeEditing("copy") : copySelection()),
+  "edit.undo": () => (typingNow() ? editField("undo") : undo()),
+  "edit.redo": () => (typingNow() ? editField("redo") : redo()),
+  "edit.cut": () => (typingNow() ? editField("cut") : cutSelection()),
+  "edit.copy": () => (typingNow() ? editField("copy") : copySelection()),
   "edit.paste": () =>
-    typingNow() ? runNativeEditing("paste") : pasteFromClipboard(),
+    typingNow() ? editField("paste") : pasteFromClipboard(),
   "edit.delete": () => {
     if (!typingNow()) {
       deleteSelection();
     }
   },
   "edit.selectAll": () =>
-    typingNow() ? runNativeEditing("selectAll") : selectAllClips(),
+    typingNow() ? editField("selectAll") : selectAllClips(),
   "edit.deselectAll": () => {
     if (!typingNow()) {
       clearSelection();
