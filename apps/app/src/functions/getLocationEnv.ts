@@ -35,3 +35,11 @@ export function locationEnvOf(location: {
 export function getLocationEnv(): LocationEnv {
   return locationEnvOf(window.location);
 }
+
+/**
+ * Whether this is a browser build (demo or self-hosted), safely: `false` where
+ * there is no `window` at all, so a module a node suite imports can ask.
+ */
+export function isBrowserBuild(): boolean {
+  return typeof window !== "undefined" && window.location != null && getLocationEnv() !== "electron";
+}

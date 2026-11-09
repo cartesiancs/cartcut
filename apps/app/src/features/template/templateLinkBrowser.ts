@@ -11,7 +11,10 @@ import { selectionStore } from "../../states/selectionStore";
 import { setProjectFps } from "../editor/frameRate";
 import { addTemplateToTimeline } from "./addTemplate";
 import {
+  exampleTemplateDir,
+  exampleTemplateListing,
   exampleTemplateReader,
+  isExampleTemplateId,
   openTemplateLink,
   templateSlugFrom,
   type TemplateHttpPort,
@@ -116,4 +119,40 @@ export async function openLinkedTemplate(
       });
     },
   });
+}
+
+/**
+ * Make every example template `ids` names drawable again, for a project
+ * reopened in a browser. A placed template is a reference, not a copy, and a
+ * browser registers an example only when a `?template=` link opens it, so a
+ * project saved after one and reopened later named a template nothing could
+ * find and drew nothing for it. Answers how many could not be found.
+ */
+export async function registerExampleTemplates(ids: Iterable<string>): Promise<number> {
+  installReader();
+  let missing = 0;
+  for (const id of new Set(ids)) {
+    if (!isExampleTemplateId(id) || installedTemplates().some((entry) => entry.id === id)) {
+      continue;
+    }
+    const slug = id.slice(id.indexOf(":") + 1);
+    const manifestJson = await fetchHttp.text(`${exampleTemplateDir(slug)}/template.json`);
+    let object = false;
+    try {
+      const parsed = manifestJson == null ? null : JSON.parse(manifestJson);
+      object = parsed != null && typeof parsed === "object" && !Array.isArray(parsed);
+    } catch {
+      object = false;
+    }
+    if (!object) {
+      missing += 1;
+      continue;
+    }
+    const listing = exampleTemplateListing(slug, manifestJson);
+    setTemplateLibrary([...installedTemplates().filter((entry) => entry.id !== listing.id), listing]);
+    if ((await loadTemplate(listing.id)) == null) {
+      missing += 1;
+    }
+  }
+  return missing;
 }

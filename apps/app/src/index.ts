@@ -12,7 +12,8 @@ import { useTimelineStore } from "./states/timelineStore";
 import { installProxyBridge } from "./features/proxy/proxyBridge";
 import { installAutosave } from "./features/project/autosaveBridge";
 import { installTimelineSwitchEffects } from "./features/composition/installSwitchEffects";
-import { initProjectBaseline } from "./features/project/projectDirty";
+import { initProjectBaseline, isProjectDirty } from "./features/project/projectDirty";
+import { installUnloadGuard } from "./features/project/web/webAutosave";
 import { installHoverMotion } from "./features/motion/hoverSpring";
 import { installBrowseMotion } from "./features/motion/browseMotion";
 import {
@@ -49,6 +50,9 @@ if (getLocationEnv() !== "electron") {
   // glyphs it shows. The desktop app draws graphics with html-in-canvas and
   // never asks for it.
   installSubsetWasmUrl(subsetWasmUrl);
+  // The desktop asks before quitting on unsaved work; a tab asks before it
+  // closes or reloads.
+  installUnloadGuard(isProjectDirty);
 }
 
 // The browser builds only. Electron already shows no native right-click menu.

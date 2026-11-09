@@ -382,7 +382,9 @@ and are absent when empty: `extensions.json` (see Extensions),
 `timelineView.json`, the height of every resized timeline row and the timeline
 notes (`noteStore`, same rules), over every timeline's rows, and
 `compositions.json`, the templates main names, each with its own asset paths
-(`project/compositionsFile.ts`; the schema exception above). Row heights are view state
+(`project/compositionsFile.ts`; the schema exception above), and
+`webMedia.json`, written only by a browser build, naming each `blob:` path's file
+by name, size and modified time. Row heights are view state
 (`timeline/trackHeights.ts`): keyed by track id in `trackHeightStore`, never in
 `TimelineDocument`, so they are saved and make the project dirty but are never
 undone, and the caption lock does not stop a resize. Anything asking where a row
@@ -448,6 +450,18 @@ Five rules carry it:
 Use `ipcFilesystem.writeFileEnsured`, never `writeFile`: the older one calls the
 callback form of `fs.writeFile` and returns before it runs, so a failure is
 indistinguishable from success, and it does not create parent directories.
+
+**A browser build saves and opens with no main process** (`project/web/`).
+Where the File System Access API exists (Chrome, Edge) Save keeps the file's
+handle, so ⌘S writes in place, and every media file's handle is filed in
+IndexedDB under its identity; elsewhere a save is a download under a name asked
+once. A `blob:` path dies with the tab, so opening a project rewrites each one
+to a live file before adopting it: a filed handle, else the Reconnect dialog,
+which matches files the user picks again by name and size
+(`webMediaLinks.ts#matchPicked`). The picker must be the first thing awaited
+after the click, or the user activation it needs has expired. Auto Save is the
+same session with an IndexedDB writer (`webAutosave.ts`), and a tab asks before
+closing on unsaved work.
 
 ## Where the features live
 

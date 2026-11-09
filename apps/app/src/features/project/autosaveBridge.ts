@@ -52,6 +52,9 @@ import { serializeProjectEntries } from "./projectEntries";
 import { compositionsExtraEntries } from "./compositionsFile";
 import { projectSnapshot } from "../composition/projectSnapshot";
 import { buildNgtBytes } from "./projectArchive";
+import { isBrowserBuild } from "../../functions/getLocationEnv";
+import { browserAutosaveApi } from "./web/webAutosave";
+import { webMediaExtraEntries } from "./web/webProjectFile";
 
 /** The narrow part of the preload bridge Auto Save needs. */
 type AutosaveIpc = {
@@ -65,10 +68,14 @@ type AutosaveIpc = {
 };
 
 function ipc(): AutosaveIpc | null {
-  return (
+  const bridged =
     (globalThis as { electronAPI?: { req?: { autosave?: AutosaveIpc } } })
-      ?.electronAPI?.req?.autosave ?? null
-  );
+      ?.electronAPI?.req?.autosave ?? null;
+  if (bridged != null) {
+    return bridged;
+  }
+  // A browser build keeps the same rings in IndexedDB (`web/webAutosave.ts`).
+  return isBrowserBuild() && typeof indexedDB !== "undefined" ? browserAutosaveApi() : null;
 }
 
 /** This run of the app. What an unsaved project's ring is keyed by. */
@@ -226,6 +233,11 @@ function realSource(): { snapshot: () => AutosaveSnapshot | null } {
               ...timelineView,
               // The templates the project owns. Absent when it owns none.
               ...owned,
+              // In a browser, what each `blob:` path is, so a recovery in a
+              // later visit can find the files again. Absent elsewhere.
+              ...(isBrowserBuild()
+                ? webMediaExtraEntries([main.elements, compositions])
+                : {}),
               // The sixth entry. `project.load` reads five *named* entries and
               // ignores the rest, so this does not move `SCHEMA_VERSION`, and
               // it never appears in a user-saved `.ngt`. It exists so each
@@ -257,10 +269,10 @@ export function autosaveSession(): AutosaveSession | null {
 /**
  * Start autosaving.
  *
- * A no-op with no bridge, which is the web build: `ipcWrapper` replaces
- * `window.electronAPI` wholesale and provides no `autosave`. The same `== null`
- * gate `templateExport.ts` uses, and the same reason — a feature that cannot
- * work there should do nothing rather than fail every few seconds.
+ * The browser builds write to IndexedDB instead of the preload bridge
+ * (`web/webAutosave.ts`); with neither (no IndexedDB at all) this is a no-op,
+ * because a feature that cannot work should do nothing rather than fail every
+ * few seconds.
  */
 export function installAutosave(): () => void {
   const api = ipc();

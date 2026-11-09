@@ -44,6 +44,18 @@ import {
   COMPOSITIONS_ENTRY,
   compositionsExtraEntries,
 } from "../features/project/compositionsFile";
+import { getLocationEnv } from "./getLocationEnv";
+import {
+  chooseSaveTarget,
+  pickProjectFile,
+  reconnectMedia,
+  rememberTarget,
+  targetNamed,
+  webMediaExtraEntries,
+  writeTarget,
+} from "../features/project/web/webProjectFile";
+import { WEB_MEDIA_ENTRY, rewritePaths } from "../features/project/web/webMediaLinks";
+import { registerExampleTemplates } from "../features/template/templateLinkBrowser";
 import { projectSnapshot } from "../features/composition/projectSnapshot";
 
 const timelineStore = useTimelineStore.getState();
@@ -75,6 +87,9 @@ const project = {
    * error and must not be reported as one.
    */
   save: async function (): Promise<SaveOutcome> {
+    if (getLocationEnv() !== "electron") {
+      return project.saveInBrowser();
+    }
     const projectFile = document.querySelector("#projectFile")?.value ?? "";
 
     if (projectFile != "") {
@@ -116,6 +131,9 @@ const project = {
    * belong to *this* surface: the dialog, and which modal a failure shows.
    */
   openProjectFile: async function (): Promise<void> {
+    if (getLocationEnv() !== "electron") {
+      return project.openInBrowser();
+    }
     const filesystem = window.electronAPI?.req?.filesystem;
     if (filesystem == null) {
       return;
@@ -287,9 +305,15 @@ const project = {
     }
   },
 
-  saveProjectFile: async function ({
-    projectDestination,
-  }): Promise<SaveOutcome> {
+  /**
+   * The archive a save writes, anchored on `anchor`.
+   *
+   * Shared by the desktop save and the browser's, so both write the same
+   * entries. The browser adds `webMedia.json`, what each `blob:` path is
+   * (`project/web/webMediaLinks.ts`), and has no anchor: nothing it saves
+   * lives in a folder its media could be relative to.
+   */
+  buildArchive: async function (anchor: string): Promise<Blob> {
     // The project, whichever timeline is showing: main's document, the
     // templates main names, and the project's own frame size.
     const snapshot = projectSnapshot();
@@ -309,7 +333,7 @@ const project = {
       elements,
       tracks,
       options: snapshot.options,
-      anchor: projectDestination,
+      anchor,
       previewRatio,
       compositionCount: Object.keys(compositions).length,
     });
@@ -318,11 +342,148 @@ const project = {
     // when it has nothing to keep (no extension has stored anything, every row
     // is at the default height), so a project that uses neither is
     // byte-identical to a project saved before either existed.
-    const content = await buildNgtBlob(entries, {
+    return buildNgtBlob(entries, {
       ...extensionsExtraEntries(),
       ...timelineViewExtraEntries(snapshot.tracks),
-      ...compositionsExtraEntries(compositions, projectDestination),
+      ...compositionsExtraEntries(compositions, anchor),
+      ...(getLocationEnv() !== "electron"
+        ? webMediaExtraEntries([elements, compositions])
+        : {}),
     });
+  },
+
+  /**
+   * Save in a browser: in place through the handle the last save or open
+   * kept (Chrome, Edge), else wherever the user chooses now, else as a
+   * download (Safari, Firefox). See `project/web/webProjectFile.ts`.
+   */
+  saveInBrowser: async function (): Promise<SaveOutcome> {
+    const named = document.querySelector("#projectFile")?.value ?? "";
+    // The picker first: it needs the click's user activation, which building
+    // the archive could outlast.
+    const target =
+      (named !== "" ? targetNamed(named) : null) ??
+      (await chooseSaveTarget(named !== "" ? named : "Untitled.ngt"));
+    if (target == null) {
+      return { ok: false, cancelled: true, message: "Save cancelled." };
+    }
+
+    const written = await writeTarget(target, await project.buildArchive(""));
+    if (!written.ok) {
+      document
+        .querySelector("toast-box")
+        ?.showToast({ message: written.message, delay: "5000" });
+      return { ok: false, message: written.message };
+    }
+
+    rememberTarget(target);
+    markProjectSaved();
+    // Only where the bytes are known to be in the file. A download is handed
+    // to the browser and may yet be refused, and the recovery ring is the
+    // user's copy until then.
+    if (written.confirmed) {
+      void autosaveSession()
+        ?.markSaved(autosaveKeysRetiredBy(target.name))
+        .catch((error) => console.warn("[autosave] could not retire the ring", error));
+    }
+    document.querySelector("toast-box")?.showToast({
+      message: written.confirmed ? "Saved" : `Saved as a download: ${target.name}`,
+      delay: "2500",
+    });
+    project.changeProjectFileValue({ projectDestination: target.name });
+    return { ok: true, path: target.name };
+  },
+
+  /**
+   * Open a `.ngt` in a browser: read the picked file, point its media at live
+   * files (`reconnectMedia`), make its example templates drawable, then adopt
+   * it exactly as the desktop path does.
+   */
+  openInBrowser: async function (): Promise<void> {
+    const picked = await pickProjectFile();
+    if (picked == null) {
+      return;
+    }
+
+    let entries;
+    const extras: ProjectExtras = {
+      extensions: null,
+      timelineView: null,
+      compositions: null,
+      webMedia: null,
+    };
+    try {
+      const zip = await openNgt(await picked.file.arrayBuffer());
+      entries = await readNgtEntries(zip);
+      extras.extensions = await readNgtExtra(zip, EXTENSIONS_ENTRY);
+      extras.timelineView = await readNgtExtra(zip, TIMELINE_VIEW_ENTRY);
+      extras.compositions = await readNgtExtra(zip, COMPOSITIONS_ENTRY);
+      extras.webMedia = await readNgtExtra(zip, WEB_MEDIA_ENTRY);
+    } catch (error) {
+      project.showLoadFailure(
+        `This project could not be opened: ${String(error)}.`,
+      );
+      return;
+    }
+
+    // No anchor: a browser has no folder to resolve relative paths in, and
+    // every path a browser can load is already absolute (a site path, a
+    // server route, a `blob:` URL handled below).
+    const read = await readProjectDocument(
+      entries,
+      "",
+      async () => false,
+      extras.compositions ?? null,
+    );
+    if (!read.ok) {
+      project.showLoadFailure(readProjectFailureMessage(read));
+      return;
+    }
+
+    const ready = await project.prepareForBrowser(read, extras);
+    project.adoptDocument(ready, picked.file.name, extras);
+    rememberTarget({ name: picked.file.name, handle: picked.handle });
+    project.changeProjectFileValue({ projectDestination: picked.file.name });
+    markProjectSaved();
+  },
+
+  /**
+   * What a browser does to a read project before adopting it, shared by Open
+   * and Auto Save recovery: reconnect its `blob:` media, and register the
+   * example templates it names.
+   */
+  prepareForBrowser: async function (
+    read: Extract<ReadProjectResult, { ok: true }>,
+    extras: ProjectExtras,
+  ): Promise<Extract<ReadProjectResult, { ok: true }>> {
+    const { map, missing } = await reconnectMedia(
+      [read.document.elements, read.compositions],
+      extras.webMedia,
+    );
+    const templateIds = [
+      read.document.elements,
+      ...Object.values(read.compositions ?? {}).map((composition) => composition.elements),
+    ].flatMap((elements) =>
+      Object.values(elements ?? {})
+        .map((element: any) => element?.templateId)
+        .filter((id): id is string => typeof id === "string"),
+    );
+    await registerExampleTemplates(templateIds);
+    return {
+      ...read,
+      document: {
+        ...read.document,
+        elements: rewritePaths(read.document.elements, map),
+      },
+      compositions: rewritePaths(read.compositions, map),
+      missing: read.missing + missing,
+    };
+  },
+
+  saveProjectFile: async function ({
+    projectDestination,
+  }): Promise<SaveOutcome> {
+    const content = await project.buildArchive(projectDestination);
     const base64 = arrayBufferToBase64(await content.arrayBuffer());
 
     // `writeFileEnsured`, never `writeFile`. The latter calls the *callback*

@@ -241,14 +241,14 @@ describe("recovering", () => {
     );
     await recoverAutosave(PICK, guard(true, false), p.reader, p.effects);
     expect(p.adoptedExtras).toEqual([
-      { extensions: null, timelineView: view, compositions: null },
+      { extensions: null, timelineView: view, compositions: null, webMedia: null },
     ]);
   });
 
   it("hands over null for an archive with no row heights", async () => {
     await recoverAutosave(PICK, guard(true, false), p.reader, p.effects);
     expect(p.adoptedExtras).toEqual([
-      { extensions: null, timelineView: null, compositions: null },
+      { extensions: null, timelineView: null, compositions: null, webMedia: null },
     ]);
   });
 

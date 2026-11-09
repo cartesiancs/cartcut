@@ -44,6 +44,9 @@ import {
 } from "./projectArchive";
 import { TIMELINE_VIEW_ENTRY } from "./timelineView";
 import { COMPOSITIONS_ENTRY } from "./compositionsFile";
+import { WEB_MEDIA_ENTRY } from "./web/webMediaLinks";
+import { readBrowserAutosave } from "./web/webAutosave";
+import { isBrowserBuild } from "../../functions/getLocationEnv";
 import {
   readProjectDocument,
   readProjectFailureMessage,
@@ -115,6 +118,16 @@ export type RecoverEffectsPort = {
   warn(message: string): void;
   toast(message: string): void;
   markRecovered(): void;
+  /**
+   * Run between the read and `adopt`, and awaited; answers the read to adopt.
+   * The browser build reconnects the media a recovered archive names here
+   * (`project/web/webProjectFile.ts`), because its `blob:` paths died with
+   * the tab that wrote them.
+   */
+  prepare?(
+    read: Extract<ReadProjectResult, { ok: true }>,
+    extras: ProjectExtras,
+  ): Promise<Extract<ReadProjectResult, { ok: true }>>;
 };
 
 export const RECOVER_NOT_EMPTY_MESSAGE =
@@ -191,6 +204,8 @@ export async function recoverAutosave(
     // The project's own templates, or a recovered autosave would bring back
     // every clip that names one and none of what they draw.
     extras.compositions = await readNgtExtra(zip, COMPOSITIONS_ENTRY);
+    // What a browser's `blob:` paths were, for `effects.prepare`.
+    extras.webMedia = await readNgtExtra(zip, WEB_MEDIA_ENTRY);
     autosaveMeta =
       raw != null && typeof raw === "object"
         ? (raw as AutosaveArchiveMeta)
@@ -221,7 +236,8 @@ export async function recoverAutosave(
     return { kind: "failed", message };
   }
 
-  effects.adopt(read, extras);
+  const ready = effects.prepare != null ? await effects.prepare(read, extras) : read;
+  effects.adopt(ready, extras);
 
   // `setProjectPath` is *not* called. The session is detached, so ⌘S opens
   // Save As and the original `.ngt` cannot be overwritten with older state.
@@ -243,17 +259,17 @@ export async function recoverAutosave(
     `Recovered the auto-save from ${timeOf(writtenAt)}. Save it with ⌘S.`,
   );
 
-  if (read.missing > 0) {
+  if (ready.missing > 0) {
     // Counted in files rather than clips, as the load path does: twenty cuts
     // of one missing video are one thing to go and find.
     effects.toast(
-      read.missing === 1
+      ready.missing === 1
         ? `1 media file could not be found.`
-        : `${read.missing} media files could not be found.`,
+        : `${ready.missing} media files could not be found.`,
     );
   }
 
-  return { kind: "recovered", from: pick.file, missing: read.missing };
+  return { kind: "recovered", from: pick.file, missing: ready.missing };
 }
 
 function basename(path: string): string {
@@ -285,8 +301,11 @@ export async function recoverAutosaveEntry(payload: unknown): Promise<void> {
     return;
   }
 
+  // A browser keeps its rings in IndexedDB (`web/webAutosave.ts`), and its
+  // archives name `blob:` media that must be reconnected before adopting.
+  const browser = isBrowserBuild();
   const filesystem = (globalThis as any).electronAPI?.req?.filesystem;
-  if (filesystem?.readFile == null) {
+  if (!browser && filesystem?.readFile == null) {
     return;
   }
 
@@ -301,13 +320,27 @@ export async function recoverAutosaveEntry(payload: unknown): Promise<void> {
       isEmpty: () => isProjectEmpty(),
       isDirty: () => isProjectDirty(),
     },
+    browser
+      ? {
+          readFile: async (file) => {
+            const bytes = await readBrowserAutosave(file);
+            if (bytes == null) {
+              throw new Error("that recovery point is no longer stored");
+            }
+            return bytes;
+          },
+          exists: async () => false,
+        }
+      : {
+          readFile: (path) => filesystem.readFile(path),
+          // `existFile` takes a real filesystem path, which is why
+          // `relinkAssets` converts before it probes.
+          exists: (fsPath) => filesystem.existFile(fsPath),
+        },
     {
-      readFile: (path) => filesystem.readFile(path),
-      // `existFile` takes a real filesystem path, which is why `relinkAssets`
-      // converts before it probes.
-      exists: (fsPath) => filesystem.existFile(fsPath),
-    },
-    {
+      ...(browser
+        ? { prepare: (read, extras) => project.prepareForBrowser(read, extras) }
+        : {}),
       adopt: (read, extras) => project.adoptDocument(read, pick.file, extras),
       setTitle: (title) => uiStore.getState().setTopBarTitle(title),
       // Never called. See the header.

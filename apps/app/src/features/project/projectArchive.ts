@@ -38,6 +38,11 @@ export type ProjectExtras = {
   timelineView: string | null;
   /** `compositions.json`: the templates the project owns. Optional so older callers compile. */
   compositions?: string | null;
+  /**
+   * `webMedia.json`: what each `blob:` path in a browser-saved project was, so
+   * the browser can find the file again (`project/web/webMediaLinks.ts`).
+   */
+  webMedia?: string | null;
 };
 
 /**
