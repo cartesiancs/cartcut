@@ -61,7 +61,10 @@ export const MAX_DEPTH = 64;
 const NS_HTML = "http://www.w3.org/1999/xhtml";
 const NS_SVG = "http://www.w3.org/2000/svg";
 
-const HTML_ELEMENTS = new Set([
+/** Attributes the editor writes on a graphic's elements for itself. */
+export const RESERVED_DATA_PREFIX = "data-cc-";
+
+export const HTML_ELEMENTS: ReadonlySet<string> = new Set([
   "div", "span", "p", "h1", "h2", "h3", "h4", "h5", "h6", "strong", "em", "b",
   "i", "u", "s", "small", "sub", "sup", "br", "hr", "ul", "ol", "li", "table",
   "thead", "tbody", "tr", "th", "td", "figure", "figcaption", "blockquote",
@@ -221,6 +224,11 @@ function filterAttribute(
   }
   if (BLOCKED_ATTRS.has(lower) || lower.startsWith("xmlns")) {
     return refuse("not allowed");
+  }
+  if (lower.startsWith(RESERVED_DATA_PREFIX)) {
+    // The snapshot host marks the elements it copies with these
+    // (`snapshotHost.ts`); a program's own would be taken for its marks.
+    return refuse("reserved for the editor");
   }
   if (DATA_ATTR.test(name)) {
     // Data, read by `data-param` and `data-split` and by `attr()`. Never a

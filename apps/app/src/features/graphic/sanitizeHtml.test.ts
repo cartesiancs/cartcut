@@ -126,6 +126,10 @@ describe("custom elements", () => {
 });
 
 describe("what a graphic needs survives", () => {
+  it("refuses the data-cc- attributes the snapshot host reserves", () => {
+    expect(markup('<h1 data-cc-i="3" data-x="1">Hi</h1>')).toBe('<h1 data-x="1">Hi</h1>');
+  });
+
   it("keeps data-param and data-split", () => {
     expect(markup('<h1 data-param="title" data-split="words chars">Hello</h1>')).toBe(
       '<h1 data-param="title" data-split="words chars">Hello</h1>',
