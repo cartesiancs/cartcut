@@ -436,18 +436,20 @@ export class WebMenuBar extends LitElement {
       .wmb-top {
         border: 0;
         background: transparent;
-        color: #adb5bd;
+        color: #7c838a;
         font-size: 12px;
-        font-weight: 600;
+        font-weight: 400;
+        letter-spacing: 0.01em;
         padding: 3px 8px;
         border-radius: 5px;
         line-height: 18px;
         cursor: default;
+        transition: color 0.12s ease, background-color 0.12s ease;
       }
       .wmb-top:hover,
       .wmb-top.is-open {
-        background: #24272b;
-        color: #f1f3f5;
+        background: #1c1f22;
+        color: #c3c8cd;
       }
       .wmb-panel {
         position: absolute;
