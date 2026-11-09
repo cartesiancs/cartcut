@@ -119,6 +119,9 @@ export class AudioRecordPanel extends LitElement {
       });
 
       this.mediaRecorder = new MediaRecorder(this.stream);
+      // Kept now: `stopRecording` drops the recorder before `onstop` runs, and
+      // a browser names the take by what the recorder actually wrote.
+      const recordedType = this.mediaRecorder.mimeType;
       this.recordedChunks = [];
       this.startTime = Date.now();
 
@@ -136,7 +139,7 @@ export class AudioRecordPanel extends LitElement {
         const arrayBuffer = await blob.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
 
-        await saveAndImportRecording(buffer, "audio", duration);
+        await saveAndImportRecording(buffer, "audio", duration, recordedType);
 
         this.recordedChunks = [];
         this.mediaRecorder = undefined;

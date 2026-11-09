@@ -25,6 +25,26 @@ import { arrayBufferToBase64 } from "../../utils/base64";
 import { serializeAssetPaths } from "../project/assetsFile";
 import { schemaVersionFor, type TimelineTrack } from "../timeline/tracks";
 import { planTemplateExport } from "./exportPlan";
+import { isBrowserBuild, getLocationEnv } from "../../functions/getLocationEnv";
+import { mediaUrlFor } from "../../functions/mediaUrl";
+import { registeredMedia } from "../asset/webMedia/mediaRegistry";
+
+/**
+ * One staged asset's bytes. A browser's own pick is read from the `File` it
+ * stands for, and a site or server path is fetched; the desktop reads its
+ * disk through the bridge.
+ */
+async function readAsset(from: string, fs: FilesystemBridge | null): Promise<unknown> {
+  if (from.startsWith("blob:")) {
+    const media = registeredMedia(from);
+    return media == null ? null : new Uint8Array(await media.file.arrayBuffer());
+  }
+  if (isBrowserBuild()) {
+    const response = await fetch(mediaUrlFor(from, getLocationEnv()));
+    return response.ok ? new Uint8Array(await response.arrayBuffer()) : null;
+  }
+  return fs?.readFile == null ? null : fs.readFile(from);
+}
 
 /** The notional folder the archive is anchored on. Never created. */
 const STAGING_DIR = "/cartcut-template";
@@ -42,7 +62,19 @@ export type TemplateExportInput = {
 };
 
 /** Everything `exportTemplate` needs except the name, which it derives. */
-export type TemplateExportRequest = Omit<TemplateExportInput, "name">;
+export type TemplateExportRequest = Omit<TemplateExportInput, "name" | "thumbnail"> & {
+  /**
+   * The thumbnail, or a render of it run only once the destination is chosen:
+   * a browser's save picker needs the click's user activation, which a render
+   * awaited first could outlast.
+   */
+  thumbnail?: Uint8Array | null | (() => Promise<Uint8Array | null>);
+};
+
+async function resolved(request: TemplateExportRequest): Promise<Omit<TemplateExportInput, "name">> {
+  const thumbnail = typeof request.thumbnail === "function" ? await request.thumbnail() : request.thumbnail;
+  return { ...request, thumbnail: thumbnail ?? null };
+}
 
 export type TemplateExportResult =
   | { ok: true; path: string; name: string; warnings: string[] }
@@ -95,16 +127,19 @@ export async function buildTemplateArchive(
 ): Promise<
   { ok: true; blob: Blob; warnings: string[] } | { ok: false; message: string }
 > {
+  const browser = isBrowserBuild();
   const plan = planTemplateExport(input.elements, {
     stagingDir: STAGING_DIR,
     flavour: "posix",
+    // A browser's own picks are files too, read from the `File` they stand for.
+    ...(browser ? { browserMedia: (path: string) => registeredMedia(path)?.name ?? null } : {}),
   });
   if (!plan.ok) {
     return { ok: false, message: plan.reason };
   }
 
   const fs = filesystem();
-  if (fs?.readFile == null) {
+  if (!browser && fs?.readFile == null) {
     return { ok: false, message: "No filesystem bridge is available." };
   }
 
@@ -117,7 +152,7 @@ export async function buildTemplateArchive(
   for (const asset of plan.assets) {
     let bytes: unknown;
     try {
-      bytes = await fs.readFile(asset.from);
+      bytes = await readAsset(asset.from, fs);
     } catch {
       bytes = null;
     }
@@ -188,6 +223,9 @@ export async function buildTemplateArchive(
 export async function exportTemplate(
   request: TemplateExportRequest,
 ): Promise<TemplateExportResult> {
+  if (isBrowserBuild()) {
+    return exportTemplateInBrowser(request);
+  }
   const dialog = (
     globalThis as {
       electronAPI?: {
@@ -207,7 +245,7 @@ export async function exportTemplate(
   }
 
   const name = templateNameFrom(destination);
-  const built = await buildTemplateArchive({ ...request, name });
+  const built = await buildTemplateArchive({ ...(await resolved(request)), name });
   if (!built.ok) {
     return built;
   }
@@ -232,4 +270,36 @@ export async function exportTemplate(
   }
 
   return { ok: true, path: destination, name, warnings: built.warnings };
+}
+
+/**
+ * The browser's Export Template: the save picker, or a download under a name
+ * the user gives, then the same archive the desktop writes.
+ */
+async function exportTemplateInBrowser(
+  request: TemplateExportRequest,
+): Promise<TemplateExportResult> {
+  const { chooseFileTarget, writeTarget } = await import("../project/web/webProjectFile");
+  const target = await chooseFileTarget("Template.cttpl", {
+    types: [{ description: "CartCut Template", accept: { "application/zip": [".cttpl"] } }],
+    request: {
+      title: "Export Template",
+      note: "This browser saves the template as a download.",
+      extensions: [".cttpl"],
+    },
+  });
+  if (target == null) {
+    return { ok: false, cancelled: true };
+  }
+
+  const name = templateNameFrom(target.name);
+  const built = await buildTemplateArchive({ ...(await resolved(request)), name });
+  if (!built.ok) {
+    return built;
+  }
+  const written = await writeTarget(target, built.blob);
+  if (!written.ok) {
+    return { ok: false, message: written.message };
+  }
+  return { ok: true, path: target.name, name, warnings: built.warnings };
 }

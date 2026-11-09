@@ -45,6 +45,11 @@ const mime = {
     m4a: {
       type: "audio",
     },
+    // WebM holding sound only, what a browser's MediaRecorder writes for a
+    // microphone (`record/saveRecording.ts`).
+    weba: {
+      type: "audio",
+    },
     svg: {
       type: "image",
     },

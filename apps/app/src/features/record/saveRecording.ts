@@ -15,6 +15,8 @@
  */
 
 import { importPathsAt, atPlayhead } from "../asset/importDrop";
+import { importedMediaStore } from "../asset/webMedia/importedMedia";
+import { isBrowserBuild } from "../../functions/getLocationEnv";
 import { recordProcessStore } from "../../states/recordProcessStore";
 import { planAutoZoom, readInputLog } from "./applyAutoZoom";
 import { loadRecordSettings } from "./recordSettingsBridge";
@@ -39,7 +41,11 @@ export async function saveAndImportRecording(
   buffer: Buffer,
   kind: "video" | "audio",
   wallClockMs: number,
+  mimeType = "",
 ): Promise<string[]> {
+  if (isBrowserBuild()) {
+    return importBrowserRecording(buffer, kind, wallClockMs, mimeType);
+  }
   try {
     const stream = window.electronAPI.req.stream;
     const saved =
@@ -166,5 +172,52 @@ export function watchOverlayRecordings(): void {
     onProcessing(() => {
       recordProcessStore.getState().enter("finishing");
     });
+  }
+}
+
+/**
+ * The extension a browser recording is named with, from what the recorder
+ * actually wrote: everything downstream decides a file's kind from its name
+ * (`mediaElement.ts#mediaKindOf`), and Safari records MP4 where Chrome and
+ * Firefox record WebM.
+ */
+export function recordingExtension(mimeType: string, kind: "video" | "audio"): string {
+  const type = mimeType.toLowerCase();
+  if (type.includes("mp4")) {
+    return kind === "audio" ? "m4a" : "mp4";
+  }
+  if (type.includes("ogg")) {
+    return kind === "audio" ? "weba" : "webm";
+  }
+  return kind === "audio" ? "weba" : "webm";
+}
+
+/**
+ * A browser has no folder to save into and no save dialog to ask: the take
+ * becomes a `File`, is listed in the asset panel as an import would be, and is
+ * placed at the playhead, the same `importPathsAt` the desktop path ends in.
+ */
+async function importBrowserRecording(
+  buffer: Buffer,
+  kind: "video" | "audio",
+  wallClockMs: number,
+  mimeType: string,
+): Promise<string[]> {
+  try {
+    const type = mimeType !== "" ? mimeType : kind === "audio" ? "audio/webm" : "video/webm";
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const file = new File([buffer], `Recording ${stamp}.${recordingExtension(type, kind)}`, {
+      type,
+      lastModified: Date.now(),
+    });
+    const [path] = importedMediaStore.getState().add([{ file }]);
+    if (path == null) {
+      return [];
+    }
+    return await importPathsAt([{ path, fallbackDurationMs: wallClockMs }], atPlayhead());
+  } catch (error) {
+    console.error("[record] could not add the recording", error);
+    toast("That recording could not be added.");
+    return [];
   }
 }

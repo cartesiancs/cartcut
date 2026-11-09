@@ -17,6 +17,23 @@ import { bytesToBase64 } from "../../utils/base64";
 import type { SubtitleFlavour } from "./cues";
 import { decodeSubtitleBytes, type SubtitleEncoding } from "./encoding";
 import { parseSubtitles, type SubtitleParse } from "./parse";
+import { isBrowserBuild } from "../../functions/getLocationEnv";
+import { registerPickedFile, registeredMedia } from "../asset/webMedia/mediaRegistry";
+import type { SaveTarget } from "../project/web/webProjectFile";
+
+/** What the browser's save picker offers for subtitles. */
+const SUBTITLE_TYPES = [
+  { description: "SubRip Subtitles", accept: { "application/x-subrip": [".srt"] } },
+  { description: "WebVTT Subtitles", accept: { "text/vtt": [".vtt"] } },
+];
+
+/**
+ * Where each browser export is going, by the name handed back as its "path".
+ * A browser has no path: the name is what decides the format
+ * (`flavourForPath`) and what the toast reports, and this is where the handle
+ * or the download it stands for is kept until the write.
+ */
+const browserTargets = new Map<string, SaveTarget>();
 
 export const SUBTITLE_EXTENSIONS = ["srt", "vtt"] as const;
 
@@ -67,6 +84,17 @@ export function subtitleNameFrom(path: string): string {
  * tells the user off for changing their mind.
  */
 export async function pickSubtitleFiles(): Promise<string[]> {
+  if (isBrowserBuild()) {
+    // Read from the `File` itself (`readSubtitleFile` below), so registered
+    // like a picked media file but not listed in the asset panel.
+    const { pickFiles } = await import("../project/web/webProjectFile");
+    const picked = await pickFiles({
+      accept: ".srt,.vtt",
+      types: [{ description: "Subtitles", accept: { "text/plain": [".srt", ".vtt"] } }],
+      multiple: true,
+    });
+    return picked.map(({ file }) => registerPickedFile(file));
+  }
   const dialog = bridge<DialogBridge>("dialog");
   if (dialog?.openFiles == null) {
     return [];
@@ -77,6 +105,22 @@ export async function pickSubtitleFiles(): Promise<string[]> {
 
 /** Null means cancelled. */
 export async function pickSubtitleDestination(): Promise<string | null> {
+  if (isBrowserBuild()) {
+    const { chooseFileTarget } = await import("../project/web/webProjectFile");
+    const target = await chooseFileTarget("subtitles.srt", {
+      types: SUBTITLE_TYPES,
+      request: {
+        title: "Export Subtitles",
+        note: "This browser saves the subtitles as a download. End the name in .vtt for WebVTT.",
+        extensions: [".srt", ".vtt"],
+      },
+    });
+    if (target == null) {
+      return null;
+    }
+    browserTargets.set(target.name, target);
+    return target.name;
+  }
   const dialog = bridge<DialogBridge>("dialog");
   if (dialog?.saveSubtitles == null) {
     return null;
@@ -95,6 +139,25 @@ export async function pickSubtitleDestination(): Promise<string | null> {
 export async function readSubtitleFile(
   path: string,
 ): Promise<SubtitleReadResult> {
+  // A browser's picked or dropped file: read the `File` the registry holds.
+  // The filesystem shim would answer the string "none" for it, which decoded
+  // as a subtitle file holding nothing.
+  const picked = registeredMedia(path);
+  if (picked != null) {
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(await picked.file.arrayBuffer());
+    } catch (error) {
+      return { ok: false, path, message: messageOf(error) };
+    }
+    const decoded = decodeSubtitleBytes(bytes);
+    return {
+      ok: true,
+      path,
+      parse: parseSubtitles(decoded.text, path),
+      encoding: decoded.encoding,
+    };
+  }
   const filesystem = bridge<FilesystemBridge>("filesystem");
   if (filesystem?.readFile == null) {
     return { ok: false, path, message: "No filesystem bridge to read with." };
@@ -125,6 +188,16 @@ export async function writeSubtitleFile(
   path: string,
   text: string,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
+  const target = browserTargets.get(path);
+  if (target != null) {
+    browserTargets.delete(path);
+    const { writeTarget } = await import("../project/web/webProjectFile");
+    const written = await writeTarget(
+      target,
+      new Blob([text], { type: flavourForPath(path) === "vtt" ? "text/vtt" : "application/x-subrip" }),
+    );
+    return written.ok ? { ok: true } : { ok: false, message: written.message };
+  }
   const filesystem = bridge<FilesystemBridge>("filesystem");
   // `writeFileEnsured`, never `writeFile`: the older one calls the callback
   // form of `fs.writeFile` and returns before it runs, so a failure is

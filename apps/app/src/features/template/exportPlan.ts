@@ -60,6 +60,13 @@ export type TemplateExportOptions = {
   /** The folder the archive is being built in. Absolute, host syntax. */
   stagingDir: string;
   flavour?: PathFlavour;
+  /**
+   * In a browser build: the file name of a `blob:` path whose bytes this
+   * session can still read, `null` for one it cannot. Such a path is staged
+   * like a file on disk, read from the `File` it stands for. Absent on the
+   * desktop, where a `blob:` value is never a file.
+   */
+  browserMedia?: (path: string) => string | null;
 };
 
 const ASSET_DIR = "assets";
@@ -147,14 +154,28 @@ export function planTemplateExport(
   const taken = new Set<string>();
   const next: Record<string, TimelineElement> = {};
 
+  /** Whether a value names something the archive can carry. */
+  const stageable = (value: unknown): value is string =>
+    isRealAssetPath(value) ||
+    (typeof value === "string" && value.startsWith("blob:") && options.browserMedia?.(value) != null);
+
+  /** Where a value's bytes come from, and the name it would be staged under. */
+  const sourceOf = (value: string): { from: string; base: string } => {
+    if (value.startsWith("blob:")) {
+      return { from: value, base: options.browserMedia?.(value) ?? "asset" };
+    }
+    const from = toFsPath(value, flavour);
+    return { from, base: basename(from) };
+  };
+
   /** Stage one file once, under a name no other file has claimed. */
   const stage = (value: string): StagedAsset => {
     let asset = staged.get(value);
     if (asset == null) {
-      const from = toFsPath(value, flavour);
-      let name = safeAssetName(basename(from));
+      const { from, base } = sourceOf(value);
+      let name = safeAssetName(base);
       for (let index = 2; taken.has(name.toLowerCase()); index += 1) {
-        name = withSuffix(safeAssetName(basename(from)), index);
+        name = withSuffix(safeAssetName(base), index);
       }
       taken.add(name.toLowerCase());
       asset = {
@@ -185,7 +206,7 @@ export function planTemplateExport(
     // machine. They sit below the element's fields, so they are staged here
     // through the same `stage` and written back through `assetsFile`.
     for (const ref of graphicAssetRefsOf(element)) {
-      if (!isRealAssetPath(ref.value)) {
+      if (!stageable(ref.value)) {
         continue;
       }
       const asset = stage(ref.value);
@@ -194,18 +215,18 @@ export function planTemplateExport(
 
     for (const field of assetFieldsOf(element)) {
       const value = (element as Record<string, unknown>)[field];
-      if (!isRealAssetPath(value)) {
+      if (!stageable(value)) {
         continue;
       }
 
       let asset = staged.get(value);
       if (asset == null) {
-        const from = toFsPath(value, flavour);
-        let name = safeAssetName(basename(from));
+        const { from, base } = sourceOf(value);
+        let name = safeAssetName(base);
         // One file used by two clips is staged once. Two *different* files
         // that share a basename each get their own name.
         for (let index = 2; taken.has(name.toLowerCase()); index += 1) {
-          name = withSuffix(safeAssetName(basename(from)), index);
+          name = withSuffix(safeAssetName(base), index);
         }
         taken.add(name.toLowerCase());
 

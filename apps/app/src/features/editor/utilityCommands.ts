@@ -119,10 +119,10 @@ export async function exportProjectAsTemplate(): Promise<void> {
   //
   // Best effort on the thumbnail. A template without one gets an icon on its
   // tile, which beats an export refused because a canvas would not allocate,
-  // so `renderTemplateThumbnail` answers null and never throws.
-  const thumbnail = await renderTemplateThumbnail(
-    useTimelineStore.getState().cursor,
-  );
+  // so `renderTemplateThumbnail` answers null and never throws. Rendered once
+  // the destination is chosen, so the dialog comes straight after the click.
+  const cursor = useTimelineStore.getState().cursor;
+  const thumbnail = () => renderTemplateThumbnail(cursor);
 
   const result = await exportTemplate({
     elements: document_.elements,
